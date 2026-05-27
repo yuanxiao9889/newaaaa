@@ -73,6 +73,7 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
   const channel = row.original
   const { setOpen, setCurrentRow, upstream } = useChannels()
   const queryClient = useQueryClient()
+  const [actionsOpen, setActionsOpen] = useState(false)
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false)
   const [isTesting, setIsTesting] = useState(false)
   const [isTogglingStatus, setIsTogglingStatus] = useState(false)
@@ -125,6 +126,11 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
   const handleManageKeys = () => {
     setCurrentRow(channel)
     setOpen('multi-key-manage')
+  }
+
+  const handleDeleteSelect = () => {
+    setActionsOpen(false)
+    window.setTimeout(() => setDeleteConfirmOpen(true), 0)
   }
 
   const handleToggleStatus = async (
@@ -192,7 +198,11 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
         </TooltipContent>
       </Tooltip>
 
-      <DropdownMenu>
+      <DropdownMenu
+        open={actionsOpen}
+        onOpenChange={setActionsOpen}
+        modal={false}
+      >
         <DropdownMenuTrigger
           render={
             <Button
@@ -298,10 +308,7 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
 
           {/* Delete */}
           <DropdownMenuItem
-            onSelect={(e) => {
-              e.preventDefault()
-              setDeleteConfirmOpen(true)
-            }}
+            onSelect={handleDeleteSelect}
             className='text-destructive focus:text-destructive'
           >
             {t('Delete')}

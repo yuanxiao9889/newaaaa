@@ -165,6 +165,15 @@ func SetRelayRouter(router *gin.Engine) {
 		httpRouter.DELETE("/models/:model", controller.RelayNotImplemented)
 	}
 
+	imageTaskRouter := router.Group("/v1/images/tasks")
+	imageTaskRouter.Use(middleware.RouteTag("relay"))
+	imageTaskRouter.Use(middleware.SystemPerformanceCheck())
+	imageTaskRouter.Use(middleware.TokenOrUserAuth())
+	{
+		imageTaskRouter.GET("/:task_id", middleware.AsyncImageTaskStatusRateLimit(), controller.GetImageTask)
+		imageTaskRouter.GET("/:task_id/content", controller.GetImageTaskContent)
+	}
+
 	relayMjRouter := router.Group("/mj")
 	relayMjRouter.Use(middleware.RouteTag("relay"))
 	relayMjRouter.Use(middleware.SystemPerformanceCheck())

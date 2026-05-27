@@ -65,6 +65,7 @@ var DisplayInCurrencyEnabled = true
 var DisplayTokenStatEnabled = true
 var DrawingEnabled = true
 var TaskEnabled = true
+var AsyncImageInternalTaskEnabled = false
 var DataExportEnabled = true
 var DataExportInterval = 5         // unit: minute
 var DataExportDefaultTime = "hour" // unit: minute
@@ -226,6 +227,10 @@ var (
 	SearchRateLimitEnable         = true
 	SearchRateLimitNum            = 10
 	SearchRateLimitDuration int64 = 60
+
+	AsyncImageTaskStatusRateLimitEnable         = true
+	AsyncImageTaskStatusRateLimitNum            = 120
+	AsyncImageTaskStatusRateLimitDuration int64 = 60
 )
 
 var RateLimitKeyExpirationDuration = 20 * time.Minute

@@ -110,7 +110,6 @@ func ImageHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *type
 			}
 		}
 	}
-
 	usage, newAPIError := adaptor.DoResponse(c, httpResp, info)
 	if newAPIError != nil {
 		// reset status code 重置状态码
@@ -157,6 +156,16 @@ func ImageHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *type
 		logContent = append(logContent, fmt.Sprintf("生成数量 %d", imageN))
 	}
 
-	service.PostTextConsumeQuota(c, info, usage.(*dto.Usage), logContent)
+	if !c.GetBool("async_image_worker") {
+		service.PostTextConsumeQuota(c, info, usage.(*dto.Usage), logContent)
+	}
 	return nil
+}
+
+func preConsumeAsyncImageBilling(c *gin.Context, info *relaycommon.RelayInfo) *types.NewAPIError {
+	if info == nil || info.PriceData.FreeModel || info.PriceData.QuotaToPreConsume <= 0 || info.Billing != nil {
+		return nil
+	}
+	info.ForcePreConsume = true
+	return service.PreConsumeBilling(c, info.PriceData.QuotaToPreConsume, info)
 }

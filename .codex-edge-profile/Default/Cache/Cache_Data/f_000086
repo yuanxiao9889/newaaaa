@@ -1,0 +1,1403 @@
+import { createHotContext as __vite__createHotContext } from "/@vite/client";import.meta.hot = __vite__createHotContext("/src/pages/Setting/Ratio/GroupRatioSettings.jsx");import __vite__cjsImport0_react_jsxDevRuntime from "/node_modules/.vite/deps/react_jsx-dev-runtime.js?v=1c6fcc49"; const jsxDEV = __vite__cjsImport0_react_jsxDevRuntime["jsxDEV"];
+import RefreshRuntime from "/@react-refresh";
+const inWebWorker = typeof WorkerGlobalScope !== "undefined" && self instanceof WorkerGlobalScope;
+let prevRefreshReg;
+let prevRefreshSig;
+if (import.meta.hot && !inWebWorker) {
+  if (!window.__vite_plugin_react_preamble_installed__) {
+    throw new Error("@vitejs/plugin-react can't detect preamble. Something is wrong. See https://github.com/vitejs/vite-plugin-react/pull/11#discussion_r430879201");
+  }
+  prevRefreshReg = window.$RefreshReg$;
+  prevRefreshSig = window.$RefreshSig$;
+  window.$RefreshReg$ = (type, id) => {
+    RefreshRuntime.register(type, "E:/new-api/web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx " + id);
+  };
+  window.$RefreshSig$ = RefreshRuntime.createSignatureFunctionForTransform;
+}
+var _s2 = $RefreshSig$();
+import __vite__cjsImport3_react from "/node_modules/.vite/deps/react.js?v=1c6fcc49"; const React = __vite__cjsImport3_react.__esModule ? __vite__cjsImport3_react.default : __vite__cjsImport3_react; const useEffect = __vite__cjsImport3_react["useEffect"]; const useState = __vite__cjsImport3_react["useState"]; const useRef = __vite__cjsImport3_react["useRef"]; const useCallback = __vite__cjsImport3_react["useCallback"]; const useMemo = __vite__cjsImport3_react["useMemo"];
+import {
+  Button,
+  Col,
+  Collapsible,
+  Form,
+  Radio,
+  RadioGroup,
+  Row,
+  SideSheet,
+  Spin,
+  Switch,
+  Tabs,
+  Typography
+} from "/node_modules/.vite/deps/@douyinfe_semi-ui.js?v=0f3c8be3";
+import { IconChevronDown, IconChevronUp } from "/node_modules/.vite/deps/@douyinfe_semi-icons.js?v=4a36e176";
+import { IconHelpCircle } from "/node_modules/.vite/deps/@douyinfe_semi-icons.js?v=4a36e176";
+import {
+  compareObjects,
+  API,
+  showError,
+  showSuccess,
+  showWarning,
+  verifyJSON
+} from "/src/helpers/index.js";
+import { useTranslation } from "/node_modules/.vite/deps/react-i18next.js?v=8646de14";
+import GroupTable from "/src/pages/Setting/Ratio/components/GroupTable.jsx";
+import AutoGroupList from "/src/pages/Setting/Ratio/components/AutoGroupList.jsx";
+import GroupGroupRatioRules from "/src/pages/Setting/Ratio/components/GroupGroupRatioRules.jsx";
+import GroupSpecialUsableRules from "/src/pages/Setting/Ratio/components/GroupSpecialUsableRules.jsx";
+const { Text, Title, Paragraph } = Typography;
+const OPTION_KEYS = [
+  "GroupRatio",
+  "UserUsableGroups",
+  "GroupGroupRatio",
+  "group_ratio_setting.group_special_usable_group",
+  "AutoGroups",
+  "DefaultUseAutoGroup"
+];
+function parseJSONSafe(str, fallback) {
+  if (!str || !str.trim()) return fallback;
+  try {
+    return JSON.parse(str);
+  } catch {
+    return fallback;
+  }
+}
+export default function GroupRatioSettings(props) {
+  _s2();
+  var _s = $RefreshSig$();
+  const { t } = useTranslation();
+  const [loading, setLoading] = useState(false);
+  const [editMode, setEditMode] = useState("visual");
+  const [showGuide, setShowGuide] = useState(false);
+  const [inputs, setInputs] = useState({
+    GroupRatio: "",
+    UserUsableGroups: "",
+    GroupGroupRatio: "",
+    "group_ratio_setting.group_special_usable_group": "",
+    AutoGroups: "",
+    DefaultUseAutoGroup: false
+  });
+  const refForm = useRef();
+  const [inputsRow, setInputsRow] = useState(inputs);
+  const dataVersionRef = useRef(0);
+  const groupNames = useMemo(() => {
+    const ratioMap = parseJSONSafe(inputs.GroupRatio, {});
+    return Object.keys(ratioMap);
+  }, [inputs.GroupRatio]);
+  async function onSubmit() {
+    if (editMode === "manual") {
+      try {
+        await refForm.current.validate();
+      } catch {
+        showError(t("请检查输入"));
+        return;
+      }
+    }
+    const updateArray = compareObjects(inputs, inputsRow);
+    if (!updateArray.length) {
+      return showWarning(t("你似乎并没有修改什么"));
+    }
+    const requestQueue = updateArray.map((item) => {
+      const value = typeof inputs[item.key] === "boolean" ? String(inputs[item.key]) : inputs[item.key];
+      return API.put("/api/option/", { key: item.key, value });
+    });
+    setLoading(true);
+    try {
+      const res = await Promise.all(requestQueue);
+      if (res.includes(void 0)) {
+        return showError(
+          requestQueue.length > 1 ? t("部分保存失败，请重试") : t("保存失败")
+        );
+      }
+      for (let i = 0; i < res.length; i++) {
+        if (!res[i].data.success) {
+          return showError(res[i].data.message);
+        }
+      }
+      showSuccess(t("保存成功"));
+      props.refresh();
+    } catch (error) {
+      console.error("Unexpected error:", error);
+      showError(t("保存失败，请重试"));
+    } finally {
+      setLoading(false);
+    }
+  }
+  useEffect(() => {
+    const currentInputs = {};
+    for (let key in props.options) {
+      if (OPTION_KEYS.includes(key)) {
+        currentInputs[key] = props.options[key];
+      }
+    }
+    setInputs(currentInputs);
+    setInputsRow(structuredClone(currentInputs));
+    dataVersionRef.current += 1;
+    if (refForm.current) {
+      refForm.current.setValues(currentInputs);
+    }
+  }, [props.options]);
+  const handleGroupTableChange = useCallback(
+    ({ GroupRatio, UserUsableGroups }) => {
+      setInputs((prev) => ({ ...prev, GroupRatio, UserUsableGroups }));
+    },
+    []
+  );
+  const handleAutoGroupsChange = useCallback((value) => {
+    setInputs((prev) => ({ ...prev, AutoGroups: value }));
+  }, []);
+  const handleGroupGroupRatioChange = useCallback((value) => {
+    setInputs((prev) => ({ ...prev, GroupGroupRatio: value }));
+  }, []);
+  const handleSpecialUsableChange = useCallback((value) => {
+    setInputs((prev) => ({
+      ...prev,
+      "group_ratio_setting.group_special_usable_group": value
+    }));
+  }, []);
+  const dv = dataVersionRef.current;
+  const renderVisualMode = () => /* @__PURE__ */ jsxDEV(Form, { values: inputs, style: { marginBottom: 15 }, "data-insp-path": "web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx:182:5:Form", children: [
+    /* @__PURE__ */ jsxDEV(Form.Section, { text: t("分组管理"), children: [
+      /* @__PURE__ */ jsxDEV(Text, { type: "tertiary", size: "small", style: { display: "block", marginBottom: 12 }, "data-insp-path": "web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx:184:9:Text", children: t("倍率用于计费乘数，勾选「用户可选」后用户可在创建令牌时选择该分组") }, void 0, false, {
+        fileName: "E:/new-api/web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx",
+        lineNumber: 184,
+        columnNumber: 9
+      }, this),
+      /* @__PURE__ */ jsxDEV(
+        GroupTable,
+        {
+          groupRatio: inputs.GroupRatio,
+          userUsableGroups: inputs.UserUsableGroups,
+          onChange: handleGroupTableChange,
+          "data-insp-path": "web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx:187:9:GroupTable"
+        },
+        `gt_${dv}`,
+        false,
+        {
+          fileName: "E:/new-api/web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx",
+          lineNumber: 187,
+          columnNumber: 9
+        },
+        this
+      )
+    ] }, void 0, true, {
+      fileName: "E:/new-api/web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx",
+      lineNumber: 183,
+      columnNumber: 7
+    }, this),
+    /* @__PURE__ */ jsxDEV(Form.Section, { text: t("自动分组"), children: [
+      /* @__PURE__ */ jsxDEV(Text, { type: "tertiary", size: "small", style: { display: "block", marginBottom: 12 }, "data-insp-path": "web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx:196:9:Text", children: t("令牌分组设为 auto 时，按以下顺序依次尝试选择可用分组，排在前面的优先级更高") }, void 0, false, {
+        fileName: "E:/new-api/web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx",
+        lineNumber: 196,
+        columnNumber: 9
+      }, this),
+      /* @__PURE__ */ jsxDEV(Row, { gutter: 16, "data-insp-path": "web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx:199:9:Row", children: /* @__PURE__ */ jsxDEV(Col, { xs: 24, sm: 12, md: 8, lg: 8, xl: 8, "data-insp-path": "web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx:200:11:Col", children: /* @__PURE__ */ jsxDEV(Form.Slot, { label: t("默认使用auto分组"), children: [
+        /* @__PURE__ */ jsxDEV("div", { className: "flex items-center gap-2", "data-insp-path": "web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx:202:15:div", children: /* @__PURE__ */ jsxDEV(
+          Switch,
+          {
+            checked: !!inputs.DefaultUseAutoGroup,
+            size: "default",
+            checkedText: "｜",
+            uncheckedText: "〇",
+            onChange: (value) => setInputs((prev) => ({
+              ...prev,
+              DefaultUseAutoGroup: value
+            })),
+            "data-insp-path": "web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx:203:17:Switch"
+          },
+          void 0,
+          false,
+          {
+            fileName: "E:/new-api/web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx",
+            lineNumber: 203,
+            columnNumber: 17
+          },
+          this
+        ) }, void 0, false, {
+          fileName: "E:/new-api/web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx",
+          lineNumber: 202,
+          columnNumber: 15
+        }, this),
+        /* @__PURE__ */ jsxDEV(Text, { type: "tertiary", size: "small", style: { marginTop: 4 }, "data-insp-path": "web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx:216:15:Text", children: t("开启后创建令牌默认选择auto分组，初始令牌也将设为auto") }, void 0, false, {
+          fileName: "E:/new-api/web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx",
+          lineNumber: 216,
+          columnNumber: 15
+        }, this)
+      ] }, void 0, true, {
+        fileName: "E:/new-api/web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx",
+        lineNumber: 201,
+        columnNumber: 13
+      }, this) }, void 0, false, {
+        fileName: "E:/new-api/web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx",
+        lineNumber: 200,
+        columnNumber: 11
+      }, this) }, void 0, false, {
+        fileName: "E:/new-api/web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx",
+        lineNumber: 199,
+        columnNumber: 9
+      }, this),
+      /* @__PURE__ */ jsxDEV(
+        AutoGroupList,
+        {
+          value: inputs.AutoGroups,
+          groupNames,
+          onChange: handleAutoGroupsChange,
+          "data-insp-path": "web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx:222:9:AutoGroupList"
+        },
+        `ag_${dv}`,
+        false,
+        {
+          fileName: "E:/new-api/web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx",
+          lineNumber: 222,
+          columnNumber: 9
+        },
+        this
+      )
+    ] }, void 0, true, {
+      fileName: "E:/new-api/web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx",
+      lineNumber: 195,
+      columnNumber: 7
+    }, this),
+    /* @__PURE__ */ jsxDEV(Form.Section, { text: t("分组特殊倍率"), children: [
+      /* @__PURE__ */ jsxDEV(Text, { type: "tertiary", size: "small", style: { display: "block", marginBottom: 12 }, "data-insp-path": "web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx:231:9:Text", children: t("当某个分组的用户使用另一个分组的令牌时，可设置特殊倍率覆盖基础倍率。例如：vip 分组的用户使用 default 分组时倍率为 0.5") }, void 0, false, {
+        fileName: "E:/new-api/web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx",
+        lineNumber: 231,
+        columnNumber: 9
+      }, this),
+      /* @__PURE__ */ jsxDEV(
+        GroupGroupRatioRules,
+        {
+          value: inputs.GroupGroupRatio,
+          groupNames,
+          onChange: handleGroupGroupRatioChange,
+          "data-insp-path": "web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx:234:9:GroupGroupRatioRules"
+        },
+        `ggr_${dv}`,
+        false,
+        {
+          fileName: "E:/new-api/web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx",
+          lineNumber: 234,
+          columnNumber: 9
+        },
+        this
+      )
+    ] }, void 0, true, {
+      fileName: "E:/new-api/web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx",
+      lineNumber: 230,
+      columnNumber: 7
+    }, this),
+    /* @__PURE__ */ jsxDEV(Form.Section, { text: t("分组特殊可用分组"), children: [
+      /* @__PURE__ */ jsxDEV(Text, { type: "tertiary", size: "small", style: { display: "block", marginBottom: 12 }, "data-insp-path": "web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx:243:9:Text", children: t("为特定用户分组配置可用分组的增减规则。「添加」为该分组新增可用分组，「移除」移除默认可用分组，「追加」直接追加分组") }, void 0, false, {
+        fileName: "E:/new-api/web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx",
+        lineNumber: 243,
+        columnNumber: 9
+      }, this),
+      /* @__PURE__ */ jsxDEV(
+        GroupSpecialUsableRules,
+        {
+          value: inputs["group_ratio_setting.group_special_usable_group"],
+          groupNames,
+          onChange: handleSpecialUsableChange,
+          "data-insp-path": "web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx:246:9:GroupSpecialUsableRules"
+        },
+        `gsu_${dv}`,
+        false,
+        {
+          fileName: "E:/new-api/web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx",
+          lineNumber: 246,
+          columnNumber: 9
+        },
+        this
+      )
+    ] }, void 0, true, {
+      fileName: "E:/new-api/web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx",
+      lineNumber: 242,
+      columnNumber: 7
+    }, this)
+  ] }, "form-visual", true, {
+    fileName: "E:/new-api/web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx",
+    lineNumber: 182,
+    columnNumber: 3
+  }, this);
+  useEffect(() => {
+    if (editMode === "manual" && refForm.current) {
+      refForm.current.setValues(inputs);
+    }
+  }, [editMode]);
+  const renderManualMode = () => /* @__PURE__ */ jsxDEV(
+    Form,
+    {
+      initValues: inputs,
+      getFormApi: (formAPI) => refForm.current = formAPI,
+      style: { marginBottom: 15 },
+      "data-insp-path": "web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx:263:5:Form",
+      children: /* @__PURE__ */ jsxDEV(Form.Section, { text: t("分组JSON设置"), children: [
+        /* @__PURE__ */ jsxDEV(Row, { gutter: 16, "data-insp-path": "web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx:270:9:Row", children: /* @__PURE__ */ jsxDEV(Col, { xs: 24, sm: 16, "data-insp-path": "web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx:271:11:Col", children: /* @__PURE__ */ jsxDEV(
+          Form.TextArea,
+          {
+            label: t("分组倍率"),
+            placeholder: t("为一个 JSON 文本，键为分组名称，值为倍率"),
+            extraText: t(
+              '分组倍率设置，可以在此处新增分组或修改现有分组的倍率，格式为 JSON 字符串，例如：{"vip": 0.5, "test": 1}，表示 vip 分组的倍率为 0.5，test 分组的倍率为 1'
+            ),
+            field: "GroupRatio",
+            autosize: { minRows: 6, maxRows: 12 },
+            trigger: "blur",
+            stopValidateWithError: true,
+            rules: [
+              {
+                validator: (rule, value) => verifyJSON(value),
+                message: t("不是合法的 JSON 字符串")
+              }
+            ],
+            onChange: (value) => setInputs((prev) => ({ ...prev, GroupRatio: value }))
+          },
+          void 0,
+          false,
+          {
+            fileName: "E:/new-api/web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx",
+            lineNumber: 272,
+            columnNumber: 13
+          },
+          this
+        ) }, void 0, false, {
+          fileName: "E:/new-api/web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx",
+          lineNumber: 271,
+          columnNumber: 11
+        }, this) }, void 0, false, {
+          fileName: "E:/new-api/web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx",
+          lineNumber: 270,
+          columnNumber: 9
+        }, this),
+        /* @__PURE__ */ jsxDEV(Row, { gutter: 16, "data-insp-path": "web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx:294:9:Row", children: /* @__PURE__ */ jsxDEV(Col, { xs: 24, sm: 16, "data-insp-path": "web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx:295:11:Col", children: /* @__PURE__ */ jsxDEV(
+          Form.TextArea,
+          {
+            label: t("用户可选分组"),
+            placeholder: t(
+              "为一个 JSON 文本，键为分组名称，值为分组描述"
+            ),
+            extraText: t(
+              '用户新建令牌时可选的分组，格式为 JSON 字符串，例如：{"vip": "VIP 用户", "test": "测试"}，表示用户可以选择 vip 分组和 test 分组'
+            ),
+            field: "UserUsableGroups",
+            autosize: { minRows: 6, maxRows: 12 },
+            trigger: "blur",
+            stopValidateWithError: true,
+            rules: [
+              {
+                validator: (rule, value) => verifyJSON(value),
+                message: t("不是合法的 JSON 字符串")
+              }
+            ],
+            onChange: (value) => setInputs((prev) => ({ ...prev, UserUsableGroups: value }))
+          },
+          void 0,
+          false,
+          {
+            fileName: "E:/new-api/web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx",
+            lineNumber: 296,
+            columnNumber: 13
+          },
+          this
+        ) }, void 0, false, {
+          fileName: "E:/new-api/web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx",
+          lineNumber: 295,
+          columnNumber: 11
+        }, this) }, void 0, false, {
+          fileName: "E:/new-api/web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx",
+          lineNumber: 294,
+          columnNumber: 9
+        }, this),
+        /* @__PURE__ */ jsxDEV(Row, { gutter: 16, "data-insp-path": "web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx:320:9:Row", children: /* @__PURE__ */ jsxDEV(Col, { xs: 24, sm: 16, "data-insp-path": "web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx:321:11:Col", children: /* @__PURE__ */ jsxDEV(
+          Form.TextArea,
+          {
+            label: t("分组特殊倍率"),
+            placeholder: t("为一个 JSON 文本"),
+            extraText: t(
+              '键为分组名称，值为另一个 JSON 对象，键为分组名称，值为该分组的用户的特殊分组倍率，例如：{"vip": {"default": 0.5, "test": 1}}，表示 vip 分组的用户在使用default分组的令牌时倍率为0.5，使用test分组时倍率为1'
+            ),
+            field: "GroupGroupRatio",
+            autosize: { minRows: 6, maxRows: 12 },
+            trigger: "blur",
+            stopValidateWithError: true,
+            rules: [
+              {
+                validator: (rule, value) => verifyJSON(value),
+                message: t("不是合法的 JSON 字符串")
+              }
+            ],
+            onChange: (value) => setInputs((prev) => ({ ...prev, GroupGroupRatio: value }))
+          },
+          void 0,
+          false,
+          {
+            fileName: "E:/new-api/web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx",
+            lineNumber: 322,
+            columnNumber: 13
+          },
+          this
+        ) }, void 0, false, {
+          fileName: "E:/new-api/web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx",
+          lineNumber: 321,
+          columnNumber: 11
+        }, this) }, void 0, false, {
+          fileName: "E:/new-api/web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx",
+          lineNumber: 320,
+          columnNumber: 9
+        }, this),
+        /* @__PURE__ */ jsxDEV(Row, { gutter: 16, "data-insp-path": "web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx:344:9:Row", children: /* @__PURE__ */ jsxDEV(Col, { xs: 24, sm: 16, "data-insp-path": "web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx:345:11:Col", children: /* @__PURE__ */ jsxDEV(
+          Form.TextArea,
+          {
+            label: t("分组特殊可用分组"),
+            placeholder: t("为一个 JSON 文本"),
+            extraText: t(
+              '键为用户分组名称，值为操作映射对象。内层键以"+:"开头表示添加指定分组（键值为分组名称，值为描述），以"-:"开头表示移除指定分组（键值为分组名称），不带前缀的键直接添加该分组。例如：{"vip": {"+:premium": "高级分组", "special": "特殊分组", "-:default": "默认分组"}}，表示 vip 分组的用户可以使用 premium 和 special 分组，同时移除 default 分组的访问权限'
+            ),
+            field: "group_ratio_setting.group_special_usable_group",
+            autosize: { minRows: 6, maxRows: 12 },
+            trigger: "blur",
+            stopValidateWithError: true,
+            rules: [
+              {
+                validator: (rule, value) => verifyJSON(value),
+                message: t("不是合法的 JSON 字符串")
+              }
+            ],
+            onChange: (value) => setInputs((prev) => ({
+              ...prev,
+              "group_ratio_setting.group_special_usable_group": value
+            }))
+          },
+          void 0,
+          false,
+          {
+            fileName: "E:/new-api/web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx",
+            lineNumber: 346,
+            columnNumber: 13
+          },
+          this
+        ) }, void 0, false, {
+          fileName: "E:/new-api/web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx",
+          lineNumber: 345,
+          columnNumber: 11
+        }, this) }, void 0, false, {
+          fileName: "E:/new-api/web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx",
+          lineNumber: 344,
+          columnNumber: 9
+        }, this),
+        /* @__PURE__ */ jsxDEV(Row, { gutter: 16, "data-insp-path": "web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx:371:9:Row", children: /* @__PURE__ */ jsxDEV(Col, { xs: 24, sm: 16, "data-insp-path": "web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx:372:11:Col", children: /* @__PURE__ */ jsxDEV(
+          Form.TextArea,
+          {
+            label: t("自动分组auto，从第一个开始选择"),
+            placeholder: t("为一个 JSON 文本"),
+            field: "AutoGroups",
+            autosize: { minRows: 6, maxRows: 12 },
+            trigger: "blur",
+            stopValidateWithError: true,
+            rules: [
+              {
+                validator: (rule, value) => {
+                  if (!value || value.trim() === "") return true;
+                  try {
+                    const parsed = JSON.parse(value);
+                    if (!Array.isArray(parsed)) return false;
+                    return parsed.every((item) => typeof item === "string");
+                  } catch {
+                    return false;
+                  }
+                },
+                message: t(
+                  '必须是有效的 JSON 字符串数组，例如：["g1","g2"]'
+                )
+              }
+            ],
+            onChange: (value) => setInputs((prev) => ({ ...prev, AutoGroups: value }))
+          },
+          void 0,
+          false,
+          {
+            fileName: "E:/new-api/web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx",
+            lineNumber: 373,
+            columnNumber: 13
+          },
+          this
+        ) }, void 0, false, {
+          fileName: "E:/new-api/web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx",
+          lineNumber: 372,
+          columnNumber: 11
+        }, this) }, void 0, false, {
+          fileName: "E:/new-api/web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx",
+          lineNumber: 371,
+          columnNumber: 9
+        }, this),
+        /* @__PURE__ */ jsxDEV(Row, { gutter: 16, "data-insp-path": "web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx:403:9:Row", children: /* @__PURE__ */ jsxDEV(Col, { span: 16, "data-insp-path": "web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx:404:11:Col", children: /* @__PURE__ */ jsxDEV(
+          Form.Switch,
+          {
+            label: t(
+              "创建令牌默认选择auto分组，初始令牌也将设为auto（否则留空，为用户默认分组）"
+            ),
+            field: "DefaultUseAutoGroup",
+            onChange: (value) => setInputs((prev) => ({
+              ...prev,
+              DefaultUseAutoGroup: value
+            }))
+          },
+          void 0,
+          false,
+          {
+            fileName: "E:/new-api/web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx",
+            lineNumber: 405,
+            columnNumber: 13
+          },
+          this
+        ) }, void 0, false, {
+          fileName: "E:/new-api/web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx",
+          lineNumber: 404,
+          columnNumber: 11
+        }, this) }, void 0, false, {
+          fileName: "E:/new-api/web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx",
+          lineNumber: 403,
+          columnNumber: 9
+        }, this)
+      ] }, void 0, true, {
+        fileName: "E:/new-api/web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx",
+        lineNumber: 269,
+        columnNumber: 7
+      }, this)
+    },
+    "form-manual",
+    false,
+    {
+      fileName: "E:/new-api/web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx",
+      lineNumber: 263,
+      columnNumber: 3
+    },
+    this
+  );
+  const GuideSection = ({ title, children }) => {
+    _s();
+    const [open, setOpen] = useState(false);
+    return /* @__PURE__ */ jsxDEV("div", { style: { marginTop: 16 }, "data-insp-path": "web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx:426:7:div", children: [
+      /* @__PURE__ */ jsxDEV(
+        Button,
+        {
+          theme: "borderless",
+          size: "small",
+          icon: open ? /* @__PURE__ */ jsxDEV(IconChevronUp, { "data-insp-path": "web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx:430:24:IconChevronUp" }, void 0, false, {
+            fileName: "E:/new-api/web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx",
+            lineNumber: 430,
+            columnNumber: 24
+          }, this) : /* @__PURE__ */ jsxDEV(IconChevronDown, { "data-insp-path": "web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx:430:44:IconChevronDown" }, void 0, false, {
+            fileName: "E:/new-api/web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx",
+            lineNumber: 430,
+            columnNumber: 141
+          }, this),
+          onClick: () => setOpen(!open),
+          style: { padding: "4px 0", color: "var(--semi-color-primary)" },
+          "data-insp-path": "web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx:427:9:Button",
+          children: title
+        },
+        void 0,
+        false,
+        {
+          fileName: "E:/new-api/web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx",
+          lineNumber: 427,
+          columnNumber: 9
+        },
+        this
+      ),
+      /* @__PURE__ */ jsxDEV(Collapsible, { isOpen: open, keepDOM: true, "data-insp-path": "web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx:436:9:Collapsible", children: /* @__PURE__ */ jsxDEV(
+        "div",
+        {
+          style: {
+            background: "var(--semi-color-fill-0)",
+            padding: "12px 16px",
+            borderRadius: 8,
+            marginTop: 8
+          },
+          "data-insp-path": "web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx:437:11:div",
+          children
+        },
+        void 0,
+        false,
+        {
+          fileName: "E:/new-api/web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx",
+          lineNumber: 437,
+          columnNumber: 11
+        },
+        this
+      ) }, void 0, false, {
+        fileName: "E:/new-api/web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx",
+        lineNumber: 436,
+        columnNumber: 9
+      }, this)
+    ] }, void 0, true, {
+      fileName: "E:/new-api/web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx",
+      lineNumber: 426,
+      columnNumber: 7
+    }, this);
+  };
+  _s(GuideSection, "xG1TONbKtDWtdOTrXaTAsNhPg/Q=");
+  const CodeBlock = ({ children }) => /* @__PURE__ */ jsxDEV(
+    "pre",
+    {
+      style: {
+        background: "var(--semi-color-bg-2)",
+        border: "1px solid var(--semi-color-border)",
+        padding: "10px 14px",
+        borderRadius: 6,
+        fontFamily: "monospace",
+        fontSize: 13,
+        margin: "8px 0",
+        whiteSpace: "pre-wrap",
+        lineHeight: 1.6,
+        overflowX: "auto"
+      },
+      "data-insp-path": "web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx:453:5:pre",
+      children
+    },
+    void 0,
+    false,
+    {
+      fileName: "E:/new-api/web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx",
+      lineNumber: 453,
+      columnNumber: 3
+    },
+    this
+  );
+  const renderGuide = () => /* @__PURE__ */ jsxDEV(
+    SideSheet,
+    {
+      title: t("分组设置使用说明"),
+      visible: showGuide,
+      onCancel: () => setShowGuide(false),
+      width: 560,
+      bodyStyle: { overflow: "auto", padding: "0 24px 24px" },
+      "data-insp-path": "web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx:472:5:SideSheet",
+      children: /* @__PURE__ */ jsxDEV(Tabs, { type: "line", size: "small", "data-insp-path": "web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx:479:7:Tabs", children: [
+        /* @__PURE__ */ jsxDEV(Tabs.TabPane, { tab: t("概览"), itemKey: "overview", children: /* @__PURE__ */ jsxDEV("div", { style: { paddingTop: 20 }, "data-insp-path": "web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx:481:11:div", children: [
+          /* @__PURE__ */ jsxDEV(Title, { heading: 5, "data-insp-path": "web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx:482:13:Title", children: t("什么是分组？") }, void 0, false, {
+            fileName: "E:/new-api/web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx",
+            lineNumber: 482,
+            columnNumber: 13
+          }, this),
+          /* @__PURE__ */ jsxDEV(Paragraph, { style: { marginTop: 12, lineHeight: 1.8 }, "data-insp-path": "web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx:483:13:Paragraph", children: t(
+            "分组是用于控制计费倍率和模型访问权限的核心概念。每个用户属于一个分组，每个令牌也可以指定使用某个分组。"
+          ) }, void 0, false, {
+            fileName: "E:/new-api/web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx",
+            lineNumber: 483,
+            columnNumber: 13
+          }, this),
+          /* @__PURE__ */ jsxDEV(Paragraph, { style: { marginTop: 8, lineHeight: 1.8 }, "data-insp-path": "web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx:488:13:Paragraph", children: t(
+            "通过分组可以实现不同用户等级的差异化定价，例如 VIP 用户享受更低的 API 调用费用。"
+          ) }, void 0, false, {
+            fileName: "E:/new-api/web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx",
+            lineNumber: 488,
+            columnNumber: 13
+          }, this),
+          /* @__PURE__ */ jsxDEV(GuideSection, { title: t("核心概念"), "data-insp-path": "web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx:494:13:GuideSection", children: [
+            /* @__PURE__ */ jsxDEV(Paragraph, { style: { lineHeight: 1.8 }, "data-insp-path": "web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx:495:15:Paragraph", children: [
+              /* @__PURE__ */ jsxDEV(Text, { strong: true, "data-insp-path": "web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx:496:17:Text", children: t("用户分组") }, void 0, false, {
+                fileName: "E:/new-api/web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx",
+                lineNumber: 496,
+                columnNumber: 17
+              }, this),
+              " — ",
+              t("由管理员分配，决定用户身份等级（如 default、vip）。")
+            ] }, void 0, true, {
+              fileName: "E:/new-api/web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx",
+              lineNumber: 495,
+              columnNumber: 15
+            }, this),
+            /* @__PURE__ */ jsxDEV(Paragraph, { style: { lineHeight: 1.8, marginTop: 4 }, "data-insp-path": "web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx:499:15:Paragraph", children: [
+              /* @__PURE__ */ jsxDEV(Text, { strong: true, "data-insp-path": "web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx:500:17:Text", children: t("令牌分组") }, void 0, false, {
+                fileName: "E:/new-api/web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx",
+                lineNumber: 500,
+                columnNumber: 17
+              }, this),
+              " — ",
+              t("用户创建令牌时选择的分组，决定该令牌的实际计费倍率。一个用户可以创建多个令牌，使用不同分组。")
+            ] }, void 0, true, {
+              fileName: "E:/new-api/web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx",
+              lineNumber: 499,
+              columnNumber: 15
+            }, this),
+            /* @__PURE__ */ jsxDEV(Paragraph, { style: { lineHeight: 1.8, marginTop: 4 }, "data-insp-path": "web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx:503:15:Paragraph", children: [
+              /* @__PURE__ */ jsxDEV(Text, { strong: true, "data-insp-path": "web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx:504:17:Text", children: t("倍率") }, void 0, false, {
+                fileName: "E:/new-api/web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx",
+                lineNumber: 504,
+                columnNumber: 17
+              }, this),
+              " — ",
+              t("计费乘数，倍率越低费用越低。例如倍率 0.5 表示半价。")
+            ] }, void 0, true, {
+              fileName: "E:/new-api/web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx",
+              lineNumber: 503,
+              columnNumber: 15
+            }, this),
+            /* @__PURE__ */ jsxDEV(Paragraph, { style: { lineHeight: 1.8, marginTop: 4 }, "data-insp-path": "web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx:507:15:Paragraph", children: [
+              /* @__PURE__ */ jsxDEV(Text, { strong: true, "data-insp-path": "web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx:508:17:Text", children: t("用户可选") }, void 0, false, {
+                fileName: "E:/new-api/web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx",
+                lineNumber: 508,
+                columnNumber: 17
+              }, this),
+              " — ",
+              t("勾选后，该分组会出现在用户创建令牌时的下拉菜单中。未勾选的分组只能由管理员分配，用户自己无法选择。")
+            ] }, void 0, true, {
+              fileName: "E:/new-api/web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx",
+              lineNumber: 507,
+              columnNumber: 15
+            }, this),
+            /* @__PURE__ */ jsxDEV(Paragraph, { style: { lineHeight: 1.8, marginTop: 4 }, "data-insp-path": "web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx:511:15:Paragraph", children: [
+              /* @__PURE__ */ jsxDEV(Text, { strong: true, "data-insp-path": "web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx:512:17:Text", children: t("自动分组") }, void 0, false, {
+                fileName: "E:/new-api/web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx",
+                lineNumber: 512,
+                columnNumber: 17
+              }, this),
+              " — ",
+              t("令牌分组设为 auto 时，系统按优先级顺序自动选择一个可用分组。")
+            ] }, void 0, true, {
+              fileName: "E:/new-api/web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx",
+              lineNumber: 511,
+              columnNumber: 15
+            }, this)
+          ] }, void 0, true, {
+            fileName: "E:/new-api/web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx",
+            lineNumber: 494,
+            columnNumber: 13
+          }, this)
+        ] }, void 0, true, {
+          fileName: "E:/new-api/web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx",
+          lineNumber: 481,
+          columnNumber: 11
+        }, this) }, void 0, false, {
+          fileName: "E:/new-api/web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx",
+          lineNumber: 480,
+          columnNumber: 9
+        }, this),
+        /* @__PURE__ */ jsxDEV(Tabs.TabPane, { tab: t("分组管理"), itemKey: "groups", children: /* @__PURE__ */ jsxDEV("div", { style: { paddingTop: 20 }, "data-insp-path": "web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx:520:11:div", children: [
+          /* @__PURE__ */ jsxDEV(Title, { heading: 5, "data-insp-path": "web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx:521:13:Title", children: t("创建和管理分组") }, void 0, false, {
+            fileName: "E:/new-api/web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx",
+            lineNumber: 521,
+            columnNumber: 13
+          }, this),
+          /* @__PURE__ */ jsxDEV(Paragraph, { style: { marginTop: 12, lineHeight: 1.8 }, "data-insp-path": "web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx:522:13:Paragraph", children: t("每个分组代表一个价格档位。管理员创建分组后，可以选择哪些档位对用户开放自选。") }, void 0, false, {
+            fileName: "E:/new-api/web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx",
+            lineNumber: 522,
+            columnNumber: 13
+          }, this),
+          /* @__PURE__ */ jsxDEV(GuideSection, { title: t("查看示例"), "data-insp-path": "web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx:526:13:GuideSection", children: [
+            /* @__PURE__ */ jsxDEV(Paragraph, { size: "small", type: "tertiary", style: { marginBottom: 8 }, "data-insp-path": "web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx:527:15:Paragraph", children: t("场景：站点提供两个价格档位，用户可以按需选择") }, void 0, false, {
+              fileName: "E:/new-api/web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx",
+              lineNumber: 527,
+              columnNumber: 15
+            }, this),
+            /* @__PURE__ */ jsxDEV(CodeBlock, { "data-insp-path": "web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx:530:15:CodeBlock", children: `${t("分组名")}      ${t("倍率")}    ${t("用户可选")}    ${t("说明")}
+──────────────────────────────────────
+standard  1.0     ${t("是")}        ${t("标准价格")}
+premium   0.5     ${t("是")}        ${t("高级套餐，半价优惠")}` }, void 0, false, {
+              fileName: "E:/new-api/web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx",
+              lineNumber: 530,
+              columnNumber: 15
+            }, this),
+            /* @__PURE__ */ jsxDEV(Paragraph, { size: "small", style: { marginTop: 10, lineHeight: 1.8 }, "data-insp-path": "web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx:533:15:Paragraph", children: t("两个分组都勾选了「用户可选」，所以用户创建令牌时可以看到这两个选项：") }, void 0, false, {
+              fileName: "E:/new-api/web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx",
+              lineNumber: 533,
+              columnNumber: 15
+            }, this),
+            /* @__PURE__ */ jsxDEV(CodeBlock, { "data-insp-path": "web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx:536:15:CodeBlock", children: [
+              t("用户创建令牌 → 选择分组下拉框："),
+              "\n",
+              `  ├─ standard (${t("标准价格")})`,
+              "\n",
+              `  └─ premium  (${t("高级套餐，半价优惠")})`
+            ] }, void 0, true, {
+              fileName: "E:/new-api/web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx",
+              lineNumber: 536,
+              columnNumber: 15
+            }, this),
+            /* @__PURE__ */ jsxDEV(Paragraph, { size: "small", style: { marginTop: 10, lineHeight: 1.8 }, "data-insp-path": "web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx:541:15:Paragraph", children: t("选择 premium 创建的令牌，调用 API 时费用为 standard 的 50%。") }, void 0, false, {
+              fileName: "E:/new-api/web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx",
+              lineNumber: 541,
+              columnNumber: 15
+            }, this),
+            /* @__PURE__ */ jsxDEV(Paragraph, { size: "small", style: { marginTop: 16, lineHeight: 1.8 }, "data-insp-path": "web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx:544:15:Paragraph", children: /* @__PURE__ */ jsxDEV(Text, { strong: true, "data-insp-path": "web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx:545:17:Text", children: t("对比：不勾选「用户可选」的场景") }, void 0, false, {
+              fileName: "E:/new-api/web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx",
+              lineNumber: 545,
+              columnNumber: 17
+            }, this) }, void 0, false, {
+              fileName: "E:/new-api/web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx",
+              lineNumber: 544,
+              columnNumber: 15
+            }, this),
+            /* @__PURE__ */ jsxDEV(Paragraph, { size: "small", style: { marginTop: 4, lineHeight: 1.8 }, "data-insp-path": "web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx:547:15:Paragraph", children: t("假设再加两个分组 default 和 vip，但不勾选用户可选：") }, void 0, false, {
+              fileName: "E:/new-api/web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx",
+              lineNumber: 547,
+              columnNumber: 15
+            }, this),
+            /* @__PURE__ */ jsxDEV(CodeBlock, { "data-insp-path": "web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx:550:15:CodeBlock", children: `${t("分组名")}      ${t("倍率")}    ${t("用户可选")}    ${t("说明")}
+──────────────────────────────────────
+default   1.0     ${t("否")}        ${t("管理员分配的基础分组")}
+vip       0.5     ${t("否")}        ${t("管理员分配的优惠分组")}
+standard  1.0     ${t("是")}        ${t("标准价格")}
+premium   0.5     ${t("是")}        ${t("高级套餐，半价优惠")}` }, void 0, false, {
+              fileName: "E:/new-api/web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx",
+              lineNumber: 550,
+              columnNumber: 15
+            }, this),
+            /* @__PURE__ */ jsxDEV(Paragraph, { size: "small", style: { marginTop: 8, lineHeight: 1.8 }, "data-insp-path": "web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx:553:15:Paragraph", children: t("此时用户创建令牌时只能看到 standard 和 premium：") }, void 0, false, {
+              fileName: "E:/new-api/web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx",
+              lineNumber: 553,
+              columnNumber: 15
+            }, this),
+            /* @__PURE__ */ jsxDEV(CodeBlock, { "data-insp-path": "web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx:556:15:CodeBlock", children: [
+              t("用户创建令牌 → 选择分组下拉框："),
+              "\n",
+              `  ├─ standard (${t("标准价格")})`,
+              "\n",
+              `  └─ premium  (${t("高级套餐，半价优惠")})`,
+              "\n\n",
+              `  ${t("不会出现")} default ${t("和")} vip`
+            ] }, void 0, true, {
+              fileName: "E:/new-api/web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx",
+              lineNumber: 556,
+              columnNumber: 15
+            }, this),
+            /* @__PURE__ */ jsxDEV(Paragraph, { size: "small", style: { marginTop: 8, lineHeight: 1.8 }, "data-insp-path": "web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx:562:15:Paragraph", children: t("default 和 vip 只能由管理员在「用户管理」中分配给用户。适用于按用户等级定价、内部测试等不希望用户自主选择的场景。") }, void 0, false, {
+              fileName: "E:/new-api/web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx",
+              lineNumber: 562,
+              columnNumber: 15
+            }, this),
+            /* @__PURE__ */ jsxDEV(Paragraph, { size: "small", style: { marginTop: 12, lineHeight: 1.8 }, "data-insp-path": "web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx:565:15:Paragraph", children: /* @__PURE__ */ jsxDEV(Text, { strong: true, "data-insp-path": "web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx:566:17:Text", children: t("用户分组的联动作用") }, void 0, false, {
+              fileName: "E:/new-api/web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx",
+              lineNumber: 566,
+              columnNumber: 17
+            }, this) }, void 0, false, {
+              fileName: "E:/new-api/web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx",
+              lineNumber: 565,
+              columnNumber: 15
+            }, this),
+            /* @__PURE__ */ jsxDEV(Paragraph, { size: "small", style: { lineHeight: 1.8 }, "data-insp-path": "web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx:568:15:Paragraph", children: t("管理员给用户分配的分组（如 vip）不仅决定用户身份，还会影响后续两个功能：") }, void 0, false, {
+              fileName: "E:/new-api/web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx",
+              lineNumber: 568,
+              columnNumber: 15
+            }, this),
+            /* @__PURE__ */ jsxDEV(Paragraph, { size: "small", style: { lineHeight: 1.8, marginTop: 4 }, "data-insp-path": "web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx:571:15:Paragraph", children: [
+              "1. ",
+              /* @__PURE__ */ jsxDEV(Text, { strong: true, "data-insp-path": "web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx:572:24:Text", children: t("特殊倍率") }, void 0, false, {
+                fileName: "E:/new-api/web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx",
+                lineNumber: 572,
+                columnNumber: 24
+              }, this),
+              " — ",
+              t("可以根据用户分组设置不同的计费倍率。例如 vip 用户使用 standard 令牌时倍率从 1.0 降为 0.8。")
+            ] }, void 0, true, {
+              fileName: "E:/new-api/web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx",
+              lineNumber: 571,
+              columnNumber: 15
+            }, this),
+            /* @__PURE__ */ jsxDEV(Paragraph, { size: "small", style: { lineHeight: 1.8, marginTop: 2 }, "data-insp-path": "web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx:575:15:Paragraph", children: [
+              "2. ",
+              /* @__PURE__ */ jsxDEV(Text, { strong: true, "data-insp-path": "web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx:576:24:Text", children: t("可用分组") }, void 0, false, {
+                fileName: "E:/new-api/web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx",
+                lineNumber: 576,
+                columnNumber: 24
+              }, this),
+              " — ",
+              t("可以根据用户分组增减令牌可选的分组范围。例如 vip 用户额外开放 premium 分组，或移除某个分组的选择权。")
+            ] }, void 0, true, {
+              fileName: "E:/new-api/web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx",
+              lineNumber: 575,
+              columnNumber: 15
+            }, this),
+            /* @__PURE__ */ jsxDEV(Paragraph, { size: "small", type: "tertiary", style: { lineHeight: 1.8, marginTop: 6 }, "data-insp-path": "web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx:579:15:Paragraph", children: t("详见「特殊倍率」和「可用分组」标签页。") }, void 0, false, {
+              fileName: "E:/new-api/web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx",
+              lineNumber: 579,
+              columnNumber: 15
+            }, this)
+          ] }, void 0, true, {
+            fileName: "E:/new-api/web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx",
+            lineNumber: 526,
+            columnNumber: 13
+          }, this),
+          /* @__PURE__ */ jsxDEV(GuideSection, { title: t("JSON 格式参考"), "data-insp-path": "web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx:584:13:GuideSection", children: [
+            /* @__PURE__ */ jsxDEV(Paragraph, { size: "small", style: { marginBottom: 4 }, "data-insp-path": "web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx:585:15:Paragraph", children: [
+              /* @__PURE__ */ jsxDEV(Text, { strong: true, code: true, "data-insp-path": "web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx:586:17:Text", children: "GroupRatio" }, void 0, false, {
+                fileName: "E:/new-api/web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx",
+                lineNumber: 586,
+                columnNumber: 17
+              }, this),
+              " — ",
+              t("分组名称到倍率的映射")
+            ] }, void 0, true, {
+              fileName: "E:/new-api/web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx",
+              lineNumber: 585,
+              columnNumber: 15
+            }, this),
+            /* @__PURE__ */ jsxDEV(CodeBlock, { "data-insp-path": "web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx:588:15:CodeBlock", children: `{"default": 1, "vip": 0.5, "standard": 1, "premium": 0.5}` }, void 0, false, {
+              fileName: "E:/new-api/web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx",
+              lineNumber: 588,
+              columnNumber: 15
+            }, this),
+            /* @__PURE__ */ jsxDEV(Paragraph, { size: "small", style: { marginBottom: 4, marginTop: 8 }, "data-insp-path": "web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx:589:15:Paragraph", children: [
+              /* @__PURE__ */ jsxDEV(Text, { strong: true, code: true, "data-insp-path": "web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx:590:17:Text", children: "UserUsableGroups" }, void 0, false, {
+                fileName: "E:/new-api/web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx",
+                lineNumber: 590,
+                columnNumber: 17
+              }, this),
+              " — ",
+              t("用户可选分组的名称和描述（只包含勾选了用户可选的分组）")
+            ] }, void 0, true, {
+              fileName: "E:/new-api/web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx",
+              lineNumber: 589,
+              columnNumber: 15
+            }, this),
+            /* @__PURE__ */ jsxDEV(CodeBlock, { "data-insp-path": "web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx:592:15:CodeBlock", children: `{"standard": "${t("标准价格")}", "premium": "${t("高级套餐，半价优惠")}"}` }, void 0, false, {
+              fileName: "E:/new-api/web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx",
+              lineNumber: 592,
+              columnNumber: 15
+            }, this)
+          ] }, void 0, true, {
+            fileName: "E:/new-api/web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx",
+            lineNumber: 584,
+            columnNumber: 13
+          }, this)
+        ] }, void 0, true, {
+          fileName: "E:/new-api/web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx",
+          lineNumber: 520,
+          columnNumber: 11
+        }, this) }, void 0, false, {
+          fileName: "E:/new-api/web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx",
+          lineNumber: 519,
+          columnNumber: 9
+        }, this),
+        /* @__PURE__ */ jsxDEV(Tabs.TabPane, { tab: t("自动分组"), itemKey: "auto", children: /* @__PURE__ */ jsxDEV("div", { style: { paddingTop: 20 }, "data-insp-path": "web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx:598:11:div", children: [
+          /* @__PURE__ */ jsxDEV(Title, { heading: 5, "data-insp-path": "web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx:599:13:Title", children: t("自动分组选择") }, void 0, false, {
+            fileName: "E:/new-api/web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx",
+            lineNumber: 599,
+            columnNumber: 13
+          }, this),
+          /* @__PURE__ */ jsxDEV(Paragraph, { style: { marginTop: 12, lineHeight: 1.8 }, "data-insp-path": "web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx:600:13:Paragraph", children: t("当令牌分组设为 auto 时，系统按列表顺序依次选择可用分组。排在前面的优先级更高。") }, void 0, false, {
+            fileName: "E:/new-api/web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx",
+            lineNumber: 600,
+            columnNumber: 13
+          }, this),
+          /* @__PURE__ */ jsxDEV(GuideSection, { title: t("查看示例"), "data-insp-path": "web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx:604:13:GuideSection", children: [
+            /* @__PURE__ */ jsxDEV(Paragraph, { size: "small", type: "tertiary", style: { marginBottom: 6 }, "data-insp-path": "web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx:605:15:Paragraph", children: t("场景：设置自动选择优先级") }, void 0, false, {
+              fileName: "E:/new-api/web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx",
+              lineNumber: 605,
+              columnNumber: 15
+            }, this),
+            /* @__PURE__ */ jsxDEV(CodeBlock, { "data-insp-path": "web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx:608:15:CodeBlock", children: `1. default    ${t("最高优先级")}
+2. vip` }, void 0, false, {
+              fileName: "E:/new-api/web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx",
+              lineNumber: 608,
+              columnNumber: 15
+            }, this),
+            /* @__PURE__ */ jsxDEV(Paragraph, { size: "small", style: { marginTop: 6, lineHeight: 1.6 }, "data-insp-path": "web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx:611:15:Paragraph", children: t("开启「默认使用 auto 分组」后，新建令牌和初始令牌都会自动设为 auto。") }, void 0, false, {
+              fileName: "E:/new-api/web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx",
+              lineNumber: 611,
+              columnNumber: 15
+            }, this)
+          ] }, void 0, true, {
+            fileName: "E:/new-api/web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx",
+            lineNumber: 604,
+            columnNumber: 13
+          }, this),
+          /* @__PURE__ */ jsxDEV(GuideSection, { title: t("JSON 格式参考"), "data-insp-path": "web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx:616:13:GuideSection", children: [
+            /* @__PURE__ */ jsxDEV(Paragraph, { size: "small", style: { marginBottom: 4 }, "data-insp-path": "web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx:617:15:Paragraph", children: [
+              /* @__PURE__ */ jsxDEV(Text, { strong: true, code: true, "data-insp-path": "web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx:618:17:Text", children: "AutoGroups" }, void 0, false, {
+                fileName: "E:/new-api/web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx",
+                lineNumber: 618,
+                columnNumber: 17
+              }, this),
+              " — ",
+              t("有序字符串数组")
+            ] }, void 0, true, {
+              fileName: "E:/new-api/web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx",
+              lineNumber: 617,
+              columnNumber: 15
+            }, this),
+            /* @__PURE__ */ jsxDEV(CodeBlock, { "data-insp-path": "web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx:620:15:CodeBlock", children: `["default", "vip"]` }, void 0, false, {
+              fileName: "E:/new-api/web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx",
+              lineNumber: 620,
+              columnNumber: 15
+            }, this)
+          ] }, void 0, true, {
+            fileName: "E:/new-api/web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx",
+            lineNumber: 616,
+            columnNumber: 13
+          }, this)
+        ] }, void 0, true, {
+          fileName: "E:/new-api/web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx",
+          lineNumber: 598,
+          columnNumber: 11
+        }, this) }, void 0, false, {
+          fileName: "E:/new-api/web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx",
+          lineNumber: 597,
+          columnNumber: 9
+        }, this),
+        /* @__PURE__ */ jsxDEV(Tabs.TabPane, { tab: t("特殊倍率"), itemKey: "ratios", children: /* @__PURE__ */ jsxDEV("div", { style: { paddingTop: 20 }, "data-insp-path": "web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx:626:11:div", children: [
+          /* @__PURE__ */ jsxDEV(Title, { heading: 5, "data-insp-path": "web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx:627:13:Title", children: t("跨分组特殊倍率") }, void 0, false, {
+            fileName: "E:/new-api/web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx",
+            lineNumber: 627,
+            columnNumber: 13
+          }, this),
+          /* @__PURE__ */ jsxDEV(Paragraph, { style: { marginTop: 12, lineHeight: 1.8 }, "data-insp-path": "web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx:628:13:Paragraph", children: t("正常情况下，令牌的计费倍率由令牌所选的分组决定。特殊倍率可以根据「用户所在分组」进一步覆盖这个倍率。") }, void 0, false, {
+            fileName: "E:/new-api/web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx",
+            lineNumber: 628,
+            columnNumber: 13
+          }, this),
+          /* @__PURE__ */ jsxDEV(Paragraph, { style: { marginTop: 8, lineHeight: 1.8 }, "data-insp-path": "web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx:631:13:Paragraph", children: t("简单来说：同一个令牌分组，不同等级的用户可以享受不同的价格。") }, void 0, false, {
+            fileName: "E:/new-api/web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx",
+            lineNumber: 631,
+            columnNumber: 13
+          }, this),
+          /* @__PURE__ */ jsxDEV(GuideSection, { title: t("查看示例"), "data-insp-path": "web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx:635:13:GuideSection", children: [
+            /* @__PURE__ */ jsxDEV(Paragraph, { size: "small", type: "tertiary", style: { marginBottom: 8 }, "data-insp-path": "web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx:636:15:Paragraph", children: t("场景：站点有 standard（倍率 1.0）和 premium（倍率 0.5）两个分组，希望 vip 用户使用 standard 令牌时也能享受折扣") }, void 0, false, {
+              fileName: "E:/new-api/web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx",
+              lineNumber: 636,
+              columnNumber: 15
+            }, this),
+            /* @__PURE__ */ jsxDEV(Paragraph, { size: "small", style: { marginBottom: 8, lineHeight: 1.8 }, "data-insp-path": "web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx:639:15:Paragraph", children: /* @__PURE__ */ jsxDEV(Text, { strong: true, "data-insp-path": "web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx:640:17:Text", children: t("不配置特殊倍率时：") }, void 0, false, {
+              fileName: "E:/new-api/web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx",
+              lineNumber: 640,
+              columnNumber: 17
+            }, this) }, void 0, false, {
+              fileName: "E:/new-api/web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx",
+              lineNumber: 639,
+              columnNumber: 15
+            }, this),
+            /* @__PURE__ */ jsxDEV(CodeBlock, { "data-insp-path": "web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx:642:15:CodeBlock", children: `${t("普通用户")} + standard ${t("令牌")} → ${t("倍率")} 1.0  (${t("原价")})
+vip ${t("用户")}  + standard ${t("令牌")} → ${t("倍率")} 1.0  (${t("原价，和普通用户一样")})` }, void 0, false, {
+              fileName: "E:/new-api/web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx",
+              lineNumber: 642,
+              columnNumber: 15
+            }, this),
+            /* @__PURE__ */ jsxDEV(Paragraph, { size: "small", style: { marginTop: 10, marginBottom: 8, lineHeight: 1.8 }, "data-insp-path": "web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx:645:15:Paragraph", children: /* @__PURE__ */ jsxDEV(Text, { strong: true, "data-insp-path": "web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx:646:17:Text", children: t("配置特殊倍率后：") }, void 0, false, {
+              fileName: "E:/new-api/web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx",
+              lineNumber: 646,
+              columnNumber: 17
+            }, this) }, void 0, false, {
+              fileName: "E:/new-api/web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx",
+              lineNumber: 645,
+              columnNumber: 15
+            }, this),
+            /* @__PURE__ */ jsxDEV(CodeBlock, { "data-insp-path": "web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx:648:15:CodeBlock", children: `${t("用户分组")}    ${t("使用分组")}    ${t("倍率")}
+────────────────────────────
+vip       standard   0.8
+vip       premium    0.3` }, void 0, false, {
+              fileName: "E:/new-api/web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx",
+              lineNumber: 648,
+              columnNumber: 15
+            }, this),
+            /* @__PURE__ */ jsxDEV(Paragraph, { size: "small", style: { marginTop: 10, lineHeight: 1.8 }, "data-insp-path": "web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx:651:15:Paragraph", children: t("配置后的效果：") }, void 0, false, {
+              fileName: "E:/new-api/web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx",
+              lineNumber: 651,
+              columnNumber: 15
+            }, this),
+            /* @__PURE__ */ jsxDEV(CodeBlock, { "data-insp-path": "web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx:654:15:CodeBlock", children: `${t("普通用户")} + standard ${t("令牌")} → ${t("倍率")} 1.0  (${t("不变")})
+vip ${t("用户")}  + standard ${t("令牌")} → ${t("倍率")} 0.8  (${t("享受 8 折")})
+vip ${t("用户")}  + premium  ${t("令牌")} → ${t("倍率")} 0.3  (${t("从 0.5 降到 0.3")})` }, void 0, false, {
+              fileName: "E:/new-api/web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx",
+              lineNumber: 654,
+              columnNumber: 15
+            }, this),
+            /* @__PURE__ */ jsxDEV(Paragraph, { size: "small", type: "tertiary", style: { marginTop: 10, lineHeight: 1.8 }, "data-insp-path": "web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx:657:15:Paragraph", children: t("只有配置了规则的组合才会覆盖，未配置的组合仍使用令牌分组的基础倍率。") }, void 0, false, {
+              fileName: "E:/new-api/web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx",
+              lineNumber: 657,
+              columnNumber: 15
+            }, this)
+          ] }, void 0, true, {
+            fileName: "E:/new-api/web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx",
+            lineNumber: 635,
+            columnNumber: 13
+          }, this),
+          /* @__PURE__ */ jsxDEV(GuideSection, { title: t("JSON 格式参考"), "data-insp-path": "web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx:662:13:GuideSection", children: [
+            /* @__PURE__ */ jsxDEV(Paragraph, { size: "small", style: { marginBottom: 4 }, "data-insp-path": "web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx:663:15:Paragraph", children: [
+              /* @__PURE__ */ jsxDEV(Text, { strong: true, code: true, "data-insp-path": "web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx:664:17:Text", children: "GroupGroupRatio" }, void 0, false, {
+                fileName: "E:/new-api/web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx",
+                lineNumber: 664,
+                columnNumber: 17
+              }, this),
+              " — ",
+              t("嵌套映射：用户分组 → 使用分组 → 倍率")
+            ] }, void 0, true, {
+              fileName: "E:/new-api/web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx",
+              lineNumber: 663,
+              columnNumber: 15
+            }, this),
+            /* @__PURE__ */ jsxDEV(CodeBlock, { "data-insp-path": "web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx:666:15:CodeBlock", children: `{
+  "vip": {
+    "standard": 0.8,
+    "premium": 0.3
+  }
+}` }, void 0, false, {
+              fileName: "E:/new-api/web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx",
+              lineNumber: 666,
+              columnNumber: 15
+            }, this)
+          ] }, void 0, true, {
+            fileName: "E:/new-api/web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx",
+            lineNumber: 662,
+            columnNumber: 13
+          }, this)
+        ] }, void 0, true, {
+          fileName: "E:/new-api/web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx",
+          lineNumber: 626,
+          columnNumber: 11
+        }, this) }, void 0, false, {
+          fileName: "E:/new-api/web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx",
+          lineNumber: 625,
+          columnNumber: 9
+        }, this),
+        /* @__PURE__ */ jsxDEV(Tabs.TabPane, { tab: t("可用分组"), itemKey: "usable", children: /* @__PURE__ */ jsxDEV("div", { style: { paddingTop: 20 }, "data-insp-path": "web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx:672:11:div", children: [
+          /* @__PURE__ */ jsxDEV(Title, { heading: 5, "data-insp-path": "web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx:673:13:Title", children: t("特殊可用分组规则") }, void 0, false, {
+            fileName: "E:/new-api/web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx",
+            lineNumber: 673,
+            columnNumber: 13
+          }, this),
+          /* @__PURE__ */ jsxDEV(Paragraph, { style: { marginTop: 12, lineHeight: 1.8 }, "data-insp-path": "web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx:674:13:Paragraph", children: t("默认情况下，所有用户创建令牌时看到的可选分组列表是一样的（即「用户可选」列勾选的分组）。") }, void 0, false, {
+            fileName: "E:/new-api/web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx",
+            lineNumber: 674,
+            columnNumber: 13
+          }, this),
+          /* @__PURE__ */ jsxDEV(Paragraph, { style: { marginTop: 8, lineHeight: 1.8 }, "data-insp-path": "web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx:677:13:Paragraph", children: t("通过此功能，可以根据用户所在分组，为不同等级的用户展示不同的可选列表。") }, void 0, false, {
+            fileName: "E:/new-api/web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx",
+            lineNumber: 677,
+            columnNumber: 13
+          }, this),
+          /* @__PURE__ */ jsxDEV(GuideSection, { title: t("查看示例"), "data-insp-path": "web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx:681:13:GuideSection", children: [
+            /* @__PURE__ */ jsxDEV(Paragraph, { size: "small", type: "tertiary", style: { marginBottom: 8 }, "data-insp-path": "web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx:682:15:Paragraph", children: t("场景：站点有 standard 和 premium 两个用户可选分组。希望 vip 用户额外看到 exclusive 分组，同时不再看到 standard 分组") }, void 0, false, {
+              fileName: "E:/new-api/web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx",
+              lineNumber: 682,
+              columnNumber: 15
+            }, this),
+            /* @__PURE__ */ jsxDEV(Paragraph, { size: "small", style: { marginBottom: 8, lineHeight: 1.8 }, "data-insp-path": "web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx:685:15:Paragraph", children: /* @__PURE__ */ jsxDEV(Text, { strong: true, "data-insp-path": "web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx:686:17:Text", children: t("不配置规则时，所有用户看到的下拉框一样：") }, void 0, false, {
+              fileName: "E:/new-api/web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx",
+              lineNumber: 686,
+              columnNumber: 17
+            }, this) }, void 0, false, {
+              fileName: "E:/new-api/web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx",
+              lineNumber: 685,
+              columnNumber: 15
+            }, this),
+            /* @__PURE__ */ jsxDEV(CodeBlock, { "data-insp-path": "web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx:688:15:CodeBlock", children: `${t("所有用户")} → ${t("创建令牌可选")}:
+  ├─ standard
+  └─ premium` }, void 0, false, {
+              fileName: "E:/new-api/web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx",
+              lineNumber: 688,
+              columnNumber: 15
+            }, this),
+            /* @__PURE__ */ jsxDEV(Paragraph, { size: "small", style: { marginTop: 10, marginBottom: 8, lineHeight: 1.8 }, "data-insp-path": "web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx:691:15:Paragraph", children: /* @__PURE__ */ jsxDEV(Text, { strong: true, "data-insp-path": "web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx:692:17:Text", children: t("为 vip 用户配置规则：") }, void 0, false, {
+              fileName: "E:/new-api/web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx",
+              lineNumber: 692,
+              columnNumber: 17
+            }, this) }, void 0, false, {
+              fileName: "E:/new-api/web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx",
+              lineNumber: 691,
+              columnNumber: 15
+            }, this),
+            /* @__PURE__ */ jsxDEV(CodeBlock, { "data-insp-path": "web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx:694:15:CodeBlock", children: `${t("用户分组")}    ${t("操作")}        ${t("目标分组")}    ${t("描述")}
+──────────────────────────────────────────
+vip       ${t("添加")} (+:)   exclusive   ${t("专属分组")}
+vip       ${t("移除")} (-:)   standard    -` }, void 0, false, {
+              fileName: "E:/new-api/web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx",
+              lineNumber: 694,
+              columnNumber: 15
+            }, this),
+            /* @__PURE__ */ jsxDEV(Paragraph, { size: "small", style: { marginTop: 10, lineHeight: 1.8 }, "data-insp-path": "web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx:697:15:Paragraph", children: t("配置后的效果：") }, void 0, false, {
+              fileName: "E:/new-api/web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx",
+              lineNumber: 697,
+              columnNumber: 15
+            }, this),
+            /* @__PURE__ */ jsxDEV(CodeBlock, { "data-insp-path": "web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx:700:15:CodeBlock", children: `${t("普通用户")} → ${t("创建令牌可选")}:
+  ├─ standard
+  └─ premium
+
+vip ${t("用户")} → ${t("创建令牌可选")}:
+  ├─ premium     (${t("保留")})
+  └─ exclusive   (${t("新增")})
+
+  ${t("standard 已被移除，vip 用户看不到")}` }, void 0, false, {
+              fileName: "E:/new-api/web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx",
+              lineNumber: 700,
+              columnNumber: 15
+            }, this),
+            /* @__PURE__ */ jsxDEV(Paragraph, { size: "small", style: { marginTop: 14, lineHeight: 1.8 }, "data-insp-path": "web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx:704:15:Paragraph", children: /* @__PURE__ */ jsxDEV(Text, { strong: true, "data-insp-path": "web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx:705:17:Text", children: t("三种操作的区别：") }, void 0, false, {
+              fileName: "E:/new-api/web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx",
+              lineNumber: 705,
+              columnNumber: 17
+            }, this) }, void 0, false, {
+              fileName: "E:/new-api/web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx",
+              lineNumber: 704,
+              columnNumber: 15
+            }, this),
+            /* @__PURE__ */ jsxDEV(CodeBlock, { "data-insp-path": "web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx:707:15:CodeBlock", children: `${t("添加")} (+:)  → ${t("在默认列表基础上新增一个分组")}
+${t("移除")} (-:)  → ${t("从默认列表中去掉一个分组")}
+${t("追加")}       → ${t("直接追加（和添加类似，但无前缀）")}` }, void 0, false, {
+              fileName: "E:/new-api/web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx",
+              lineNumber: 707,
+              columnNumber: 15
+            }, this)
+          ] }, void 0, true, {
+            fileName: "E:/new-api/web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx",
+            lineNumber: 681,
+            columnNumber: 13
+          }, this),
+          /* @__PURE__ */ jsxDEV(GuideSection, { title: t("JSON 格式参考"), "data-insp-path": "web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx:712:13:GuideSection", children: [
+            /* @__PURE__ */ jsxDEV(Paragraph, { size: "small", style: { marginBottom: 4 }, "data-insp-path": "web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx:713:15:Paragraph", children: /* @__PURE__ */ jsxDEV(Text, { strong: true, code: true, "data-insp-path": "web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx:714:17:Text", children: "group_special_usable_group" }, void 0, false, {
+              fileName: "E:/new-api/web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx",
+              lineNumber: 714,
+              columnNumber: 17
+            }, this) }, void 0, false, {
+              fileName: "E:/new-api/web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx",
+              lineNumber: 713,
+              columnNumber: 15
+            }, this),
+            /* @__PURE__ */ jsxDEV(CodeBlock, { "data-insp-path": "web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx:716:15:CodeBlock", children: `{
+  "vip": {
+    "+:exclusive": "${t("专属分组")}",
+    "-:standard": "remove"
+  }
+}` }, void 0, false, {
+              fileName: "E:/new-api/web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx",
+              lineNumber: 716,
+              columnNumber: 15
+            }, this),
+            /* @__PURE__ */ jsxDEV(Paragraph, { size: "small", type: "tertiary", style: { marginTop: 6, lineHeight: 1.6 }, "data-insp-path": "web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx:717:15:Paragraph", children: t('键的前缀 +: 表示添加，-: 表示移除，无前缀表示追加。值为分组描述（移除时填 "remove"）。') }, void 0, false, {
+              fileName: "E:/new-api/web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx",
+              lineNumber: 717,
+              columnNumber: 15
+            }, this)
+          ] }, void 0, true, {
+            fileName: "E:/new-api/web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx",
+            lineNumber: 712,
+            columnNumber: 13
+          }, this)
+        ] }, void 0, true, {
+          fileName: "E:/new-api/web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx",
+          lineNumber: 672,
+          columnNumber: 11
+        }, this) }, void 0, false, {
+          fileName: "E:/new-api/web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx",
+          lineNumber: 671,
+          columnNumber: 9
+        }, this)
+      ] }, void 0, true, {
+        fileName: "E:/new-api/web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx",
+        lineNumber: 479,
+        columnNumber: 7
+      }, this)
+    },
+    void 0,
+    false,
+    {
+      fileName: "E:/new-api/web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx",
+      lineNumber: 472,
+      columnNumber: 3
+    },
+    this
+  );
+  return /* @__PURE__ */ jsxDEV(Spin, { spinning: loading, "data-insp-path": "web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx:728:5:Spin", children: [
+    /* @__PURE__ */ jsxDEV("div", { style: { marginBottom: 15 }, "data-insp-path": "web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx:729:7:div", children: [
+      /* @__PURE__ */ jsxDEV("div", { className: "flex items-center gap-3", style: { marginTop: 12, marginBottom: 16 }, "data-insp-path": "web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx:730:9:div", children: [
+        /* @__PURE__ */ jsxDEV(
+          RadioGroup,
+          {
+            type: "button",
+            size: "small",
+            value: editMode,
+            onChange: (e) => setEditMode(e.target.value),
+            "data-insp-path": "web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx:731:11:RadioGroup",
+            children: [
+              /* @__PURE__ */ jsxDEV(Radio, { value: "visual", "data-insp-path": "web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx:737:13:Radio", children: t("可视化编辑") }, void 0, false, {
+                fileName: "E:/new-api/web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx",
+                lineNumber: 737,
+                columnNumber: 13
+              }, this),
+              /* @__PURE__ */ jsxDEV(Radio, { value: "manual", "data-insp-path": "web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx:738:13:Radio", children: t("手动编辑") }, void 0, false, {
+                fileName: "E:/new-api/web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx",
+                lineNumber: 738,
+                columnNumber: 13
+              }, this)
+            ]
+          },
+          void 0,
+          true,
+          {
+            fileName: "E:/new-api/web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx",
+            lineNumber: 731,
+            columnNumber: 11
+          },
+          this
+        ),
+        /* @__PURE__ */ jsxDEV(
+          Button,
+          {
+            icon: /* @__PURE__ */ jsxDEV(IconHelpCircle, { "data-insp-path": "web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx:741:19:IconHelpCircle" }, void 0, false, {
+              fileName: "E:/new-api/web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx",
+              lineNumber: 741,
+              columnNumber: 19
+            }, this),
+            theme: "borderless",
+            type: "tertiary",
+            size: "small",
+            onClick: () => setShowGuide(true),
+            "data-insp-path": "web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx:740:11:Button",
+            children: t("使用说明")
+          },
+          void 0,
+          false,
+          {
+            fileName: "E:/new-api/web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx",
+            lineNumber: 740,
+            columnNumber: 11
+          },
+          this
+        )
+      ] }, void 0, true, {
+        fileName: "E:/new-api/web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx",
+        lineNumber: 730,
+        columnNumber: 9
+      }, this),
+      editMode === "visual" ? renderVisualMode() : renderManualMode()
+    ] }, void 0, true, {
+      fileName: "E:/new-api/web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx",
+      lineNumber: 729,
+      columnNumber: 7
+    }, this),
+    /* @__PURE__ */ jsxDEV(Button, { size: "default", onClick: onSubmit, "data-insp-path": "web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx:752:7:Button", children: t("保存分组相关设置") }, void 0, false, {
+      fileName: "E:/new-api/web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx",
+      lineNumber: 752,
+      columnNumber: 7
+    }, this),
+    renderGuide()
+  ] }, void 0, true, {
+    fileName: "E:/new-api/web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx",
+    lineNumber: 728,
+    columnNumber: 5
+  }, this);
+}
+_s2(GroupRatioSettings, "1grcMjvho+zHSSx4IDV0loMuTtk=", false, function() {
+  return [useTranslation];
+});
+_c = GroupRatioSettings;
+var _c;
+$RefreshReg$(_c, "GroupRatioSettings");
+if (import.meta.hot && !inWebWorker) {
+  window.$RefreshReg$ = prevRefreshReg;
+  window.$RefreshSig$ = prevRefreshSig;
+}
+if (import.meta.hot && !inWebWorker) {
+  RefreshRuntime.__hmr_import(import.meta.url).then((currentExports) => {
+    RefreshRuntime.registerExportsForReactRefresh("E:/new-api/web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx", currentExports);
+    import.meta.hot.accept((nextExports) => {
+      if (!nextExports) return;
+      const invalidateMessage = RefreshRuntime.validateRefreshBoundaryAndEnqueueUpdate("E:/new-api/web/classic/src/pages/Setting/Ratio/GroupRatioSettings.jsx", currentExports, nextExports);
+      if (invalidateMessage) import.meta.hot.invalidate(invalidateMessage);
+    });
+  });
+}
+
+//# sourceMappingURL=data:application/json;base64,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c2VTdGF0ZSIsInVzZVJlZiIsInVzZUNhbGxiYWNrIiwidXNlTWVtbyIsIkJ1dHRvbiIsIkNvbCIsIkNvbGxhcHNpYmxlIiwiRm9ybSIsIlJhZGlvIiwiUmFkaW9Hcm91cCIsIlJvdyIsIlNpZGVTaGVldCIsIlNwaW4iLCJTd2l0Y2giLCJUYWJzIiwiVHlwb2dyYXBoeSIsIkljb25DaGV2cm9uRG93biIsIkljb25DaGV2cm9uVXAiLCJJY29uSGVscENpcmNsZSIsImNvbXBhcmVPYmplY3RzIiwiQVBJIiwic2hvd0Vycm9yIiwic2hvd1N1Y2Nlc3MiLCJzaG93V2FybmluZyIsInZlcmlmeUpTT04iLCJ1c2VUcmFuc2xhdGlvbiIsIkdyb3VwVGFibGUiLCJBdXRvR3JvdXBMaXN0IiwiR3JvdXBHcm91cFJhdGlvUnVsZXMiLCJHcm91cFNwZWNpYWxVc2FibGVSdWxlcyIsIlRleHQiLCJUaXRsZSIsIlBhcmFncmFwaCIsIk9QVElPTl9LRVlTIiwicGFyc2VKU09OU2FmZSIsInN0ciIsImZhbGxiYWNrIiwidHJpbSIsIkpTT04iLCJwYXJzZSIsIkdyb3VwUmF0aW9TZXR0aW5ncyIsInByb3BzIiwiX3MyIiwiX3MiLCIkUmVmcmVzaFNpZyQiLCJ0IiwibG9hZGluZyIsInNldExvYWRpbmciLCJlZGl0TW9kZSIsInNldEVkaXRNb2RlIiwic2hvd0d1aWRlIiwic2V0U2hvd0d1aWRlIiwiaW5wdXRzIiwic2V0SW5wdXRzIiwiR3JvdXBSYXRpbyIsIlVzZXJVc2FibGVHcm91cHMiLCJHcm91cEdyb3VwUmF0aW8iLCJBdXRvR3JvdXBzIiwiRGVmYXVsdFVzZUF1dG9Hcm91cCIsInJlZkZvcm0iLCJpbnB1dHNSb3ciLCJzZXRJbnB1dHNSb3ciLCJkYXRhVmVyc2lvblJlZiIsImdyb3VwTmFtZXMiLCJyYXRpb01hcCIsIk9iamVjdCIsImtleXMiLCJvblN1Ym1pdCIsImN1cnJlbnQiLCJ2YWxpZGF0ZSIsInVwZGF0ZUFycmF5IiwibGVuZ3RoIiwicmVxdWVzdFF1ZXVlIiwibWFwIiwiaXRlbSIsInZhbHVlIiwia2V5IiwiU3RyaW5nIiwicHV0IiwicmVzIiwiUHJvbWlzZSIsImFsbCIsImluY2x1ZGVzIiwidW5kZWZpbmVkIiwiaSIsImRhdGEiLCJzdWNjZXNzIiwibWVzc2FnZSIsInJlZnJlc2giLCJlcnJvciIsImNvbnNvbGUiLCJjdXJyZW50SW5wdXRzIiwib3B0aW9ucyIsInN0cnVjdHVyZWRDbG9uZSIsInNldFZhbHVlcyIsImhhbmRsZUdyb3VwVGFibGVDaGFuZ2UiLCJwcmV2IiwiaGFuZGxlQXV0b0dyb3Vwc0NoYW5nZSIsImhhbmRsZUdyb3VwR3JvdXBSYXRpb0NoYW5nZSIsImhhbmRsZVNwZWNpYWxVc2FibGVDaGFuZ2UiLCJkdiIsInJlbmRlclZpc3VhbE1vZGUiLCJtYXJnaW5Cb3R0b20iLCJkaXNwbGF5IiwibWFyZ2luVG9wIiwicmVuZGVyTWFudWFsTW9kZSIsImZvcm1BUEkiLCJtaW5Sb3dzIiwibWF4Um93cyIsInZhbGlkYXRvciIsInJ1bGUiLCJwYXJzZWQiLCJBcnJheSIsImlzQXJyYXkiLCJldmVyeSIsIkd1aWRlU2VjdGlvbiIsInRpdGxlIiwiY2hpbGRyZW4iLCJvcGVuIiwic2V0T3BlbiIsInBhZGRpbmciLCJjb2xvciIsImJhY2tncm91bmQiLCJib3JkZXJSYWRpdXMiLCJDb2RlQmxvY2siLCJib3JkZXIiLCJmb250RmFtaWx5IiwiZm9udFNpemUiLCJtYXJnaW4iLCJ3aGl0ZVNwYWNlIiwibGluZUhlaWdodCIsIm92ZXJmbG93WCIsInJlbmRlckd1aWRlIiwib3ZlcmZsb3ciLCJwYWRkaW5nVG9wIiwiZSIsInRhcmdldCIsIl9jIiwiJFJlZnJlc2hSZWckIl0sImlnbm9yZUxpc3QiOltdLCJzb3VyY2VzIjpbIkdyb3VwUmF0aW9TZXR0aW5ncy5qc3giXSwic291cmNlc0NvbnRlbnQiOlsiLypcbkNvcHlyaWdodCAoQykgMjAyNSBRdWFudHVtTm91c1xuXG5UaGlzIHByb2dyYW0gaXMgZnJlZSBzb2Z0d2FyZTogeW91IGNhbiByZWRpc3RyaWJ1dGUgaXQgYW5kL29yIG1vZGlmeVxuaXQgdW5kZXIgdGhlIHRlcm1zIG9mIHRoZSBHTlUgQWZmZXJvIEdlbmVyYWwgUHVibGljIExpY2Vuc2UgYXNcbnB1Ymxpc2hlZCBieSB0aGUgRnJlZSBTb2Z0d2FyZSBGb3VuZGF0aW9uLCBlaXRoZXIgdmVyc2lvbiAzIG9mIHRoZVxuTGljZW5zZSwgb3IgKGF0IHlvdXIgb3B0aW9uKSBhbnkgbGF0ZXIgdmVyc2lvbi5cblxuVGhpcyBwcm9ncmFtIGlzIGRpc3RyaWJ1dGVkIGluIHRoZSBob3BlIHRoYXQgaXQgd2lsbCBiZSB1c2VmdWwsXG5idXQgV0lUSE9VVCBBTlkgV0FSUkFOVFk7IHdpdGhvdXQgZXZlbiB0aGUgaW1wbGllZCB3YXJyYW50eSBvZlxuTUVSQ0hBTlRBQklMSVRZIG9yIEZJVE5FU1MgRk9SIEEgUEFSVElDVUxBUiBQVVJQT1NFLiBTZWUgdGhlXG5HTlUgQWZmZXJvIEdlbmVyYWwgUHVibGljIExpY2Vuc2UgZm9yIG1vcmUgZGV0YWlscy5cblxuWW91IHNob3VsZCBoYXZlIHJlY2VpdmVkIGEgY29weSBvZiB0aGUgR05VIEFmZmVybyBHZW5lcmFsIFB1YmxpYyBMaWNlbnNlXG5hbG9uZyB3aXRoIHRoaXMgcHJvZ3JhbS4gSWYgbm90LCBzZWUgPGh0dHBzOi8vd3d3LmdudS5vcmcvbGljZW5zZXMvPi5cblxuRm9yIGNvbW1lcmNpYWwgbGljZW5zaW5nLCBwbGVhc2UgY29udGFjdCBzdXBwb3J0QHF1YW50dW1ub3VzLmNvbVxuKi9cblxuaW1wb3J0IFJlYWN0LCB7IHVzZUVmZmVjdCwgdXNlU3RhdGUsIHVzZVJlZiwgdXNlQ2FsbGJhY2ssIHVzZU1lbW8gfSBmcm9tICdyZWFjdCc7XG5pbXBvcnQge1xuICBCdXR0b24sXG4gIENvbCxcbiAgQ29sbGFwc2libGUsXG4gIEZvcm0sXG4gIFJhZGlvLFxuICBSYWRpb0dyb3VwLFxuICBSb3csXG4gIFNpZGVTaGVldCxcbiAgU3BpbixcbiAgU3dpdGNoLFxuICBUYWJzLFxuICBUeXBvZ3JhcGh5LFxufSBmcm9tICdAZG91eWluZmUvc2VtaS11aSc7XG5pbXBvcnQgeyBJY29uQ2hldnJvbkRvd24sIEljb25DaGV2cm9uVXAgfSBmcm9tICdAZG91eWluZmUvc2VtaS1pY29ucyc7XG5pbXBvcnQgeyBJY29uSGVscENpcmNsZSB9IGZyb20gJ0Bkb3V5aW5mZS9zZW1pLWljb25zJztcbmltcG9ydCB7XG4gIGNvbXBhcmVPYmplY3RzLFxuICBBUEksXG4gIHNob3dFcnJvcixcbiAgc2hvd1N1Y2Nlc3MsXG4gIHNob3dXYXJuaW5nLFxuICB2ZXJpZnlKU09OLFxufSBmcm9tICcuLi8uLi8uLi9oZWxwZXJzJztcbmltcG9ydCB7IHVzZVRyYW5zbGF0aW9uIH0gZnJvbSAncmVhY3QtaTE4bmV4dCc7XG5pbXBvcnQgR3JvdXBUYWJsZSBmcm9tICcuL2NvbXBvbmVudHMvR3JvdXBUYWJsZSc7XG5pbXBvcnQgQXV0b0dyb3VwTGlzdCBmcm9tICcuL2NvbXBvbmVudHMvQXV0b0dyb3VwTGlzdCc7XG5pbXBvcnQgR3JvdXBHcm91cFJhdGlvUnVsZXMgZnJvbSAnLi9jb21wb25lbnRzL0dyb3VwR3JvdXBSYXRpb1J1bGVzJztcbmltcG9ydCBHcm91cFNwZWNpYWxVc2FibGVSdWxlcyBmcm9tICcuL2NvbXBvbmVudHMvR3JvdXBTcGVjaWFsVXNhYmxlUnVsZXMnO1xuXG5jb25zdCB7IFRleHQsIFRpdGxlLCBQYXJhZ3JhcGggfSA9IFR5cG9ncmFwaHk7XG5cbmNvbnN0IE9QVElPTl9LRVlTID0gW1xuICAnR3JvdXBSYXRpbycsXG4gICdVc2VyVXNhYmxlR3JvdXBzJyxcbiAgJ0dyb3VwR3JvdXBSYXRpbycsXG4gICdncm91cF9yYXRpb19zZXR0aW5nLmdyb3VwX3NwZWNpYWxfdXNhYmxlX2dyb3VwJyxcbiAgJ0F1dG9Hcm91cHMnLFxuICAnRGVmYXVsdFVzZUF1dG9Hcm91cCcsXG5dO1xuXG5mdW5jdGlvbiBwYXJzZUpTT05TYWZlKHN0ciwgZmFsbGJhY2spIHtcbiAgaWYgKCFzdHIgfHwgIXN0ci50cmltKCkpIHJldHVybiBmYWxsYmFjaztcbiAgdHJ5IHtcbiAgICByZXR1cm4gSlNPTi5wYXJzZShzdHIpO1xuICB9IGNhdGNoIHtcbiAgICByZXR1cm4gZmFsbGJhY2s7XG4gIH1cbn1cblxuZXhwb3J0IGRlZmF1bHQgZnVuY3Rpb24gR3JvdXBSYXRpb1NldHRpbmdzKHByb3BzKSB7XG4gIGNvbnN0IHsgdCB9ID0gdXNlVHJhbnNsYXRpb24oKTtcbiAgY29uc3QgW2xvYWRpbmcsIHNldExvYWRpbmddID0gdXNlU3RhdGUoZmFsc2UpO1xuICBjb25zdCBbZWRpdE1vZGUsIHNldEVkaXRNb2RlXSA9IHVzZVN0YXRlKCd2aXN1YWwnKTtcbiAgY29uc3QgW3Nob3dHdWlkZSwgc2V0U2hvd0d1aWRlXSA9IHVzZVN0YXRlKGZhbHNlKTtcblxuICBjb25zdCBbaW5wdXRzLCBzZXRJbnB1dHNdID0gdXNlU3RhdGUoe1xuICAgIEdyb3VwUmF0aW86ICcnLFxuICAgIFVzZXJVc2FibGVHcm91cHM6ICcnLFxuICAgIEdyb3VwR3JvdXBSYXRpbzogJycsXG4gICAgJ2dyb3VwX3JhdGlvX3NldHRpbmcuZ3JvdXBfc3BlY2lhbF91c2FibGVfZ3JvdXAnOiAnJyxcbiAgICBBdXRvR3JvdXBzOiAnJyxcbiAgICBEZWZhdWx0VXNlQXV0b0dyb3VwOiBmYWxzZSxcbiAgfSk7XG4gIGNvbnN0IHJlZkZvcm0gPSB1c2VSZWYoKTtcbiAgY29uc3QgW2lucHV0c1Jvdywgc2V0SW5wdXRzUm93XSA9IHVzZVN0YXRlKGlucHV0cyk7XG4gIGNvbnN0IGRhdGFWZXJzaW9uUmVmID0gdXNlUmVmKDApO1xuXG4gIGNvbnN0IGdyb3VwTmFtZXMgPSB1c2VNZW1vKCgpID0+IHtcbiAgICBjb25zdCByYXRpb01hcCA9IHBhcnNlSlNPTlNhZmUoaW5wdXRzLkdyb3VwUmF0aW8sIHt9KTtcbiAgICByZXR1cm4gT2JqZWN0LmtleXMocmF0aW9NYXApO1xuICB9LCBbaW5wdXRzLkdyb3VwUmF0aW9dKTtcblxuICBhc3luYyBmdW5jdGlvbiBvblN1Ym1pdCgpIHtcbiAgICBpZiAoZWRpdE1vZGUgPT09ICdtYW51YWwnKSB7XG4gICAgICB0cnkge1xuICAgICAgICBhd2FpdCByZWZGb3JtLmN1cnJlbnQudmFsaWRhdGUoKTtcbiAgICAgIH0gY2F0Y2gge1xuICAgICAgICBzaG93RXJyb3IodCgn6K+35qOA5p+l6L6T5YWlJykpO1xuICAgICAgICByZXR1cm47XG4gICAgICB9XG4gICAgfVxuXG4gICAgY29uc3QgdXBkYXRlQXJyYXkgPSBjb21wYXJlT2JqZWN0cyhpbnB1dHMsIGlucHV0c1Jvdyk7XG4gICAgaWYgKCF1cGRhdGVBcnJheS5sZW5ndGgpIHtcbiAgICAgIHJldHVybiBzaG93V2FybmluZyh0KCfkvaDkvLzkuY7lubbmsqHmnInkv67mlLnku4DkuYgnKSk7XG4gICAgfVxuXG4gICAgY29uc3QgcmVxdWVzdFF1ZXVlID0gdXBkYXRlQXJyYXkubWFwKChpdGVtKSA9PiB7XG4gICAgICBjb25zdCB2YWx1ZSA9XG4gICAgICAgIHR5cGVvZiBpbnB1dHNbaXRlbS5rZXldID09PSAnYm9vbGVhbidcbiAgICAgICAgICA/IFN0cmluZyhpbnB1dHNbaXRlbS5rZXldKVxuICAgICAgICAgIDogaW5wdXRzW2l0ZW0ua2V5XTtcbiAgICAgIHJldHVybiBBUEkucHV0KCcvYXBpL29wdGlvbi8nLCB7IGtleTogaXRlbS5rZXksIHZhbHVlIH0pO1xuICAgIH0pO1xuXG4gICAgc2V0TG9hZGluZyh0cnVlKTtcbiAgICB0cnkge1xuICAgICAgY29uc3QgcmVzID0gYXdhaXQgUHJvbWlzZS5hbGwocmVxdWVzdFF1ZXVlKTtcbiAgICAgIGlmIChyZXMuaW5jbHVkZXModW5kZWZpbmVkKSkge1xuICAgICAgICByZXR1cm4gc2hvd0Vycm9yKFxuICAgICAgICAgIHJlcXVlc3RRdWV1ZS5sZW5ndGggPiAxXG4gICAgICAgICAgICA/IHQoJ+mDqOWIhuS/neWtmOWksei0pe+8jOivt+mHjeivlScpXG4gICAgICAgICAgICA6IHQoJ+S/neWtmOWksei0pScpLFxuICAgICAgICApO1xuICAgICAgfVxuICAgICAgZm9yIChsZXQgaSA9IDA7IGkgPCByZXMubGVuZ3RoOyBpKyspIHtcbiAgICAgICAgaWYgKCFyZXNbaV0uZGF0YS5zdWNjZXNzKSB7XG4gICAgICAgICAgcmV0dXJuIHNob3dFcnJvcihyZXNbaV0uZGF0YS5tZXNzYWdlKTtcbiAgICAgICAgfVxuICAgICAgfVxuICAgICAgc2hvd1N1Y2Nlc3ModCgn5L+d5a2Y5oiQ5YqfJykpO1xuICAgICAgcHJvcHMucmVmcmVzaCgpO1xuICAgIH0gY2F0Y2ggKGVycm9yKSB7XG4gICAgICBjb25zb2xlLmVycm9yKCdVbmV4cGVjdGVkIGVycm9yOicsIGVycm9yKTtcbiAgICAgIHNob3dFcnJvcih0KCfkv53lrZjlpLHotKXvvIzor7fph43or5UnKSk7XG4gICAgfSBmaW5hbGx5IHtcbiAgICAgIHNldExvYWRpbmcoZmFsc2UpO1xuICAgIH1cbiAgfVxuXG4gIHVzZUVmZmVjdCgoKSA9PiB7XG4gICAgY29uc3QgY3VycmVudElucHV0cyA9IHt9O1xuICAgIGZvciAobGV0IGtleSBpbiBwcm9wcy5vcHRpb25zKSB7XG4gICAgICBpZiAoT1BUSU9OX0tFWVMuaW5jbHVkZXMoa2V5KSkge1xuICAgICAgICBjdXJyZW50SW5wdXRzW2tleV0gPSBwcm9wcy5vcHRpb25zW2tleV07XG4gICAgICB9XG4gICAgfVxuICAgIHNldElucHV0cyhjdXJyZW50SW5wdXRzKTtcbiAgICBzZXRJbnB1dHNSb3coc3RydWN0dXJlZENsb25lKGN1cnJlbnRJbnB1dHMpKTtcbiAgICBkYXRhVmVyc2lvblJlZi5jdXJyZW50ICs9IDE7XG4gICAgaWYgKHJlZkZvcm0uY3VycmVudCkge1xuICAgICAgcmVmRm9ybS5jdXJyZW50LnNldFZhbHVlcyhjdXJyZW50SW5wdXRzKTtcbiAgICB9XG4gIH0sIFtwcm9wcy5vcHRpb25zXSk7XG5cbiAgY29uc3QgaGFuZGxlR3JvdXBUYWJsZUNoYW5nZSA9IHVzZUNhbGxiYWNrKFxuICAgICh7IEdyb3VwUmF0aW8sIFVzZXJVc2FibGVHcm91cHMgfSkgPT4ge1xuICAgICAgc2V0SW5wdXRzKChwcmV2KSA9PiAoeyAuLi5wcmV2LCBHcm91cFJhdGlvLCBVc2VyVXNhYmxlR3JvdXBzIH0pKTtcbiAgICB9LFxuICAgIFtdLFxuICApO1xuXG4gIGNvbnN0IGhhbmRsZUF1dG9Hcm91cHNDaGFuZ2UgPSB1c2VDYWxsYmFjaygodmFsdWUpID0+IHtcbiAgICBzZXRJbnB1dHMoKHByZXYpID0+ICh7IC4uLnByZXYsIEF1dG9Hcm91cHM6IHZhbHVlIH0pKTtcbiAgfSwgW10pO1xuXG4gIGNvbnN0IGhhbmRsZUdyb3VwR3JvdXBSYXRpb0NoYW5nZSA9IHVzZUNhbGxiYWNrKCh2YWx1ZSkgPT4ge1xuICAgIHNldElucHV0cygocHJldikgPT4gKHsgLi4ucHJldiwgR3JvdXBHcm91cFJhdGlvOiB2YWx1ZSB9KSk7XG4gIH0sIFtdKTtcblxuICBjb25zdCBoYW5kbGVTcGVjaWFsVXNhYmxlQ2hhbmdlID0gdXNlQ2FsbGJhY2soKHZhbHVlKSA9PiB7XG4gICAgc2V0SW5wdXRzKChwcmV2KSA9PiAoe1xuICAgICAgLi4ucHJldixcbiAgICAgICdncm91cF9yYXRpb19zZXR0aW5nLmdyb3VwX3NwZWNpYWxfdXNhYmxlX2dyb3VwJzogdmFsdWUsXG4gICAgfSkpO1xuICB9LCBbXSk7XG5cbiAgY29uc3QgZHYgPSBkYXRhVmVyc2lvblJlZi5jdXJyZW50O1xuXG4gIGNvbnN0IHJlbmRlclZpc3VhbE1vZGUgPSAoKSA9PiAoXG4gICAgPEZvcm0ga2V5PSdmb3JtLXZpc3VhbCcgdmFsdWVzPXtpbnB1dHN9IHN0eWxlPXt7IG1hcmdpbkJvdHRvbTogMTUgfX0gZGF0YS1pbnNwLXBhdGg9XCJ3ZWIvY2xhc3NpYy9zcmMvcGFnZXMvU2V0dGluZy9SYXRpby9Hcm91cFJhdGlvU2V0dGluZ3MuanN4OjE4Mjo1OkZvcm1cIiA+XG4gICAgICA8Rm9ybS5TZWN0aW9uIHRleHQ9e3QoJ+WIhue7hOeuoeeQhicpfT5cbiAgICAgICAgPFRleHQgdHlwZT0ndGVydGlhcnknIHNpemU9J3NtYWxsJyBzdHlsZT17eyBkaXNwbGF5OiAnYmxvY2snLCBtYXJnaW5Cb3R0b206IDEyIH19IGRhdGEtaW5zcC1wYXRoPVwid2ViL2NsYXNzaWMvc3JjL3BhZ2VzL1NldHRpbmcvUmF0aW8vR3JvdXBSYXRpb1NldHRpbmdzLmpzeDoxODQ6OTpUZXh0XCIgPlxuICAgICAgICAgIHt0KCflgI3njofnlKjkuo7orqHotLnkuZjmlbDvvIzli77pgInjgIznlKjmiLflj6/pgInjgI3lkI7nlKjmiLflj6/lnKjliJvlu7rku6TniYzml7bpgInmi6nor6XliIbnu4QnKX1cbiAgICAgICAgPC9UZXh0PlxuICAgICAgICA8R3JvdXBUYWJsZVxuICAgICAgICAgIGtleT17YGd0XyR7ZHZ9YH1cbiAgICAgICAgICBncm91cFJhdGlvPXtpbnB1dHMuR3JvdXBSYXRpb31cbiAgICAgICAgICB1c2VyVXNhYmxlR3JvdXBzPXtpbnB1dHMuVXNlclVzYWJsZUdyb3Vwc31cbiAgICAgICAgICBvbkNoYW5nZT17aGFuZGxlR3JvdXBUYWJsZUNoYW5nZX1cbiAgICAgICAgIGRhdGEtaW5zcC1wYXRoPVwid2ViL2NsYXNzaWMvc3JjL3BhZ2VzL1NldHRpbmcvUmF0aW8vR3JvdXBSYXRpb1NldHRpbmdzLmpzeDoxODc6OTpHcm91cFRhYmxlXCIgLz5cbiAgICAgIDwvRm9ybS5TZWN0aW9uPlxuXG4gICAgICA8Rm9ybS5TZWN0aW9uIHRleHQ9e3QoJ+iHquWKqOWIhue7hCcpfT5cbiAgICAgICAgPFRleHQgdHlwZT0ndGVydGlhcnknIHNpemU9J3NtYWxsJyBzdHlsZT17eyBkaXNwbGF5OiAnYmxvY2snLCBtYXJnaW5Cb3R0b206IDEyIH19IGRhdGEtaW5zcC1wYXRoPVwid2ViL2NsYXNzaWMvc3JjL3BhZ2VzL1NldHRpbmcvUmF0aW8vR3JvdXBSYXRpb1NldHRpbmdzLmpzeDoxOTY6OTpUZXh0XCIgPlxuICAgICAgICAgIHt0KCfku6TniYzliIbnu4Torr7kuLogYXV0byDml7bvvIzmjInku6XkuIvpobrluo/kvp3mrKHlsJ3or5XpgInmi6nlj6/nlKjliIbnu4TvvIzmjpLlnKjliY3pnaLnmoTkvJjlhYjnuqfmm7Tpq5gnKX1cbiAgICAgICAgPC9UZXh0PlxuICAgICAgICA8Um93IGd1dHRlcj17MTZ9IGRhdGEtaW5zcC1wYXRoPVwid2ViL2NsYXNzaWMvc3JjL3BhZ2VzL1NldHRpbmcvUmF0aW8vR3JvdXBSYXRpb1NldHRpbmdzLmpzeDoxOTk6OTpSb3dcIiA+XG4gICAgICAgICAgPENvbCB4cz17MjR9IHNtPXsxMn0gbWQ9ezh9IGxnPXs4fSB4bD17OH0gZGF0YS1pbnNwLXBhdGg9XCJ3ZWIvY2xhc3NpYy9zcmMvcGFnZXMvU2V0dGluZy9SYXRpby9Hcm91cFJhdGlvU2V0dGluZ3MuanN4OjIwMDoxMTpDb2xcIiA+XG4gICAgICAgICAgICA8Rm9ybS5TbG90IGxhYmVsPXt0KCfpu5jorqTkvb/nlKhhdXRv5YiG57uEJyl9PlxuICAgICAgICAgICAgICA8ZGl2IGNsYXNzTmFtZT0nZmxleCBpdGVtcy1jZW50ZXIgZ2FwLTInIGRhdGEtaW5zcC1wYXRoPVwid2ViL2NsYXNzaWMvc3JjL3BhZ2VzL1NldHRpbmcvUmF0aW8vR3JvdXBSYXRpb1NldHRpbmdzLmpzeDoyMDI6MTU6ZGl2XCIgPlxuICAgICAgICAgICAgICAgIDxTd2l0Y2hcbiAgICAgICAgICAgICAgICAgIGNoZWNrZWQ9eyEhaW5wdXRzLkRlZmF1bHRVc2VBdXRvR3JvdXB9XG4gICAgICAgICAgICAgICAgICBzaXplPSdkZWZhdWx0J1xuICAgICAgICAgICAgICAgICAgY2hlY2tlZFRleHQ9J++9nCdcbiAgICAgICAgICAgICAgICAgIHVuY2hlY2tlZFRleHQ9J+OAhydcbiAgICAgICAgICAgICAgICAgIG9uQ2hhbmdlPXsodmFsdWUpID0+XG4gICAgICAgICAgICAgICAgICAgIHNldElucHV0cygocHJldikgPT4gKHtcbiAgICAgICAgICAgICAgICAgICAgICAuLi5wcmV2LFxuICAgICAgICAgICAgICAgICAgICAgIERlZmF1bHRVc2VBdXRvR3JvdXA6IHZhbHVlLFxuICAgICAgICAgICAgICAgICAgICB9KSlcbiAgICAgICAgICAgICAgICAgIH1cbiAgICAgICAgICAgICAgICAgZGF0YS1pbnNwLXBhdGg9XCJ3ZWIvY2xhc3NpYy9zcmMvcGFnZXMvU2V0dGluZy9SYXRpby9Hcm91cFJhdGlvU2V0dGluZ3MuanN4OjIwMzoxNzpTd2l0Y2hcIiAvPlxuICAgICAgICAgICAgICA8L2Rpdj5cbiAgICAgICAgICAgICAgPFRleHQgdHlwZT0ndGVydGlhcnknIHNpemU9J3NtYWxsJyBzdHlsZT17eyBtYXJnaW5Ub3A6IDQgfX0gZGF0YS1pbnNwLXBhdGg9XCJ3ZWIvY2xhc3NpYy9zcmMvcGFnZXMvU2V0dGluZy9SYXRpby9Hcm91cFJhdGlvU2V0dGluZ3MuanN4OjIxNjoxNTpUZXh0XCIgPlxuICAgICAgICAgICAgICAgIHt0KCflvIDlkK/lkI7liJvlu7rku6TniYzpu5jorqTpgInmi6lhdXRv5YiG57uE77yM5Yid5aeL5Luk54mM5Lmf5bCG6K6+5Li6YXV0bycpfVxuICAgICAgICAgICAgICA8L1RleHQ+XG4gICAgICAgICAgICA8L0Zvcm0uU2xvdD5cbiAgICAgICAgICA8L0NvbD5cbiAgICAgICAgPC9Sb3c+XG4gICAgICAgIDxBdXRvR3JvdXBMaXN0XG4gICAgICAgICAga2V5PXtgYWdfJHtkdn1gfVxuICAgICAgICAgIHZhbHVlPXtpbnB1dHMuQXV0b0dyb3Vwc31cbiAgICAgICAgICBncm91cE5hbWVzPXtncm91cE5hbWVzfVxuICAgICAgICAgIG9uQ2hhbmdlPXtoYW5kbGVBdXRvR3JvdXBzQ2hhbmdlfVxuICAgICAgICAgZGF0YS1pbnNwLXBhdGg9XCJ3ZWIvY2xhc3NpYy9zcmMvcGFnZXMvU2V0dGluZy9SYXRpby9Hcm91cFJhdGlvU2V0dGluZ3MuanN4OjIyMjo5OkF1dG9Hcm91cExpc3RcIiAvPlxuICAgICAgPC9Gb3JtLlNlY3Rpb24+XG5cbiAgICAgIDxGb3JtLlNlY3Rpb24gdGV4dD17dCgn5YiG57uE54m55q6K5YCN546HJyl9PlxuICAgICAgICA8VGV4dCB0eXBlPSd0ZXJ0aWFyeScgc2l6ZT0nc21hbGwnIHN0eWxlPXt7IGRpc3BsYXk6ICdibG9jaycsIG1hcmdpbkJvdHRvbTogMTIgfX0gZGF0YS1pbnNwLXBhdGg9XCJ3ZWIvY2xhc3NpYy9zcmMvcGFnZXMvU2V0dGluZy9SYXRpby9Hcm91cFJhdGlvU2V0dGluZ3MuanN4OjIzMTo5OlRleHRcIiA+XG4gICAgICAgICAge3QoJ+W9k+afkOS4quWIhue7hOeahOeUqOaIt+S9v+eUqOWPpuS4gOS4quWIhue7hOeahOS7pOeJjOaXtu+8jOWPr+iuvue9rueJueauiuWAjeeOh+imhuebluWfuuehgOWAjeeOh+OAguS+i+Wmgu+8mnZpcCDliIbnu4TnmoTnlKjmiLfkvb/nlKggZGVmYXVsdCDliIbnu4Tml7blgI3njofkuLogMC41Jyl9XG4gICAgICAgIDwvVGV4dD5cbiAgICAgICAgPEdyb3VwR3JvdXBSYXRpb1J1bGVzXG4gICAgICAgICAga2V5PXtgZ2dyXyR7ZHZ9YH1cbiAgICAgICAgICB2YWx1ZT17aW5wdXRzLkdyb3VwR3JvdXBSYXRpb31cbiAgICAgICAgICBncm91cE5hbWVzPXtncm91cE5hbWVzfVxuICAgICAgICAgIG9uQ2hhbmdlPXtoYW5kbGVHcm91cEdyb3VwUmF0aW9DaGFuZ2V9XG4gICAgICAgICBkYXRhLWluc3AtcGF0aD1cIndlYi9jbGFzc2ljL3NyYy9wYWdlcy9TZXR0aW5nL1JhdGlvL0dyb3VwUmF0aW9TZXR0aW5ncy5qc3g6MjM0Ojk6R3JvdXBHcm91cFJhdGlvUnVsZXNcIiAvPlxuICAgICAgPC9Gb3JtLlNlY3Rpb24+XG5cbiAgICAgIDxGb3JtLlNlY3Rpb24gdGV4dD17dCgn5YiG57uE54m55q6K5Y+v55So5YiG57uEJyl9PlxuICAgICAgICA8VGV4dCB0eXBlPSd0ZXJ0aWFyeScgc2l6ZT0nc21hbGwnIHN0eWxlPXt7IGRpc3BsYXk6ICdibG9jaycsIG1hcmdpbkJvdHRvbTogMTIgfX0gZGF0YS1pbnNwLXBhdGg9XCJ3ZWIvY2xhc3NpYy9zcmMvcGFnZXMvU2V0dGluZy9SYXRpby9Hcm91cFJhdGlvU2V0dGluZ3MuanN4OjI0Mzo5OlRleHRcIiA+XG4gICAgICAgICAge3QoJ+S4uueJueWumueUqOaIt+WIhue7hOmFjee9ruWPr+eUqOWIhue7hOeahOWinuWHj+inhOWImeOAguOAjOa3u+WKoOOAjeS4uuivpeWIhue7hOaWsOWinuWPr+eUqOWIhue7hO+8jOOAjOenu+mZpOOAjeenu+mZpOm7mOiupOWPr+eUqOWIhue7hO+8jOOAjOi/veWKoOOAjeebtOaOpei/veWKoOWIhue7hCcpfVxuICAgICAgICA8L1RleHQ+XG4gICAgICAgIDxHcm91cFNwZWNpYWxVc2FibGVSdWxlc1xuICAgICAgICAgIGtleT17YGdzdV8ke2R2fWB9XG4gICAgICAgICAgdmFsdWU9e2lucHV0c1snZ3JvdXBfcmF0aW9fc2V0dGluZy5ncm91cF9zcGVjaWFsX3VzYWJsZV9ncm91cCddfVxuICAgICAgICAgIGdyb3VwTmFtZXM9e2dyb3VwTmFtZXN9XG4gICAgICAgICAgb25DaGFuZ2U9e2hhbmRsZVNwZWNpYWxVc2FibGVDaGFuZ2V9XG4gICAgICAgICBkYXRhLWluc3AtcGF0aD1cIndlYi9jbGFzc2ljL3NyYy9wYWdlcy9TZXR0aW5nL1JhdGlvL0dyb3VwUmF0aW9TZXR0aW5ncy5qc3g6MjQ2Ojk6R3JvdXBTcGVjaWFsVXNhYmxlUnVsZXNcIiAvPlxuICAgICAgPC9Gb3JtLlNlY3Rpb24+XG4gICAgPC9Gb3JtPlxuICApO1xuXG4gIHVzZUVmZmVjdCgoKSA9PiB7XG4gICAgaWYgKGVkaXRNb2RlID09PSAnbWFudWFsJyAmJiByZWZGb3JtLmN1cnJlbnQpIHtcbiAgICAgIHJlZkZvcm0uY3VycmVudC5zZXRWYWx1ZXMoaW5wdXRzKTtcbiAgICB9XG4gIH0sIFtlZGl0TW9kZV0pO1xuXG4gIGNvbnN0IHJlbmRlck1hbnVhbE1vZGUgPSAoKSA9PiAoXG4gICAgPEZvcm1cbiAgICAgIGtleT0nZm9ybS1tYW51YWwnXG4gICAgICBpbml0VmFsdWVzPXtpbnB1dHN9XG4gICAgICBnZXRGb3JtQXBpPXsoZm9ybUFQSSkgPT4gKHJlZkZvcm0uY3VycmVudCA9IGZvcm1BUEkpfVxuICAgICAgc3R5bGU9e3sgbWFyZ2luQm90dG9tOiAxNSB9fVxuICAgICBkYXRhLWluc3AtcGF0aD1cIndlYi9jbGFzc2ljL3NyYy9wYWdlcy9TZXR0aW5nL1JhdGlvL0dyb3VwUmF0aW9TZXR0aW5ncy5qc3g6MjYzOjU6Rm9ybVwiID5cbiAgICAgIDxGb3JtLlNlY3Rpb24gdGV4dD17dCgn5YiG57uESlNPTuiuvue9ricpfT5cbiAgICAgICAgPFJvdyBndXR0ZXI9ezE2fSBkYXRhLWluc3AtcGF0aD1cIndlYi9jbGFzc2ljL3NyYy9wYWdlcy9TZXR0aW5nL1JhdGlvL0dyb3VwUmF0aW9TZXR0aW5ncy5qc3g6MjcwOjk6Um93XCIgPlxuICAgICAgICAgIDxDb2wgeHM9ezI0fSBzbT17MTZ9IGRhdGEtaW5zcC1wYXRoPVwid2ViL2NsYXNzaWMvc3JjL3BhZ2VzL1NldHRpbmcvUmF0aW8vR3JvdXBSYXRpb1NldHRpbmdzLmpzeDoyNzE6MTE6Q29sXCIgPlxuICAgICAgICAgICAgPEZvcm0uVGV4dEFyZWFcbiAgICAgICAgICAgICAgbGFiZWw9e3QoJ+WIhue7hOWAjeeOhycpfVxuICAgICAgICAgICAgICBwbGFjZWhvbGRlcj17dCgn5Li65LiA5LiqIEpTT04g5paH5pys77yM6ZSu5Li65YiG57uE5ZCN56ew77yM5YC85Li65YCN546HJyl9XG4gICAgICAgICAgICAgIGV4dHJhVGV4dD17dChcbiAgICAgICAgICAgICAgICAn5YiG57uE5YCN546H6K6+572u77yM5Y+v5Lul5Zyo5q2k5aSE5paw5aKe5YiG57uE5oiW5L+u5pS5546w5pyJ5YiG57uE55qE5YCN546H77yM5qC85byP5Li6IEpTT04g5a2X56ym5Liy77yM5L6L5aaC77yae1widmlwXCI6IDAuNSwgXCJ0ZXN0XCI6IDF977yM6KGo56S6IHZpcCDliIbnu4TnmoTlgI3njofkuLogMC4177yMdGVzdCDliIbnu4TnmoTlgI3njofkuLogMScsXG4gICAgICAgICAgICAgICl9XG4gICAgICAgICAgICAgIGZpZWxkPXsnR3JvdXBSYXRpbyd9XG4gICAgICAgICAgICAgIGF1dG9zaXplPXt7IG1pblJvd3M6IDYsIG1heFJvd3M6IDEyIH19XG4gICAgICAgICAgICAgIHRyaWdnZXI9J2JsdXInXG4gICAgICAgICAgICAgIHN0b3BWYWxpZGF0ZVdpdGhFcnJvclxuICAgICAgICAgICAgICBydWxlcz17W1xuICAgICAgICAgICAgICAgIHtcbiAgICAgICAgICAgICAgICAgIHZhbGlkYXRvcjogKHJ1bGUsIHZhbHVlKSA9PiB2ZXJpZnlKU09OKHZhbHVlKSxcbiAgICAgICAgICAgICAgICAgIG1lc3NhZ2U6IHQoJ+S4jeaYr+WQiOazleeahCBKU09OIOWtl+espuS4sicpLFxuICAgICAgICAgICAgICAgIH0sXG4gICAgICAgICAgICAgIF19XG4gICAgICAgICAgICAgIG9uQ2hhbmdlPXsodmFsdWUpID0+XG4gICAgICAgICAgICAgICAgc2V0SW5wdXRzKChwcmV2KSA9PiAoeyAuLi5wcmV2LCBHcm91cFJhdGlvOiB2YWx1ZSB9KSlcbiAgICAgICAgICAgICAgfVxuICAgICAgICAgICAgLz5cbiAgICAgICAgICA8L0NvbD5cbiAgICAgICAgPC9Sb3c+XG4gICAgICAgIDxSb3cgZ3V0dGVyPXsxNn0gZGF0YS1pbnNwLXBhdGg9XCJ3ZWIvY2xhc3NpYy9zcmMvcGFnZXMvU2V0dGluZy9SYXRpby9Hcm91cFJhdGlvU2V0dGluZ3MuanN4OjI5NDo5OlJvd1wiID5cbiAgICAgICAgICA8Q29sIHhzPXsyNH0gc209ezE2fSBkYXRhLWluc3AtcGF0aD1cIndlYi9jbGFzc2ljL3NyYy9wYWdlcy9TZXR0aW5nL1JhdGlvL0dyb3VwUmF0aW9TZXR0aW5ncy5qc3g6Mjk1OjExOkNvbFwiID5cbiAgICAgICAgICAgIDxGb3JtLlRleHRBcmVhXG4gICAgICAgICAgICAgIGxhYmVsPXt0KCfnlKjmiLflj6/pgInliIbnu4QnKX1cbiAgICAgICAgICAgICAgcGxhY2Vob2xkZXI9e3QoXG4gICAgICAgICAgICAgICAgJ+S4uuS4gOS4qiBKU09OIOaWh+acrO+8jOmUruS4uuWIhue7hOWQjeensO+8jOWAvOS4uuWIhue7hOaPj+i/sCcsXG4gICAgICAgICAgICAgICl9XG4gICAgICAgICAgICAgIGV4dHJhVGV4dD17dChcbiAgICAgICAgICAgICAgICAn55So5oi35paw5bu65Luk54mM5pe25Y+v6YCJ55qE5YiG57uE77yM5qC85byP5Li6IEpTT04g5a2X56ym5Liy77yM5L6L5aaC77yae1widmlwXCI6IFwiVklQIOeUqOaIt1wiLCBcInRlc3RcIjogXCLmtYvor5VcIn3vvIzooajnpLrnlKjmiLflj6/ku6XpgInmi6kgdmlwIOWIhue7hOWSjCB0ZXN0IOWIhue7hCcsXG4gICAgICAgICAgICAgICl9XG4gICAgICAgICAgICAgIGZpZWxkPXsnVXNlclVzYWJsZUdyb3Vwcyd9XG4gICAgICAgICAgICAgIGF1dG9zaXplPXt7IG1pblJvd3M6IDYsIG1heFJvd3M6IDEyIH19XG4gICAgICAgICAgICAgIHRyaWdnZXI9J2JsdXInXG4gICAgICAgICAgICAgIHN0b3BWYWxpZGF0ZVdpdGhFcnJvclxuICAgICAgICAgICAgICBydWxlcz17W1xuICAgICAgICAgICAgICAgIHtcbiAgICAgICAgICAgICAgICAgIHZhbGlkYXRvcjogKHJ1bGUsIHZhbHVlKSA9PiB2ZXJpZnlKU09OKHZhbHVlKSxcbiAgICAgICAgICAgICAgICAgIG1lc3NhZ2U6IHQoJ+S4jeaYr+WQiOazleeahCBKU09OIOWtl+espuS4sicpLFxuICAgICAgICAgICAgICAgIH0sXG4gICAgICAgICAgICAgIF19XG4gICAgICAgICAgICAgIG9uQ2hhbmdlPXsodmFsdWUpID0+XG4gICAgICAgICAgICAgICAgc2V0SW5wdXRzKChwcmV2KSA9PiAoeyAuLi5wcmV2LCBVc2VyVXNhYmxlR3JvdXBzOiB2YWx1ZSB9KSlcbiAgICAgICAgICAgICAgfVxuICAgICAgICAgICAgLz5cbiAgICAgICAgICA8L0NvbD5cbiAgICAgICAgPC9Sb3c+XG4gICAgICAgIDxSb3cgZ3V0dGVyPXsxNn0gZGF0YS1pbnNwLXBhdGg9XCJ3ZWIvY2xhc3NpYy9zcmMvcGFnZXMvU2V0dGluZy9SYXRpby9Hcm91cFJhdGlvU2V0dGluZ3MuanN4OjMyMDo5OlJvd1wiID5cbiAgICAgICAgICA8Q29sIHhzPXsyNH0gc209ezE2fSBkYXRhLWluc3AtcGF0aD1cIndlYi9jbGFzc2ljL3NyYy9wYWdlcy9TZXR0aW5nL1JhdGlvL0dyb3VwUmF0aW9TZXR0aW5ncy5qc3g6MzIxOjExOkNvbFwiID5cbiAgICAgICAgICAgIDxGb3JtLlRleHRBcmVhXG4gICAgICAgICAgICAgIGxhYmVsPXt0KCfliIbnu4TnibnmrorlgI3njocnKX1cbiAgICAgICAgICAgICAgcGxhY2Vob2xkZXI9e3QoJ+S4uuS4gOS4qiBKU09OIOaWh+acrCcpfVxuICAgICAgICAgICAgICBleHRyYVRleHQ9e3QoXG4gICAgICAgICAgICAgICAgJ+mUruS4uuWIhue7hOWQjeensO+8jOWAvOS4uuWPpuS4gOS4qiBKU09OIOWvueixoe+8jOmUruS4uuWIhue7hOWQjeensO+8jOWAvOS4uuivpeWIhue7hOeahOeUqOaIt+eahOeJueauiuWIhue7hOWAjeeOh++8jOS+i+Wmgu+8mntcInZpcFwiOiB7XCJkZWZhdWx0XCI6IDAuNSwgXCJ0ZXN0XCI6IDF9fe+8jOihqOekuiB2aXAg5YiG57uE55qE55So5oi35Zyo5L2/55SoZGVmYXVsdOWIhue7hOeahOS7pOeJjOaXtuWAjeeOh+S4ujAuNe+8jOS9v+eUqHRlc3TliIbnu4Tml7blgI3njofkuLoxJyxcbiAgICAgICAgICAgICAgKX1cbiAgICAgICAgICAgICAgZmllbGQ9eydHcm91cEdyb3VwUmF0aW8nfVxuICAgICAgICAgICAgICBhdXRvc2l6ZT17eyBtaW5Sb3dzOiA2LCBtYXhSb3dzOiAxMiB9fVxuICAgICAgICAgICAgICB0cmlnZ2VyPSdibHVyJ1xuICAgICAgICAgICAgICBzdG9wVmFsaWRhdGVXaXRoRXJyb3JcbiAgICAgICAgICAgICAgcnVsZXM9e1tcbiAgICAgICAgICAgICAgICB7XG4gICAgICAgICAgICAgICAgICB2YWxpZGF0b3I6IChydWxlLCB2YWx1ZSkgPT4gdmVyaWZ5SlNPTih2YWx1ZSksXG4gICAgICAgICAgICAgICAgICBtZXNzYWdlOiB0KCfkuI3mmK/lkIjms5XnmoQgSlNPTiDlrZfnrKbkuLInKSxcbiAgICAgICAgICAgICAgICB9LFxuICAgICAgICAgICAgICBdfVxuICAgICAgICAgICAgICBvbkNoYW5nZT17KHZhbHVlKSA9PlxuICAgICAgICAgICAgICAgIHNldElucHV0cygocHJldikgPT4gKHsgLi4ucHJldiwgR3JvdXBHcm91cFJhdGlvOiB2YWx1ZSB9KSlcbiAgICAgICAgICAgICAgfVxuICAgICAgICAgICAgLz5cbiAgICAgICAgICA8L0NvbD5cbiAgICAgICAgPC9Sb3c+XG4gICAgICAgIDxSb3cgZ3V0dGVyPXsxNn0gZGF0YS1pbnNwLXBhdGg9XCJ3ZWIvY2xhc3NpYy9zcmMvcGFnZXMvU2V0dGluZy9SYXRpby9Hcm91cFJhdGlvU2V0dGluZ3MuanN4OjM0NDo5OlJvd1wiID5cbiAgICAgICAgICA8Q29sIHhzPXsyNH0gc209ezE2fSBkYXRhLWluc3AtcGF0aD1cIndlYi9jbGFzc2ljL3NyYy9wYWdlcy9TZXR0aW5nL1JhdGlvL0dyb3VwUmF0aW9TZXR0aW5ncy5qc3g6MzQ1OjExOkNvbFwiID5cbiAgICAgICAgICAgIDxGb3JtLlRleHRBcmVhXG4gICAgICAgICAgICAgIGxhYmVsPXt0KCfliIbnu4Tnibnmrorlj6/nlKjliIbnu4QnKX1cbiAgICAgICAgICAgICAgcGxhY2Vob2xkZXI9e3QoJ+S4uuS4gOS4qiBKU09OIOaWh+acrCcpfVxuICAgICAgICAgICAgICBleHRyYVRleHQ9e3QoXG4gICAgICAgICAgICAgICAgJ+mUruS4uueUqOaIt+WIhue7hOWQjeensO+8jOWAvOS4uuaTjeS9nOaYoOWwhOWvueixoeOAguWGheWxgumUruS7pVwiKzpcIuW8gOWktOihqOekuua3u+WKoOaMh+WumuWIhue7hO+8iOmUruWAvOS4uuWIhue7hOWQjeensO+8jOWAvOS4uuaPj+i/sO+8ie+8jOS7pVwiLTpcIuW8gOWktOihqOekuuenu+mZpOaMh+WumuWIhue7hO+8iOmUruWAvOS4uuWIhue7hOWQjeensO+8ie+8jOS4jeW4puWJjee8gOeahOmUruebtOaOpea3u+WKoOivpeWIhue7hOOAguS+i+Wmgu+8mntcInZpcFwiOiB7XCIrOnByZW1pdW1cIjogXCLpq5jnuqfliIbnu4RcIiwgXCJzcGVjaWFsXCI6IFwi54m55q6K5YiG57uEXCIsIFwiLTpkZWZhdWx0XCI6IFwi6buY6K6k5YiG57uEXCJ9fe+8jOihqOekuiB2aXAg5YiG57uE55qE55So5oi35Y+v5Lul5L2/55SoIHByZW1pdW0g5ZKMIHNwZWNpYWwg5YiG57uE77yM5ZCM5pe256e76ZmkIGRlZmF1bHQg5YiG57uE55qE6K6/6Zeu5p2D6ZmQJyxcbiAgICAgICAgICAgICAgKX1cbiAgICAgICAgICAgICAgZmllbGQ9eydncm91cF9yYXRpb19zZXR0aW5nLmdyb3VwX3NwZWNpYWxfdXNhYmxlX2dyb3VwJ31cbiAgICAgICAgICAgICAgYXV0b3NpemU9e3sgbWluUm93czogNiwgbWF4Um93czogMTIgfX1cbiAgICAgICAgICAgICAgdHJpZ2dlcj0nYmx1cidcbiAgICAgICAgICAgICAgc3RvcFZhbGlkYXRlV2l0aEVycm9yXG4gICAgICAgICAgICAgIHJ1bGVzPXtbXG4gICAgICAgICAgICAgICAge1xuICAgICAgICAgICAgICAgICAgdmFsaWRhdG9yOiAocnVsZSwgdmFsdWUpID0+IHZlcmlmeUpTT04odmFsdWUpLFxuICAgICAgICAgICAgICAgICAgbWVzc2FnZTogdCgn5LiN5piv5ZCI5rOV55qEIEpTT04g5a2X56ym5LiyJyksXG4gICAgICAgICAgICAgICAgfSxcbiAgICAgICAgICAgICAgXX1cbiAgICAgICAgICAgICAgb25DaGFuZ2U9eyh2YWx1ZSkgPT5cbiAgICAgICAgICAgICAgICBzZXRJbnB1dHMoKHByZXYpID0+ICh7XG4gICAgICAgICAgICAgICAgICAuLi5wcmV2LFxuICAgICAgICAgICAgICAgICAgJ2dyb3VwX3JhdGlvX3NldHRpbmcuZ3JvdXBfc3BlY2lhbF91c2FibGVfZ3JvdXAnOiB2YWx1ZSxcbiAgICAgICAgICAgICAgICB9KSlcbiAgICAgICAgICAgICAgfVxuICAgICAgICAgICAgLz5cbiAgICAgICAgICA8L0NvbD5cbiAgICAgICAgPC9Sb3c+XG4gICAgICAgIDxSb3cgZ3V0dGVyPXsxNn0gZGF0YS1pbnNwLXBhdGg9XCJ3ZWIvY2xhc3NpYy9zcmMvcGFnZXMvU2V0dGluZy9SYXRpby9Hcm91cFJhdGlvU2V0dGluZ3MuanN4OjM3MTo5OlJvd1wiID5cbiAgICAgICAgICA8Q29sIHhzPXsyNH0gc209ezE2fSBkYXRhLWluc3AtcGF0aD1cIndlYi9jbGFzc2ljL3NyYy9wYWdlcy9TZXR0aW5nL1JhdGlvL0dyb3VwUmF0aW9TZXR0aW5ncy5qc3g6MzcyOjExOkNvbFwiID5cbiAgICAgICAgICAgIDxGb3JtLlRleHRBcmVhXG4gICAgICAgICAgICAgIGxhYmVsPXt0KCfoh6rliqjliIbnu4RhdXRv77yM5LuO56ys5LiA5Liq5byA5aeL6YCJ5oupJyl9XG4gICAgICAgICAgICAgIHBsYWNlaG9sZGVyPXt0KCfkuLrkuIDkuKogSlNPTiDmlofmnKwnKX1cbiAgICAgICAgICAgICAgZmllbGQ9eydBdXRvR3JvdXBzJ31cbiAgICAgICAgICAgICAgYXV0b3NpemU9e3sgbWluUm93czogNiwgbWF4Um93czogMTIgfX1cbiAgICAgICAgICAgICAgdHJpZ2dlcj0nYmx1cidcbiAgICAgICAgICAgICAgc3RvcFZhbGlkYXRlV2l0aEVycm9yXG4gICAgICAgICAgICAgIHJ1bGVzPXtbXG4gICAgICAgICAgICAgICAge1xuICAgICAgICAgICAgICAgICAgdmFsaWRhdG9yOiAocnVsZSwgdmFsdWUpID0+IHtcbiAgICAgICAgICAgICAgICAgICAgaWYgKCF2YWx1ZSB8fCB2YWx1ZS50cmltKCkgPT09ICcnKSByZXR1cm4gdHJ1ZTtcbiAgICAgICAgICAgICAgICAgICAgdHJ5IHtcbiAgICAgICAgICAgICAgICAgICAgICBjb25zdCBwYXJzZWQgPSBKU09OLnBhcnNlKHZhbHVlKTtcbiAgICAgICAgICAgICAgICAgICAgICBpZiAoIUFycmF5LmlzQXJyYXkocGFyc2VkKSkgcmV0dXJuIGZhbHNlO1xuICAgICAgICAgICAgICAgICAgICAgIHJldHVybiBwYXJzZWQuZXZlcnkoKGl0ZW0pID0+IHR5cGVvZiBpdGVtID09PSAnc3RyaW5nJyk7XG4gICAgICAgICAgICAgICAgICAgIH0gY2F0Y2gge1xuICAgICAgICAgICAgICAgICAgICAgIHJldHVybiBmYWxzZTtcbiAgICAgICAgICAgICAgICAgICAgfVxuICAgICAgICAgICAgICAgICAgfSxcbiAgICAgICAgICAgICAgICAgIG1lc3NhZ2U6IHQoXG4gICAgICAgICAgICAgICAgICAgICflv4XpobvmmK/mnInmlYjnmoQgSlNPTiDlrZfnrKbkuLLmlbDnu4TvvIzkvovlpoLvvJpbXCJnMVwiLFwiZzJcIl0nLFxuICAgICAgICAgICAgICAgICAgKSxcbiAgICAgICAgICAgICAgICB9LFxuICAgICAgICAgICAgICBdfVxuICAgICAgICAgICAgICBvbkNoYW5nZT17KHZhbHVlKSA9PlxuICAgICAgICAgICAgICAgIHNldElucHV0cygocHJldikgPT4gKHsgLi4ucHJldiwgQXV0b0dyb3VwczogdmFsdWUgfSkpXG4gICAgICAgICAgICAgIH1cbiAgICAgICAgICAgIC8+XG4gICAgICAgICAgPC9Db2w+XG4gICAgICAgIDwvUm93PlxuICAgICAgICA8Um93IGd1dHRlcj17MTZ9IGRhdGEtaW5zcC1wYXRoPVwid2ViL2NsYXNzaWMvc3JjL3BhZ2VzL1NldHRpbmcvUmF0aW8vR3JvdXBSYXRpb1NldHRpbmdzLmpzeDo0MDM6OTpSb3dcIiA+XG4gICAgICAgICAgPENvbCBzcGFuPXsxNn0gZGF0YS1pbnNwLXBhdGg9XCJ3ZWIvY2xhc3NpYy9zcmMvcGFnZXMvU2V0dGluZy9SYXRpby9Hcm91cFJhdGlvU2V0dGluZ3MuanN4OjQwNDoxMTpDb2xcIiA+XG4gICAgICAgICAgICA8Rm9ybS5Td2l0Y2hcbiAgICAgICAgICAgICAgbGFiZWw9e3QoXG4gICAgICAgICAgICAgICAgJ+WIm+W7uuS7pOeJjOm7mOiupOmAieaLqWF1dG/liIbnu4TvvIzliJ3lp4vku6TniYzkuZ/lsIborr7kuLphdXRv77yI5ZCm5YiZ55WZ56m677yM5Li655So5oi36buY6K6k5YiG57uE77yJJyxcbiAgICAgICAgICAgICAgKX1cbiAgICAgICAgICAgICAgZmllbGQ9eydEZWZhdWx0VXNlQXV0b0dyb3VwJ31cbiAgICAgICAgICAgICAgb25DaGFuZ2U9eyh2YWx1ZSkgPT5cbiAgICAgICAgICAgICAgICBzZXRJbnB1dHMoKHByZXYpID0+ICh7XG4gICAgICAgICAgICAgICAgICAuLi5wcmV2LFxuICAgICAgICAgICAgICAgICAgRGVmYXVsdFVzZUF1dG9Hcm91cDogdmFsdWUsXG4gICAgICAgICAgICAgICAgfSkpXG4gICAgICAgICAgICAgIH1cbiAgICAgICAgICAgIC8+XG4gICAgICAgICAgPC9Db2w+XG4gICAgICAgIDwvUm93PlxuICAgICAgPC9Gb3JtLlNlY3Rpb24+XG4gICAgPC9Gb3JtPlxuICApO1xuXG4gIGNvbnN0IEd1aWRlU2VjdGlvbiA9ICh7IHRpdGxlLCBjaGlsZHJlbiB9KSA9PiB7XG4gICAgY29uc3QgW29wZW4sIHNldE9wZW5dID0gdXNlU3RhdGUoZmFsc2UpO1xuICAgIHJldHVybiAoXG4gICAgICA8ZGl2IHN0eWxlPXt7IG1hcmdpblRvcDogMTYgfX0gZGF0YS1pbnNwLXBhdGg9XCJ3ZWIvY2xhc3NpYy9zcmMvcGFnZXMvU2V0dGluZy9SYXRpby9Hcm91cFJhdGlvU2V0dGluZ3MuanN4OjQyNjo3OmRpdlwiID5cbiAgICAgICAgPEJ1dHRvblxuICAgICAgICAgIHRoZW1lPSdib3JkZXJsZXNzJ1xuICAgICAgICAgIHNpemU9J3NtYWxsJ1xuICAgICAgICAgIGljb249e29wZW4gPyA8SWNvbkNoZXZyb25VcCAgZGF0YS1pbnNwLXBhdGg9XCJ3ZWIvY2xhc3NpYy9zcmMvcGFnZXMvU2V0dGluZy9SYXRpby9Hcm91cFJhdGlvU2V0dGluZ3MuanN4OjQzMDoyNDpJY29uQ2hldnJvblVwXCIvPiA6IDxJY29uQ2hldnJvbkRvd24gIGRhdGEtaW5zcC1wYXRoPVwid2ViL2NsYXNzaWMvc3JjL3BhZ2VzL1NldHRpbmcvUmF0aW8vR3JvdXBSYXRpb1NldHRpbmdzLmpzeDo0MzA6NDQ6SWNvbkNoZXZyb25Eb3duXCIvPn1cbiAgICAgICAgICBvbkNsaWNrPXsoKSA9PiBzZXRPcGVuKCFvcGVuKX1cbiAgICAgICAgICBzdHlsZT17eyBwYWRkaW5nOiAnNHB4IDAnLCBjb2xvcjogJ3ZhcigtLXNlbWktY29sb3ItcHJpbWFyeSknIH19XG4gICAgICAgICBkYXRhLWluc3AtcGF0aD1cIndlYi9jbGFzc2ljL3NyYy9wYWdlcy9TZXR0aW5nL1JhdGlvL0dyb3VwUmF0aW9TZXR0aW5ncy5qc3g6NDI3Ojk6QnV0dG9uXCIgPlxuICAgICAgICAgIHt0aXRsZX1cbiAgICAgICAgPC9CdXR0b24+XG4gICAgICAgIDxDb2xsYXBzaWJsZSBpc09wZW49e29wZW59IGtlZXBET00gZGF0YS1pbnNwLXBhdGg9XCJ3ZWIvY2xhc3NpYy9zcmMvcGFnZXMvU2V0dGluZy9SYXRpby9Hcm91cFJhdGlvU2V0dGluZ3MuanN4OjQzNjo5OkNvbGxhcHNpYmxlXCIgPlxuICAgICAgICAgIDxkaXZcbiAgICAgICAgICAgIHN0eWxlPXt7XG4gICAgICAgICAgICAgIGJhY2tncm91bmQ6ICd2YXIoLS1zZW1pLWNvbG9yLWZpbGwtMCknLFxuICAgICAgICAgICAgICBwYWRkaW5nOiAnMTJweCAxNnB4JyxcbiAgICAgICAgICAgICAgYm9yZGVyUmFkaXVzOiA4LFxuICAgICAgICAgICAgICBtYXJnaW5Ub3A6IDgsXG4gICAgICAgICAgICB9fVxuICAgICAgICAgICBkYXRhLWluc3AtcGF0aD1cIndlYi9jbGFzc2ljL3NyYy9wYWdlcy9TZXR0aW5nL1JhdGlvL0dyb3VwUmF0aW9TZXR0aW5ncy5qc3g6NDM3OjExOmRpdlwiID5cbiAgICAgICAgICAgIHtjaGlsZHJlbn1cbiAgICAgICAgICA8L2Rpdj5cbiAgICAgICAgPC9Db2xsYXBzaWJsZT5cbiAgICAgIDwvZGl2PlxuICAgICk7XG4gIH07XG5cbiAgY29uc3QgQ29kZUJsb2NrID0gKHsgY2hpbGRyZW4gfSkgPT4gKFxuICAgIDxwcmVcbiAgICAgIHN0eWxlPXt7XG4gICAgICAgIGJhY2tncm91bmQ6ICd2YXIoLS1zZW1pLWNvbG9yLWJnLTIpJyxcbiAgICAgICAgYm9yZGVyOiAnMXB4IHNvbGlkIHZhcigtLXNlbWktY29sb3ItYm9yZGVyKScsXG4gICAgICAgIHBhZGRpbmc6ICcxMHB4IDE0cHgnLFxuICAgICAgICBib3JkZXJSYWRpdXM6IDYsXG4gICAgICAgIGZvbnRGYW1pbHk6ICdtb25vc3BhY2UnLFxuICAgICAgICBmb250U2l6ZTogMTMsXG4gICAgICAgIG1hcmdpbjogJzhweCAwJyxcbiAgICAgICAgd2hpdGVTcGFjZTogJ3ByZS13cmFwJyxcbiAgICAgICAgbGluZUhlaWdodDogMS42LFxuICAgICAgICBvdmVyZmxvd1g6ICdhdXRvJyxcbiAgICAgIH19XG4gICAgIGRhdGEtaW5zcC1wYXRoPVwid2ViL2NsYXNzaWMvc3JjL3BhZ2VzL1NldHRpbmcvUmF0aW8vR3JvdXBSYXRpb1NldHRpbmdzLmpzeDo0NTM6NTpwcmVcIiA+XG4gICAgICB7Y2hpbGRyZW59XG4gICAgPC9wcmU+XG4gICk7XG5cbiAgY29uc3QgcmVuZGVyR3VpZGUgPSAoKSA9PiAoXG4gICAgPFNpZGVTaGVldFxuICAgICAgdGl0bGU9e3QoJ+WIhue7hOiuvue9ruS9v+eUqOivtOaYjicpfVxuICAgICAgdmlzaWJsZT17c2hvd0d1aWRlfVxuICAgICAgb25DYW5jZWw9eygpID0+IHNldFNob3dHdWlkZShmYWxzZSl9XG4gICAgICB3aWR0aD17NTYwfVxuICAgICAgYm9keVN0eWxlPXt7IG92ZXJmbG93OiAnYXV0bycsIHBhZGRpbmc6ICcwIDI0cHggMjRweCcgfX1cbiAgICAgZGF0YS1pbnNwLXBhdGg9XCJ3ZWIvY2xhc3NpYy9zcmMvcGFnZXMvU2V0dGluZy9SYXRpby9Hcm91cFJhdGlvU2V0dGluZ3MuanN4OjQ3Mjo1OlNpZGVTaGVldFwiID5cbiAgICAgIDxUYWJzIHR5cGU9J2xpbmUnIHNpemU9J3NtYWxsJyBkYXRhLWluc3AtcGF0aD1cIndlYi9jbGFzc2ljL3NyYy9wYWdlcy9TZXR0aW5nL1JhdGlvL0dyb3VwUmF0aW9TZXR0aW5ncy5qc3g6NDc5Ojc6VGFic1wiID5cbiAgICAgICAgPFRhYnMuVGFiUGFuZSB0YWI9e3QoJ+amguiniCcpfSBpdGVtS2V5PSdvdmVydmlldyc+XG4gICAgICAgICAgPGRpdiBzdHlsZT17eyBwYWRkaW5nVG9wOiAyMCB9fSBkYXRhLWluc3AtcGF0aD1cIndlYi9jbGFzc2ljL3NyYy9wYWdlcy9TZXR0aW5nL1JhdGlvL0dyb3VwUmF0aW9TZXR0aW5ncy5qc3g6NDgxOjExOmRpdlwiID5cbiAgICAgICAgICAgIDxUaXRsZSBoZWFkaW5nPXs1fSBkYXRhLWluc3AtcGF0aD1cIndlYi9jbGFzc2ljL3NyYy9wYWdlcy9TZXR0aW5nL1JhdGlvL0dyb3VwUmF0aW9TZXR0aW5ncy5qc3g6NDgyOjEzOlRpdGxlXCIgPnt0KCfku4DkuYjmmK/liIbnu4TvvJ8nKX08L1RpdGxlPlxuICAgICAgICAgICAgPFBhcmFncmFwaCBzdHlsZT17eyBtYXJnaW5Ub3A6IDEyLCBsaW5lSGVpZ2h0OiAxLjggfX0gZGF0YS1pbnNwLXBhdGg9XCJ3ZWIvY2xhc3NpYy9zcmMvcGFnZXMvU2V0dGluZy9SYXRpby9Hcm91cFJhdGlvU2V0dGluZ3MuanN4OjQ4MzoxMzpQYXJhZ3JhcGhcIiA+XG4gICAgICAgICAgICAgIHt0KFxuICAgICAgICAgICAgICAgICfliIbnu4TmmK/nlKjkuo7mjqfliLborqHotLnlgI3njoflkozmqKHlnovorr/pl67mnYPpmZDnmoTmoLjlv4PmpoLlv7XjgILmr4/kuKrnlKjmiLflsZ7kuo7kuIDkuKrliIbnu4TvvIzmr4/kuKrku6TniYzkuZ/lj6/ku6XmjIflrprkvb/nlKjmn5DkuKrliIbnu4TjgIInLFxuICAgICAgICAgICAgICApfVxuICAgICAgICAgICAgPC9QYXJhZ3JhcGg+XG4gICAgICAgICAgICA8UGFyYWdyYXBoIHN0eWxlPXt7IG1hcmdpblRvcDogOCwgbGluZUhlaWdodDogMS44IH19IGRhdGEtaW5zcC1wYXRoPVwid2ViL2NsYXNzaWMvc3JjL3BhZ2VzL1NldHRpbmcvUmF0aW8vR3JvdXBSYXRpb1NldHRpbmdzLmpzeDo0ODg6MTM6UGFyYWdyYXBoXCIgPlxuICAgICAgICAgICAgICB7dChcbiAgICAgICAgICAgICAgICAn6YCa6L+H5YiG57uE5Y+v5Lul5a6e546w5LiN5ZCM55So5oi3562J57qn55qE5beu5byC5YyW5a6a5Lu377yM5L6L5aaCIFZJUCDnlKjmiLfkuqvlj5fmm7TkvY7nmoQgQVBJIOiwg+eUqOi0ueeUqOOAgicsXG4gICAgICAgICAgICAgICl9XG4gICAgICAgICAgICA8L1BhcmFncmFwaD5cblxuICAgICAgICAgICAgPEd1aWRlU2VjdGlvbiB0aXRsZT17dCgn5qC45b+D5qaC5b+1Jyl9IGRhdGEtaW5zcC1wYXRoPVwid2ViL2NsYXNzaWMvc3JjL3BhZ2VzL1NldHRpbmcvUmF0aW8vR3JvdXBSYXRpb1NldHRpbmdzLmpzeDo0OTQ6MTM6R3VpZGVTZWN0aW9uXCIgPlxuICAgICAgICAgICAgICA8UGFyYWdyYXBoIHN0eWxlPXt7IGxpbmVIZWlnaHQ6IDEuOCB9fSBkYXRhLWluc3AtcGF0aD1cIndlYi9jbGFzc2ljL3NyYy9wYWdlcy9TZXR0aW5nL1JhdGlvL0dyb3VwUmF0aW9TZXR0aW5ncy5qc3g6NDk1OjE1OlBhcmFncmFwaFwiID5cbiAgICAgICAgICAgICAgICA8VGV4dCBzdHJvbmcgZGF0YS1pbnNwLXBhdGg9XCJ3ZWIvY2xhc3NpYy9zcmMvcGFnZXMvU2V0dGluZy9SYXRpby9Hcm91cFJhdGlvU2V0dGluZ3MuanN4OjQ5NjoxNzpUZXh0XCIgPnt0KCfnlKjmiLfliIbnu4QnKX08L1RleHQ+eycg4oCUICd9XG4gICAgICAgICAgICAgICAge3QoJ+eUseeuoeeQhuWRmOWIhumFje+8jOWGs+WumueUqOaIt+i6q+S7veetiee6p++8iOWmgiBkZWZhdWx044CBdmlw77yJ44CCJyl9XG4gICAgICAgICAgICAgIDwvUGFyYWdyYXBoPlxuICAgICAgICAgICAgICA8UGFyYWdyYXBoIHN0eWxlPXt7IGxpbmVIZWlnaHQ6IDEuOCwgbWFyZ2luVG9wOiA0IH19IGRhdGEtaW5zcC1wYXRoPVwid2ViL2NsYXNzaWMvc3JjL3BhZ2VzL1NldHRpbmcvUmF0aW8vR3JvdXBSYXRpb1NldHRpbmdzLmpzeDo0OTk6MTU6UGFyYWdyYXBoXCIgPlxuICAgICAgICAgICAgICAgIDxUZXh0IHN0cm9uZyBkYXRhLWluc3AtcGF0aD1cIndlYi9jbGFzc2ljL3NyYy9wYWdlcy9TZXR0aW5nL1JhdGlvL0dyb3VwUmF0aW9TZXR0aW5ncy5qc3g6NTAwOjE3OlRleHRcIiA+e3QoJ+S7pOeJjOWIhue7hCcpfTwvVGV4dD57JyDigJQgJ31cbiAgICAgICAgICAgICAgICB7dCgn55So5oi35Yib5bu65Luk54mM5pe26YCJ5oup55qE5YiG57uE77yM5Yaz5a6a6K+l5Luk54mM55qE5a6e6ZmF6K6h6LS55YCN546H44CC5LiA5Liq55So5oi35Y+v5Lul5Yib5bu65aSa5Liq5Luk54mM77yM5L2/55So5LiN5ZCM5YiG57uE44CCJyl9XG4gICAgICAgICAgICAgIDwvUGFyYWdyYXBoPlxuICAgICAgICAgICAgICA8UGFyYWdyYXBoIHN0eWxlPXt7IGxpbmVIZWlnaHQ6IDEuOCwgbWFyZ2luVG9wOiA0IH19IGRhdGEtaW5zcC1wYXRoPVwid2ViL2NsYXNzaWMvc3JjL3BhZ2VzL1NldHRpbmcvUmF0aW8vR3JvdXBSYXRpb1NldHRpbmdzLmpzeDo1MDM6MTU6UGFyYWdyYXBoXCIgPlxuICAgICAgICAgICAgICAgIDxUZXh0IHN0cm9uZyBkYXRhLWluc3AtcGF0aD1cIndlYi9jbGFzc2ljL3NyYy9wYWdlcy9TZXR0aW5nL1JhdGlvL0dyb3VwUmF0aW9TZXR0aW5ncy5qc3g6NTA0OjE3OlRleHRcIiA+e3QoJ+WAjeeOhycpfTwvVGV4dD57JyDigJQgJ31cbiAgICAgICAgICAgICAgICB7dCgn6K6h6LS55LmY5pWw77yM5YCN546H6LaK5L2O6LS555So6LaK5L2O44CC5L6L5aaC5YCN546HIDAuNSDooajnpLrljYrku7fjgIInKX1cbiAgICAgICAgICAgICAgPC9QYXJhZ3JhcGg+XG4gICAgICAgICAgICAgIDxQYXJhZ3JhcGggc3R5bGU9e3sgbGluZUhlaWdodDogMS44LCBtYXJnaW5Ub3A6IDQgfX0gZGF0YS1pbnNwLXBhdGg9XCJ3ZWIvY2xhc3NpYy9zcmMvcGFnZXMvU2V0dGluZy9SYXRpby9Hcm91cFJhdGlvU2V0dGluZ3MuanN4OjUwNzoxNTpQYXJhZ3JhcGhcIiA+XG4gICAgICAgICAgICAgICAgPFRleHQgc3Ryb25nIGRhdGEtaW5zcC1wYXRoPVwid2ViL2NsYXNzaWMvc3JjL3BhZ2VzL1NldHRpbmcvUmF0aW8vR3JvdXBSYXRpb1NldHRpbmdzLmpzeDo1MDg6MTc6VGV4dFwiID57dCgn55So5oi35Y+v6YCJJyl9PC9UZXh0PnsnIOKAlCAnfVxuICAgICAgICAgICAgICAgIHt0KCfli77pgInlkI7vvIzor6XliIbnu4TkvJrlh7rnjrDlnKjnlKjmiLfliJvlu7rku6TniYzml7bnmoTkuIvmi4noj5zljZXkuK3jgILmnKrli77pgInnmoTliIbnu4Tlj6rog73nlLHnrqHnkIblkZjliIbphY3vvIznlKjmiLfoh6rlt7Hml6Dms5XpgInmi6njgIInKX1cbiAgICAgICAgICAgICAgPC9QYXJhZ3JhcGg+XG4gICAgICAgICAgICAgIDxQYXJhZ3JhcGggc3R5bGU9e3sgbGluZUhlaWdodDogMS44LCBtYXJnaW5Ub3A6IDQgfX0gZGF0YS1pbnNwLXBhdGg9XCJ3ZWIvY2xhc3NpYy9zcmMvcGFnZXMvU2V0dGluZy9SYXRpby9Hcm91cFJhdGlvU2V0dGluZ3MuanN4OjUxMToxNTpQYXJhZ3JhcGhcIiA+XG4gICAgICAgICAgICAgICAgPFRleHQgc3Ryb25nIGRhdGEtaW5zcC1wYXRoPVwid2ViL2NsYXNzaWMvc3JjL3BhZ2VzL1NldHRpbmcvUmF0aW8vR3JvdXBSYXRpb1NldHRpbmdzLmpzeDo1MTI6MTc6VGV4dFwiID57dCgn6Ieq5Yqo5YiG57uEJyl9PC9UZXh0PnsnIOKAlCAnfVxuICAgICAgICAgICAgICAgIHt0KCfku6TniYzliIbnu4Torr7kuLogYXV0byDml7bvvIzns7vnu5/mjInkvJjlhYjnuqfpobrluo/oh6rliqjpgInmi6nkuIDkuKrlj6/nlKjliIbnu4TjgIInKX1cbiAgICAgICAgICAgICAgPC9QYXJhZ3JhcGg+XG4gICAgICAgICAgICA8L0d1aWRlU2VjdGlvbj5cbiAgICAgICAgICA8L2Rpdj5cbiAgICAgICAgPC9UYWJzLlRhYlBhbmU+XG5cbiAgICAgICAgPFRhYnMuVGFiUGFuZSB0YWI9e3QoJ+WIhue7hOeuoeeQhicpfSBpdGVtS2V5PSdncm91cHMnPlxuICAgICAgICAgIDxkaXYgc3R5bGU9e3sgcGFkZGluZ1RvcDogMjAgfX0gZGF0YS1pbnNwLXBhdGg9XCJ3ZWIvY2xhc3NpYy9zcmMvcGFnZXMvU2V0dGluZy9SYXRpby9Hcm91cFJhdGlvU2V0dGluZ3MuanN4OjUyMDoxMTpkaXZcIiA+XG4gICAgICAgICAgICA8VGl0bGUgaGVhZGluZz17NX0gZGF0YS1pbnNwLXBhdGg9XCJ3ZWIvY2xhc3NpYy9zcmMvcGFnZXMvU2V0dGluZy9SYXRpby9Hcm91cFJhdGlvU2V0dGluZ3MuanN4OjUyMToxMzpUaXRsZVwiID57dCgn5Yib5bu65ZKM566h55CG5YiG57uEJyl9PC9UaXRsZT5cbiAgICAgICAgICAgIDxQYXJhZ3JhcGggc3R5bGU9e3sgbWFyZ2luVG9wOiAxMiwgbGluZUhlaWdodDogMS44IH19IGRhdGEtaW5zcC1wYXRoPVwid2ViL2NsYXNzaWMvc3JjL3BhZ2VzL1NldHRpbmcvUmF0aW8vR3JvdXBSYXRpb1NldHRpbmdzLmpzeDo1MjI6MTM6UGFyYWdyYXBoXCIgPlxuICAgICAgICAgICAgICB7dCgn5q+P5Liq5YiG57uE5Luj6KGo5LiA5Liq5Lu35qC85qGj5L2N44CC566h55CG5ZGY5Yib5bu65YiG57uE5ZCO77yM5Y+v5Lul6YCJ5oup5ZOq5Lqb5qGj5L2N5a+555So5oi35byA5pS+6Ieq6YCJ44CCJyl9XG4gICAgICAgICAgICA8L1BhcmFncmFwaD5cblxuICAgICAgICAgICAgPEd1aWRlU2VjdGlvbiB0aXRsZT17dCgn5p+l55yL56S65L6LJyl9IGRhdGEtaW5zcC1wYXRoPVwid2ViL2NsYXNzaWMvc3JjL3BhZ2VzL1NldHRpbmcvUmF0aW8vR3JvdXBSYXRpb1NldHRpbmdzLmpzeDo1MjY6MTM6R3VpZGVTZWN0aW9uXCIgPlxuICAgICAgICAgICAgICA8UGFyYWdyYXBoIHNpemU9J3NtYWxsJyB0eXBlPSd0ZXJ0aWFyeScgc3R5bGU9e3sgbWFyZ2luQm90dG9tOiA4IH19IGRhdGEtaW5zcC1wYXRoPVwid2ViL2NsYXNzaWMvc3JjL3BhZ2VzL1NldHRpbmcvUmF0aW8vR3JvdXBSYXRpb1NldHRpbmdzLmpzeDo1Mjc6MTU6UGFyYWdyYXBoXCIgPlxuICAgICAgICAgICAgICAgIHt0KCflnLrmma/vvJrnq5nngrnmj5DkvpvkuKTkuKrku7fmoLzmoaPkvY3vvIznlKjmiLflj6/ku6XmjInpnIDpgInmi6knKX1cbiAgICAgICAgICAgICAgPC9QYXJhZ3JhcGg+XG4gICAgICAgICAgICAgIDxDb2RlQmxvY2sgZGF0YS1pbnNwLXBhdGg9XCJ3ZWIvY2xhc3NpYy9zcmMvcGFnZXMvU2V0dGluZy9SYXRpby9Hcm91cFJhdGlvU2V0dGluZ3MuanN4OjUzMDoxNTpDb2RlQmxvY2tcIj5cbiAgICAgICAgICAgICAgICB7YCR7dCgn5YiG57uE5ZCNJyl9ICAgICAgJHt0KCflgI3njocnKX0gICAgJHt0KCfnlKjmiLflj6/pgIknKX0gICAgJHt0KCfor7TmmI4nKX1cXG7ilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIBcXG5zdGFuZGFyZCAgMS4wICAgICAke3QoJ+aYrycpfSAgICAgICAgJHt0KCfmoIflh4bku7fmoLwnKX1cXG5wcmVtaXVtICAgMC41ICAgICAke3QoJ+aYrycpfSAgICAgICAgJHt0KCfpq5jnuqflpZfppJDvvIzljYrku7fkvJjmg6AnKX1gfVxuICAgICAgICAgICAgICA8L0NvZGVCbG9jaz5cbiAgICAgICAgICAgICAgPFBhcmFncmFwaCBzaXplPSdzbWFsbCcgc3R5bGU9e3sgbWFyZ2luVG9wOiAxMCwgbGluZUhlaWdodDogMS44IH19IGRhdGEtaW5zcC1wYXRoPVwid2ViL2NsYXNzaWMvc3JjL3BhZ2VzL1NldHRpbmcvUmF0aW8vR3JvdXBSYXRpb1NldHRpbmdzLmpzeDo1MzM6MTU6UGFyYWdyYXBoXCIgPlxuICAgICAgICAgICAgICAgIHt0KCfkuKTkuKrliIbnu4Tpg73li77pgInkuobjgIznlKjmiLflj6/pgInjgI3vvIzmiYDku6XnlKjmiLfliJvlu7rku6TniYzml7blj6/ku6XnnIvliLDov5nkuKTkuKrpgInpobnvvJonKX1cbiAgICAgICAgICAgICAgPC9QYXJhZ3JhcGg+XG4gICAgICAgICAgICAgIDxDb2RlQmxvY2sgZGF0YS1pbnNwLXBhdGg9XCJ3ZWIvY2xhc3NpYy9zcmMvcGFnZXMvU2V0dGluZy9SYXRpby9Hcm91cFJhdGlvU2V0dGluZ3MuanN4OjUzNjoxNTpDb2RlQmxvY2tcIj5cbiAgICAgICAgICAgICAgICB7dCgn55So5oi35Yib5bu65Luk54mMIOKGkiDpgInmi6nliIbnu4TkuIvmi4nmoYbvvJonKX17J1xcbid9XG4gICAgICAgICAgICAgICAge2AgIOKUnOKUgCBzdGFuZGFyZCAoJHt0KCfmoIflh4bku7fmoLwnKX0pYH17J1xcbid9XG4gICAgICAgICAgICAgICAge2AgIOKUlOKUgCBwcmVtaXVtICAoJHt0KCfpq5jnuqflpZfppJDvvIzljYrku7fkvJjmg6AnKX0pYH1cbiAgICAgICAgICAgICAgPC9Db2RlQmxvY2s+XG4gICAgICAgICAgICAgIDxQYXJhZ3JhcGggc2l6ZT0nc21hbGwnIHN0eWxlPXt7IG1hcmdpblRvcDogMTAsIGxpbmVIZWlnaHQ6IDEuOCB9fSBkYXRhLWluc3AtcGF0aD1cIndlYi9jbGFzc2ljL3NyYy9wYWdlcy9TZXR0aW5nL1JhdGlvL0dyb3VwUmF0aW9TZXR0aW5ncy5qc3g6NTQxOjE1OlBhcmFncmFwaFwiID5cbiAgICAgICAgICAgICAgICB7dCgn6YCJ5oupIHByZW1pdW0g5Yib5bu655qE5Luk54mM77yM6LCD55SoIEFQSSDml7botLnnlKjkuLogc3RhbmRhcmQg55qEIDUwJeOAgicpfVxuICAgICAgICAgICAgICA8L1BhcmFncmFwaD5cbiAgICAgICAgICAgICAgPFBhcmFncmFwaCBzaXplPSdzbWFsbCcgc3R5bGU9e3sgbWFyZ2luVG9wOiAxNiwgbGluZUhlaWdodDogMS44IH19IGRhdGEtaW5zcC1wYXRoPVwid2ViL2NsYXNzaWMvc3JjL3BhZ2VzL1NldHRpbmcvUmF0aW8vR3JvdXBSYXRpb1NldHRpbmdzLmpzeDo1NDQ6MTU6UGFyYWdyYXBoXCIgPlxuICAgICAgICAgICAgICAgIDxUZXh0IHN0cm9uZyBkYXRhLWluc3AtcGF0aD1cIndlYi9jbGFzc2ljL3NyYy9wYWdlcy9TZXR0aW5nL1JhdGlvL0dyb3VwUmF0aW9TZXR0aW5ncy5qc3g6NTQ1OjE3OlRleHRcIiA+e3QoJ+WvueavlO+8muS4jeWLvumAieOAjOeUqOaIt+WPr+mAieOAjeeahOWcuuaZrycpfTwvVGV4dD5cbiAgICAgICAgICAgICAgPC9QYXJhZ3JhcGg+XG4gICAgICAgICAgICAgIDxQYXJhZ3JhcGggc2l6ZT0nc21hbGwnIHN0eWxlPXt7IG1hcmdpblRvcDogNCwgbGluZUhlaWdodDogMS44IH19IGRhdGEtaW5zcC1wYXRoPVwid2ViL2NsYXNzaWMvc3JjL3BhZ2VzL1NldHRpbmcvUmF0aW8vR3JvdXBSYXRpb1NldHRpbmdzLmpzeDo1NDc6MTU6UGFyYWdyYXBoXCIgPlxuICAgICAgICAgICAgICAgIHt0KCflgYforr7lho3liqDkuKTkuKrliIbnu4QgZGVmYXVsdCDlkowgdmlw77yM5L2G5LiN5Yu+6YCJ55So5oi35Y+v6YCJ77yaJyl9XG4gICAgICAgICAgICAgIDwvUGFyYWdyYXBoPlxuICAgICAgICAgICAgICA8Q29kZUJsb2NrIGRhdGEtaW5zcC1wYXRoPVwid2ViL2NsYXNzaWMvc3JjL3BhZ2VzL1NldHRpbmcvUmF0aW8vR3JvdXBSYXRpb1NldHRpbmdzLmpzeDo1NTA6MTU6Q29kZUJsb2NrXCI+XG4gICAgICAgICAgICAgICAge2Ake3QoJ+WIhue7hOWQjScpfSAgICAgICR7dCgn5YCN546HJyl9ICAgICR7dCgn55So5oi35Y+v6YCJJyl9ICAgICR7dCgn6K+05piOJyl9XFxu4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSAXFxuZGVmYXVsdCAgIDEuMCAgICAgJHt0KCflkKYnKX0gICAgICAgICR7dCgn566h55CG5ZGY5YiG6YWN55qE5Z+656GA5YiG57uEJyl9XFxudmlwICAgICAgIDAuNSAgICAgJHt0KCflkKYnKX0gICAgICAgICR7dCgn566h55CG5ZGY5YiG6YWN55qE5LyY5oOg5YiG57uEJyl9XFxuc3RhbmRhcmQgIDEuMCAgICAgJHt0KCfmmK8nKX0gICAgICAgICR7dCgn5qCH5YeG5Lu35qC8Jyl9XFxucHJlbWl1bSAgIDAuNSAgICAgJHt0KCfmmK8nKX0gICAgICAgICR7dCgn6auY57qn5aWX6aSQ77yM5Y2K5Lu35LyY5oOgJyl9YH1cbiAgICAgICAgICAgICAgPC9Db2RlQmxvY2s+XG4gICAgICAgICAgICAgIDxQYXJhZ3JhcGggc2l6ZT0nc21hbGwnIHN0eWxlPXt7IG1hcmdpblRvcDogOCwgbGluZUhlaWdodDogMS44IH19IGRhdGEtaW5zcC1wYXRoPVwid2ViL2NsYXNzaWMvc3JjL3BhZ2VzL1NldHRpbmcvUmF0aW8vR3JvdXBSYXRpb1NldHRpbmdzLmpzeDo1NTM6MTU6UGFyYWdyYXBoXCIgPlxuICAgICAgICAgICAgICAgIHt0KCfmraTml7bnlKjmiLfliJvlu7rku6TniYzml7blj6rog73nnIvliLAgc3RhbmRhcmQg5ZKMIHByZW1pdW3vvJonKX1cbiAgICAgICAgICAgICAgPC9QYXJhZ3JhcGg+XG4gICAgICAgICAgICAgIDxDb2RlQmxvY2sgZGF0YS1pbnNwLXBhdGg9XCJ3ZWIvY2xhc3NpYy9zcmMvcGFnZXMvU2V0dGluZy9SYXRpby9Hcm91cFJhdGlvU2V0dGluZ3MuanN4OjU1NjoxNTpDb2RlQmxvY2tcIj5cbiAgICAgICAgICAgICAgICB7dCgn55So5oi35Yib5bu65Luk54mMIOKGkiDpgInmi6nliIbnu4TkuIvmi4nmoYbvvJonKX17J1xcbid9XG4gICAgICAgICAgICAgICAge2AgIOKUnOKUgCBzdGFuZGFyZCAoJHt0KCfmoIflh4bku7fmoLwnKX0pYH17J1xcbid9XG4gICAgICAgICAgICAgICAge2AgIOKUlOKUgCBwcmVtaXVtICAoJHt0KCfpq5jnuqflpZfppJDvvIzljYrku7fkvJjmg6AnKX0pYH17J1xcblxcbid9XG4gICAgICAgICAgICAgICAge2AgICR7dCgn5LiN5Lya5Ye6546wJyl9IGRlZmF1bHQgJHt0KCflkownKX0gdmlwYH1cbiAgICAgICAgICAgICAgPC9Db2RlQmxvY2s+XG4gICAgICAgICAgICAgIDxQYXJhZ3JhcGggc2l6ZT0nc21hbGwnIHN0eWxlPXt7IG1hcmdpblRvcDogOCwgbGluZUhlaWdodDogMS44IH19IGRhdGEtaW5zcC1wYXRoPVwid2ViL2NsYXNzaWMvc3JjL3BhZ2VzL1NldHRpbmcvUmF0aW8vR3JvdXBSYXRpb1NldHRpbmdzLmpzeDo1NjI6MTU6UGFyYWdyYXBoXCIgPlxuICAgICAgICAgICAgICAgIHt0KCdkZWZhdWx0IOWSjCB2aXAg5Y+q6IO955Sx566h55CG5ZGY5Zyo44CM55So5oi3566h55CG44CN5Lit5YiG6YWN57uZ55So5oi344CC6YCC55So5LqO5oyJ55So5oi3562J57qn5a6a5Lu344CB5YaF6YOo5rWL6K+V562J5LiN5biM5pyb55So5oi36Ieq5Li76YCJ5oup55qE5Zy65pmv44CCJyl9XG4gICAgICAgICAgICAgIDwvUGFyYWdyYXBoPlxuICAgICAgICAgICAgICA8UGFyYWdyYXBoIHNpemU9J3NtYWxsJyBzdHlsZT17eyBtYXJnaW5Ub3A6IDEyLCBsaW5lSGVpZ2h0OiAxLjggfX0gZGF0YS1pbnNwLXBhdGg9XCJ3ZWIvY2xhc3NpYy9zcmMvcGFnZXMvU2V0dGluZy9SYXRpby9Hcm91cFJhdGlvU2V0dGluZ3MuanN4OjU2NToxNTpQYXJhZ3JhcGhcIiA+XG4gICAgICAgICAgICAgICAgPFRleHQgc3Ryb25nIGRhdGEtaW5zcC1wYXRoPVwid2ViL2NsYXNzaWMvc3JjL3BhZ2VzL1NldHRpbmcvUmF0aW8vR3JvdXBSYXRpb1NldHRpbmdzLmpzeDo1NjY6MTc6VGV4dFwiID57dCgn55So5oi35YiG57uE55qE6IGU5Yqo5L2c55SoJyl9PC9UZXh0PlxuICAgICAgICAgICAgICA8L1BhcmFncmFwaD5cbiAgICAgICAgICAgICAgPFBhcmFncmFwaCBzaXplPSdzbWFsbCcgc3R5bGU9e3sgbGluZUhlaWdodDogMS44IH19IGRhdGEtaW5zcC1wYXRoPVwid2ViL2NsYXNzaWMvc3JjL3BhZ2VzL1NldHRpbmcvUmF0aW8vR3JvdXBSYXRpb1NldHRpbmdzLmpzeDo1Njg6MTU6UGFyYWdyYXBoXCIgPlxuICAgICAgICAgICAgICAgIHt0KCfnrqHnkIblkZjnu5nnlKjmiLfliIbphY3nmoTliIbnu4TvvIjlpoIgdmlw77yJ5LiN5LuF5Yaz5a6a55So5oi36Lqr5Lu977yM6L+Y5Lya5b2x5ZON5ZCO57ut5Lik5Liq5Yqf6IO977yaJyl9XG4gICAgICAgICAgICAgIDwvUGFyYWdyYXBoPlxuICAgICAgICAgICAgICA8UGFyYWdyYXBoIHNpemU9J3NtYWxsJyBzdHlsZT17eyBsaW5lSGVpZ2h0OiAxLjgsIG1hcmdpblRvcDogNCB9fSBkYXRhLWluc3AtcGF0aD1cIndlYi9jbGFzc2ljL3NyYy9wYWdlcy9TZXR0aW5nL1JhdGlvL0dyb3VwUmF0aW9TZXR0aW5ncy5qc3g6NTcxOjE1OlBhcmFncmFwaFwiID5cbiAgICAgICAgICAgICAgICB7JzEuICd9PFRleHQgc3Ryb25nIGRhdGEtaW5zcC1wYXRoPVwid2ViL2NsYXNzaWMvc3JjL3BhZ2VzL1NldHRpbmcvUmF0aW8vR3JvdXBSYXRpb1NldHRpbmdzLmpzeDo1NzI6MjQ6VGV4dFwiID57dCgn54m55q6K5YCN546HJyl9PC9UZXh0PnsnIOKAlCAnfVxuICAgICAgICAgICAgICAgIHt0KCflj6/ku6XmoLnmja7nlKjmiLfliIbnu4Torr7nva7kuI3lkIznmoTorqHotLnlgI3njofjgILkvovlpoIgdmlwIOeUqOaIt+S9v+eUqCBzdGFuZGFyZCDku6TniYzml7blgI3njofku44gMS4wIOmZjeS4uiAwLjjjgIInKX1cbiAgICAgICAgICAgICAgPC9QYXJhZ3JhcGg+XG4gICAgICAgICAgICAgIDxQYXJhZ3JhcGggc2l6ZT0nc21hbGwnIHN0eWxlPXt7IGxpbmVIZWlnaHQ6IDEuOCwgbWFyZ2luVG9wOiAyIH19IGRhdGEtaW5zcC1wYXRoPVwid2ViL2NsYXNzaWMvc3JjL3BhZ2VzL1NldHRpbmcvUmF0aW8vR3JvdXBSYXRpb1NldHRpbmdzLmpzeDo1NzU6MTU6UGFyYWdyYXBoXCIgPlxuICAgICAgICAgICAgICAgIHsnMi4gJ308VGV4dCBzdHJvbmcgZGF0YS1pbnNwLXBhdGg9XCJ3ZWIvY2xhc3NpYy9zcmMvcGFnZXMvU2V0dGluZy9SYXRpby9Hcm91cFJhdGlvU2V0dGluZ3MuanN4OjU3NjoyNDpUZXh0XCIgPnt0KCflj6/nlKjliIbnu4QnKX08L1RleHQ+eycg4oCUICd9XG4gICAgICAgICAgICAgICAge3QoJ+WPr+S7peagueaNrueUqOaIt+WIhue7hOWinuWHj+S7pOeJjOWPr+mAieeahOWIhue7hOiMg+WbtOOAguS+i+WmgiB2aXAg55So5oi36aKd5aSW5byA5pS+IHByZW1pdW0g5YiG57uE77yM5oiW56e76Zmk5p+Q5Liq5YiG57uE55qE6YCJ5oup5p2D44CCJyl9XG4gICAgICAgICAgICAgIDwvUGFyYWdyYXBoPlxuICAgICAgICAgICAgICA8UGFyYWdyYXBoIHNpemU9J3NtYWxsJyB0eXBlPSd0ZXJ0aWFyeScgc3R5bGU9e3sgbGluZUhlaWdodDogMS44LCBtYXJnaW5Ub3A6IDYgfX0gZGF0YS1pbnNwLXBhdGg9XCJ3ZWIvY2xhc3NpYy9zcmMvcGFnZXMvU2V0dGluZy9SYXRpby9Hcm91cFJhdGlvU2V0dGluZ3MuanN4OjU3OToxNTpQYXJhZ3JhcGhcIiA+XG4gICAgICAgICAgICAgICAge3QoJ+ivpuingeOAjOeJueauiuWAjeeOh+OAjeWSjOOAjOWPr+eUqOWIhue7hOOAjeagh+etvumhteOAgicpfVxuICAgICAgICAgICAgICA8L1BhcmFncmFwaD5cbiAgICAgICAgICAgIDwvR3VpZGVTZWN0aW9uPlxuXG4gICAgICAgICAgICA8R3VpZGVTZWN0aW9uIHRpdGxlPXt0KCdKU09OIOagvOW8j+WPguiAgycpfSBkYXRhLWluc3AtcGF0aD1cIndlYi9jbGFzc2ljL3NyYy9wYWdlcy9TZXR0aW5nL1JhdGlvL0dyb3VwUmF0aW9TZXR0aW5ncy5qc3g6NTg0OjEzOkd1aWRlU2VjdGlvblwiID5cbiAgICAgICAgICAgICAgPFBhcmFncmFwaCBzaXplPSdzbWFsbCcgc3R5bGU9e3sgbWFyZ2luQm90dG9tOiA0IH19IGRhdGEtaW5zcC1wYXRoPVwid2ViL2NsYXNzaWMvc3JjL3BhZ2VzL1NldHRpbmcvUmF0aW8vR3JvdXBSYXRpb1NldHRpbmdzLmpzeDo1ODU6MTU6UGFyYWdyYXBoXCIgPlxuICAgICAgICAgICAgICAgIDxUZXh0IHN0cm9uZyBjb2RlIGRhdGEtaW5zcC1wYXRoPVwid2ViL2NsYXNzaWMvc3JjL3BhZ2VzL1NldHRpbmcvUmF0aW8vR3JvdXBSYXRpb1NldHRpbmdzLmpzeDo1ODY6MTc6VGV4dFwiID5Hcm91cFJhdGlvPC9UZXh0PnsnIOKAlCAnfXt0KCfliIbnu4TlkI3np7DliLDlgI3njofnmoTmmKDlsIQnKX1cbiAgICAgICAgICAgICAgPC9QYXJhZ3JhcGg+XG4gICAgICAgICAgICAgIDxDb2RlQmxvY2sgZGF0YS1pbnNwLXBhdGg9XCJ3ZWIvY2xhc3NpYy9zcmMvcGFnZXMvU2V0dGluZy9SYXRpby9Hcm91cFJhdGlvU2V0dGluZ3MuanN4OjU4ODoxNTpDb2RlQmxvY2tcIj57YHtcImRlZmF1bHRcIjogMSwgXCJ2aXBcIjogMC41LCBcInN0YW5kYXJkXCI6IDEsIFwicHJlbWl1bVwiOiAwLjV9YH08L0NvZGVCbG9jaz5cbiAgICAgICAgICAgICAgPFBhcmFncmFwaCBzaXplPSdzbWFsbCcgc3R5bGU9e3sgbWFyZ2luQm90dG9tOiA0LCBtYXJnaW5Ub3A6IDggfX0gZGF0YS1pbnNwLXBhdGg9XCJ3ZWIvY2xhc3NpYy9zcmMvcGFnZXMvU2V0dGluZy9SYXRpby9Hcm91cFJhdGlvU2V0dGluZ3MuanN4OjU4OToxNTpQYXJhZ3JhcGhcIiA+XG4gICAgICAgICAgICAgICAgPFRleHQgc3Ryb25nIGNvZGUgZGF0YS1pbnNwLXBhdGg9XCJ3ZWIvY2xhc3NpYy9zcmMvcGFnZXMvU2V0dGluZy9SYXRpby9Hcm91cFJhdGlvU2V0dGluZ3MuanN4OjU5MDoxNzpUZXh0XCIgPlVzZXJVc2FibGVHcm91cHM8L1RleHQ+eycg4oCUICd9e3QoJ+eUqOaIt+WPr+mAieWIhue7hOeahOWQjeensOWSjOaPj+i/sO+8iOWPquWMheWQq+WLvumAieS6hueUqOaIt+WPr+mAieeahOWIhue7hO+8iScpfVxuICAgICAgICAgICAgICA8L1BhcmFncmFwaD5cbiAgICAgICAgICAgICAgPENvZGVCbG9jayBkYXRhLWluc3AtcGF0aD1cIndlYi9jbGFzc2ljL3NyYy9wYWdlcy9TZXR0aW5nL1JhdGlvL0dyb3VwUmF0aW9TZXR0aW5ncy5qc3g6NTkyOjE1OkNvZGVCbG9ja1wiPntge1wic3RhbmRhcmRcIjogXCIke3QoJ+agh+WHhuS7t+agvCcpfVwiLCBcInByZW1pdW1cIjogXCIke3QoJ+mrmOe6p+Wll+mkkO+8jOWNiuS7t+S8mOaDoCcpfVwifWB9PC9Db2RlQmxvY2s+XG4gICAgICAgICAgICA8L0d1aWRlU2VjdGlvbj5cbiAgICAgICAgICA8L2Rpdj5cbiAgICAgICAgPC9UYWJzLlRhYlBhbmU+XG5cbiAgICAgICAgPFRhYnMuVGFiUGFuZSB0YWI9e3QoJ+iHquWKqOWIhue7hCcpfSBpdGVtS2V5PSdhdXRvJz5cbiAgICAgICAgICA8ZGl2IHN0eWxlPXt7IHBhZGRpbmdUb3A6IDIwIH19IGRhdGEtaW5zcC1wYXRoPVwid2ViL2NsYXNzaWMvc3JjL3BhZ2VzL1NldHRpbmcvUmF0aW8vR3JvdXBSYXRpb1NldHRpbmdzLmpzeDo1OTg6MTE6ZGl2XCIgPlxuICAgICAgICAgICAgPFRpdGxlIGhlYWRpbmc9ezV9IGRhdGEtaW5zcC1wYXRoPVwid2ViL2NsYXNzaWMvc3JjL3BhZ2VzL1NldHRpbmcvUmF0aW8vR3JvdXBSYXRpb1NldHRpbmdzLmpzeDo1OTk6MTM6VGl0bGVcIiA+e3QoJ+iHquWKqOWIhue7hOmAieaLqScpfTwvVGl0bGU+XG4gICAgICAgICAgICA8UGFyYWdyYXBoIHN0eWxlPXt7IG1hcmdpblRvcDogMTIsIGxpbmVIZWlnaHQ6IDEuOCB9fSBkYXRhLWluc3AtcGF0aD1cIndlYi9jbGFzc2ljL3NyYy9wYWdlcy9TZXR0aW5nL1JhdGlvL0dyb3VwUmF0aW9TZXR0aW5ncy5qc3g6NjAwOjEzOlBhcmFncmFwaFwiID5cbiAgICAgICAgICAgICAge3QoJ+W9k+S7pOeJjOWIhue7hOiuvuS4uiBhdXRvIOaXtu+8jOezu+e7n+aMieWIl+ihqOmhuuW6j+S+neasoemAieaLqeWPr+eUqOWIhue7hOOAguaOkuWcqOWJjemdoueahOS8mOWFiOe6p+abtOmrmOOAgicpfVxuICAgICAgICAgICAgPC9QYXJhZ3JhcGg+XG5cbiAgICAgICAgICAgIDxHdWlkZVNlY3Rpb24gdGl0bGU9e3QoJ+afpeeci+ekuuS+iycpfSBkYXRhLWluc3AtcGF0aD1cIndlYi9jbGFzc2ljL3NyYy9wYWdlcy9TZXR0aW5nL1JhdGlvL0dyb3VwUmF0aW9TZXR0aW5ncy5qc3g6NjA0OjEzOkd1aWRlU2VjdGlvblwiID5cbiAgICAgICAgICAgICAgPFBhcmFncmFwaCBzaXplPSdzbWFsbCcgdHlwZT0ndGVydGlhcnknIHN0eWxlPXt7IG1hcmdpbkJvdHRvbTogNiB9fSBkYXRhLWluc3AtcGF0aD1cIndlYi9jbGFzc2ljL3NyYy9wYWdlcy9TZXR0aW5nL1JhdGlvL0dyb3VwUmF0aW9TZXR0aW5ncy5qc3g6NjA1OjE1OlBhcmFncmFwaFwiID5cbiAgICAgICAgICAgICAgICB7dCgn5Zy65pmv77ya6K6+572u6Ieq5Yqo6YCJ5oup5LyY5YWI57qnJyl9XG4gICAgICAgICAgICAgIDwvUGFyYWdyYXBoPlxuICAgICAgICAgICAgICA8Q29kZUJsb2NrIGRhdGEtaW5zcC1wYXRoPVwid2ViL2NsYXNzaWMvc3JjL3BhZ2VzL1NldHRpbmcvUmF0aW8vR3JvdXBSYXRpb1NldHRpbmdzLmpzeDo2MDg6MTU6Q29kZUJsb2NrXCI+XG4gICAgICAgICAgICAgICAge2AxLiBkZWZhdWx0ICAgICR7dCgn5pyA6auY5LyY5YWI57qnJyl9XFxuMi4gdmlwYH1cbiAgICAgICAgICAgICAgPC9Db2RlQmxvY2s+XG4gICAgICAgICAgICAgIDxQYXJhZ3JhcGggc2l6ZT0nc21hbGwnIHN0eWxlPXt7IG1hcmdpblRvcDogNiwgbGluZUhlaWdodDogMS42IH19IGRhdGEtaW5zcC1wYXRoPVwid2ViL2NsYXNzaWMvc3JjL3BhZ2VzL1NldHRpbmcvUmF0aW8vR3JvdXBSYXRpb1NldHRpbmdzLmpzeDo2MTE6MTU6UGFyYWdyYXBoXCIgPlxuICAgICAgICAgICAgICAgIHt0KCflvIDlkK/jgIzpu5jorqTkvb/nlKggYXV0byDliIbnu4TjgI3lkI7vvIzmlrDlu7rku6TniYzlkozliJ3lp4vku6TniYzpg73kvJroh6rliqjorr7kuLogYXV0b+OAgicpfVxuICAgICAgICAgICAgICA8L1BhcmFncmFwaD5cbiAgICAgICAgICAgIDwvR3VpZGVTZWN0aW9uPlxuXG4gICAgICAgICAgICA8R3VpZGVTZWN0aW9uIHRpdGxlPXt0KCdKU09OIOagvOW8j+WPguiAgycpfSBkYXRhLWluc3AtcGF0aD1cIndlYi9jbGFzc2ljL3NyYy9wYWdlcy9TZXR0aW5nL1JhdGlvL0dyb3VwUmF0aW9TZXR0aW5ncy5qc3g6NjE2OjEzOkd1aWRlU2VjdGlvblwiID5cbiAgICAgICAgICAgICAgPFBhcmFncmFwaCBzaXplPSdzbWFsbCcgc3R5bGU9e3sgbWFyZ2luQm90dG9tOiA0IH19IGRhdGEtaW5zcC1wYXRoPVwid2ViL2NsYXNzaWMvc3JjL3BhZ2VzL1NldHRpbmcvUmF0aW8vR3JvdXBSYXRpb1NldHRpbmdzLmpzeDo2MTc6MTU6UGFyYWdyYXBoXCIgPlxuICAgICAgICAgICAgICAgIDxUZXh0IHN0cm9uZyBjb2RlIGRhdGEtaW5zcC1wYXRoPVwid2ViL2NsYXNzaWMvc3JjL3BhZ2VzL1NldHRpbmcvUmF0aW8vR3JvdXBSYXRpb1NldHRpbmdzLmpzeDo2MTg6MTc6VGV4dFwiID5BdXRvR3JvdXBzPC9UZXh0PnsnIOKAlCAnfXt0KCfmnInluo/lrZfnrKbkuLLmlbDnu4QnKX1cbiAgICAgICAgICAgICAgPC9QYXJhZ3JhcGg+XG4gICAgICAgICAgICAgIDxDb2RlQmxvY2sgZGF0YS1pbnNwLXBhdGg9XCJ3ZWIvY2xhc3NpYy9zcmMvcGFnZXMvU2V0dGluZy9SYXRpby9Hcm91cFJhdGlvU2V0dGluZ3MuanN4OjYyMDoxNTpDb2RlQmxvY2tcIj57YFtcImRlZmF1bHRcIiwgXCJ2aXBcIl1gfTwvQ29kZUJsb2NrPlxuICAgICAgICAgICAgPC9HdWlkZVNlY3Rpb24+XG4gICAgICAgICAgPC9kaXY+XG4gICAgICAgIDwvVGFicy5UYWJQYW5lPlxuXG4gICAgICAgIDxUYWJzLlRhYlBhbmUgdGFiPXt0KCfnibnmrorlgI3njocnKX0gaXRlbUtleT0ncmF0aW9zJz5cbiAgICAgICAgICA8ZGl2IHN0eWxlPXt7IHBhZGRpbmdUb3A6IDIwIH19IGRhdGEtaW5zcC1wYXRoPVwid2ViL2NsYXNzaWMvc3JjL3BhZ2VzL1NldHRpbmcvUmF0aW8vR3JvdXBSYXRpb1NldHRpbmdzLmpzeDo2MjY6MTE6ZGl2XCIgPlxuICAgICAgICAgICAgPFRpdGxlIGhlYWRpbmc9ezV9IGRhdGEtaW5zcC1wYXRoPVwid2ViL2NsYXNzaWMvc3JjL3BhZ2VzL1NldHRpbmcvUmF0aW8vR3JvdXBSYXRpb1NldHRpbmdzLmpzeDo2Mjc6MTM6VGl0bGVcIiA+e3QoJ+i3qOWIhue7hOeJueauiuWAjeeOhycpfTwvVGl0bGU+XG4gICAgICAgICAgICA8UGFyYWdyYXBoIHN0eWxlPXt7IG1hcmdpblRvcDogMTIsIGxpbmVIZWlnaHQ6IDEuOCB9fSBkYXRhLWluc3AtcGF0aD1cIndlYi9jbGFzc2ljL3NyYy9wYWdlcy9TZXR0aW5nL1JhdGlvL0dyb3VwUmF0aW9TZXR0aW5ncy5qc3g6NjI4OjEzOlBhcmFncmFwaFwiID5cbiAgICAgICAgICAgICAge3QoJ+ato+W4uOaDheWGteS4i++8jOS7pOeJjOeahOiuoei0ueWAjeeOh+eUseS7pOeJjOaJgOmAieeahOWIhue7hOWGs+WumuOAgueJueauiuWAjeeOh+WPr+S7peagueaNruOAjOeUqOaIt+aJgOWcqOWIhue7hOOAjei/m+S4gOatpeimhueblui/meS4quWAjeeOh+OAgicpfVxuICAgICAgICAgICAgPC9QYXJhZ3JhcGg+XG4gICAgICAgICAgICA8UGFyYWdyYXBoIHN0eWxlPXt7IG1hcmdpblRvcDogOCwgbGluZUhlaWdodDogMS44IH19IGRhdGEtaW5zcC1wYXRoPVwid2ViL2NsYXNzaWMvc3JjL3BhZ2VzL1NldHRpbmcvUmF0aW8vR3JvdXBSYXRpb1NldHRpbmdzLmpzeDo2MzE6MTM6UGFyYWdyYXBoXCIgPlxuICAgICAgICAgICAgICB7dCgn566A5Y2V5p2l6K+077ya5ZCM5LiA5Liq5Luk54mM5YiG57uE77yM5LiN5ZCM562J57qn55qE55So5oi35Y+v5Lul5Lqr5Y+X5LiN5ZCM55qE5Lu35qC844CCJyl9XG4gICAgICAgICAgICA8L1BhcmFncmFwaD5cblxuICAgICAgICAgICAgPEd1aWRlU2VjdGlvbiB0aXRsZT17dCgn5p+l55yL56S65L6LJyl9IGRhdGEtaW5zcC1wYXRoPVwid2ViL2NsYXNzaWMvc3JjL3BhZ2VzL1NldHRpbmcvUmF0aW8vR3JvdXBSYXRpb1NldHRpbmdzLmpzeDo2MzU6MTM6R3VpZGVTZWN0aW9uXCIgPlxuICAgICAgICAgICAgICA8UGFyYWdyYXBoIHNpemU9J3NtYWxsJyB0eXBlPSd0ZXJ0aWFyeScgc3R5bGU9e3sgbWFyZ2luQm90dG9tOiA4IH19IGRhdGEtaW5zcC1wYXRoPVwid2ViL2NsYXNzaWMvc3JjL3BhZ2VzL1NldHRpbmcvUmF0aW8vR3JvdXBSYXRpb1NldHRpbmdzLmpzeDo2MzY6MTU6UGFyYWdyYXBoXCIgPlxuICAgICAgICAgICAgICAgIHt0KCflnLrmma/vvJrnq5nngrnmnIkgc3RhbmRhcmTvvIjlgI3njocgMS4w77yJ5ZKMIHByZW1pdW3vvIjlgI3njocgMC4177yJ5Lik5Liq5YiG57uE77yM5biM5pybIHZpcCDnlKjmiLfkvb/nlKggc3RhbmRhcmQg5Luk54mM5pe25Lmf6IO95Lqr5Y+X5oqY5omjJyl9XG4gICAgICAgICAgICAgIDwvUGFyYWdyYXBoPlxuICAgICAgICAgICAgICA8UGFyYWdyYXBoIHNpemU9J3NtYWxsJyBzdHlsZT17eyBtYXJnaW5Cb3R0b206IDgsIGxpbmVIZWlnaHQ6IDEuOCB9fSBkYXRhLWluc3AtcGF0aD1cIndlYi9jbGFzc2ljL3NyYy9wYWdlcy9TZXR0aW5nL1JhdGlvL0dyb3VwUmF0aW9TZXR0aW5ncy5qc3g6NjM5OjE1OlBhcmFncmFwaFwiID5cbiAgICAgICAgICAgICAgICA8VGV4dCBzdHJvbmcgZGF0YS1pbnNwLXBhdGg9XCJ3ZWIvY2xhc3NpYy9zcmMvcGFnZXMvU2V0dGluZy9SYXRpby9Hcm91cFJhdGlvU2V0dGluZ3MuanN4OjY0MDoxNzpUZXh0XCIgPnt0KCfkuI3phY3nva7nibnmrorlgI3njofml7bvvJonKX08L1RleHQ+XG4gICAgICAgICAgICAgIDwvUGFyYWdyYXBoPlxuICAgICAgICAgICAgICA8Q29kZUJsb2NrIGRhdGEtaW5zcC1wYXRoPVwid2ViL2NsYXNzaWMvc3JjL3BhZ2VzL1NldHRpbmcvUmF0aW8vR3JvdXBSYXRpb1NldHRpbmdzLmpzeDo2NDI6MTU6Q29kZUJsb2NrXCI+XG4gICAgICAgICAgICAgICAge2Ake3QoJ+aZrumAmueUqOaItycpfSArIHN0YW5kYXJkICR7dCgn5Luk54mMJyl9IOKGkiAke3QoJ+WAjeeOhycpfSAxLjAgICgke3QoJ+WOn+S7tycpfSlcXG52aXAgJHt0KCfnlKjmiLcnKX0gICsgc3RhbmRhcmQgJHt0KCfku6TniYwnKX0g4oaSICR7dCgn5YCN546HJyl9IDEuMCAgKCR7dCgn5Y6f5Lu377yM5ZKM5pmu6YCa55So5oi35LiA5qC3Jyl9KWB9XG4gICAgICAgICAgICAgIDwvQ29kZUJsb2NrPlxuICAgICAgICAgICAgICA8UGFyYWdyYXBoIHNpemU9J3NtYWxsJyBzdHlsZT17eyBtYXJnaW5Ub3A6IDEwLCBtYXJnaW5Cb3R0b206IDgsIGxpbmVIZWlnaHQ6IDEuOCB9fSBkYXRhLWluc3AtcGF0aD1cIndlYi9jbGFzc2ljL3NyYy9wYWdlcy9TZXR0aW5nL1JhdGlvL0dyb3VwUmF0aW9TZXR0aW5ncy5qc3g6NjQ1OjE1OlBhcmFncmFwaFwiID5cbiAgICAgICAgICAgICAgICA8VGV4dCBzdHJvbmcgZGF0YS1pbnNwLXBhdGg9XCJ3ZWIvY2xhc3NpYy9zcmMvcGFnZXMvU2V0dGluZy9SYXRpby9Hcm91cFJhdGlvU2V0dGluZ3MuanN4OjY0NjoxNzpUZXh0XCIgPnt0KCfphY3nva7nibnmrorlgI3njoflkI7vvJonKX08L1RleHQ+XG4gICAgICAgICAgICAgIDwvUGFyYWdyYXBoPlxuICAgICAgICAgICAgICA8Q29kZUJsb2NrIGRhdGEtaW5zcC1wYXRoPVwid2ViL2NsYXNzaWMvc3JjL3BhZ2VzL1NldHRpbmcvUmF0aW8vR3JvdXBSYXRpb1NldHRpbmdzLmpzeDo2NDg6MTU6Q29kZUJsb2NrXCI+XG4gICAgICAgICAgICAgICAge2Ake3QoJ+eUqOaIt+WIhue7hCcpfSAgICAke3QoJ+S9v+eUqOWIhue7hCcpfSAgICAke3QoJ+WAjeeOhycpfVxcbuKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgFxcbnZpcCAgICAgICBzdGFuZGFyZCAgIDAuOFxcbnZpcCAgICAgICBwcmVtaXVtICAgIDAuM2B9XG4gICAgICAgICAgICAgIDwvQ29kZUJsb2NrPlxuICAgICAgICAgICAgICA8UGFyYWdyYXBoIHNpemU9J3NtYWxsJyBzdHlsZT17eyBtYXJnaW5Ub3A6IDEwLCBsaW5lSGVpZ2h0OiAxLjggfX0gZGF0YS1pbnNwLXBhdGg9XCJ3ZWIvY2xhc3NpYy9zcmMvcGFnZXMvU2V0dGluZy9SYXRpby9Hcm91cFJhdGlvU2V0dGluZ3MuanN4OjY1MToxNTpQYXJhZ3JhcGhcIiA+XG4gICAgICAgICAgICAgICAge3QoJ+mFjee9ruWQjueahOaViOaenO+8micpfVxuICAgICAgICAgICAgICA8L1BhcmFncmFwaD5cbiAgICAgICAgICAgICAgPENvZGVCbG9jayBkYXRhLWluc3AtcGF0aD1cIndlYi9jbGFzc2ljL3NyYy9wYWdlcy9TZXR0aW5nL1JhdGlvL0dyb3VwUmF0aW9TZXR0aW5ncy5qc3g6NjU0OjE1OkNvZGVCbG9ja1wiPlxuICAgICAgICAgICAgICAgIHtgJHt0KCfmma7pgJrnlKjmiLcnKX0gKyBzdGFuZGFyZCAke3QoJ+S7pOeJjCcpfSDihpIgJHt0KCflgI3njocnKX0gMS4wICAoJHt0KCfkuI3lj5gnKX0pXFxudmlwICR7dCgn55So5oi3Jyl9ICArIHN0YW5kYXJkICR7dCgn5Luk54mMJyl9IOKGkiAke3QoJ+WAjeeOhycpfSAwLjggICgke3QoJ+S6q+WPlyA4IOaKmCcpfSlcXG52aXAgJHt0KCfnlKjmiLcnKX0gICsgcHJlbWl1bSAgJHt0KCfku6TniYwnKX0g4oaSICR7dCgn5YCN546HJyl9IDAuMyAgKCR7dCgn5LuOIDAuNSDpmY3liLAgMC4zJyl9KWB9XG4gICAgICAgICAgICAgIDwvQ29kZUJsb2NrPlxuICAgICAgICAgICAgICA8UGFyYWdyYXBoIHNpemU9J3NtYWxsJyB0eXBlPSd0ZXJ0aWFyeScgc3R5bGU9e3sgbWFyZ2luVG9wOiAxMCwgbGluZUhlaWdodDogMS44IH19IGRhdGEtaW5zcC1wYXRoPVwid2ViL2NsYXNzaWMvc3JjL3BhZ2VzL1NldHRpbmcvUmF0aW8vR3JvdXBSYXRpb1NldHRpbmdzLmpzeDo2NTc6MTU6UGFyYWdyYXBoXCIgPlxuICAgICAgICAgICAgICAgIHt0KCflj6rmnInphY3nva7kuobop4TliJnnmoTnu4TlkIjmiY3kvJropobnm5bvvIzmnKrphY3nva7nmoTnu4TlkIjku43kvb/nlKjku6TniYzliIbnu4TnmoTln7rnoYDlgI3njofjgIInKX1cbiAgICAgICAgICAgICAgPC9QYXJhZ3JhcGg+XG4gICAgICAgICAgICA8L0d1aWRlU2VjdGlvbj5cblxuICAgICAgICAgICAgPEd1aWRlU2VjdGlvbiB0aXRsZT17dCgnSlNPTiDmoLzlvI/lj4LogIMnKX0gZGF0YS1pbnNwLXBhdGg9XCJ3ZWIvY2xhc3NpYy9zcmMvcGFnZXMvU2V0dGluZy9SYXRpby9Hcm91cFJhdGlvU2V0dGluZ3MuanN4OjY2MjoxMzpHdWlkZVNlY3Rpb25cIiA+XG4gICAgICAgICAgICAgIDxQYXJhZ3JhcGggc2l6ZT0nc21hbGwnIHN0eWxlPXt7IG1hcmdpbkJvdHRvbTogNCB9fSBkYXRhLWluc3AtcGF0aD1cIndlYi9jbGFzc2ljL3NyYy9wYWdlcy9TZXR0aW5nL1JhdGlvL0dyb3VwUmF0aW9TZXR0aW5ncy5qc3g6NjYzOjE1OlBhcmFncmFwaFwiID5cbiAgICAgICAgICAgICAgICA8VGV4dCBzdHJvbmcgY29kZSBkYXRhLWluc3AtcGF0aD1cIndlYi9jbGFzc2ljL3NyYy9wYWdlcy9TZXR0aW5nL1JhdGlvL0dyb3VwUmF0aW9TZXR0aW5ncy5qc3g6NjY0OjE3OlRleHRcIiA+R3JvdXBHcm91cFJhdGlvPC9UZXh0PnsnIOKAlCAnfXt0KCfltYzlpZfmmKDlsITvvJrnlKjmiLfliIbnu4Qg4oaSIOS9v+eUqOWIhue7hCDihpIg5YCN546HJyl9XG4gICAgICAgICAgICAgIDwvUGFyYWdyYXBoPlxuICAgICAgICAgICAgICA8Q29kZUJsb2NrIGRhdGEtaW5zcC1wYXRoPVwid2ViL2NsYXNzaWMvc3JjL3BhZ2VzL1NldHRpbmcvUmF0aW8vR3JvdXBSYXRpb1NldHRpbmdzLmpzeDo2NjY6MTU6Q29kZUJsb2NrXCI+e2B7XFxuICBcInZpcFwiOiB7XFxuICAgIFwic3RhbmRhcmRcIjogMC44LFxcbiAgICBcInByZW1pdW1cIjogMC4zXFxuICB9XFxufWB9PC9Db2RlQmxvY2s+XG4gICAgICAgICAgICA8L0d1aWRlU2VjdGlvbj5cbiAgICAgICAgICA8L2Rpdj5cbiAgICAgICAgPC9UYWJzLlRhYlBhbmU+XG5cbiAgICAgICAgPFRhYnMuVGFiUGFuZSB0YWI9e3QoJ+WPr+eUqOWIhue7hCcpfSBpdGVtS2V5PSd1c2FibGUnPlxuICAgICAgICAgIDxkaXYgc3R5bGU9e3sgcGFkZGluZ1RvcDogMjAgfX0gZGF0YS1pbnNwLXBhdGg9XCJ3ZWIvY2xhc3NpYy9zcmMvcGFnZXMvU2V0dGluZy9SYXRpby9Hcm91cFJhdGlvU2V0dGluZ3MuanN4OjY3MjoxMTpkaXZcIiA+XG4gICAgICAgICAgICA8VGl0bGUgaGVhZGluZz17NX0gZGF0YS1pbnNwLXBhdGg9XCJ3ZWIvY2xhc3NpYy9zcmMvcGFnZXMvU2V0dGluZy9SYXRpby9Hcm91cFJhdGlvU2V0dGluZ3MuanN4OjY3MzoxMzpUaXRsZVwiID57dCgn54m55q6K5Y+v55So5YiG57uE6KeE5YiZJyl9PC9UaXRsZT5cbiAgICAgICAgICAgIDxQYXJhZ3JhcGggc3R5bGU9e3sgbWFyZ2luVG9wOiAxMiwgbGluZUhlaWdodDogMS44IH19IGRhdGEtaW5zcC1wYXRoPVwid2ViL2NsYXNzaWMvc3JjL3BhZ2VzL1NldHRpbmcvUmF0aW8vR3JvdXBSYXRpb1NldHRpbmdzLmpzeDo2NzQ6MTM6UGFyYWdyYXBoXCIgPlxuICAgICAgICAgICAgICB7dCgn6buY6K6k5oOF5Ya15LiL77yM5omA5pyJ55So5oi35Yib5bu65Luk54mM5pe255yL5Yiw55qE5Y+v6YCJ5YiG57uE5YiX6KGo5piv5LiA5qC355qE77yI5Y2z44CM55So5oi35Y+v6YCJ44CN5YiX5Yu+6YCJ55qE5YiG57uE77yJ44CCJyl9XG4gICAgICAgICAgICA8L1BhcmFncmFwaD5cbiAgICAgICAgICAgIDxQYXJhZ3JhcGggc3R5bGU9e3sgbWFyZ2luVG9wOiA4LCBsaW5lSGVpZ2h0OiAxLjggfX0gZGF0YS1pbnNwLXBhdGg9XCJ3ZWIvY2xhc3NpYy9zcmMvcGFnZXMvU2V0dGluZy9SYXRpby9Hcm91cFJhdGlvU2V0dGluZ3MuanN4OjY3NzoxMzpQYXJhZ3JhcGhcIiA+XG4gICAgICAgICAgICAgIHt0KCfpgJrov4fmraTlip/og73vvIzlj6/ku6XmoLnmja7nlKjmiLfmiYDlnKjliIbnu4TvvIzkuLrkuI3lkIznrYnnuqfnmoTnlKjmiLflsZXnpLrkuI3lkIznmoTlj6/pgInliJfooajjgIInKX1cbiAgICAgICAgICAgIDwvUGFyYWdyYXBoPlxuXG4gICAgICAgICAgICA8R3VpZGVTZWN0aW9uIHRpdGxlPXt0KCfmn6XnnIvnpLrkvosnKX0gZGF0YS1pbnNwLXBhdGg9XCJ3ZWIvY2xhc3NpYy9zcmMvcGFnZXMvU2V0dGluZy9SYXRpby9Hcm91cFJhdGlvU2V0dGluZ3MuanN4OjY4MToxMzpHdWlkZVNlY3Rpb25cIiA+XG4gICAgICAgICAgICAgIDxQYXJhZ3JhcGggc2l6ZT0nc21hbGwnIHR5cGU9J3RlcnRpYXJ5JyBzdHlsZT17eyBtYXJnaW5Cb3R0b206IDggfX0gZGF0YS1pbnNwLXBhdGg9XCJ3ZWIvY2xhc3NpYy9zcmMvcGFnZXMvU2V0dGluZy9SYXRpby9Hcm91cFJhdGlvU2V0dGluZ3MuanN4OjY4MjoxNTpQYXJhZ3JhcGhcIiA+XG4gICAgICAgICAgICAgICAge3QoJ+WcuuaZr++8muermeeCueaciSBzdGFuZGFyZCDlkowgcHJlbWl1bSDkuKTkuKrnlKjmiLflj6/pgInliIbnu4TjgILluIzmnJsgdmlwIOeUqOaIt+mineWklueci+WIsCBleGNsdXNpdmUg5YiG57uE77yM5ZCM5pe25LiN5YaN55yL5YiwIHN0YW5kYXJkIOWIhue7hCcpfVxuICAgICAgICAgICAgICA8L1BhcmFncmFwaD5cbiAgICAgICAgICAgICAgPFBhcmFncmFwaCBzaXplPSdzbWFsbCcgc3R5bGU9e3sgbWFyZ2luQm90dG9tOiA4LCBsaW5lSGVpZ2h0OiAxLjggfX0gZGF0YS1pbnNwLXBhdGg9XCJ3ZWIvY2xhc3NpYy9zcmMvcGFnZXMvU2V0dGluZy9SYXRpby9Hcm91cFJhdGlvU2V0dGluZ3MuanN4OjY4NToxNTpQYXJhZ3JhcGhcIiA+XG4gICAgICAgICAgICAgICAgPFRleHQgc3Ryb25nIGRhdGEtaW5zcC1wYXRoPVwid2ViL2NsYXNzaWMvc3JjL3BhZ2VzL1NldHRpbmcvUmF0aW8vR3JvdXBSYXRpb1NldHRpbmdzLmpzeDo2ODY6MTc6VGV4dFwiID57dCgn5LiN6YWN572u6KeE5YiZ5pe277yM5omA5pyJ55So5oi355yL5Yiw55qE5LiL5ouJ5qGG5LiA5qC377yaJyl9PC9UZXh0PlxuICAgICAgICAgICAgICA8L1BhcmFncmFwaD5cbiAgICAgICAgICAgICAgPENvZGVCbG9jayBkYXRhLWluc3AtcGF0aD1cIndlYi9jbGFzc2ljL3NyYy9wYWdlcy9TZXR0aW5nL1JhdGlvL0dyb3VwUmF0aW9TZXR0aW5ncy5qc3g6Njg4OjE1OkNvZGVCbG9ja1wiPlxuICAgICAgICAgICAgICAgIHtgJHt0KCfmiYDmnInnlKjmiLcnKX0g4oaSICR7dCgn5Yib5bu65Luk54mM5Y+v6YCJJyl9OlxcbiAg4pSc4pSAIHN0YW5kYXJkXFxuICDilJTilIAgcHJlbWl1bWB9XG4gICAgICAgICAgICAgIDwvQ29kZUJsb2NrPlxuICAgICAgICAgICAgICA8UGFyYWdyYXBoIHNpemU9J3NtYWxsJyBzdHlsZT17eyBtYXJnaW5Ub3A6IDEwLCBtYXJnaW5Cb3R0b206IDgsIGxpbmVIZWlnaHQ6IDEuOCB9fSBkYXRhLWluc3AtcGF0aD1cIndlYi9jbGFzc2ljL3NyYy9wYWdlcy9TZXR0aW5nL1JhdGlvL0dyb3VwUmF0aW9TZXR0aW5ncy5qc3g6NjkxOjE1OlBhcmFncmFwaFwiID5cbiAgICAgICAgICAgICAgICA8VGV4dCBzdHJvbmcgZGF0YS1pbnNwLXBhdGg9XCJ3ZWIvY2xhc3NpYy9zcmMvcGFnZXMvU2V0dGluZy9SYXRpby9Hcm91cFJhdGlvU2V0dGluZ3MuanN4OjY5MjoxNzpUZXh0XCIgPnt0KCfkuLogdmlwIOeUqOaIt+mFjee9ruinhOWIme+8micpfTwvVGV4dD5cbiAgICAgICAgICAgICAgPC9QYXJhZ3JhcGg+XG4gICAgICAgICAgICAgIDxDb2RlQmxvY2sgZGF0YS1pbnNwLXBhdGg9XCJ3ZWIvY2xhc3NpYy9zcmMvcGFnZXMvU2V0dGluZy9SYXRpby9Hcm91cFJhdGlvU2V0dGluZ3MuanN4OjY5NDoxNTpDb2RlQmxvY2tcIj5cbiAgICAgICAgICAgICAgICB7YCR7dCgn55So5oi35YiG57uEJyl9ICAgICR7dCgn5pON5L2cJyl9ICAgICAgICAke3QoJ+ebruagh+WIhue7hCcpfSAgICAke3QoJ+aPj+i/sCcpfVxcbuKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgFxcbnZpcCAgICAgICAke3QoJ+a3u+WKoCcpfSAoKzopICAgZXhjbHVzaXZlICAgJHt0KCfkuJPlsZ7liIbnu4QnKX1cXG52aXAgICAgICAgJHt0KCfnp7vpmaQnKX0gKC06KSAgIHN0YW5kYXJkICAgIC1gfVxuICAgICAgICAgICAgICA8L0NvZGVCbG9jaz5cbiAgICAgICAgICAgICAgPFBhcmFncmFwaCBzaXplPSdzbWFsbCcgc3R5bGU9e3sgbWFyZ2luVG9wOiAxMCwgbGluZUhlaWdodDogMS44IH19IGRhdGEtaW5zcC1wYXRoPVwid2ViL2NsYXNzaWMvc3JjL3BhZ2VzL1NldHRpbmcvUmF0aW8vR3JvdXBSYXRpb1NldHRpbmdzLmpzeDo2OTc6MTU6UGFyYWdyYXBoXCIgPlxuICAgICAgICAgICAgICAgIHt0KCfphY3nva7lkI7nmoTmlYjmnpzvvJonKX1cbiAgICAgICAgICAgICAgPC9QYXJhZ3JhcGg+XG4gICAgICAgICAgICAgIDxDb2RlQmxvY2sgZGF0YS1pbnNwLXBhdGg9XCJ3ZWIvY2xhc3NpYy9zcmMvcGFnZXMvU2V0dGluZy9SYXRpby9Hcm91cFJhdGlvU2V0dGluZ3MuanN4OjcwMDoxNTpDb2RlQmxvY2tcIj5cbiAgICAgICAgICAgICAgICB7YCR7dCgn5pmu6YCa55So5oi3Jyl9IOKGkiAke3QoJ+WIm+W7uuS7pOeJjOWPr+mAiScpfTpcXG4gIOKUnOKUgCBzdGFuZGFyZFxcbiAg4pSU4pSAIHByZW1pdW1cXG5cXG52aXAgJHt0KCfnlKjmiLcnKX0g4oaSICR7dCgn5Yib5bu65Luk54mM5Y+v6YCJJyl9OlxcbiAg4pSc4pSAIHByZW1pdW0gICAgICgke3QoJ+S/neeVmScpfSlcXG4gIOKUlOKUgCBleGNsdXNpdmUgICAoJHt0KCfmlrDlop4nKX0pXFxuXFxuICAke3QoJ3N0YW5kYXJkIOW3suiiq+enu+mZpO+8jHZpcCDnlKjmiLfnnIvkuI3liLAnKX1gfVxuICAgICAgICAgICAgICA8L0NvZGVCbG9jaz5cblxuICAgICAgICAgICAgICA8UGFyYWdyYXBoIHNpemU9J3NtYWxsJyBzdHlsZT17eyBtYXJnaW5Ub3A6IDE0LCBsaW5lSGVpZ2h0OiAxLjggfX0gZGF0YS1pbnNwLXBhdGg9XCJ3ZWIvY2xhc3NpYy9zcmMvcGFnZXMvU2V0dGluZy9SYXRpby9Hcm91cFJhdGlvU2V0dGluZ3MuanN4OjcwNDoxNTpQYXJhZ3JhcGhcIiA+XG4gICAgICAgICAgICAgICAgPFRleHQgc3Ryb25nIGRhdGEtaW5zcC1wYXRoPVwid2ViL2NsYXNzaWMvc3JjL3BhZ2VzL1NldHRpbmcvUmF0aW8vR3JvdXBSYXRpb1NldHRpbmdzLmpzeDo3MDU6MTc6VGV4dFwiID57dCgn5LiJ56eN5pON5L2c55qE5Yy65Yir77yaJyl9PC9UZXh0PlxuICAgICAgICAgICAgICA8L1BhcmFncmFwaD5cbiAgICAgICAgICAgICAgPENvZGVCbG9jayBkYXRhLWluc3AtcGF0aD1cIndlYi9jbGFzc2ljL3NyYy9wYWdlcy9TZXR0aW5nL1JhdGlvL0dyb3VwUmF0aW9TZXR0aW5ncy5qc3g6NzA3OjE1OkNvZGVCbG9ja1wiPlxuICAgICAgICAgICAgICAgIHtgJHt0KCfmt7vliqAnKX0gKCs6KSAg4oaSICR7dCgn5Zyo6buY6K6k5YiX6KGo5Z+656GA5LiK5paw5aKe5LiA5Liq5YiG57uEJyl9XFxuJHt0KCfnp7vpmaQnKX0gKC06KSAg4oaSICR7dCgn5LuO6buY6K6k5YiX6KGo5Lit5Y675o6J5LiA5Liq5YiG57uEJyl9XFxuJHt0KCfov73liqAnKX0gICAgICAg4oaSICR7dCgn55u05o6l6L+95Yqg77yI5ZKM5re75Yqg57G75Ly877yM5L2G5peg5YmN57yA77yJJyl9YH1cbiAgICAgICAgICAgICAgPC9Db2RlQmxvY2s+XG4gICAgICAgICAgICA8L0d1aWRlU2VjdGlvbj5cblxuICAgICAgICAgICAgPEd1aWRlU2VjdGlvbiB0aXRsZT17dCgnSlNPTiDmoLzlvI/lj4LogIMnKX0gZGF0YS1pbnNwLXBhdGg9XCJ3ZWIvY2xhc3NpYy9zcmMvcGFnZXMvU2V0dGluZy9SYXRpby9Hcm91cFJhdGlvU2V0dGluZ3MuanN4OjcxMjoxMzpHdWlkZVNlY3Rpb25cIiA+XG4gICAgICAgICAgICAgIDxQYXJhZ3JhcGggc2l6ZT0nc21hbGwnIHN0eWxlPXt7IG1hcmdpbkJvdHRvbTogNCB9fSBkYXRhLWluc3AtcGF0aD1cIndlYi9jbGFzc2ljL3NyYy9wYWdlcy9TZXR0aW5nL1JhdGlvL0dyb3VwUmF0aW9TZXR0aW5ncy5qc3g6NzEzOjE1OlBhcmFncmFwaFwiID5cbiAgICAgICAgICAgICAgICA8VGV4dCBzdHJvbmcgY29kZSBkYXRhLWluc3AtcGF0aD1cIndlYi9jbGFzc2ljL3NyYy9wYWdlcy9TZXR0aW5nL1JhdGlvL0dyb3VwUmF0aW9TZXR0aW5ncy5qc3g6NzE0OjE3OlRleHRcIiA+Z3JvdXBfc3BlY2lhbF91c2FibGVfZ3JvdXA8L1RleHQ+XG4gICAgICAgICAgICAgIDwvUGFyYWdyYXBoPlxuICAgICAgICAgICAgICA8Q29kZUJsb2NrIGRhdGEtaW5zcC1wYXRoPVwid2ViL2NsYXNzaWMvc3JjL3BhZ2VzL1NldHRpbmcvUmF0aW8vR3JvdXBSYXRpb1NldHRpbmdzLmpzeDo3MTY6MTU6Q29kZUJsb2NrXCI+e2B7XFxuICBcInZpcFwiOiB7XFxuICAgIFwiKzpleGNsdXNpdmVcIjogXCIke3QoJ+S4k+WxnuWIhue7hCcpfVwiLFxcbiAgICBcIi06c3RhbmRhcmRcIjogXCJyZW1vdmVcIlxcbiAgfVxcbn1gfTwvQ29kZUJsb2NrPlxuICAgICAgICAgICAgICA8UGFyYWdyYXBoIHNpemU9J3NtYWxsJyB0eXBlPSd0ZXJ0aWFyeScgc3R5bGU9e3sgbWFyZ2luVG9wOiA2LCBsaW5lSGVpZ2h0OiAxLjYgfX0gZGF0YS1pbnNwLXBhdGg9XCJ3ZWIvY2xhc3NpYy9zcmMvcGFnZXMvU2V0dGluZy9SYXRpby9Hcm91cFJhdGlvU2V0dGluZ3MuanN4OjcxNzoxNTpQYXJhZ3JhcGhcIiA+XG4gICAgICAgICAgICAgICAge3QoJ+mUrueahOWJjee8gCArOiDooajnpLrmt7vliqDvvIwtOiDooajnpLrnp7vpmaTvvIzml6DliY3nvIDooajnpLrov73liqDjgILlgLzkuLrliIbnu4Tmj4/ov7DvvIjnp7vpmaTml7bloasgXCJyZW1vdmVcIu+8ieOAgicpfVxuICAgICAgICAgICAgICA8L1BhcmFncmFwaD5cbiAgICAgICAgICAgIDwvR3VpZGVTZWN0aW9uPlxuICAgICAgICAgIDwvZGl2PlxuICAgICAgICA8L1RhYnMuVGFiUGFuZT5cbiAgICAgIDwvVGFicz5cbiAgICA8L1NpZGVTaGVldD5cbiAgKTtcblxuICByZXR1cm4gKFxuICAgIDxTcGluIHNwaW5uaW5nPXtsb2FkaW5nfSBkYXRhLWluc3AtcGF0aD1cIndlYi9jbGFzc2ljL3NyYy9wYWdlcy9TZXR0aW5nL1JhdGlvL0dyb3VwUmF0aW9TZXR0aW5ncy5qc3g6NzI4OjU6U3BpblwiID5cbiAgICAgIDxkaXYgc3R5bGU9e3sgbWFyZ2luQm90dG9tOiAxNSB9fSBkYXRhLWluc3AtcGF0aD1cIndlYi9jbGFzc2ljL3NyYy9wYWdlcy9TZXR0aW5nL1JhdGlvL0dyb3VwUmF0aW9TZXR0aW5ncy5qc3g6NzI5Ojc6ZGl2XCIgPlxuICAgICAgICA8ZGl2IGNsYXNzTmFtZT0nZmxleCBpdGVtcy1jZW50ZXIgZ2FwLTMnIHN0eWxlPXt7IG1hcmdpblRvcDogMTIsIG1hcmdpbkJvdHRvbTogMTYgfX0gZGF0YS1pbnNwLXBhdGg9XCJ3ZWIvY2xhc3NpYy9zcmMvcGFnZXMvU2V0dGluZy9SYXRpby9Hcm91cFJhdGlvU2V0dGluZ3MuanN4OjczMDo5OmRpdlwiID5cbiAgICAgICAgICA8UmFkaW9Hcm91cFxuICAgICAgICAgICAgdHlwZT0nYnV0dG9uJ1xuICAgICAgICAgICAgc2l6ZT0nc21hbGwnXG4gICAgICAgICAgICB2YWx1ZT17ZWRpdE1vZGV9XG4gICAgICAgICAgICBvbkNoYW5nZT17KGUpID0+IHNldEVkaXRNb2RlKGUudGFyZ2V0LnZhbHVlKX1cbiAgICAgICAgICAgZGF0YS1pbnNwLXBhdGg9XCJ3ZWIvY2xhc3NpYy9zcmMvcGFnZXMvU2V0dGluZy9SYXRpby9Hcm91cFJhdGlvU2V0dGluZ3MuanN4OjczMToxMTpSYWRpb0dyb3VwXCIgPlxuICAgICAgICAgICAgPFJhZGlvIHZhbHVlPSd2aXN1YWwnIGRhdGEtaW5zcC1wYXRoPVwid2ViL2NsYXNzaWMvc3JjL3BhZ2VzL1NldHRpbmcvUmF0aW8vR3JvdXBSYXRpb1NldHRpbmdzLmpzeDo3Mzc6MTM6UmFkaW9cIiA+e3QoJ+WPr+inhuWMlue8lui+kScpfTwvUmFkaW8+XG4gICAgICAgICAgICA8UmFkaW8gdmFsdWU9J21hbnVhbCcgZGF0YS1pbnNwLXBhdGg9XCJ3ZWIvY2xhc3NpYy9zcmMvcGFnZXMvU2V0dGluZy9SYXRpby9Hcm91cFJhdGlvU2V0dGluZ3MuanN4OjczODoxMzpSYWRpb1wiID57dCgn5omL5Yqo57yW6L6RJyl9PC9SYWRpbz5cbiAgICAgICAgICA8L1JhZGlvR3JvdXA+XG4gICAgICAgICAgPEJ1dHRvblxuICAgICAgICAgICAgaWNvbj17PEljb25IZWxwQ2lyY2xlICBkYXRhLWluc3AtcGF0aD1cIndlYi9jbGFzc2ljL3NyYy9wYWdlcy9TZXR0aW5nL1JhdGlvL0dyb3VwUmF0aW9TZXR0aW5ncy5qc3g6NzQxOjE5Okljb25IZWxwQ2lyY2xlXCIvPn1cbiAgICAgICAgICAgIHRoZW1lPSdib3JkZXJsZXNzJ1xuICAgICAgICAgICAgdHlwZT0ndGVydGlhcnknXG4gICAgICAgICAgICBzaXplPSdzbWFsbCdcbiAgICAgICAgICAgIG9uQ2xpY2s9eygpID0+IHNldFNob3dHdWlkZSh0cnVlKX1cbiAgICAgICAgICAgZGF0YS1pbnNwLXBhdGg9XCJ3ZWIvY2xhc3NpYy9zcmMvcGFnZXMvU2V0dGluZy9SYXRpby9Hcm91cFJhdGlvU2V0dGluZ3MuanN4Ojc0MDoxMTpCdXR0b25cIiA+XG4gICAgICAgICAgICB7dCgn5L2/55So6K+05piOJyl9XG4gICAgICAgICAgPC9CdXR0b24+XG4gICAgICAgIDwvZGl2PlxuICAgICAgICB7ZWRpdE1vZGUgPT09ICd2aXN1YWwnID8gcmVuZGVyVmlzdWFsTW9kZSgpIDogcmVuZGVyTWFudWFsTW9kZSgpfVxuICAgICAgPC9kaXY+XG4gICAgICA8QnV0dG9uIHNpemU9J2RlZmF1bHQnIG9uQ2xpY2s9e29uU3VibWl0fSBkYXRhLWluc3AtcGF0aD1cIndlYi9jbGFzc2ljL3NyYy9wYWdlcy9TZXR0aW5nL1JhdGlvL0dyb3VwUmF0aW9TZXR0aW5ncy5qc3g6NzUyOjc6QnV0dG9uXCIgPlxuICAgICAgICB7dCgn5L+d5a2Y5YiG57uE55u45YWz6K6+572uJyl9XG4gICAgICA8L0J1dHRvbj5cbiAgICAgIHtyZW5kZXJHdWlkZSgpfVxuICAgIDwvU3Bpbj5cbiAgKTtcbn1cbiJdLCJmaWxlIjoiRTovbmV3LWFwaS93ZWIvY2xhc3NpYy9zcmMvcGFnZXMvU2V0dGluZy9SYXRpby9Hcm91cFJhdGlvU2V0dGluZ3MuanN4In0=

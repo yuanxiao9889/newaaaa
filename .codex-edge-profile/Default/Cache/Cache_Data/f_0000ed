@@ -1,0 +1,476 @@
+import { createHotContext as __vite__createHotContext } from "/@vite/client";import.meta.hot = __vite__createHotContext("/src/components/common/ui/ChannelKeyDisplay.jsx");import __vite__cjsImport0_react_jsxDevRuntime from "/node_modules/.vite/deps/react_jsx-dev-runtime.js?v=1c6fcc49"; const jsxDEV = __vite__cjsImport0_react_jsxDevRuntime["jsxDEV"];
+import RefreshRuntime from "/@react-refresh";
+const inWebWorker = typeof WorkerGlobalScope !== "undefined" && self instanceof WorkerGlobalScope;
+let prevRefreshReg;
+let prevRefreshSig;
+if (import.meta.hot && !inWebWorker) {
+  if (!window.__vite_plugin_react_preamble_installed__) {
+    throw new Error("@vitejs/plugin-react can't detect preamble. Something is wrong. See https://github.com/vitejs/vite-plugin-react/pull/11#discussion_r430879201");
+  }
+  prevRefreshReg = window.$RefreshReg$;
+  prevRefreshSig = window.$RefreshSig$;
+  window.$RefreshReg$ = (type, id) => {
+    RefreshRuntime.register(type, "E:/new-api/web/classic/src/components/common/ui/ChannelKeyDisplay.jsx " + id);
+  };
+  window.$RefreshSig$ = RefreshRuntime.createSignatureFunctionForTransform;
+}
+var _s = $RefreshSig$();
+import __vite__cjsImport3_react from "/node_modules/.vite/deps/react.js?v=1c6fcc49"; const React = __vite__cjsImport3_react.__esModule ? __vite__cjsImport3_react.default : __vite__cjsImport3_react;
+import { useTranslation } from "/node_modules/.vite/deps/react-i18next.js?v=8646de14";
+import { Card, Button, Typography, Tag } from "/node_modules/.vite/deps/@douyinfe_semi-ui.js?v=0f3c8be3";
+import { copy, showSuccess } from "/src/helpers/index.js";
+const parseChannelKeys = (keyData, t) => {
+  if (!keyData) return [];
+  const trimmed = keyData.trim();
+  if (trimmed.startsWith("[")) {
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (Array.isArray(parsed)) {
+        return parsed.map((item, index) => ({
+          id: index,
+          content: typeof item === "string" ? item : JSON.stringify(item, null, 2),
+          type: typeof item === "string" ? "text" : "json",
+          label: `${t("密钥")} ${index + 1}`
+        }));
+      }
+    } catch (e) {
+      console.warn("Failed to parse JSON keys:", e);
+    }
+  }
+  const lines = trimmed.split("\n").filter((line) => line.trim());
+  if (lines.length > 1) {
+    return lines.map((line, index) => ({
+      id: index,
+      content: line.trim(),
+      type: "text",
+      label: `${t("密钥")} ${index + 1}`
+    }));
+  }
+  return [
+    {
+      id: 0,
+      content: trimmed,
+      type: trimmed.startsWith("{") ? "json" : "text",
+      label: t("密钥")
+    }
+  ];
+};
+const ChannelKeyDisplay = ({
+  keyData,
+  showSuccessIcon = true,
+  successText,
+  showWarning = true,
+  warningText
+}) => {
+  _s();
+  const { t } = useTranslation();
+  const parsedKeys = parseChannelKeys(keyData, t);
+  const isMultipleKeys = parsedKeys.length > 1;
+  const handleCopyAll = () => {
+    copy(keyData);
+    showSuccess(t("所有密钥已复制到剪贴板"));
+  };
+  const handleCopyKey = (content) => {
+    copy(content);
+    showSuccess(t("密钥已复制到剪贴板"));
+  };
+  return /* @__PURE__ */ jsxDEV("div", { className: "space-y-4", "data-insp-path": "web/classic/src/components/common/ui/ChannelKeyDisplay.jsx:109:5:div", children: [
+    showSuccessIcon && /* @__PURE__ */ jsxDEV("div", { className: "flex items-center gap-2", "data-insp-path": "web/classic/src/components/common/ui/ChannelKeyDisplay.jsx:112:9:div", children: [
+      /* @__PURE__ */ jsxDEV(
+        "svg",
+        {
+          className: "w-5 h-5 text-green-600",
+          fill: "currentColor",
+          viewBox: "0 0 20 20",
+          "data-insp-path": "web/classic/src/components/common/ui/ChannelKeyDisplay.jsx:113:11:svg",
+          children: /* @__PURE__ */ jsxDEV(
+            "path",
+            {
+              fillRule: "evenodd",
+              d: "M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z",
+              clipRule: "evenodd",
+              "data-insp-path": "web/classic/src/components/common/ui/ChannelKeyDisplay.jsx:118:13:path"
+            },
+            void 0,
+            false,
+            {
+              fileName: "E:/new-api/web/classic/src/components/common/ui/ChannelKeyDisplay.jsx",
+              lineNumber: 118,
+              columnNumber: 13
+            },
+            this
+          )
+        },
+        void 0,
+        false,
+        {
+          fileName: "E:/new-api/web/classic/src/components/common/ui/ChannelKeyDisplay.jsx",
+          lineNumber: 113,
+          columnNumber: 11
+        },
+        this
+      ),
+      /* @__PURE__ */ jsxDEV(Typography.Text, { strong: true, className: "text-green-700", children: successText || t("验证成功") }, void 0, false, {
+        fileName: "E:/new-api/web/classic/src/components/common/ui/ChannelKeyDisplay.jsx",
+        lineNumber: 124,
+        columnNumber: 11
+      }, this)
+    ] }, void 0, true, {
+      fileName: "E:/new-api/web/classic/src/components/common/ui/ChannelKeyDisplay.jsx",
+      lineNumber: 112,
+      columnNumber: 7
+    }, this),
+    /* @__PURE__ */ jsxDEV("div", { className: "space-y-3", "data-insp-path": "web/classic/src/components/common/ui/ChannelKeyDisplay.jsx:131:7:div", children: [
+      /* @__PURE__ */ jsxDEV("div", { className: "flex items-center justify-between", "data-insp-path": "web/classic/src/components/common/ui/ChannelKeyDisplay.jsx:132:9:div", children: [
+        /* @__PURE__ */ jsxDEV(Typography.Text, { strong: true, children: isMultipleKeys ? t("渠道密钥列表") : t("渠道密钥") }, void 0, false, {
+          fileName: "E:/new-api/web/classic/src/components/common/ui/ChannelKeyDisplay.jsx",
+          lineNumber: 133,
+          columnNumber: 11
+        }, this),
+        isMultipleKeys && /* @__PURE__ */ jsxDEV("div", { className: "flex items-center gap-2", "data-insp-path": "web/classic/src/components/common/ui/ChannelKeyDisplay.jsx:137:13:div", children: [
+          /* @__PURE__ */ jsxDEV(Typography.Text, { type: "tertiary", size: "small", children: t("共 {{count}} 个密钥", { count: parsedKeys.length }) }, void 0, false, {
+            fileName: "E:/new-api/web/classic/src/components/common/ui/ChannelKeyDisplay.jsx",
+            lineNumber: 138,
+            columnNumber: 15
+          }, this),
+          /* @__PURE__ */ jsxDEV(
+            Button,
+            {
+              size: "small",
+              type: "primary",
+              theme: "outline",
+              onClick: handleCopyAll,
+              "data-insp-path": "web/classic/src/components/common/ui/ChannelKeyDisplay.jsx:141:15:Button",
+              children: t("复制全部")
+            },
+            void 0,
+            false,
+            {
+              fileName: "E:/new-api/web/classic/src/components/common/ui/ChannelKeyDisplay.jsx",
+              lineNumber: 141,
+              columnNumber: 15
+            },
+            this
+          )
+        ] }, void 0, true, {
+          fileName: "E:/new-api/web/classic/src/components/common/ui/ChannelKeyDisplay.jsx",
+          lineNumber: 137,
+          columnNumber: 11
+        }, this)
+      ] }, void 0, true, {
+        fileName: "E:/new-api/web/classic/src/components/common/ui/ChannelKeyDisplay.jsx",
+        lineNumber: 132,
+        columnNumber: 9
+      }, this),
+      /* @__PURE__ */ jsxDEV("div", { className: "space-y-3 max-h-80 overflow-auto", "data-insp-path": "web/classic/src/components/common/ui/ChannelKeyDisplay.jsx:153:9:div", children: parsedKeys.map(
+        (keyItem) => /* @__PURE__ */ jsxDEV(
+          Card,
+          {
+            className: "!rounded-lg !border !border-gray-200 dark:!border-gray-700",
+            "data-insp-path": "web/classic/src/components/common/ui/ChannelKeyDisplay.jsx:155:13:Card",
+            children: /* @__PURE__ */ jsxDEV("div", { className: "space-y-2", "data-insp-path": "web/classic/src/components/common/ui/ChannelKeyDisplay.jsx:159:15:div", children: [
+              /* @__PURE__ */ jsxDEV("div", { className: "flex items-center justify-between", "data-insp-path": "web/classic/src/components/common/ui/ChannelKeyDisplay.jsx:160:17:div", children: [
+                /* @__PURE__ */ jsxDEV(
+                  Typography.Text,
+                  {
+                    strong: true,
+                    size: "small",
+                    className: "text-gray-700 dark:text-gray-300",
+                    children: keyItem.label
+                  },
+                  void 0,
+                  false,
+                  {
+                    fileName: "E:/new-api/web/classic/src/components/common/ui/ChannelKeyDisplay.jsx",
+                    lineNumber: 161,
+                    columnNumber: 19
+                  },
+                  this
+                ),
+                /* @__PURE__ */ jsxDEV("div", { className: "flex items-center gap-2", "data-insp-path": "web/classic/src/components/common/ui/ChannelKeyDisplay.jsx:168:19:div", children: [
+                  keyItem.type === "json" && /* @__PURE__ */ jsxDEV(Tag, { size: "small", color: "blue", "data-insp-path": "web/classic/src/components/common/ui/ChannelKeyDisplay.jsx:170:23:Tag", children: t("JSON") }, void 0, false, {
+                    fileName: "E:/new-api/web/classic/src/components/common/ui/ChannelKeyDisplay.jsx",
+                    lineNumber: 170,
+                    columnNumber: 19
+                  }, this),
+                  /* @__PURE__ */ jsxDEV(
+                    Button,
+                    {
+                      size: "small",
+                      type: "primary",
+                      theme: "outline",
+                      icon: /* @__PURE__ */ jsxDEV(
+                        "svg",
+                        {
+                          className: "w-3 h-3",
+                          fill: "currentColor",
+                          viewBox: "0 0 20 20",
+                          "data-insp-path": "web/classic/src/components/common/ui/ChannelKeyDisplay.jsx:179:25:svg",
+                          children: [
+                            /* @__PURE__ */ jsxDEV("path", { d: "M8 3a1 1 0 011-1h2a1 1 0 110 2H9a1 1 0 01-1-1z", "data-insp-path": "web/classic/src/components/common/ui/ChannelKeyDisplay.jsx:184:27:path" }, void 0, false, {
+                              fileName: "E:/new-api/web/classic/src/components/common/ui/ChannelKeyDisplay.jsx",
+                              lineNumber: 184,
+                              columnNumber: 27
+                            }, this),
+                            /* @__PURE__ */ jsxDEV("path", { d: "M6 3a2 2 0 00-2 2v11a2 2 0 002 2h8a2 2 0 002-2V5a2 2 0 00-2-2 3 3 0 01-3 3H9a3 3 0 01-3-3z", "data-insp-path": "web/classic/src/components/common/ui/ChannelKeyDisplay.jsx:185:27:path" }, void 0, false, {
+                              fileName: "E:/new-api/web/classic/src/components/common/ui/ChannelKeyDisplay.jsx",
+                              lineNumber: 185,
+                              columnNumber: 27
+                            }, this)
+                          ]
+                        },
+                        void 0,
+                        true,
+                        {
+                          fileName: "E:/new-api/web/classic/src/components/common/ui/ChannelKeyDisplay.jsx",
+                          lineNumber: 179,
+                          columnNumber: 21
+                        },
+                        this
+                      ),
+                      onClick: () => handleCopyKey(keyItem.content),
+                      "data-insp-path": "web/classic/src/components/common/ui/ChannelKeyDisplay.jsx:174:21:Button",
+                      children: t("复制")
+                    },
+                    void 0,
+                    false,
+                    {
+                      fileName: "E:/new-api/web/classic/src/components/common/ui/ChannelKeyDisplay.jsx",
+                      lineNumber: 174,
+                      columnNumber: 21
+                    },
+                    this
+                  )
+                ] }, void 0, true, {
+                  fileName: "E:/new-api/web/classic/src/components/common/ui/ChannelKeyDisplay.jsx",
+                  lineNumber: 168,
+                  columnNumber: 19
+                }, this)
+              ] }, void 0, true, {
+                fileName: "E:/new-api/web/classic/src/components/common/ui/ChannelKeyDisplay.jsx",
+                lineNumber: 160,
+                columnNumber: 17
+              }, this),
+              /* @__PURE__ */ jsxDEV("div", { className: "bg-gray-50 dark:bg-gray-800 rounded-lg p-3 max-h-40 overflow-auto", "data-insp-path": "web/classic/src/components/common/ui/ChannelKeyDisplay.jsx:195:17:div", children: /* @__PURE__ */ jsxDEV(
+                Typography.Text,
+                {
+                  code: true,
+                  className: "text-xs font-mono break-all whitespace-pre-wrap text-gray-800 dark:text-gray-200",
+                  children: keyItem.content
+                },
+                void 0,
+                false,
+                {
+                  fileName: "E:/new-api/web/classic/src/components/common/ui/ChannelKeyDisplay.jsx",
+                  lineNumber: 196,
+                  columnNumber: 19
+                },
+                this
+              ) }, void 0, false, {
+                fileName: "E:/new-api/web/classic/src/components/common/ui/ChannelKeyDisplay.jsx",
+                lineNumber: 195,
+                columnNumber: 17
+              }, this),
+              keyItem.type === "json" && /* @__PURE__ */ jsxDEV(
+                Typography.Text,
+                {
+                  type: "tertiary",
+                  size: "small",
+                  className: "block",
+                  children: t("JSON格式密钥，请确保格式正确")
+                },
+                void 0,
+                false,
+                {
+                  fileName: "E:/new-api/web/classic/src/components/common/ui/ChannelKeyDisplay.jsx",
+                  lineNumber: 205,
+                  columnNumber: 15
+                },
+                this
+              )
+            ] }, void 0, true, {
+              fileName: "E:/new-api/web/classic/src/components/common/ui/ChannelKeyDisplay.jsx",
+              lineNumber: 159,
+              columnNumber: 15
+            }, this)
+          },
+          keyItem.id,
+          false,
+          {
+            fileName: "E:/new-api/web/classic/src/components/common/ui/ChannelKeyDisplay.jsx",
+            lineNumber: 155,
+            columnNumber: 11
+          },
+          this
+        )
+      ) }, void 0, false, {
+        fileName: "E:/new-api/web/classic/src/components/common/ui/ChannelKeyDisplay.jsx",
+        lineNumber: 153,
+        columnNumber: 9
+      }, this),
+      isMultipleKeys && /* @__PURE__ */ jsxDEV("div", { className: "bg-blue-50 dark:bg-blue-900 rounded-lg p-3", "data-insp-path": "web/classic/src/components/common/ui/ChannelKeyDisplay.jsx:219:11:div", children: /* @__PURE__ */ jsxDEV(
+        Typography.Text,
+        {
+          type: "tertiary",
+          size: "small",
+          className: "text-blue-700 dark:text-blue-300",
+          children: [
+            /* @__PURE__ */ jsxDEV(
+              "svg",
+              {
+                className: "w-4 h-4 inline mr-1",
+                fill: "currentColor",
+                viewBox: "0 0 20 20",
+                "data-insp-path": "web/classic/src/components/common/ui/ChannelKeyDisplay.jsx:225:15:svg",
+                children: /* @__PURE__ */ jsxDEV(
+                  "path",
+                  {
+                    fillRule: "evenodd",
+                    d: "M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z",
+                    clipRule: "evenodd",
+                    "data-insp-path": "web/classic/src/components/common/ui/ChannelKeyDisplay.jsx:230:17:path"
+                  },
+                  void 0,
+                  false,
+                  {
+                    fileName: "E:/new-api/web/classic/src/components/common/ui/ChannelKeyDisplay.jsx",
+                    lineNumber: 230,
+                    columnNumber: 17
+                  },
+                  this
+                )
+              },
+              void 0,
+              false,
+              {
+                fileName: "E:/new-api/web/classic/src/components/common/ui/ChannelKeyDisplay.jsx",
+                lineNumber: 225,
+                columnNumber: 15
+              },
+              this
+            ),
+            t(
+              "检测到多个密钥，您可以单独复制每个密钥，或点击复制全部获取完整内容。"
+            )
+          ]
+        },
+        void 0,
+        true,
+        {
+          fileName: "E:/new-api/web/classic/src/components/common/ui/ChannelKeyDisplay.jsx",
+          lineNumber: 220,
+          columnNumber: 13
+        },
+        this
+      ) }, void 0, false, {
+        fileName: "E:/new-api/web/classic/src/components/common/ui/ChannelKeyDisplay.jsx",
+        lineNumber: 219,
+        columnNumber: 9
+      }, this)
+    ] }, void 0, true, {
+      fileName: "E:/new-api/web/classic/src/components/common/ui/ChannelKeyDisplay.jsx",
+      lineNumber: 131,
+      columnNumber: 7
+    }, this),
+    showWarning && /* @__PURE__ */ jsxDEV("div", { className: "bg-yellow-50 dark:bg-yellow-900 rounded-lg p-4", "data-insp-path": "web/classic/src/components/common/ui/ChannelKeyDisplay.jsx:246:9:div", children: /* @__PURE__ */ jsxDEV("div", { className: "flex items-start", "data-insp-path": "web/classic/src/components/common/ui/ChannelKeyDisplay.jsx:247:11:div", children: [
+      /* @__PURE__ */ jsxDEV(
+        "svg",
+        {
+          className: "w-5 h-5 text-yellow-600 dark:text-yellow-400 mt-0.5 mr-3 flex-shrink-0",
+          fill: "currentColor",
+          viewBox: "0 0 20 20",
+          "data-insp-path": "web/classic/src/components/common/ui/ChannelKeyDisplay.jsx:248:13:svg",
+          children: /* @__PURE__ */ jsxDEV(
+            "path",
+            {
+              fillRule: "evenodd",
+              d: "M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z",
+              clipRule: "evenodd",
+              "data-insp-path": "web/classic/src/components/common/ui/ChannelKeyDisplay.jsx:253:15:path"
+            },
+            void 0,
+            false,
+            {
+              fileName: "E:/new-api/web/classic/src/components/common/ui/ChannelKeyDisplay.jsx",
+              lineNumber: 253,
+              columnNumber: 15
+            },
+            this
+          )
+        },
+        void 0,
+        false,
+        {
+          fileName: "E:/new-api/web/classic/src/components/common/ui/ChannelKeyDisplay.jsx",
+          lineNumber: 248,
+          columnNumber: 13
+        },
+        this
+      ),
+      /* @__PURE__ */ jsxDEV("div", { "data-insp-path": "web/classic/src/components/common/ui/ChannelKeyDisplay.jsx:259:13:div", children: [
+        /* @__PURE__ */ jsxDEV(
+          Typography.Text,
+          {
+            strong: true,
+            className: "text-yellow-800 dark:text-yellow-200",
+            children: t("安全提醒")
+          },
+          void 0,
+          false,
+          {
+            fileName: "E:/new-api/web/classic/src/components/common/ui/ChannelKeyDisplay.jsx",
+            lineNumber: 260,
+            columnNumber: 15
+          },
+          this
+        ),
+        /* @__PURE__ */ jsxDEV(Typography.Text, { className: "block text-yellow-700 dark:text-yellow-300 text-sm mt-1", children: warningText || t(
+          "请妥善保管密钥信息，不要泄露给他人。如有安全疑虑，请及时更换密钥。"
+        ) }, void 0, false, {
+          fileName: "E:/new-api/web/classic/src/components/common/ui/ChannelKeyDisplay.jsx",
+          lineNumber: 266,
+          columnNumber: 15
+        }, this)
+      ] }, void 0, true, {
+        fileName: "E:/new-api/web/classic/src/components/common/ui/ChannelKeyDisplay.jsx",
+        lineNumber: 259,
+        columnNumber: 13
+      }, this)
+    ] }, void 0, true, {
+      fileName: "E:/new-api/web/classic/src/components/common/ui/ChannelKeyDisplay.jsx",
+      lineNumber: 247,
+      columnNumber: 11
+    }, this) }, void 0, false, {
+      fileName: "E:/new-api/web/classic/src/components/common/ui/ChannelKeyDisplay.jsx",
+      lineNumber: 246,
+      columnNumber: 7
+    }, this)
+  ] }, void 0, true, {
+    fileName: "E:/new-api/web/classic/src/components/common/ui/ChannelKeyDisplay.jsx",
+    lineNumber: 109,
+    columnNumber: 5
+  }, this);
+};
+_s(ChannelKeyDisplay, "zlIdU9EjM2llFt74AbE2KsUJXyM=", false, function() {
+  return [useTranslation];
+});
+_c = ChannelKeyDisplay;
+export default ChannelKeyDisplay;
+var _c;
+$RefreshReg$(_c, "ChannelKeyDisplay");
+if (import.meta.hot && !inWebWorker) {
+  window.$RefreshReg$ = prevRefreshReg;
+  window.$RefreshSig$ = prevRefreshSig;
+}
+if (import.meta.hot && !inWebWorker) {
+  RefreshRuntime.__hmr_import(import.meta.url).then((currentExports) => {
+    RefreshRuntime.registerExportsForReactRefresh("E:/new-api/web/classic/src/components/common/ui/ChannelKeyDisplay.jsx", currentExports);
+    import.meta.hot.accept((nextExports) => {
+      if (!nextExports) return;
+      const invalidateMessage = RefreshRuntime.validateRefreshBoundaryAndEnqueueUpdate("E:/new-api/web/classic/src/components/common/ui/ChannelKeyDisplay.jsx", currentExports, nextExports);
+      if (invalidateMessage) import.meta.hot.invalidate(invalidateMessage);
+    });
+  });
+}
+
+//# sourceMappingURL=data:application/json;base64,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QUFBQSxNQVVBO0FBQUEsTUFDQSx1QkFBQyxTQUFJLGtCQUFlLHlFQUNsQjtBQUFBO0FBQUEsVUFBQyxXQUFXO0FBQUEsVUFBWDtBQUFBLFlBQ0M7QUFBQSxZQUNBLFdBQVU7QUFBQSxZQUVUNUIsWUFBRSxNQUFNO0FBQUE7QUFBQSxVQUpYO0FBQUE7QUFBQTtBQUFBO0FBQUE7QUFBQTtBQUFBO0FBQUE7QUFBQSxRQUtBO0FBQUEsUUFDQSx1QkFBQyxXQUFXLE1BQVgsRUFBZ0IsV0FBVSwyREFDeEI2Qix5QkFDQzdCO0FBQUFBLFVBQ0U7QUFBQSxRQUNGLEtBSko7QUFBQTtBQUFBO0FBQUE7QUFBQSxlQUtBO0FBQUEsV0FaRjtBQUFBO0FBQUE7QUFBQTtBQUFBLGFBYUE7QUFBQSxTQXpCRjtBQUFBO0FBQUE7QUFBQTtBQUFBLFdBMEJBLEtBM0JGO0FBQUE7QUFBQTtBQUFBO0FBQUEsV0E0QkE7QUFBQSxPQXJLSjtBQUFBO0FBQUE7QUFBQTtBQUFBLFNBdUtBO0FBRUo7QUFBRThCLEdBaE1JTCxtQkFBaUI7QUFBQSxVQU9QbEMsY0FBYztBQUFBO0FBQUE4QyxLQVB4Qlo7QUFrTU4sZUFBZUE7QUFBa0IsSUFBQVk7QUFBQUMsYUFBQUQsSUFBQSIsIm5hbWVzIjpbIlJlYWN0IiwidXNlVHJhbnNsYXRpb24iLCJDYXJkIiwiQnV0dG9uIiwiVHlwb2dyYXBoeSIsIlRhZyIsImNvcHkiLCJzaG93U3VjY2VzcyIsInBhcnNlQ2hhbm5lbEtleXMiLCJrZXlEYXRhIiwidCIsInRyaW1tZWQiLCJ0cmltIiwic3RhcnRzV2l0aCIsInBhcnNlZCIsIkpTT04iLCJwYXJzZSIsIkFycmF5IiwiaXNBcnJheSIsIm1hcCIsIml0ZW0iLCJpbmRleCIsImlkIiwiY29udGVudCIsInN0cmluZ2lmeSIsInR5cGUiLCJsYWJlbCIsImUiLCJjb25zb2xlIiwid2FybiIsImxpbmVzIiwic3BsaXQiLCJmaWx0ZXIiLCJsaW5lIiwibGVuZ3RoIiwiQ2hhbm5lbEtleURpc3BsYXkiLCJzaG93U3VjY2Vzc0ljb24iLCJzdWNjZXNzVGV4dCIsInNob3dXYXJuaW5nIiwid2FybmluZ1RleHQiLCJfcyIsInBhcnNlZEtleXMiLCJpc011bHRpcGxlS2V5cyIsImhhbmRsZUNvcHlBbGwiLCJoYW5kbGVDb3B5S2V5IiwiY291bnQiLCJrZXlJdGVtIiwiX2MiLCIkUmVmcmVzaFJlZyQiXSwiaWdub3JlTGlzdCI6W10sInNvdXJjZXMiOlsiQ2hhbm5lbEtleURpc3BsYXkuanN4Il0sInNvdXJjZXNDb250ZW50IjpbIi8qXG5Db3B5cmlnaHQgKEMpIDIwMjUgUXVhbnR1bU5vdXNcblxuVGhpcyBwcm9ncmFtIGlzIGZyZWUgc29mdHdhcmU6IHlvdSBjYW4gcmVkaXN0cmlidXRlIGl0IGFuZC9vciBtb2RpZnlcbml0IHVuZGVyIHRoZSB0ZXJtcyBvZiB0aGUgR05VIEFmZmVybyBHZW5lcmFsIFB1YmxpYyBMaWNlbnNlIGFzXG5wdWJsaXNoZWQgYnkgdGhlIEZyZWUgU29mdHdhcmUgRm91bmRhdGlvbiwgZWl0aGVyIHZlcnNpb24gMyBvZiB0aGVcbkxpY2Vuc2UsIG9yIChhdCB5b3VyIG9wdGlvbikgYW55IGxhdGVyIHZlcnNpb24uXG5cblRoaXMgcHJvZ3JhbSBpcyBkaXN0cmlidXRlZCBpbiB0aGUgaG9wZSB0aGF0IGl0IHdpbGwgYmUgdXNlZnVsLFxuYnV0IFdJVEhPVVQgQU5ZIFdBUlJBTlRZOyB3aXRob3V0IGV2ZW4gdGhlIGltcGxpZWQgd2FycmFudHkgb2Zcbk1FUkNIQU5UQUJJTElUWSBvciBGSVRORVNTIEZPUiBBIFBBUlRJQ1VMQVIgUFVSUE9TRS4gU2VlIHRoZVxuR05VIEFmZmVybyBHZW5lcmFsIFB1YmxpYyBMaWNlbnNlIGZvciBtb3JlIGRldGFpbHMuXG5cbllvdSBzaG91bGQgaGF2ZSByZWNlaXZlZCBhIGNvcHkgb2YgdGhlIEdOVSBBZmZlcm8gR2VuZXJhbCBQdWJsaWMgTGljZW5zZVxuYWxvbmcgd2l0aCB0aGlzIHByb2dyYW0uIElmIG5vdCwgc2VlIDxodHRwczovL3d3dy5nbnUub3JnL2xpY2Vuc2VzLz4uXG5cbkZvciBjb21tZXJjaWFsIGxpY2Vuc2luZywgcGxlYXNlIGNvbnRhY3Qgc3VwcG9ydEBxdWFudHVtbm91cy5jb21cbiovXG5cbmltcG9ydCBSZWFjdCBmcm9tICdyZWFjdCc7XG5pbXBvcnQgeyB1c2VUcmFuc2xhdGlvbiB9IGZyb20gJ3JlYWN0LWkxOG5leHQnO1xuaW1wb3J0IHsgQ2FyZCwgQnV0dG9uLCBUeXBvZ3JhcGh5LCBUYWcgfSBmcm9tICdAZG91eWluZmUvc2VtaS11aSc7XG5pbXBvcnQgeyBjb3B5LCBzaG93U3VjY2VzcyB9IGZyb20gJy4uLy4uLy4uL2hlbHBlcnMnO1xuXG4vKipcbiAqIOino+aekOWvhumSpeaVsOaNru+8jOaUr+aMgeWkmuenjeagvOW8j1xuICogQHBhcmFtIHtzdHJpbmd9IGtleURhdGEgLSDlr4bpkqXmlbDmja5cbiAqIEBwYXJhbSB7RnVuY3Rpb259IHQgLSDnv7vor5Hlh73mlbBcbiAqIEByZXR1cm5zIHtBcnJheX0g6Kej5p6Q5ZCO55qE5a+G6ZKl5pWw57uEXG4gKi9cbmNvbnN0IHBhcnNlQ2hhbm5lbEtleXMgPSAoa2V5RGF0YSwgdCkgPT4ge1xuICBpZiAoIWtleURhdGEpIHJldHVybiBbXTtcblxuICBjb25zdCB0cmltbWVkID0ga2V5RGF0YS50cmltKCk7XG5cbiAgLy8g5qOA5p+l5piv5ZCm5pivSlNPTuaVsOe7hOagvOW8j++8iOWmglZlcnRleCBBSe+8iVxuICBpZiAodHJpbW1lZC5zdGFydHNXaXRoKCdbJykpIHtcbiAgICB0cnkge1xuICAgICAgY29uc3QgcGFyc2VkID0gSlNPTi5wYXJzZSh0cmltbWVkKTtcbiAgICAgIGlmIChBcnJheS5pc0FycmF5KHBhcnNlZCkpIHtcbiAgICAgICAgcmV0dXJuIHBhcnNlZC5tYXAoKGl0ZW0sIGluZGV4KSA9PiAoe1xuICAgICAgICAgIGlkOiBpbmRleCxcbiAgICAgICAgICBjb250ZW50OlxuICAgICAgICAgICAgdHlwZW9mIGl0ZW0gPT09ICdzdHJpbmcnID8gaXRlbSA6IEpTT04uc3RyaW5naWZ5KGl0ZW0sIG51bGwsIDIpLFxuICAgICAgICAgIHR5cGU6IHR5cGVvZiBpdGVtID09PSAnc3RyaW5nJyA/ICd0ZXh0JyA6ICdqc29uJyxcbiAgICAgICAgICBsYWJlbDogYCR7dCgn5a+G6ZKlJyl9ICR7aW5kZXggKyAxfWAsXG4gICAgICAgIH0pKTtcbiAgICAgIH1cbiAgICB9IGNhdGNoIChlKSB7XG4gICAgICAvLyDlpoLmnpzop6PmnpDlpLHotKXvvIzmjInmma7pgJrmlofmnKzlpITnkIZcbiAgICAgIGNvbnNvbGUud2FybignRmFpbGVkIHRvIHBhcnNlIEpTT04ga2V5czonLCBlKTtcbiAgICB9XG4gIH1cblxuICAvLyDmo4Dmn6XmmK/lkKbmmK/lpJrooYzlr4bpkqXvvIjmjInmjaLooYznrKbliIblibLvvIlcbiAgY29uc3QgbGluZXMgPSB0cmltbWVkLnNwbGl0KCdcXG4nKS5maWx0ZXIoKGxpbmUpID0+IGxpbmUudHJpbSgpKTtcbiAgaWYgKGxpbmVzLmxlbmd0aCA+IDEpIHtcbiAgICByZXR1cm4gbGluZXMubWFwKChsaW5lLCBpbmRleCkgPT4gKHtcbiAgICAgIGlkOiBpbmRleCxcbiAgICAgIGNvbnRlbnQ6IGxpbmUudHJpbSgpLFxuICAgICAgdHlwZTogJ3RleHQnLFxuICAgICAgbGFiZWw6IGAke3QoJ+WvhumSpScpfSAke2luZGV4ICsgMX1gLFxuICAgIH0pKTtcbiAgfVxuXG4gIC8vIOWNleS4quWvhumSpVxuICByZXR1cm4gW1xuICAgIHtcbiAgICAgIGlkOiAwLFxuICAgICAgY29udGVudDogdHJpbW1lZCxcbiAgICAgIHR5cGU6IHRyaW1tZWQuc3RhcnRzV2l0aCgneycpID8gJ2pzb24nIDogJ3RleHQnLFxuICAgICAgbGFiZWw6IHQoJ+WvhumSpScpLFxuICAgIH0sXG4gIF07XG59O1xuXG4vKipcbiAqIOWPr+WkjeeUqOeahOWvhumSpeaYvuekuue7hOS7tlxuICogQHBhcmFtIHtPYmplY3R9IHByb3BzXG4gKiBAcGFyYW0ge3N0cmluZ30gcHJvcHMua2V5RGF0YSAtIOWvhumSpeaVsOaNrlxuICogQHBhcmFtIHtib29sZWFufSBwcm9wcy5zaG93U3VjY2Vzc0ljb24gLSDmmK/lkKbmmL7npLrmiJDlip/lm77moIdcbiAqIEBwYXJhbSB7c3RyaW5nfSBwcm9wcy5zdWNjZXNzVGV4dCAtIOaIkOWKn+aWh+acrFxuICogQHBhcmFtIHtib29sZWFufSBwcm9wcy5zaG93V2FybmluZyAtIOaYr+WQpuaYvuekuuWuieWFqOitpuWRilxuICogQHBhcmFtIHtzdHJpbmd9IHByb3BzLndhcm5pbmdUZXh0IC0g6K2m5ZGK5paH5pysXG4gKi9cbmNvbnN0IENoYW5uZWxLZXlEaXNwbGF5ID0gKHtcbiAga2V5RGF0YSxcbiAgc2hvd1N1Y2Nlc3NJY29uID0gdHJ1ZSxcbiAgc3VjY2Vzc1RleHQsXG4gIHNob3dXYXJuaW5nID0gdHJ1ZSxcbiAgd2FybmluZ1RleHQsXG59KSA9PiB7XG4gIGNvbnN0IHsgdCB9ID0gdXNlVHJhbnNsYXRpb24oKTtcblxuICBjb25zdCBwYXJzZWRLZXlzID0gcGFyc2VDaGFubmVsS2V5cyhrZXlEYXRhLCB0KTtcbiAgY29uc3QgaXNNdWx0aXBsZUtleXMgPSBwYXJzZWRLZXlzLmxlbmd0aCA+IDE7XG5cbiAgY29uc3QgaGFuZGxlQ29weUFsbCA9ICgpID0+IHtcbiAgICBjb3B5KGtleURhdGEpO1xuICAgIHNob3dTdWNjZXNzKHQoJ+aJgOacieWvhumSpeW3suWkjeWItuWIsOWJqui0tOadvycpKTtcbiAgfTtcblxuICBjb25zdCBoYW5kbGVDb3B5S2V5ID0gKGNvbnRlbnQpID0+IHtcbiAgICBjb3B5KGNvbnRlbnQpO1xuICAgIHNob3dTdWNjZXNzKHQoJ+WvhumSpeW3suWkjeWItuWIsOWJqui0tOadvycpKTtcbiAgfTtcblxuICByZXR1cm4gKFxuICAgIDxkaXYgY2xhc3NOYW1lPSdzcGFjZS15LTQnIGRhdGEtaW5zcC1wYXRoPVwid2ViL2NsYXNzaWMvc3JjL2NvbXBvbmVudHMvY29tbW9uL3VpL0NoYW5uZWxLZXlEaXNwbGF5LmpzeDoxMDk6NTpkaXZcIiA+XG4gICAgICB7Lyog5oiQ5Yqf54q25oCBICovfVxuICAgICAge3Nob3dTdWNjZXNzSWNvbiAmJiAoXG4gICAgICAgIDxkaXYgY2xhc3NOYW1lPSdmbGV4IGl0ZW1zLWNlbnRlciBnYXAtMicgZGF0YS1pbnNwLXBhdGg9XCJ3ZWIvY2xhc3NpYy9zcmMvY29tcG9uZW50cy9jb21tb24vdWkvQ2hhbm5lbEtleURpc3BsYXkuanN4OjExMjo5OmRpdlwiID5cbiAgICAgICAgICA8c3ZnXG4gICAgICAgICAgICBjbGFzc05hbWU9J3ctNSBoLTUgdGV4dC1ncmVlbi02MDAnXG4gICAgICAgICAgICBmaWxsPSdjdXJyZW50Q29sb3InXG4gICAgICAgICAgICB2aWV3Qm94PScwIDAgMjAgMjAnXG4gICAgICAgICAgIGRhdGEtaW5zcC1wYXRoPVwid2ViL2NsYXNzaWMvc3JjL2NvbXBvbmVudHMvY29tbW9uL3VpL0NoYW5uZWxLZXlEaXNwbGF5LmpzeDoxMTM6MTE6c3ZnXCIgPlxuICAgICAgICAgICAgPHBhdGhcbiAgICAgICAgICAgICAgZmlsbFJ1bGU9J2V2ZW5vZGQnXG4gICAgICAgICAgICAgIGQ9J00xMCAxOGE4IDggMCAxMDAtMTYgOCA4IDAgMDAwIDE2em0zLjcwNy05LjI5M2ExIDEgMCAwMC0xLjQxNC0xLjQxNEw5IDEwLjU4NiA3LjcwNyA5LjI5M2ExIDEgMCAwMC0xLjQxNCAxLjQxNGwyIDJhMSAxIDAgMDAxLjQxNCAwbDQtNHonXG4gICAgICAgICAgICAgIGNsaXBSdWxlPSdldmVub2RkJ1xuICAgICAgICAgICAgIGRhdGEtaW5zcC1wYXRoPVwid2ViL2NsYXNzaWMvc3JjL2NvbXBvbmVudHMvY29tbW9uL3VpL0NoYW5uZWxLZXlEaXNwbGF5LmpzeDoxMTg6MTM6cGF0aFwiIC8+XG4gICAgICAgICAgPC9zdmc+XG4gICAgICAgICAgPFR5cG9ncmFwaHkuVGV4dCBzdHJvbmcgY2xhc3NOYW1lPSd0ZXh0LWdyZWVuLTcwMCc+XG4gICAgICAgICAgICB7c3VjY2Vzc1RleHQgfHwgdCgn6aqM6K+B5oiQ5YqfJyl9XG4gICAgICAgICAgPC9UeXBvZ3JhcGh5LlRleHQ+XG4gICAgICAgIDwvZGl2PlxuICAgICAgKX1cblxuICAgICAgey8qIOWvhumSpeWGheWuuSAqL31cbiAgICAgIDxkaXYgY2xhc3NOYW1lPSdzcGFjZS15LTMnIGRhdGEtaW5zcC1wYXRoPVwid2ViL2NsYXNzaWMvc3JjL2NvbXBvbmVudHMvY29tbW9uL3VpL0NoYW5uZWxLZXlEaXNwbGF5LmpzeDoxMzE6NzpkaXZcIiA+XG4gICAgICAgIDxkaXYgY2xhc3NOYW1lPSdmbGV4IGl0ZW1zLWNlbnRlciBqdXN0aWZ5LWJldHdlZW4nIGRhdGEtaW5zcC1wYXRoPVwid2ViL2NsYXNzaWMvc3JjL2NvbXBvbmVudHMvY29tbW9uL3VpL0NoYW5uZWxLZXlEaXNwbGF5LmpzeDoxMzI6OTpkaXZcIiA+XG4gICAgICAgICAgPFR5cG9ncmFwaHkuVGV4dCBzdHJvbmc+XG4gICAgICAgICAgICB7aXNNdWx0aXBsZUtleXMgPyB0KCfmuKDpgZPlr4bpkqXliJfooagnKSA6IHQoJ+a4oOmBk+WvhumSpScpfVxuICAgICAgICAgIDwvVHlwb2dyYXBoeS5UZXh0PlxuICAgICAgICAgIHtpc011bHRpcGxlS2V5cyAmJiAoXG4gICAgICAgICAgICA8ZGl2IGNsYXNzTmFtZT0nZmxleCBpdGVtcy1jZW50ZXIgZ2FwLTInIGRhdGEtaW5zcC1wYXRoPVwid2ViL2NsYXNzaWMvc3JjL2NvbXBvbmVudHMvY29tbW9uL3VpL0NoYW5uZWxLZXlEaXNwbGF5LmpzeDoxMzc6MTM6ZGl2XCIgPlxuICAgICAgICAgICAgICA8VHlwb2dyYXBoeS5UZXh0IHR5cGU9J3RlcnRpYXJ5JyBzaXplPSdzbWFsbCc+XG4gICAgICAgICAgICAgICAge3QoJ+WFsSB7e2NvdW50fX0g5Liq5a+G6ZKlJywgeyBjb3VudDogcGFyc2VkS2V5cy5sZW5ndGggfSl9XG4gICAgICAgICAgICAgIDwvVHlwb2dyYXBoeS5UZXh0PlxuICAgICAgICAgICAgICA8QnV0dG9uXG4gICAgICAgICAgICAgICAgc2l6ZT0nc21hbGwnXG4gICAgICAgICAgICAgICAgdHlwZT0ncHJpbWFyeSdcbiAgICAgICAgICAgICAgICB0aGVtZT0nb3V0bGluZSdcbiAgICAgICAgICAgICAgICBvbkNsaWNrPXtoYW5kbGVDb3B5QWxsfVxuICAgICAgICAgICAgICAgZGF0YS1pbnNwLXBhdGg9XCJ3ZWIvY2xhc3NpYy9zcmMvY29tcG9uZW50cy9jb21tb24vdWkvQ2hhbm5lbEtleURpc3BsYXkuanN4OjE0MToxNTpCdXR0b25cIiA+XG4gICAgICAgICAgICAgICAge3QoJ+WkjeWItuWFqOmDqCcpfVxuICAgICAgICAgICAgICA8L0J1dHRvbj5cbiAgICAgICAgICAgIDwvZGl2PlxuICAgICAgICAgICl9XG4gICAgICAgIDwvZGl2PlxuXG4gICAgICAgIDxkaXYgY2xhc3NOYW1lPSdzcGFjZS15LTMgbWF4LWgtODAgb3ZlcmZsb3ctYXV0bycgZGF0YS1pbnNwLXBhdGg9XCJ3ZWIvY2xhc3NpYy9zcmMvY29tcG9uZW50cy9jb21tb24vdWkvQ2hhbm5lbEtleURpc3BsYXkuanN4OjE1Mzo5OmRpdlwiID5cbiAgICAgICAgICB7cGFyc2VkS2V5cy5tYXAoKGtleUl0ZW0pID0+IChcbiAgICAgICAgICAgIDxDYXJkXG4gICAgICAgICAgICAgIGtleT17a2V5SXRlbS5pZH1cbiAgICAgICAgICAgICAgY2xhc3NOYW1lPSchcm91bmRlZC1sZyAhYm9yZGVyICFib3JkZXItZ3JheS0yMDAgZGFyazohYm9yZGVyLWdyYXktNzAwJ1xuICAgICAgICAgICAgIGRhdGEtaW5zcC1wYXRoPVwid2ViL2NsYXNzaWMvc3JjL2NvbXBvbmVudHMvY29tbW9uL3VpL0NoYW5uZWxLZXlEaXNwbGF5LmpzeDoxNTU6MTM6Q2FyZFwiID5cbiAgICAgICAgICAgICAgPGRpdiBjbGFzc05hbWU9J3NwYWNlLXktMicgZGF0YS1pbnNwLXBhdGg9XCJ3ZWIvY2xhc3NpYy9zcmMvY29tcG9uZW50cy9jb21tb24vdWkvQ2hhbm5lbEtleURpc3BsYXkuanN4OjE1OToxNTpkaXZcIiA+XG4gICAgICAgICAgICAgICAgPGRpdiBjbGFzc05hbWU9J2ZsZXggaXRlbXMtY2VudGVyIGp1c3RpZnktYmV0d2VlbicgZGF0YS1pbnNwLXBhdGg9XCJ3ZWIvY2xhc3NpYy9zcmMvY29tcG9uZW50cy9jb21tb24vdWkvQ2hhbm5lbEtleURpc3BsYXkuanN4OjE2MDoxNzpkaXZcIiA+XG4gICAgICAgICAgICAgICAgICA8VHlwb2dyYXBoeS5UZXh0XG4gICAgICAgICAgICAgICAgICAgIHN0cm9uZ1xuICAgICAgICAgICAgICAgICAgICBzaXplPSdzbWFsbCdcbiAgICAgICAgICAgICAgICAgICAgY2xhc3NOYW1lPSd0ZXh0LWdyYXktNzAwIGRhcms6dGV4dC1ncmF5LTMwMCdcbiAgICAgICAgICAgICAgICAgID5cbiAgICAgICAgICAgICAgICAgICAge2tleUl0ZW0ubGFiZWx9XG4gICAgICAgICAgICAgICAgICA8L1R5cG9ncmFwaHkuVGV4dD5cbiAgICAgICAgICAgICAgICAgIDxkaXYgY2xhc3NOYW1lPSdmbGV4IGl0ZW1zLWNlbnRlciBnYXAtMicgZGF0YS1pbnNwLXBhdGg9XCJ3ZWIvY2xhc3NpYy9zcmMvY29tcG9uZW50cy9jb21tb24vdWkvQ2hhbm5lbEtleURpc3BsYXkuanN4OjE2ODoxOTpkaXZcIiA+XG4gICAgICAgICAgICAgICAgICAgIHtrZXlJdGVtLnR5cGUgPT09ICdqc29uJyAmJiAoXG4gICAgICAgICAgICAgICAgICAgICAgPFRhZyBzaXplPSdzbWFsbCcgY29sb3I9J2JsdWUnIGRhdGEtaW5zcC1wYXRoPVwid2ViL2NsYXNzaWMvc3JjL2NvbXBvbmVudHMvY29tbW9uL3VpL0NoYW5uZWxLZXlEaXNwbGF5LmpzeDoxNzA6MjM6VGFnXCIgPlxuICAgICAgICAgICAgICAgICAgICAgICAge3QoJ0pTT04nKX1cbiAgICAgICAgICAgICAgICAgICAgICA8L1RhZz5cbiAgICAgICAgICAgICAgICAgICAgKX1cbiAgICAgICAgICAgICAgICAgICAgPEJ1dHRvblxuICAgICAgICAgICAgICAgICAgICAgIHNpemU9J3NtYWxsJ1xuICAgICAgICAgICAgICAgICAgICAgIHR5cGU9J3ByaW1hcnknXG4gICAgICAgICAgICAgICAgICAgICAgdGhlbWU9J291dGxpbmUnXG4gICAgICAgICAgICAgICAgICAgICAgaWNvbj17XG4gICAgICAgICAgICAgICAgICAgICAgICA8c3ZnXG4gICAgICAgICAgICAgICAgICAgICAgICAgIGNsYXNzTmFtZT0ndy0zIGgtMydcbiAgICAgICAgICAgICAgICAgICAgICAgICAgZmlsbD0nY3VycmVudENvbG9yJ1xuICAgICAgICAgICAgICAgICAgICAgICAgICB2aWV3Qm94PScwIDAgMjAgMjAnXG4gICAgICAgICAgICAgICAgICAgICAgICAgZGF0YS1pbnNwLXBhdGg9XCJ3ZWIvY2xhc3NpYy9zcmMvY29tcG9uZW50cy9jb21tb24vdWkvQ2hhbm5lbEtleURpc3BsYXkuanN4OjE3OToyNTpzdmdcIiA+XG4gICAgICAgICAgICAgICAgICAgICAgICAgIDxwYXRoIGQ9J004IDNhMSAxIDAgMDExLTFoMmExIDEgMCAxMTAgMkg5YTEgMSAwIDAxLTEtMXonICBkYXRhLWluc3AtcGF0aD1cIndlYi9jbGFzc2ljL3NyYy9jb21wb25lbnRzL2NvbW1vbi91aS9DaGFubmVsS2V5RGlzcGxheS5qc3g6MTg0OjI3OnBhdGhcIiAvPlxuICAgICAgICAgICAgICAgICAgICAgICAgICA8cGF0aCBkPSdNNiAzYTIgMiAwIDAwLTIgMnYxMWEyIDIgMCAwMDIgMmg4YTIgMiAwIDAwMi0yVjVhMiAyIDAgMDAtMi0yIDMgMyAwIDAxLTMgM0g5YTMgMyAwIDAxLTMtM3onICBkYXRhLWluc3AtcGF0aD1cIndlYi9jbGFzc2ljL3NyYy9jb21wb25lbnRzL2NvbW1vbi91aS9DaGFubmVsS2V5RGlzcGxheS5qc3g6MTg1OjI3OnBhdGhcIiAvPlxuICAgICAgICAgICAgICAgICAgICAgICAgPC9zdmc+XG4gICAgICAgICAgICAgICAgICAgICAgfVxuICAgICAgICAgICAgICAgICAgICAgIG9uQ2xpY2s9eygpID0+IGhhbmRsZUNvcHlLZXkoa2V5SXRlbS5jb250ZW50KX1cbiAgICAgICAgICAgICAgICAgICAgIGRhdGEtaW5zcC1wYXRoPVwid2ViL2NsYXNzaWMvc3JjL2NvbXBvbmVudHMvY29tbW9uL3VpL0NoYW5uZWxLZXlEaXNwbGF5LmpzeDoxNzQ6MjE6QnV0dG9uXCIgPlxuICAgICAgICAgICAgICAgICAgICAgIHt0KCflpI3liLYnKX1cbiAgICAgICAgICAgICAgICAgICAgPC9CdXR0b24+XG4gICAgICAgICAgICAgICAgICA8L2Rpdj5cbiAgICAgICAgICAgICAgICA8L2Rpdj5cblxuICAgICAgICAgICAgICAgIDxkaXYgY2xhc3NOYW1lPSdiZy1ncmF5LTUwIGRhcms6YmctZ3JheS04MDAgcm91bmRlZC1sZyBwLTMgbWF4LWgtNDAgb3ZlcmZsb3ctYXV0bycgZGF0YS1pbnNwLXBhdGg9XCJ3ZWIvY2xhc3NpYy9zcmMvY29tcG9uZW50cy9jb21tb24vdWkvQ2hhbm5lbEtleURpc3BsYXkuanN4OjE5NToxNzpkaXZcIiA+XG4gICAgICAgICAgICAgICAgICA8VHlwb2dyYXBoeS5UZXh0XG4gICAgICAgICAgICAgICAgICAgIGNvZGVcbiAgICAgICAgICAgICAgICAgICAgY2xhc3NOYW1lPSd0ZXh0LXhzIGZvbnQtbW9ubyBicmVhay1hbGwgd2hpdGVzcGFjZS1wcmUtd3JhcCB0ZXh0LWdyYXktODAwIGRhcms6dGV4dC1ncmF5LTIwMCdcbiAgICAgICAgICAgICAgICAgID5cbiAgICAgICAgICAgICAgICAgICAge2tleUl0ZW0uY29udGVudH1cbiAgICAgICAgICAgICAgICAgIDwvVHlwb2dyYXBoeS5UZXh0PlxuICAgICAgICAgICAgICAgIDwvZGl2PlxuXG4gICAgICAgICAgICAgICAge2tleUl0ZW0udHlwZSA9PT0gJ2pzb24nICYmIChcbiAgICAgICAgICAgICAgICAgIDxUeXBvZ3JhcGh5LlRleHRcbiAgICAgICAgICAgICAgICAgICAgdHlwZT0ndGVydGlhcnknXG4gICAgICAgICAgICAgICAgICAgIHNpemU9J3NtYWxsJ1xuICAgICAgICAgICAgICAgICAgICBjbGFzc05hbWU9J2Jsb2NrJ1xuICAgICAgICAgICAgICAgICAgPlxuICAgICAgICAgICAgICAgICAgICB7dCgnSlNPTuagvOW8j+WvhumSpe+8jOivt+ehruS/neagvOW8j+ato+ehricpfVxuICAgICAgICAgICAgICAgICAgPC9UeXBvZ3JhcGh5LlRleHQ+XG4gICAgICAgICAgICAgICAgKX1cbiAgICAgICAgICAgICAgPC9kaXY+XG4gICAgICAgICAgICA8L0NhcmQ+XG4gICAgICAgICAgKSl9XG4gICAgICAgIDwvZGl2PlxuXG4gICAgICAgIHtpc011bHRpcGxlS2V5cyAmJiAoXG4gICAgICAgICAgPGRpdiBjbGFzc05hbWU9J2JnLWJsdWUtNTAgZGFyazpiZy1ibHVlLTkwMCByb3VuZGVkLWxnIHAtMycgZGF0YS1pbnNwLXBhdGg9XCJ3ZWIvY2xhc3NpYy9zcmMvY29tcG9uZW50cy9jb21tb24vdWkvQ2hhbm5lbEtleURpc3BsYXkuanN4OjIxOToxMTpkaXZcIiA+XG4gICAgICAgICAgICA8VHlwb2dyYXBoeS5UZXh0XG4gICAgICAgICAgICAgIHR5cGU9J3RlcnRpYXJ5J1xuICAgICAgICAgICAgICBzaXplPSdzbWFsbCdcbiAgICAgICAgICAgICAgY2xhc3NOYW1lPSd0ZXh0LWJsdWUtNzAwIGRhcms6dGV4dC1ibHVlLTMwMCdcbiAgICAgICAgICAgID5cbiAgICAgICAgICAgICAgPHN2Z1xuICAgICAgICAgICAgICAgIGNsYXNzTmFtZT0ndy00IGgtNCBpbmxpbmUgbXItMSdcbiAgICAgICAgICAgICAgICBmaWxsPSdjdXJyZW50Q29sb3InXG4gICAgICAgICAgICAgICAgdmlld0JveD0nMCAwIDIwIDIwJ1xuICAgICAgICAgICAgICAgZGF0YS1pbnNwLXBhdGg9XCJ3ZWIvY2xhc3NpYy9zcmMvY29tcG9uZW50cy9jb21tb24vdWkvQ2hhbm5lbEtleURpc3BsYXkuanN4OjIyNToxNTpzdmdcIiA+XG4gICAgICAgICAgICAgICAgPHBhdGhcbiAgICAgICAgICAgICAgICAgIGZpbGxSdWxlPSdldmVub2RkJ1xuICAgICAgICAgICAgICAgICAgZD0nTTE4IDEwYTggOCAwIDExLTE2IDAgOCA4IDAgMDExNiAwem0tNy00YTEgMSAwIDExLTIgMCAxIDEgMCAwMTIgMHpNOSA5YTEgMSAwIDAwMCAydjNhMSAxIDAgMDAxIDFoMWExIDEgMCAxMDAtMnYtM2ExIDEgMCAwMC0xLTFIOXonXG4gICAgICAgICAgICAgICAgICBjbGlwUnVsZT0nZXZlbm9kZCdcbiAgICAgICAgICAgICAgICAgZGF0YS1pbnNwLXBhdGg9XCJ3ZWIvY2xhc3NpYy9zcmMvY29tcG9uZW50cy9jb21tb24vdWkvQ2hhbm5lbEtleURpc3BsYXkuanN4OjIzMDoxNzpwYXRoXCIgLz5cbiAgICAgICAgICAgICAgPC9zdmc+XG4gICAgICAgICAgICAgIHt0KFxuICAgICAgICAgICAgICAgICfmo4DmtYvliLDlpJrkuKrlr4bpkqXvvIzmgqjlj6/ku6XljZXni6zlpI3liLbmr4/kuKrlr4bpkqXvvIzmiJbngrnlh7vlpI3liLblhajpg6jojrflj5blrozmlbTlhoXlrrnjgIInLFxuICAgICAgICAgICAgICApfVxuICAgICAgICAgICAgPC9UeXBvZ3JhcGh5LlRleHQ+XG4gICAgICAgICAgPC9kaXY+XG4gICAgICAgICl9XG4gICAgICA8L2Rpdj5cblxuICAgICAgey8qIOWuieWFqOitpuWRiiAqL31cbiAgICAgIHtzaG93V2FybmluZyAmJiAoXG4gICAgICAgIDxkaXYgY2xhc3NOYW1lPSdiZy15ZWxsb3ctNTAgZGFyazpiZy15ZWxsb3ctOTAwIHJvdW5kZWQtbGcgcC00JyBkYXRhLWluc3AtcGF0aD1cIndlYi9jbGFzc2ljL3NyYy9jb21wb25lbnRzL2NvbW1vbi91aS9DaGFubmVsS2V5RGlzcGxheS5qc3g6MjQ2Ojk6ZGl2XCIgPlxuICAgICAgICAgIDxkaXYgY2xhc3NOYW1lPSdmbGV4IGl0ZW1zLXN0YXJ0JyBkYXRhLWluc3AtcGF0aD1cIndlYi9jbGFzc2ljL3NyYy9jb21wb25lbnRzL2NvbW1vbi91aS9DaGFubmVsS2V5RGlzcGxheS5qc3g6MjQ3OjExOmRpdlwiID5cbiAgICAgICAgICAgIDxzdmdcbiAgICAgICAgICAgICAgY2xhc3NOYW1lPSd3LTUgaC01IHRleHQteWVsbG93LTYwMCBkYXJrOnRleHQteWVsbG93LTQwMCBtdC0wLjUgbXItMyBmbGV4LXNocmluay0wJ1xuICAgICAgICAgICAgICBmaWxsPSdjdXJyZW50Q29sb3InXG4gICAgICAgICAgICAgIHZpZXdCb3g9JzAgMCAyMCAyMCdcbiAgICAgICAgICAgICBkYXRhLWluc3AtcGF0aD1cIndlYi9jbGFzc2ljL3NyYy9jb21wb25lbnRzL2NvbW1vbi91aS9DaGFubmVsS2V5RGlzcGxheS5qc3g6MjQ4OjEzOnN2Z1wiID5cbiAgICAgICAgICAgICAgPHBhdGhcbiAgICAgICAgICAgICAgICBmaWxsUnVsZT0nZXZlbm9kZCdcbiAgICAgICAgICAgICAgICBkPSdNOC4yNTcgMy4wOTljLjc2NS0xLjM2IDIuNzIyLTEuMzYgMy40ODYgMGw1LjU4IDkuOTJjLjc1IDEuMzM0LS4yMTMgMi45OC0xLjc0MiAyLjk4SDQuNDJjLTEuNTMgMC0yLjQ5My0xLjY0Ni0xLjc0My0yLjk4bDUuNTgtOS45MnpNMTEgMTNhMSAxIDAgMTEtMiAwIDEgMSAwIDAxMiAwem0tMS04YTEgMSAwIDAwLTEgMXYzYTEgMSAwIDAwMiAwVjZhMSAxIDAgMDAtMS0xeidcbiAgICAgICAgICAgICAgICBjbGlwUnVsZT0nZXZlbm9kZCdcbiAgICAgICAgICAgICAgIGRhdGEtaW5zcC1wYXRoPVwid2ViL2NsYXNzaWMvc3JjL2NvbXBvbmVudHMvY29tbW9uL3VpL0NoYW5uZWxLZXlEaXNwbGF5LmpzeDoyNTM6MTU6cGF0aFwiIC8+XG4gICAgICAgICAgICA8L3N2Zz5cbiAgICAgICAgICAgIDxkaXYgZGF0YS1pbnNwLXBhdGg9XCJ3ZWIvY2xhc3NpYy9zcmMvY29tcG9uZW50cy9jb21tb24vdWkvQ2hhbm5lbEtleURpc3BsYXkuanN4OjI1OToxMzpkaXZcIj5cbiAgICAgICAgICAgICAgPFR5cG9ncmFwaHkuVGV4dFxuICAgICAgICAgICAgICAgIHN0cm9uZ1xuICAgICAgICAgICAgICAgIGNsYXNzTmFtZT0ndGV4dC15ZWxsb3ctODAwIGRhcms6dGV4dC15ZWxsb3ctMjAwJ1xuICAgICAgICAgICAgICA+XG4gICAgICAgICAgICAgICAge3QoJ+WuieWFqOaPkOmGkicpfVxuICAgICAgICAgICAgICA8L1R5cG9ncmFwaHkuVGV4dD5cbiAgICAgICAgICAgICAgPFR5cG9ncmFwaHkuVGV4dCBjbGFzc05hbWU9J2Jsb2NrIHRleHQteWVsbG93LTcwMCBkYXJrOnRleHQteWVsbG93LTMwMCB0ZXh0LXNtIG10LTEnPlxuICAgICAgICAgICAgICAgIHt3YXJuaW5nVGV4dCB8fFxuICAgICAgICAgICAgICAgICAgdChcbiAgICAgICAgICAgICAgICAgICAgJ+ivt+WmpeWWhOS/neeuoeWvhumSpeS/oeaBr++8jOS4jeimgeazhOmcsue7meS7luS6uuOAguWmguacieWuieWFqOeWkeiZke+8jOivt+WPiuaXtuabtOaNouWvhumSpeOAgicsXG4gICAgICAgICAgICAgICAgICApfVxuICAgICAgICAgICAgICA8L1R5cG9ncmFwaHkuVGV4dD5cbiAgICAgICAgICAgIDwvZGl2PlxuICAgICAgICAgIDwvZGl2PlxuICAgICAgICA8L2Rpdj5cbiAgICAgICl9XG4gICAgPC9kaXY+XG4gICk7XG59O1xuXG5leHBvcnQgZGVmYXVsdCBDaGFubmVsS2V5RGlzcGxheTtcbiJdLCJmaWxlIjoiRTovbmV3LWFwaS93ZWIvY2xhc3NpYy9zcmMvY29tcG9uZW50cy9jb21tb24vdWkvQ2hhbm5lbEtleURpc3BsYXkuanN4In0=

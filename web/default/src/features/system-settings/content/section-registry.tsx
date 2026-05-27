@@ -20,6 +20,7 @@ import type { ContentSettings } from '../types'
 import { createSectionRegistry } from '../utils/section-registry'
 import { AnnouncementsSection } from './announcements-section'
 import { ApiInfoSection } from './api-info-section'
+import { AsyncImageTaskSettingsSection } from './async-image-task-settings-section'
 import { ChatSettingsSection } from './chat-settings-section'
 import { DashboardSection } from './dashboard-section'
 import { DrawingSettingsSection } from './drawing-settings-section'
@@ -35,6 +36,21 @@ function validateDataExportDefaultTime(value: string): 'week' | 'hour' | 'day' {
   }
   // Default to 'hour' if value is unexpected
   return 'hour'
+}
+
+function validateAsyncImageRetentionHours(
+  value: string
+): '2' | '6' | '12' | '18' | '24' {
+  if (
+    value === '2' ||
+    value === '6' ||
+    value === '12' ||
+    value === '18' ||
+    value === '24'
+  ) {
+    return value
+  }
+  return '24'
 }
 
 const CONTENT_SECTIONS = [
@@ -112,6 +128,22 @@ const CONTENT_SECTIONS = [
           MjForwardUrlEnabled: settings.MjForwardUrlEnabled,
           MjModeClearEnabled: settings.MjModeClearEnabled,
           MjActionCheckSuccessEnabled: settings.MjActionCheckSuccessEnabled,
+        }}
+      />
+    ),
+  },
+  {
+    id: 'async-image-tasks',
+    titleKey: 'Async Image Tasks',
+    build: (settings: ContentSettings) => (
+      <AsyncImageTaskSettingsSection
+        defaultValues={{
+          AsyncImageInternalTaskEnabled: settings.AsyncImageInternalTaskEnabled,
+          AsyncImageRetentionHours: validateAsyncImageRetentionHours(
+            settings.AsyncImageRetentionHours
+          ),
+          AsyncImageWorkerConcurrency: settings.AsyncImageWorkerConcurrency,
+          AsyncImageMaxUnfinishedTasks: settings.AsyncImageMaxUnfinishedTasks,
         }}
       />
     ),

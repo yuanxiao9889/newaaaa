@@ -1,0 +1,609 @@
+import { createHotContext as __vite__createHotContext } from "/@vite/client";import.meta.hot = __vite__createHotContext("/src/components/table/redemptions/modals/EditRedemptionModal.jsx");import __vite__cjsImport0_react_jsxDevRuntime from "/node_modules/.vite/deps/react_jsx-dev-runtime.js?v=1c6fcc49"; const Fragment = __vite__cjsImport0_react_jsxDevRuntime["Fragment"]; const jsxDEV = __vite__cjsImport0_react_jsxDevRuntime["jsxDEV"];
+import RefreshRuntime from "/@react-refresh";
+const inWebWorker = typeof WorkerGlobalScope !== "undefined" && self instanceof WorkerGlobalScope;
+let prevRefreshReg;
+let prevRefreshSig;
+if (import.meta.hot && !inWebWorker) {
+  if (!window.__vite_plugin_react_preamble_installed__) {
+    throw new Error("@vitejs/plugin-react can't detect preamble. Something is wrong. See https://github.com/vitejs/vite-plugin-react/pull/11#discussion_r430879201");
+  }
+  prevRefreshReg = window.$RefreshReg$;
+  prevRefreshSig = window.$RefreshSig$;
+  window.$RefreshReg$ = (type, id) => {
+    RefreshRuntime.register(type, "E:/new-api/web/classic/src/components/table/redemptions/modals/EditRedemptionModal.jsx " + id);
+  };
+  window.$RefreshSig$ = RefreshRuntime.createSignatureFunctionForTransform;
+}
+var _s = $RefreshSig$();
+import __vite__cjsImport3_react from "/node_modules/.vite/deps/react.js?v=1c6fcc49"; const React = __vite__cjsImport3_react.__esModule ? __vite__cjsImport3_react.default : __vite__cjsImport3_react; const useEffect = __vite__cjsImport3_react["useEffect"]; const useState = __vite__cjsImport3_react["useState"]; const useRef = __vite__cjsImport3_react["useRef"];
+import { useTranslation } from "/node_modules/.vite/deps/react-i18next.js?v=8646de14";
+import {
+  API,
+  downloadTextAsFile,
+  showError,
+  showSuccess,
+  renderQuota,
+  getCurrencyConfig
+} from "/src/helpers/index.js";
+import {
+  quotaToDisplayAmount,
+  displayAmountToQuota
+} from "/src/helpers/quota.js";
+import { useIsMobile } from "/src/hooks/common/useIsMobile.js";
+import {
+  Button,
+  Modal,
+  SideSheet,
+  Space,
+  Spin,
+  Typography,
+  Card,
+  Tag,
+  Form,
+  Avatar,
+  Row,
+  Col,
+  InputNumber
+} from "/node_modules/.vite/deps/@douyinfe_semi-ui.js?v=0f3c8be3";
+import {
+  IconCreditCard,
+  IconSave,
+  IconClose,
+  IconGift
+} from "/node_modules/.vite/deps/@douyinfe_semi-icons.js?v=4a36e176";
+const { Text, Title } = Typography;
+const EditRedemptionModal = (props) => {
+  _s();
+  const { t } = useTranslation();
+  const isEdit = props.editingRedemption.id !== void 0;
+  const [loading, setLoading] = useState(isEdit);
+  const isMobile = useIsMobile();
+  const formApiRef = useRef(null);
+  const [showQuotaInput, setShowQuotaInput] = useState(false);
+  const getInitValues = () => ({
+    name: "",
+    quota: 1e5,
+    amount: Number(quotaToDisplayAmount(1e5).toFixed(6)),
+    count: 1,
+    expired_time: null
+  });
+  const handleCancel = () => {
+    props.handleClose();
+  };
+  const loadRedemption = async () => {
+    setLoading(true);
+    let res = await API.get(`/api/redemption/${props.editingRedemption.id}`);
+    const { success, message, data } = res.data;
+    if (success) {
+      if (data.expired_time === 0) {
+        data.expired_time = null;
+      } else {
+        data.expired_time = new Date(data.expired_time * 1e3);
+      }
+      data.amount = Number(quotaToDisplayAmount(data.quota || 0).toFixed(6));
+      formApiRef.current?.setValues({ ...getInitValues(), ...data });
+    } else {
+      showError(message);
+    }
+    setLoading(false);
+  };
+  useEffect(() => {
+    if (formApiRef.current) {
+      if (isEdit) {
+        loadRedemption();
+      } else {
+        formApiRef.current.setValues(getInitValues());
+      }
+    }
+  }, [props.editingRedemption.id]);
+  const submit = async (values) => {
+    let name = values.name;
+    if (!isEdit && (!name || name === "")) {
+      name = renderQuota(values.quota);
+    }
+    setLoading(true);
+    let localInputs = { ...values };
+    localInputs.count = parseInt(localInputs.count) || 0;
+    localInputs.quota = displayAmountToQuota(localInputs.amount);
+    if (localInputs.quota <= 0) {
+      showError(t("请输入金额"));
+      setLoading(false);
+      return;
+    }
+    localInputs.name = name;
+    if (!localInputs.expired_time) {
+      localInputs.expired_time = 0;
+    } else {
+      localInputs.expired_time = Math.floor(
+        localInputs.expired_time.getTime() / 1e3
+      );
+    }
+    let res;
+    if (isEdit) {
+      res = await API.put(`/api/redemption/`, {
+        ...localInputs,
+        id: parseInt(props.editingRedemption.id)
+      });
+    } else {
+      res = await API.post(`/api/redemption/`, {
+        ...localInputs
+      });
+    }
+    const { success, message, data } = res.data;
+    if (success) {
+      if (isEdit) {
+        showSuccess(t("兑换码更新成功！"));
+        props.refresh();
+        props.handleClose();
+      } else {
+        showSuccess(t("兑换码创建成功！"));
+        props.refresh();
+        formApiRef.current?.setValues(getInitValues());
+        props.handleClose();
+      }
+    } else {
+      showError(message);
+    }
+    if (!isEdit && data) {
+      let text = "";
+      for (let i = 0; i < data.length; i++) {
+        text += data[i] + "\n";
+      }
+      Modal.confirm({
+        title: t("兑换码创建成功"),
+        content: /* @__PURE__ */ jsxDEV("div", { "data-insp-path": "web/classic/src/components/table/redemptions/modals/EditRedemptionModal.jsx:163:11:div", children: [
+          /* @__PURE__ */ jsxDEV("p", { "data-insp-path": "web/classic/src/components/table/redemptions/modals/EditRedemptionModal.jsx:164:13:p", children: t("兑换码创建成功，是否下载兑换码？") }, void 0, false, {
+            fileName: "E:/new-api/web/classic/src/components/table/redemptions/modals/EditRedemptionModal.jsx",
+            lineNumber: 164,
+            columnNumber: 13
+          }, this),
+          /* @__PURE__ */ jsxDEV("p", { "data-insp-path": "web/classic/src/components/table/redemptions/modals/EditRedemptionModal.jsx:165:13:p", children: t("兑换码将以文本文件的形式下载，文件名为兑换码的名称。") }, void 0, false, {
+            fileName: "E:/new-api/web/classic/src/components/table/redemptions/modals/EditRedemptionModal.jsx",
+            lineNumber: 165,
+            columnNumber: 13
+          }, this)
+        ] }, void 0, true, {
+          fileName: "E:/new-api/web/classic/src/components/table/redemptions/modals/EditRedemptionModal.jsx",
+          lineNumber: 163,
+          columnNumber: 9
+        }, this),
+        onOk: () => {
+          downloadTextAsFile(text, `${localInputs.name}.txt`);
+        }
+      });
+    }
+    setLoading(false);
+  };
+  return /* @__PURE__ */ jsxDEV(Fragment, { children: /* @__PURE__ */ jsxDEV(
+    SideSheet,
+    {
+      placement: isEdit ? "right" : "left",
+      title: /* @__PURE__ */ jsxDEV(Space, { "data-insp-path": "web/classic/src/components/table/redemptions/modals/EditRedemptionModal.jsx:181:11:Space", children: [
+        isEdit ? /* @__PURE__ */ jsxDEV(Tag, { color: "blue", shape: "circle", "data-insp-path": "web/classic/src/components/table/redemptions/modals/EditRedemptionModal.jsx:183:15:Tag", children: t("更新") }, void 0, false, {
+          fileName: "E:/new-api/web/classic/src/components/table/redemptions/modals/EditRedemptionModal.jsx",
+          lineNumber: 183,
+          columnNumber: 11
+        }, this) : /* @__PURE__ */ jsxDEV(Tag, { color: "green", shape: "circle", "data-insp-path": "web/classic/src/components/table/redemptions/modals/EditRedemptionModal.jsx:187:15:Tag", children: t("新建") }, void 0, false, {
+          fileName: "E:/new-api/web/classic/src/components/table/redemptions/modals/EditRedemptionModal.jsx",
+          lineNumber: 187,
+          columnNumber: 11
+        }, this),
+        /* @__PURE__ */ jsxDEV(Title, { heading: 4, className: "m-0", "data-insp-path": "web/classic/src/components/table/redemptions/modals/EditRedemptionModal.jsx:191:13:Title", children: isEdit ? t("更新兑换码信息") : t("创建新的兑换码") }, void 0, false, {
+          fileName: "E:/new-api/web/classic/src/components/table/redemptions/modals/EditRedemptionModal.jsx",
+          lineNumber: 191,
+          columnNumber: 13
+        }, this)
+      ] }, void 0, true, {
+        fileName: "E:/new-api/web/classic/src/components/table/redemptions/modals/EditRedemptionModal.jsx",
+        lineNumber: 181,
+        columnNumber: 9
+      }, this),
+      bodyStyle: { padding: "0" },
+      visible: props.visiable,
+      width: isMobile ? "100%" : 600,
+      footer: /* @__PURE__ */ jsxDEV("div", { className: "flex justify-end bg-white", "data-insp-path": "web/classic/src/components/table/redemptions/modals/EditRedemptionModal.jsx:200:11:div", children: /* @__PURE__ */ jsxDEV(Space, { "data-insp-path": "web/classic/src/components/table/redemptions/modals/EditRedemptionModal.jsx:201:13:Space", children: [
+        /* @__PURE__ */ jsxDEV(
+          Button,
+          {
+            theme: "solid",
+            onClick: () => formApiRef.current?.submitForm(),
+            icon: /* @__PURE__ */ jsxDEV(IconSave, { "data-insp-path": "web/classic/src/components/table/redemptions/modals/EditRedemptionModal.jsx:205:23:IconSave" }, void 0, false, {
+              fileName: "E:/new-api/web/classic/src/components/table/redemptions/modals/EditRedemptionModal.jsx",
+              lineNumber: 205,
+              columnNumber: 21
+            }, this),
+            loading,
+            "data-insp-path": "web/classic/src/components/table/redemptions/modals/EditRedemptionModal.jsx:202:15:Button",
+            children: t("提交")
+          },
+          void 0,
+          false,
+          {
+            fileName: "E:/new-api/web/classic/src/components/table/redemptions/modals/EditRedemptionModal.jsx",
+            lineNumber: 202,
+            columnNumber: 15
+          },
+          this
+        ),
+        /* @__PURE__ */ jsxDEV(
+          Button,
+          {
+            theme: "light",
+            type: "primary",
+            onClick: handleCancel,
+            icon: /* @__PURE__ */ jsxDEV(IconClose, { "data-insp-path": "web/classic/src/components/table/redemptions/modals/EditRedemptionModal.jsx:214:23:IconClose" }, void 0, false, {
+              fileName: "E:/new-api/web/classic/src/components/table/redemptions/modals/EditRedemptionModal.jsx",
+              lineNumber: 214,
+              columnNumber: 21
+            }, this),
+            "data-insp-path": "web/classic/src/components/table/redemptions/modals/EditRedemptionModal.jsx:210:15:Button",
+            children: t("取消")
+          },
+          void 0,
+          false,
+          {
+            fileName: "E:/new-api/web/classic/src/components/table/redemptions/modals/EditRedemptionModal.jsx",
+            lineNumber: 210,
+            columnNumber: 15
+          },
+          this
+        )
+      ] }, void 0, true, {
+        fileName: "E:/new-api/web/classic/src/components/table/redemptions/modals/EditRedemptionModal.jsx",
+        lineNumber: 201,
+        columnNumber: 13
+      }, this) }, void 0, false, {
+        fileName: "E:/new-api/web/classic/src/components/table/redemptions/modals/EditRedemptionModal.jsx",
+        lineNumber: 200,
+        columnNumber: 9
+      }, this),
+      closeIcon: null,
+      onCancel: () => handleCancel(),
+      "data-insp-path": "web/classic/src/components/table/redemptions/modals/EditRedemptionModal.jsx:178:7:SideSheet",
+      children: /* @__PURE__ */ jsxDEV(Spin, { spinning: loading, "data-insp-path": "web/classic/src/components/table/redemptions/modals/EditRedemptionModal.jsx:224:9:Spin", children: /* @__PURE__ */ jsxDEV(
+        Form,
+        {
+          initValues: getInitValues(),
+          getFormApi: (api) => formApiRef.current = api,
+          onSubmit: submit,
+          "data-insp-path": "web/classic/src/components/table/redemptions/modals/EditRedemptionModal.jsx:225:11:Form",
+          children: ({ values }) => /* @__PURE__ */ jsxDEV("div", { className: "p-2", "data-insp-path": "web/classic/src/components/table/redemptions/modals/EditRedemptionModal.jsx:231:15:div", children: [
+            /* @__PURE__ */ jsxDEV(Card, { className: "!rounded-2xl shadow-sm border-0 mb-6", "data-insp-path": "web/classic/src/components/table/redemptions/modals/EditRedemptionModal.jsx:232:17:Card", children: [
+              /* @__PURE__ */ jsxDEV("div", { className: "flex items-center mb-2", "data-insp-path": "web/classic/src/components/table/redemptions/modals/EditRedemptionModal.jsx:234:19:div", children: [
+                /* @__PURE__ */ jsxDEV(
+                  Avatar,
+                  {
+                    size: "small",
+                    color: "blue",
+                    className: "mr-2 shadow-md",
+                    "data-insp-path": "web/classic/src/components/table/redemptions/modals/EditRedemptionModal.jsx:235:21:Avatar",
+                    children: /* @__PURE__ */ jsxDEV(IconGift, { size: 16, "data-insp-path": "web/classic/src/components/table/redemptions/modals/EditRedemptionModal.jsx:240:23:IconGift" }, void 0, false, {
+                      fileName: "E:/new-api/web/classic/src/components/table/redemptions/modals/EditRedemptionModal.jsx",
+                      lineNumber: 240,
+                      columnNumber: 23
+                    }, this)
+                  },
+                  void 0,
+                  false,
+                  {
+                    fileName: "E:/new-api/web/classic/src/components/table/redemptions/modals/EditRedemptionModal.jsx",
+                    lineNumber: 235,
+                    columnNumber: 21
+                  },
+                  this
+                ),
+                /* @__PURE__ */ jsxDEV("div", { "data-insp-path": "web/classic/src/components/table/redemptions/modals/EditRedemptionModal.jsx:242:21:div", children: [
+                  /* @__PURE__ */ jsxDEV(Text, { className: "text-lg font-medium", "data-insp-path": "web/classic/src/components/table/redemptions/modals/EditRedemptionModal.jsx:243:23:Text", children: t("基本信息") }, void 0, false, {
+                    fileName: "E:/new-api/web/classic/src/components/table/redemptions/modals/EditRedemptionModal.jsx",
+                    lineNumber: 243,
+                    columnNumber: 23
+                  }, this),
+                  /* @__PURE__ */ jsxDEV("div", { className: "text-xs text-gray-600", "data-insp-path": "web/classic/src/components/table/redemptions/modals/EditRedemptionModal.jsx:246:23:div", children: t("设置兑换码的基本信息") }, void 0, false, {
+                    fileName: "E:/new-api/web/classic/src/components/table/redemptions/modals/EditRedemptionModal.jsx",
+                    lineNumber: 246,
+                    columnNumber: 23
+                  }, this)
+                ] }, void 0, true, {
+                  fileName: "E:/new-api/web/classic/src/components/table/redemptions/modals/EditRedemptionModal.jsx",
+                  lineNumber: 242,
+                  columnNumber: 21
+                }, this)
+              ] }, void 0, true, {
+                fileName: "E:/new-api/web/classic/src/components/table/redemptions/modals/EditRedemptionModal.jsx",
+                lineNumber: 234,
+                columnNumber: 19
+              }, this),
+              /* @__PURE__ */ jsxDEV(Row, { gutter: 12, "data-insp-path": "web/classic/src/components/table/redemptions/modals/EditRedemptionModal.jsx:252:19:Row", children: [
+                /* @__PURE__ */ jsxDEV(Col, { span: 24, "data-insp-path": "web/classic/src/components/table/redemptions/modals/EditRedemptionModal.jsx:253:21:Col", children: /* @__PURE__ */ jsxDEV(
+                  Form.Input,
+                  {
+                    field: "name",
+                    label: t("名称"),
+                    placeholder: t("请输入名称"),
+                    style: { width: "100%" },
+                    rules: !isEdit ? [] : [{ required: true, message: t("请输入名称") }],
+                    showClear: true
+                  },
+                  void 0,
+                  false,
+                  {
+                    fileName: "E:/new-api/web/classic/src/components/table/redemptions/modals/EditRedemptionModal.jsx",
+                    lineNumber: 254,
+                    columnNumber: 23
+                  },
+                  this
+                ) }, void 0, false, {
+                  fileName: "E:/new-api/web/classic/src/components/table/redemptions/modals/EditRedemptionModal.jsx",
+                  lineNumber: 253,
+                  columnNumber: 21
+                }, this),
+                /* @__PURE__ */ jsxDEV(Col, { span: 24, "data-insp-path": "web/classic/src/components/table/redemptions/modals/EditRedemptionModal.jsx:267:21:Col", children: /* @__PURE__ */ jsxDEV(
+                  Form.DatePicker,
+                  {
+                    field: "expired_time",
+                    label: t("过期时间"),
+                    type: "dateTime",
+                    placeholder: t("选择过期时间（可选，留空为永久）"),
+                    style: { width: "100%" },
+                    showClear: true
+                  },
+                  void 0,
+                  false,
+                  {
+                    fileName: "E:/new-api/web/classic/src/components/table/redemptions/modals/EditRedemptionModal.jsx",
+                    lineNumber: 268,
+                    columnNumber: 23
+                  },
+                  this
+                ) }, void 0, false, {
+                  fileName: "E:/new-api/web/classic/src/components/table/redemptions/modals/EditRedemptionModal.jsx",
+                  lineNumber: 267,
+                  columnNumber: 21
+                }, this)
+              ] }, void 0, true, {
+                fileName: "E:/new-api/web/classic/src/components/table/redemptions/modals/EditRedemptionModal.jsx",
+                lineNumber: 252,
+                columnNumber: 19
+              }, this)
+            ] }, void 0, true, {
+              fileName: "E:/new-api/web/classic/src/components/table/redemptions/modals/EditRedemptionModal.jsx",
+              lineNumber: 232,
+              columnNumber: 17
+            }, this),
+            /* @__PURE__ */ jsxDEV(Card, { className: "!rounded-2xl shadow-sm border-0", "data-insp-path": "web/classic/src/components/table/redemptions/modals/EditRedemptionModal.jsx:280:17:Card", children: [
+              /* @__PURE__ */ jsxDEV("div", { className: "flex items-center mb-2", "data-insp-path": "web/classic/src/components/table/redemptions/modals/EditRedemptionModal.jsx:282:19:div", children: [
+                /* @__PURE__ */ jsxDEV(
+                  Avatar,
+                  {
+                    size: "small",
+                    color: "green",
+                    className: "mr-2 shadow-md",
+                    "data-insp-path": "web/classic/src/components/table/redemptions/modals/EditRedemptionModal.jsx:283:21:Avatar",
+                    children: /* @__PURE__ */ jsxDEV(IconCreditCard, { size: 16, "data-insp-path": "web/classic/src/components/table/redemptions/modals/EditRedemptionModal.jsx:288:23:IconCreditCard" }, void 0, false, {
+                      fileName: "E:/new-api/web/classic/src/components/table/redemptions/modals/EditRedemptionModal.jsx",
+                      lineNumber: 288,
+                      columnNumber: 23
+                    }, this)
+                  },
+                  void 0,
+                  false,
+                  {
+                    fileName: "E:/new-api/web/classic/src/components/table/redemptions/modals/EditRedemptionModal.jsx",
+                    lineNumber: 283,
+                    columnNumber: 21
+                  },
+                  this
+                ),
+                /* @__PURE__ */ jsxDEV("div", { "data-insp-path": "web/classic/src/components/table/redemptions/modals/EditRedemptionModal.jsx:290:21:div", children: [
+                  /* @__PURE__ */ jsxDEV(Text, { className: "text-lg font-medium", "data-insp-path": "web/classic/src/components/table/redemptions/modals/EditRedemptionModal.jsx:291:23:Text", children: t("额度设置") }, void 0, false, {
+                    fileName: "E:/new-api/web/classic/src/components/table/redemptions/modals/EditRedemptionModal.jsx",
+                    lineNumber: 291,
+                    columnNumber: 23
+                  }, this),
+                  /* @__PURE__ */ jsxDEV("div", { className: "text-xs text-gray-600", "data-insp-path": "web/classic/src/components/table/redemptions/modals/EditRedemptionModal.jsx:294:23:div", children: t("设置兑换码的额度和数量") }, void 0, false, {
+                    fileName: "E:/new-api/web/classic/src/components/table/redemptions/modals/EditRedemptionModal.jsx",
+                    lineNumber: 294,
+                    columnNumber: 23
+                  }, this)
+                ] }, void 0, true, {
+                  fileName: "E:/new-api/web/classic/src/components/table/redemptions/modals/EditRedemptionModal.jsx",
+                  lineNumber: 290,
+                  columnNumber: 21
+                }, this)
+              ] }, void 0, true, {
+                fileName: "E:/new-api/web/classic/src/components/table/redemptions/modals/EditRedemptionModal.jsx",
+                lineNumber: 282,
+                columnNumber: 19
+              }, this),
+              /* @__PURE__ */ jsxDEV(Row, { gutter: 12, "data-insp-path": "web/classic/src/components/table/redemptions/modals/EditRedemptionModal.jsx:300:19:Row", children: [
+                /* @__PURE__ */ jsxDEV(Col, { span: 24, "data-insp-path": "web/classic/src/components/table/redemptions/modals/EditRedemptionModal.jsx:301:21:Col", children: [
+                  /* @__PURE__ */ jsxDEV(
+                    Form.InputNumber,
+                    {
+                      field: "amount",
+                      label: t("金额"),
+                      prefix: getCurrencyConfig().symbol,
+                      placeholder: t("输入金额"),
+                      precision: 6,
+                      min: 0,
+                      step: 1e-6,
+                      style: { width: "100%" },
+                      onChange: (val) => {
+                        const amount = val === "" || val == null ? 0 : val;
+                        formApiRef.current?.setValue("amount", amount);
+                        formApiRef.current?.setValue(
+                          "quota",
+                          displayAmountToQuota(amount)
+                        );
+                      },
+                      showClear: true
+                    },
+                    void 0,
+                    false,
+                    {
+                      fileName: "E:/new-api/web/classic/src/components/table/redemptions/modals/EditRedemptionModal.jsx",
+                      lineNumber: 302,
+                      columnNumber: 23
+                    },
+                    this
+                  ),
+                  /* @__PURE__ */ jsxDEV(
+                    "div",
+                    {
+                      className: "text-xs cursor-pointer mt-1",
+                      style: { color: "var(--semi-color-text-2)" },
+                      onClick: () => setShowQuotaInput((v) => !v),
+                      "data-insp-path": "web/classic/src/components/table/redemptions/modals/EditRedemptionModal.jsx:321:23:div",
+                      children: showQuotaInput ? `▾ ${t("收起原生额度输入")}` : `▸ ${t("使用原生额度输入")}`
+                    },
+                    void 0,
+                    false,
+                    {
+                      fileName: "E:/new-api/web/classic/src/components/table/redemptions/modals/EditRedemptionModal.jsx",
+                      lineNumber: 321,
+                      columnNumber: 23
+                    },
+                    this
+                  ),
+                  /* @__PURE__ */ jsxDEV("div", { style: { display: showQuotaInput ? "block" : "none" }, className: "mt-2", "data-insp-path": "web/classic/src/components/table/redemptions/modals/EditRedemptionModal.jsx:330:23:div", children: /* @__PURE__ */ jsxDEV(
+                    Form.InputNumber,
+                    {
+                      field: "quota",
+                      label: t("额度"),
+                      placeholder: t("输入额度"),
+                      rules: [
+                        { required: true, message: t("请输入额度") },
+                        {
+                          validator: (rule, v) => {
+                            const num = parseInt(v, 10);
+                            return num > 0 ? Promise.resolve() : Promise.reject(t("额度必须大于0"));
+                          }
+                        }
+                      ],
+                      onChange: (val) => {
+                        const quota = val === "" || val == null ? 0 : val;
+                        formApiRef.current?.setValue("quota", quota);
+                        formApiRef.current?.setValue(
+                          "amount",
+                          Number(quotaToDisplayAmount(quota).toFixed(6))
+                        );
+                      },
+                      style: { width: "100%" },
+                      showClear: true
+                    },
+                    void 0,
+                    false,
+                    {
+                      fileName: "E:/new-api/web/classic/src/components/table/redemptions/modals/EditRedemptionModal.jsx",
+                      lineNumber: 331,
+                      columnNumber: 25
+                    },
+                    this
+                  ) }, void 0, false, {
+                    fileName: "E:/new-api/web/classic/src/components/table/redemptions/modals/EditRedemptionModal.jsx",
+                    lineNumber: 330,
+                    columnNumber: 23
+                  }, this)
+                ] }, void 0, true, {
+                  fileName: "E:/new-api/web/classic/src/components/table/redemptions/modals/EditRedemptionModal.jsx",
+                  lineNumber: 301,
+                  columnNumber: 21
+                }, this),
+                !isEdit && /* @__PURE__ */ jsxDEV(Col, { span: 12, "data-insp-path": "web/classic/src/components/table/redemptions/modals/EditRedemptionModal.jsx:360:23:Col", children: /* @__PURE__ */ jsxDEV(
+                  Form.InputNumber,
+                  {
+                    field: "count",
+                    label: t("生成数量"),
+                    min: 1,
+                    rules: [
+                      { required: true, message: t("请输入生成数量") },
+                      {
+                        validator: (rule, v) => {
+                          const num = parseInt(v, 10);
+                          return num > 0 ? Promise.resolve() : Promise.reject(t("生成数量必须大于0"));
+                        }
+                      }
+                    ],
+                    style: { width: "100%" },
+                    showClear: true
+                  },
+                  void 0,
+                  false,
+                  {
+                    fileName: "E:/new-api/web/classic/src/components/table/redemptions/modals/EditRedemptionModal.jsx",
+                    lineNumber: 361,
+                    columnNumber: 25
+                  },
+                  this
+                ) }, void 0, false, {
+                  fileName: "E:/new-api/web/classic/src/components/table/redemptions/modals/EditRedemptionModal.jsx",
+                  lineNumber: 360,
+                  columnNumber: 19
+                }, this)
+              ] }, void 0, true, {
+                fileName: "E:/new-api/web/classic/src/components/table/redemptions/modals/EditRedemptionModal.jsx",
+                lineNumber: 300,
+                columnNumber: 19
+              }, this)
+            ] }, void 0, true, {
+              fileName: "E:/new-api/web/classic/src/components/table/redemptions/modals/EditRedemptionModal.jsx",
+              lineNumber: 280,
+              columnNumber: 17
+            }, this)
+          ] }, void 0, true, {
+            fileName: "E:/new-api/web/classic/src/components/table/redemptions/modals/EditRedemptionModal.jsx",
+            lineNumber: 231,
+            columnNumber: 13
+          }, this)
+        },
+        void 0,
+        false,
+        {
+          fileName: "E:/new-api/web/classic/src/components/table/redemptions/modals/EditRedemptionModal.jsx",
+          lineNumber: 225,
+          columnNumber: 11
+        },
+        this
+      ) }, void 0, false, {
+        fileName: "E:/new-api/web/classic/src/components/table/redemptions/modals/EditRedemptionModal.jsx",
+        lineNumber: 224,
+        columnNumber: 9
+      }, this)
+    },
+    void 0,
+    false,
+    {
+      fileName: "E:/new-api/web/classic/src/components/table/redemptions/modals/EditRedemptionModal.jsx",
+      lineNumber: 178,
+      columnNumber: 7
+    },
+    this
+  ) }, void 0, false, {
+    fileName: "E:/new-api/web/classic/src/components/table/redemptions/modals/EditRedemptionModal.jsx",
+    lineNumber: 177,
+    columnNumber: 5
+  }, this);
+};
+_s(EditRedemptionModal, "ez6w8BtdL23xeUJbPuWrOvEdc4E=", false, function() {
+  return [useTranslation, useIsMobile];
+});
+_c = EditRedemptionModal;
+export default EditRedemptionModal;
+var _c;
+$RefreshReg$(_c, "EditRedemptionModal");
+if (import.meta.hot && !inWebWorker) {
+  window.$RefreshReg$ = prevRefreshReg;
+  window.$RefreshSig$ = prevRefreshSig;
+}
+if (import.meta.hot && !inWebWorker) {
+  RefreshRuntime.__hmr_import(import.meta.url).then((currentExports) => {
+    RefreshRuntime.registerExportsForReactRefresh("E:/new-api/web/classic/src/components/table/redemptions/modals/EditRedemptionModal.jsx", currentExports);
+    import.meta.hot.accept((nextExports) => {
+      if (!nextExports) return;
+      const invalidateMessage = RefreshRuntime.validateRefreshBoundaryAndEnqueueUpdate("E:/new-api/web/classic/src/components/table/redemptions/modals/EditRedemptionModal.jsx", currentExports, nextExports);
+      if (invalidateMessage) import.meta.hot.invalidate(invalidateMessage);
+    });
+  });
+}
+
+//# sourceMappingURL=data:application/json;base64,eyJ2ZXJzaW9uIjozLCJtYXBwaW5ncyI6IkFBbUtZLFNBYVIsVUFiUTsyQkFuS1o7QUFBQTtBQUFBO0FBQUE7QUFBQTtBQUFBO0FBQUE7QUFBQTtBQUFBO0FBQUE7QUFBQTtBQUFBO0FBQUE7QUFBQTtBQUFBO0FBQUE7QUFtQkEsT0FBT0EsU0FBU0MsV0FBV0MsVUFBVUMsY0FBYztBQUNuRCxTQUFTQyxzQkFBc0I7QUFDL0I7QUFBQSxFQUNFQztBQUFBQSxFQUNBQztBQUFBQSxFQUNBQztBQUFBQSxFQUNBQztBQUFBQSxFQUNBQztBQUFBQSxFQUNBQztBQUFBQSxPQUNLO0FBQ1A7QUFBQSxFQUNFQztBQUFBQSxFQUNBQztBQUFBQSxPQUNLO0FBQ1AsU0FBU0MsbUJBQW1CO0FBQzVCO0FBQUEsRUFDRUM7QUFBQUEsRUFDQUM7QUFBQUEsRUFDQUM7QUFBQUEsRUFDQUM7QUFBQUEsRUFDQUM7QUFBQUEsRUFDQUM7QUFBQUEsRUFDQUM7QUFBQUEsRUFDQUM7QUFBQUEsRUFDQUM7QUFBQUEsRUFDQUM7QUFBQUEsRUFDQUM7QUFBQUEsRUFDQUM7QUFBQUEsRUFDQUM7QUFBQUEsT0FDSztBQUNQO0FBQUEsRUFDRUM7QUFBQUEsRUFDQUM7QUFBQUEsRUFDQUM7QUFBQUEsRUFDQUM7QUFBQUEsT0FDSztBQUVQLE1BQU0sRUFBRUMsTUFBTUMsTUFBTSxJQUFJYjtBQUV4QixNQUFNYyxzQkFBc0JBLENBQUNDLFVBQVU7QUFBQUMsS0FBQTtBQUNyQyxRQUFNLEVBQUVDLEVBQUUsSUFBSWhDLGVBQWU7QUFDN0IsUUFBTWlDLFNBQVNILE1BQU1JLGtCQUFrQkMsT0FBT0M7QUFDOUMsUUFBTSxDQUFDQyxTQUFTQyxVQUFVLElBQUl4QyxTQUFTbUMsTUFBTTtBQUM3QyxRQUFNTSxXQUFXOUIsWUFBWTtBQUM3QixRQUFNK0IsYUFBYXpDLE9BQU8sSUFBSTtBQUM5QixRQUFNLENBQUMwQyxnQkFBZ0JDLGlCQUFpQixJQUFJNUMsU0FBUyxLQUFLO0FBRTFELFFBQU02QyxnQkFBZ0JBLE9BQU87QUFBQSxJQUMzQkMsTUFBTTtBQUFBLElBQ05DLE9BQU87QUFBQSxJQUNQQyxRQUFRQyxPQUFPeEMscUJBQXFCLEdBQU0sRUFBRXlDLFFBQVEsQ0FBQyxDQUFDO0FBQUEsSUFDdERDLE9BQU87QUFBQSxJQUNQQyxjQUFjO0FBQUEsRUFDaEI7QUFFQSxRQUFNQyxlQUFlQSxNQUFNO0FBQ3pCckIsVUFBTXNCLFlBQVk7QUFBQSxFQUNwQjtBQUVBLFFBQU1DLGlCQUFpQixZQUFZO0FBQ2pDZixlQUFXLElBQUk7QUFDZixRQUFJZ0IsTUFBTSxNQUFNckQsSUFBSXNELElBQUksbUJBQW1CekIsTUFBTUksa0JBQWtCQyxFQUFFLEVBQUU7QUFDdkUsVUFBTSxFQUFFcUIsU0FBU0MsU0FBU0MsS0FBSyxJQUFJSixJQUFJSTtBQUN2QyxRQUFJRixTQUFTO0FBQ1gsVUFBSUUsS0FBS1IsaUJBQWlCLEdBQUc7QUFDM0JRLGFBQUtSLGVBQWU7QUFBQSxNQUN0QixPQUFPO0FBQ0xRLGFBQUtSLGVBQWUsSUFBSVMsS0FBS0QsS0FBS1IsZUFBZSxHQUFJO0FBQUEsTUFDdkQ7QUFDQVEsV0FBS1osU0FBU0MsT0FBT3hDLHFCQUFxQm1ELEtBQUtiLFNBQVMsQ0FBQyxFQUFFRyxRQUFRLENBQUMsQ0FBQztBQUNyRVIsaUJBQVdvQixTQUFTQyxVQUFVLEVBQUUsR0FBR2xCLGNBQWMsR0FBRyxHQUFHZSxLQUFLLENBQUM7QUFBQSxJQUMvRCxPQUFPO0FBQ0x2RCxnQkFBVXNELE9BQU87QUFBQSxJQUNuQjtBQUNBbkIsZUFBVyxLQUFLO0FBQUEsRUFDbEI7QUFFQXpDLFlBQVUsTUFBTTtBQUNkLFFBQUkyQyxXQUFXb0IsU0FBUztBQUN0QixVQUFJM0IsUUFBUTtBQUNWb0IsdUJBQWU7QUFBQSxNQUNqQixPQUFPO0FBQ0xiLG1CQUFXb0IsUUFBUUMsVUFBVWxCLGNBQWMsQ0FBQztBQUFBLE1BQzlDO0FBQUEsSUFDRjtBQUFBLEVBQ0YsR0FBRyxDQUFDYixNQUFNSSxrQkFBa0JDLEVBQUUsQ0FBQztBQUUvQixRQUFNMkIsU0FBUyxPQUFPQyxXQUFXO0FBQy9CLFFBQUluQixPQUFPbUIsT0FBT25CO0FBQ2xCLFFBQUksQ0FBQ1gsV0FBVyxDQUFDVyxRQUFRQSxTQUFTLEtBQUs7QUFDckNBLGFBQU92QyxZQUFZMEQsT0FBT2xCLEtBQUs7QUFBQSxJQUNqQztBQUNBUCxlQUFXLElBQUk7QUFDZixRQUFJMEIsY0FBYyxFQUFFLEdBQUdELE9BQU87QUFDOUJDLGdCQUFZZixRQUFRZ0IsU0FBU0QsWUFBWWYsS0FBSyxLQUFLO0FBQ25EZSxnQkFBWW5CLFFBQVFyQyxxQkFBcUJ3RCxZQUFZbEIsTUFBTTtBQUMzRCxRQUFJa0IsWUFBWW5CLFNBQVMsR0FBRztBQUMxQjFDLGdCQUFVNkIsRUFBRSxPQUFPLENBQUM7QUFDcEJNLGlCQUFXLEtBQUs7QUFDaEI7QUFBQSxJQUNGO0FBQ0EwQixnQkFBWXBCLE9BQU9BO0FBQ25CLFFBQUksQ0FBQ29CLFlBQVlkLGNBQWM7QUFDN0JjLGtCQUFZZCxlQUFlO0FBQUEsSUFDN0IsT0FBTztBQUNMYyxrQkFBWWQsZUFBZWdCLEtBQUtDO0FBQUFBLFFBQzlCSCxZQUFZZCxhQUFha0IsUUFBUSxJQUFJO0FBQUEsTUFDdkM7QUFBQSxJQUNGO0FBQ0EsUUFBSWQ7QUFDSixRQUFJckIsUUFBUTtBQUNWcUIsWUFBTSxNQUFNckQsSUFBSW9FLElBQUksb0JBQW9CO0FBQUEsUUFDdEMsR0FBR0w7QUFBQUEsUUFDSDdCLElBQUk4QixTQUFTbkMsTUFBTUksa0JBQWtCQyxFQUFFO0FBQUEsTUFDekMsQ0FBQztBQUFBLElBQ0gsT0FBTztBQUNMbUIsWUFBTSxNQUFNckQsSUFBSXFFLEtBQUssb0JBQW9CO0FBQUEsUUFDdkMsR0FBR047QUFBQUEsTUFDTCxDQUFDO0FBQUEsSUFDSDtBQUNBLFVBQU0sRUFBRVIsU0FBU0MsU0FBU0MsS0FBSyxJQUFJSixJQUFJSTtBQUN2QyxRQUFJRixTQUFTO0FBQ1gsVUFBSXZCLFFBQVE7QUFDVjdCLG9CQUFZNEIsRUFBRSxVQUFVLENBQUM7QUFDekJGLGNBQU15QyxRQUFRO0FBQ2R6QyxjQUFNc0IsWUFBWTtBQUFBLE1BQ3BCLE9BQU87QUFDTGhELG9CQUFZNEIsRUFBRSxVQUFVLENBQUM7QUFDekJGLGNBQU15QyxRQUFRO0FBQ2QvQixtQkFBV29CLFNBQVNDLFVBQVVsQixjQUFjLENBQUM7QUFDN0NiLGNBQU1zQixZQUFZO0FBQUEsTUFDcEI7QUFBQSxJQUNGLE9BQU87QUFDTGpELGdCQUFVc0QsT0FBTztBQUFBLElBQ25CO0FBQ0EsUUFBSSxDQUFDeEIsVUFBVXlCLE1BQU07QUFDbkIsVUFBSWMsT0FBTztBQUNYLGVBQVNDLElBQUksR0FBR0EsSUFBSWYsS0FBS2dCLFFBQVFELEtBQUs7QUFDcENELGdCQUFRZCxLQUFLZSxDQUFDLElBQUk7QUFBQSxNQUNwQjtBQUNBOUQsWUFBTWdFLFFBQVE7QUFBQSxRQUNaQyxPQUFPNUMsRUFBRSxTQUFTO0FBQUEsUUFDbEI2QyxTQUNFLHVCQUFDLFNBQUksa0JBQWUsMEZBQ2xCO0FBQUEsaUNBQUMsT0FBRSxrQkFBZSx3RkFBd0Y3QyxZQUFFLGtCQUFrQixLQUE5SDtBQUFBO0FBQUE7QUFBQTtBQUFBLGlCQUFnSTtBQUFBLFVBQ2hJLHVCQUFDLE9BQUUsa0JBQWUsd0ZBQXdGQSxZQUFFLDRCQUE0QixLQUF4STtBQUFBO0FBQUE7QUFBQTtBQUFBLGlCQUEwSTtBQUFBLGFBRjVJO0FBQUE7QUFBQTtBQUFBO0FBQUEsZUFHQTtBQUFBLFFBRUY4QyxNQUFNQSxNQUFNO0FBQ1Y1RSw2QkFBbUJzRSxNQUFNLEdBQUdSLFlBQVlwQixJQUFJLE1BQU07QUFBQSxRQUNwRDtBQUFBLE1BQ0YsQ0FBQztBQUFBLElBQ0g7QUFDQU4sZUFBVyxLQUFLO0FBQUEsRUFDbEI7QUFFQSxTQUNFLG1DQUNFO0FBQUEsSUFBQztBQUFBO0FBQUEsTUFDQyxXQUFXTCxTQUFTLFVBQVU7QUFBQSxNQUM5QixPQUNFLHVCQUFDLFNBQU0sa0JBQWUsNEZBQ25CQTtBQUFBQSxpQkFDQyx1QkFBQyxPQUFJLE9BQU0sUUFBTyxPQUFNLFVBQVMsa0JBQWUsMEZBQzdDRCxZQUFFLElBQUksS0FEVDtBQUFBO0FBQUE7QUFBQTtBQUFBLGVBRUEsSUFFQSx1QkFBQyxPQUFJLE9BQU0sU0FBUSxPQUFNLFVBQVMsa0JBQWUsMEZBQzlDQSxZQUFFLElBQUksS0FEVDtBQUFBO0FBQUE7QUFBQTtBQUFBLGVBRUE7QUFBQSxRQUVGLHVCQUFDLFNBQU0sU0FBUyxHQUFHLFdBQVUsT0FBTSxrQkFBZSw0RkFDL0NDLG1CQUFTRCxFQUFFLFNBQVMsSUFBSUEsRUFBRSxTQUFTLEtBRHRDO0FBQUE7QUFBQTtBQUFBO0FBQUEsZUFFQTtBQUFBLFdBWkY7QUFBQTtBQUFBO0FBQUE7QUFBQSxhQWFBO0FBQUEsTUFFRixXQUFXLEVBQUUrQyxTQUFTLElBQUk7QUFBQSxNQUMxQixTQUFTakQsTUFBTWtEO0FBQUFBLE1BQ2YsT0FBT3pDLFdBQVcsU0FBUztBQUFBLE1BQzNCLFFBQ0UsdUJBQUMsU0FBSSxXQUFVLDZCQUE0QixrQkFBZSwwRkFDeEQsaUNBQUMsU0FBTSxrQkFBZSw0RkFDcEI7QUFBQTtBQUFBLFVBQUM7QUFBQTtBQUFBLFlBQ0MsT0FBTTtBQUFBLFlBQ04sU0FBUyxNQUFNQyxXQUFXb0IsU0FBU3FCLFdBQVc7QUFBQSxZQUM5QyxNQUFNLHVCQUFDLFlBQVUsa0JBQWUsaUdBQTFCO0FBQUE7QUFBQTtBQUFBO0FBQUEsbUJBQXVIO0FBQUEsWUFDN0g7QUFBQSxZQUNELGtCQUFlO0FBQUEsWUFDYmpELFlBQUUsSUFBSTtBQUFBO0FBQUEsVUFOVDtBQUFBO0FBQUE7QUFBQTtBQUFBO0FBQUE7QUFBQTtBQUFBO0FBQUEsUUFPQTtBQUFBLFFBQ0E7QUFBQSxVQUFDO0FBQUE7QUFBQSxZQUNDLE9BQU07QUFBQSxZQUNOLE1BQUs7QUFBQSxZQUNMLFNBQVNtQjtBQUFBQSxZQUNULE1BQU0sdUJBQUMsYUFBVyxrQkFBZSxrR0FBM0I7QUFBQTtBQUFBO0FBQUE7QUFBQSxtQkFBeUg7QUFBQSxZQUNoSSxrQkFBZTtBQUFBLFlBQ2JuQixZQUFFLElBQUk7QUFBQTtBQUFBLFVBTlQ7QUFBQTtBQUFBO0FBQUE7QUFBQTtBQUFBO0FBQUE7QUFBQTtBQUFBLFFBT0E7QUFBQSxXQWhCRjtBQUFBO0FBQUE7QUFBQTtBQUFBLGFBaUJBLEtBbEJGO0FBQUE7QUFBQTtBQUFBO0FBQUEsYUFtQkE7QUFBQSxNQUVGLFdBQVc7QUFBQSxNQUNYLFVBQVUsTUFBTW1CLGFBQWE7QUFBQSxNQUM5QixrQkFBZTtBQUFBLE1BQ2QsaUNBQUMsUUFBSyxVQUFVZCxTQUFTLGtCQUFlLDBGQUN0QztBQUFBLFFBQUM7QUFBQTtBQUFBLFVBQ0MsWUFBWU0sY0FBYztBQUFBLFVBQzFCLFlBQVksQ0FBQ3VDLFFBQVMxQyxXQUFXb0IsVUFBVXNCO0FBQUFBLFVBQzNDLFVBQVVwQjtBQUFBQSxVQUNYLGtCQUFlO0FBQUEsVUFDYixXQUFDLEVBQUVDLE9BQU8sTUFDVCx1QkFBQyxTQUFJLFdBQVUsT0FBTSxrQkFBZSwwRkFDbEM7QUFBQSxtQ0FBQyxRQUFLLFdBQVUsd0NBQXVDLGtCQUFlLDJGQUVwRTtBQUFBLHFDQUFDLFNBQUksV0FBVSwwQkFBeUIsa0JBQWUsMEZBQ3JEO0FBQUE7QUFBQSxrQkFBQztBQUFBO0FBQUEsb0JBQ0MsTUFBSztBQUFBLG9CQUNMLE9BQU07QUFBQSxvQkFDTixXQUFVO0FBQUEsb0JBQ1gsa0JBQWU7QUFBQSxvQkFDZCxpQ0FBQyxZQUFTLE1BQU0sSUFBSyxrQkFBZSxpR0FBcEM7QUFBQTtBQUFBO0FBQUE7QUFBQSwyQkFBaUk7QUFBQTtBQUFBLGtCQUxuSTtBQUFBO0FBQUE7QUFBQTtBQUFBO0FBQUE7QUFBQTtBQUFBO0FBQUEsZ0JBTUE7QUFBQSxnQkFDQSx1QkFBQyxTQUFJLGtCQUFlLDBGQUNsQjtBQUFBLHlDQUFDLFFBQUssV0FBVSx1QkFBc0Isa0JBQWUsMkZBQ2xEL0IsWUFBRSxNQUFNLEtBRFg7QUFBQTtBQUFBO0FBQUE7QUFBQSx5QkFFQTtBQUFBLGtCQUNBLHVCQUFDLFNBQUksV0FBVSx5QkFBd0Isa0JBQWUsMEZBQ25EQSxZQUFFLFlBQVksS0FEakI7QUFBQTtBQUFBO0FBQUE7QUFBQSx5QkFFQTtBQUFBLHFCQU5GO0FBQUE7QUFBQTtBQUFBO0FBQUEsdUJBT0E7QUFBQSxtQkFmRjtBQUFBO0FBQUE7QUFBQTtBQUFBLHFCQWdCQTtBQUFBLGNBRUEsdUJBQUMsT0FBSSxRQUFRLElBQUksa0JBQWUsMEZBQzlCO0FBQUEsdUNBQUMsT0FBSSxNQUFNLElBQUksa0JBQWUsMEZBQzVCO0FBQUEsa0JBQUMsS0FBSztBQUFBLGtCQUFMO0FBQUEsb0JBQ0MsT0FBTTtBQUFBLG9CQUNOLE9BQU9BLEVBQUUsSUFBSTtBQUFBLG9CQUNiLGFBQWFBLEVBQUUsT0FBTztBQUFBLG9CQUN0QixPQUFPLEVBQUVtRCxPQUFPLE9BQU87QUFBQSxvQkFDdkIsT0FDRSxDQUFDbEQsU0FDRyxLQUNBLENBQUMsRUFBRW1ELFVBQVUsTUFBTTNCLFNBQVN6QixFQUFFLE9BQU8sRUFBRSxDQUFDO0FBQUEsb0JBRTlDLFdBQVM7QUFBQTtBQUFBLGtCQVZYO0FBQUE7QUFBQTtBQUFBO0FBQUE7QUFBQTtBQUFBO0FBQUE7QUFBQSxnQkFVVyxLQVhiO0FBQUE7QUFBQTtBQUFBO0FBQUEsdUJBYUE7QUFBQSxnQkFDQSx1QkFBQyxPQUFJLE1BQU0sSUFBSSxrQkFBZSwwRkFDNUI7QUFBQSxrQkFBQyxLQUFLO0FBQUEsa0JBQUw7QUFBQSxvQkFDQyxPQUFNO0FBQUEsb0JBQ04sT0FBT0EsRUFBRSxNQUFNO0FBQUEsb0JBQ2YsTUFBSztBQUFBLG9CQUNMLGFBQWFBLEVBQUUsa0JBQWtCO0FBQUEsb0JBQ2pDLE9BQU8sRUFBRW1ELE9BQU8sT0FBTztBQUFBLG9CQUN2QixXQUFTO0FBQUE7QUFBQSxrQkFOWDtBQUFBO0FBQUE7QUFBQTtBQUFBO0FBQUE7QUFBQTtBQUFBO0FBQUEsZ0JBTVcsS0FQYjtBQUFBO0FBQUE7QUFBQTtBQUFBLHVCQVNBO0FBQUEsbUJBeEJGO0FBQUE7QUFBQTtBQUFBO0FBQUEscUJBeUJBO0FBQUEsaUJBN0NGO0FBQUE7QUFBQTtBQUFBO0FBQUEsbUJBOENBO0FBQUEsWUFFQSx1QkFBQyxRQUFLLFdBQVUsbUNBQWtDLGtCQUFlLDJGQUUvRDtBQUFBLHFDQUFDLFNBQUksV0FBVSwwQkFBeUIsa0JBQWUsMEZBQ3JEO0FBQUE7QUFBQSxrQkFBQztBQUFBO0FBQUEsb0JBQ0MsTUFBSztBQUFBLG9CQUNMLE9BQU07QUFBQSxvQkFDTixXQUFVO0FBQUEsb0JBQ1gsa0JBQWU7QUFBQSxvQkFDZCxpQ0FBQyxrQkFBZSxNQUFNLElBQUssa0JBQWUsdUdBQTFDO0FBQUE7QUFBQTtBQUFBO0FBQUEsMkJBQTZJO0FBQUE7QUFBQSxrQkFML0k7QUFBQTtBQUFBO0FBQUE7QUFBQTtBQUFBO0FBQUE7QUFBQTtBQUFBLGdCQU1BO0FBQUEsZ0JBQ0EsdUJBQUMsU0FBSSxrQkFBZSwwRkFDbEI7QUFBQSx5Q0FBQyxRQUFLLFdBQVUsdUJBQXNCLGtCQUFlLDJGQUNsRG5ELFlBQUUsTUFBTSxLQURYO0FBQUE7QUFBQTtBQUFBO0FBQUEseUJBRUE7QUFBQSxrQkFDQSx1QkFBQyxTQUFJLFdBQVUseUJBQXdCLGtCQUFlLDBGQUNuREEsWUFBRSxhQUFhLEtBRGxCO0FBQUE7QUFBQTtBQUFBO0FBQUEseUJBRUE7QUFBQSxxQkFORjtBQUFBO0FBQUE7QUFBQTtBQUFBLHVCQU9BO0FBQUEsbUJBZkY7QUFBQTtBQUFBO0FBQUE7QUFBQSxxQkFnQkE7QUFBQSxjQUVBLHVCQUFDLE9BQUksUUFBUSxJQUFJLGtCQUFlLDBGQUM5QjtBQUFBLHVDQUFDLE9BQUksTUFBTSxJQUFJLGtCQUFlLDBGQUM1QjtBQUFBO0FBQUEsb0JBQUMsS0FBSztBQUFBLG9CQUFMO0FBQUEsc0JBQ0MsT0FBTTtBQUFBLHNCQUNOLE9BQU9BLEVBQUUsSUFBSTtBQUFBLHNCQUNiLFFBQVExQixrQkFBa0IsRUFBRStFO0FBQUFBLHNCQUM1QixhQUFhckQsRUFBRSxNQUFNO0FBQUEsc0JBQ3JCLFdBQVc7QUFBQSxzQkFDWCxLQUFLO0FBQUEsc0JBQ0wsTUFBTTtBQUFBLHNCQUNOLE9BQU8sRUFBRW1ELE9BQU8sT0FBTztBQUFBLHNCQUN2QixVQUFVLENBQUNHLFFBQVE7QUFDakIsOEJBQU14QyxTQUFTd0MsUUFBUSxNQUFNQSxPQUFPLE9BQU8sSUFBSUE7QUFDL0M5QyxtQ0FBV29CLFNBQVMyQixTQUFTLFVBQVV6QyxNQUFNO0FBQzdDTixtQ0FBV29CLFNBQVMyQjtBQUFBQSwwQkFDbEI7QUFBQSwwQkFDQS9FLHFCQUFxQnNDLE1BQU07QUFBQSx3QkFDN0I7QUFBQSxzQkFDRjtBQUFBLHNCQUNBLFdBQVM7QUFBQTtBQUFBLG9CQWpCWDtBQUFBO0FBQUE7QUFBQTtBQUFBO0FBQUE7QUFBQTtBQUFBO0FBQUEsa0JBaUJXO0FBQUEsa0JBRVg7QUFBQSxvQkFBQztBQUFBO0FBQUEsc0JBQ0MsV0FBVTtBQUFBLHNCQUNWLE9BQU8sRUFBRTBDLE9BQU8sMkJBQTJCO0FBQUEsc0JBQzNDLFNBQVMsTUFBTTlDLGtCQUFrQixDQUFDK0MsTUFBTSxDQUFDQSxDQUFDO0FBQUEsc0JBQzNDLGtCQUFlO0FBQUEsc0JBQ2JoRCwyQkFDRyxLQUFLVCxFQUFFLFVBQVUsQ0FBQyxLQUNsQixLQUFLQSxFQUFFLFVBQVUsQ0FBQztBQUFBO0FBQUEsb0JBUHhCO0FBQUE7QUFBQTtBQUFBO0FBQUE7QUFBQTtBQUFBO0FBQUE7QUFBQSxrQkFRQTtBQUFBLGtCQUNBLHVCQUFDLFNBQUksT0FBTyxFQUFFMEQsU0FBU2pELGlCQUFpQixVQUFVLE9BQU8sR0FBRyxXQUFVLFFBQU8sa0JBQWUsMEZBQzFGO0FBQUEsb0JBQUMsS0FBSztBQUFBLG9CQUFMO0FBQUEsc0JBQ0MsT0FBTTtBQUFBLHNCQUNOLE9BQU9ULEVBQUUsSUFBSTtBQUFBLHNCQUNiLGFBQWFBLEVBQUUsTUFBTTtBQUFBLHNCQUNyQixPQUFPO0FBQUEsd0JBQ0wsRUFBRW9ELFVBQVUsTUFBTTNCLFNBQVN6QixFQUFFLE9BQU8sRUFBRTtBQUFBLHdCQUN0QztBQUFBLDBCQUNFMkQsV0FBV0EsQ0FBQ0MsTUFBTUgsTUFBTTtBQUN0QixrQ0FBTUksTUFBTTVCLFNBQVN3QixHQUFHLEVBQUU7QUFDMUIsbUNBQU9JLE1BQU0sSUFDVEMsUUFBUUMsUUFBUSxJQUNoQkQsUUFBUUUsT0FBT2hFLEVBQUUsU0FBUyxDQUFDO0FBQUEsMEJBQ2pDO0FBQUEsd0JBQ0Y7QUFBQSxzQkFBQztBQUFBLHNCQUVILFVBQVUsQ0FBQ3NELFFBQVE7QUFDakIsOEJBQU16QyxRQUFReUMsUUFBUSxNQUFNQSxPQUFPLE9BQU8sSUFBSUE7QUFDOUM5QyxtQ0FBV29CLFNBQVMyQixTQUFTLFNBQVMxQyxLQUFLO0FBQzNDTCxtQ0FBV29CLFNBQVMyQjtBQUFBQSwwQkFDbEI7QUFBQSwwQkFDQXhDLE9BQU94QyxxQkFBcUJzQyxLQUFLLEVBQUVHLFFBQVEsQ0FBQyxDQUFDO0FBQUEsd0JBQy9DO0FBQUEsc0JBQ0Y7QUFBQSxzQkFDQSxPQUFPLEVBQUVtQyxPQUFPLE9BQU87QUFBQSxzQkFDdkIsV0FBUztBQUFBO0FBQUEsb0JBeEJYO0FBQUE7QUFBQTtBQUFBO0FBQUE7QUFBQTtBQUFBO0FBQUE7QUFBQSxrQkF3QlcsS0F6QmI7QUFBQTtBQUFBO0FBQUE7QUFBQSx5QkEyQkE7QUFBQSxxQkF4REY7QUFBQTtBQUFBO0FBQUE7QUFBQSx1QkF5REE7QUFBQSxnQkFDQyxDQUFDbEQsVUFDQSx1QkFBQyxPQUFJLE1BQU0sSUFBSSxrQkFBZSwwRkFDNUI7QUFBQSxrQkFBQyxLQUFLO0FBQUEsa0JBQUw7QUFBQSxvQkFDQyxPQUFNO0FBQUEsb0JBQ04sT0FBT0QsRUFBRSxNQUFNO0FBQUEsb0JBQ2YsS0FBSztBQUFBLG9CQUNMLE9BQU87QUFBQSxzQkFDTCxFQUFFb0QsVUFBVSxNQUFNM0IsU0FBU3pCLEVBQUUsU0FBUyxFQUFFO0FBQUEsc0JBQ3hDO0FBQUEsd0JBQ0UyRCxXQUFXQSxDQUFDQyxNQUFNSCxNQUFNO0FBQ3RCLGdDQUFNSSxNQUFNNUIsU0FBU3dCLEdBQUcsRUFBRTtBQUMxQixpQ0FBT0ksTUFBTSxJQUNUQyxRQUFRQyxRQUFRLElBQ2hCRCxRQUFRRSxPQUFPaEUsRUFBRSxXQUFXLENBQUM7QUFBQSx3QkFDbkM7QUFBQSxzQkFDRjtBQUFBLG9CQUFDO0FBQUEsb0JBRUgsT0FBTyxFQUFFbUQsT0FBTyxPQUFPO0FBQUEsb0JBQ3ZCLFdBQVM7QUFBQTtBQUFBLGtCQWhCWDtBQUFBO0FBQUE7QUFBQTtBQUFBO0FBQUE7QUFBQTtBQUFBO0FBQUEsZ0JBZ0JXLEtBakJiO0FBQUE7QUFBQTtBQUFBO0FBQUEsdUJBbUJBO0FBQUEsbUJBL0VKO0FBQUE7QUFBQTtBQUFBO0FBQUEscUJBaUZBO0FBQUEsaUJBckdGO0FBQUE7QUFBQTtBQUFBO0FBQUEsbUJBc0dBO0FBQUEsZUF2SkY7QUFBQTtBQUFBO0FBQUE7QUFBQSxpQkF3SkE7QUFBQTtBQUFBLFFBOUpKO0FBQUE7QUFBQTtBQUFBO0FBQUE7QUFBQTtBQUFBO0FBQUE7QUFBQSxNQWdLQSxLQWpLRjtBQUFBO0FBQUE7QUFBQTtBQUFBLGFBa0tBO0FBQUE7QUFBQSxJQWhORjtBQUFBO0FBQUE7QUFBQTtBQUFBO0FBQUE7QUFBQTtBQUFBO0FBQUEsRUFpTkEsS0FsTkY7QUFBQTtBQUFBO0FBQUE7QUFBQSxTQW1OQTtBQUVKO0FBQUVwRCxHQTNVSUYscUJBQW1CO0FBQUEsVUFDVDdCLGdCQUdHUyxXQUFXO0FBQUE7QUFBQXdGLEtBSnhCcEU7QUE2VU4sZUFBZUE7QUFBb0IsSUFBQW9FO0FBQUFDLGFBQUFELElBQUEiLCJuYW1lcyI6WyJSZWFjdCIsInVzZUVmZmVjdCIsInVzZVN0YXRlIiwidXNlUmVmIiwidXNlVHJhbnNsYXRpb24iLCJBUEkiLCJkb3dubG9hZFRleHRBc0ZpbGUiLCJzaG93RXJyb3IiLCJzaG93U3VjY2VzcyIsInJlbmRlclF1b3RhIiwiZ2V0Q3VycmVuY3lDb25maWciLCJxdW90YVRvRGlzcGxheUFtb3VudCIsImRpc3BsYXlBbW91bnRUb1F1b3RhIiwidXNlSXNNb2JpbGUiLCJCdXR0b24iLCJNb2RhbCIsIlNpZGVTaGVldCIsIlNwYWNlIiwiU3BpbiIsIlR5cG9ncmFwaHkiLCJDYXJkIiwiVGFnIiwiRm9ybSIsIkF2YXRhciIsIlJvdyIsIkNvbCIsIklucHV0TnVtYmVyIiwiSWNvbkNyZWRpdENhcmQiLCJJY29uU2F2ZSIsIkljb25DbG9zZSIsIkljb25HaWZ0IiwiVGV4dCIsIlRpdGxlIiwiRWRpdFJlZGVtcHRpb25Nb2RhbCIsInByb3BzIiwiX3MiLCJ0IiwiaXNFZGl0IiwiZWRpdGluZ1JlZGVtcHRpb24iLCJpZCIsInVuZGVmaW5lZCIsImxvYWRpbmciLCJzZXRMb2FkaW5nIiwiaXNNb2JpbGUiLCJmb3JtQXBpUmVmIiwic2hvd1F1b3RhSW5wdXQiLCJzZXRTaG93UXVvdGFJbnB1dCIsImdldEluaXRWYWx1ZXMiLCJuYW1lIiwicXVvdGEiLCJhbW91bnQiLCJOdW1iZXIiLCJ0b0ZpeGVkIiwiY291bnQiLCJleHBpcmVkX3RpbWUiLCJoYW5kbGVDYW5jZWwiLCJoYW5kbGVDbG9zZSIsImxvYWRSZWRlbXB0aW9uIiwicmVzIiwiZ2V0Iiwic3VjY2VzcyIsIm1lc3NhZ2UiLCJkYXRhIiwiRGF0ZSIsImN1cnJlbnQiLCJzZXRWYWx1ZXMiLCJzdWJtaXQiLCJ2YWx1ZXMiLCJsb2NhbElucHV0cyIsInBhcnNlSW50IiwiTWF0aCIsImZsb29yIiwiZ2V0VGltZSIsInB1dCIsInBvc3QiLCJyZWZyZXNoIiwidGV4dCIsImkiLCJsZW5ndGgiLCJjb25maXJtIiwidGl0bGUiLCJjb250ZW50Iiwib25PayIsInBhZGRpbmciLCJ2aXNpYWJsZSIsInN1Ym1pdEZvcm0iLCJhcGkiLCJ3aWR0aCIsInJlcXVpcmVkIiwic3ltYm9sIiwidmFsIiwic2V0VmFsdWUiLCJjb2xvciIsInYiLCJkaXNwbGF5IiwidmFsaWRhdG9yIiwicnVsZSIsIm51bSIsIlByb21pc2UiLCJyZXNvbHZlIiwicmVqZWN0IiwiX2MiLCIkUmVmcmVzaFJlZyQiXSwiaWdub3JlTGlzdCI6W10sInNvdXJjZXMiOlsiRWRpdFJlZGVtcHRpb25Nb2RhbC5qc3giXSwic291cmNlc0NvbnRlbnQiOlsiLypcbkNvcHlyaWdodCAoQykgMjAyNSBRdWFudHVtTm91c1xuXG5UaGlzIHByb2dyYW0gaXMgZnJlZSBzb2Z0d2FyZTogeW91IGNhbiByZWRpc3RyaWJ1dGUgaXQgYW5kL29yIG1vZGlmeVxuaXQgdW5kZXIgdGhlIHRlcm1zIG9mIHRoZSBHTlUgQWZmZXJvIEdlbmVyYWwgUHVibGljIExpY2Vuc2UgYXNcbnB1Ymxpc2hlZCBieSB0aGUgRnJlZSBTb2Z0d2FyZSBGb3VuZGF0aW9uLCBlaXRoZXIgdmVyc2lvbiAzIG9mIHRoZVxuTGljZW5zZSwgb3IgKGF0IHlvdXIgb3B0aW9uKSBhbnkgbGF0ZXIgdmVyc2lvbi5cblxuVGhpcyBwcm9ncmFtIGlzIGRpc3RyaWJ1dGVkIGluIHRoZSBob3BlIHRoYXQgaXQgd2lsbCBiZSB1c2VmdWwsXG5idXQgV0lUSE9VVCBBTlkgV0FSUkFOVFk7IHdpdGhvdXQgZXZlbiB0aGUgaW1wbGllZCB3YXJyYW50eSBvZlxuTUVSQ0hBTlRBQklMSVRZIG9yIEZJVE5FU1MgRk9SIEEgUEFSVElDVUxBUiBQVVJQT1NFLiBTZWUgdGhlXG5HTlUgQWZmZXJvIEdlbmVyYWwgUHVibGljIExpY2Vuc2UgZm9yIG1vcmUgZGV0YWlscy5cblxuWW91IHNob3VsZCBoYXZlIHJlY2VpdmVkIGEgY29weSBvZiB0aGUgR05VIEFmZmVybyBHZW5lcmFsIFB1YmxpYyBMaWNlbnNlXG5hbG9uZyB3aXRoIHRoaXMgcHJvZ3JhbS4gSWYgbm90LCBzZWUgPGh0dHBzOi8vd3d3LmdudS5vcmcvbGljZW5zZXMvPi5cblxuRm9yIGNvbW1lcmNpYWwgbGljZW5zaW5nLCBwbGVhc2UgY29udGFjdCBzdXBwb3J0QHF1YW50dW1ub3VzLmNvbVxuKi9cblxuaW1wb3J0IFJlYWN0LCB7IHVzZUVmZmVjdCwgdXNlU3RhdGUsIHVzZVJlZiB9IGZyb20gJ3JlYWN0JztcbmltcG9ydCB7IHVzZVRyYW5zbGF0aW9uIH0gZnJvbSAncmVhY3QtaTE4bmV4dCc7XG5pbXBvcnQge1xuICBBUEksXG4gIGRvd25sb2FkVGV4dEFzRmlsZSxcbiAgc2hvd0Vycm9yLFxuICBzaG93U3VjY2VzcyxcbiAgcmVuZGVyUXVvdGEsXG4gIGdldEN1cnJlbmN5Q29uZmlnLFxufSBmcm9tICcuLi8uLi8uLi8uLi9oZWxwZXJzJztcbmltcG9ydCB7XG4gIHF1b3RhVG9EaXNwbGF5QW1vdW50LFxuICBkaXNwbGF5QW1vdW50VG9RdW90YSxcbn0gZnJvbSAnLi4vLi4vLi4vLi4vaGVscGVycy9xdW90YSc7XG5pbXBvcnQgeyB1c2VJc01vYmlsZSB9IGZyb20gJy4uLy4uLy4uLy4uL2hvb2tzL2NvbW1vbi91c2VJc01vYmlsZSc7XG5pbXBvcnQge1xuICBCdXR0b24sXG4gIE1vZGFsLFxuICBTaWRlU2hlZXQsXG4gIFNwYWNlLFxuICBTcGluLFxuICBUeXBvZ3JhcGh5LFxuICBDYXJkLFxuICBUYWcsXG4gIEZvcm0sXG4gIEF2YXRhcixcbiAgUm93LFxuICBDb2wsXG4gIElucHV0TnVtYmVyLFxufSBmcm9tICdAZG91eWluZmUvc2VtaS11aSc7XG5pbXBvcnQge1xuICBJY29uQ3JlZGl0Q2FyZCxcbiAgSWNvblNhdmUsXG4gIEljb25DbG9zZSxcbiAgSWNvbkdpZnQsXG59IGZyb20gJ0Bkb3V5aW5mZS9zZW1pLWljb25zJztcblxuY29uc3QgeyBUZXh0LCBUaXRsZSB9ID0gVHlwb2dyYXBoeTtcblxuY29uc3QgRWRpdFJlZGVtcHRpb25Nb2RhbCA9IChwcm9wcykgPT4ge1xuICBjb25zdCB7IHQgfSA9IHVzZVRyYW5zbGF0aW9uKCk7XG4gIGNvbnN0IGlzRWRpdCA9IHByb3BzLmVkaXRpbmdSZWRlbXB0aW9uLmlkICE9PSB1bmRlZmluZWQ7XG4gIGNvbnN0IFtsb2FkaW5nLCBzZXRMb2FkaW5nXSA9IHVzZVN0YXRlKGlzRWRpdCk7XG4gIGNvbnN0IGlzTW9iaWxlID0gdXNlSXNNb2JpbGUoKTtcbiAgY29uc3QgZm9ybUFwaVJlZiA9IHVzZVJlZihudWxsKTtcbiAgY29uc3QgW3Nob3dRdW90YUlucHV0LCBzZXRTaG93UXVvdGFJbnB1dF0gPSB1c2VTdGF0ZShmYWxzZSk7XG5cbiAgY29uc3QgZ2V0SW5pdFZhbHVlcyA9ICgpID0+ICh7XG4gICAgbmFtZTogJycsXG4gICAgcXVvdGE6IDEwMDAwMCxcbiAgICBhbW91bnQ6IE51bWJlcihxdW90YVRvRGlzcGxheUFtb3VudCgxMDAwMDApLnRvRml4ZWQoNikpLFxuICAgIGNvdW50OiAxLFxuICAgIGV4cGlyZWRfdGltZTogbnVsbCxcbiAgfSk7XG5cbiAgY29uc3QgaGFuZGxlQ2FuY2VsID0gKCkgPT4ge1xuICAgIHByb3BzLmhhbmRsZUNsb3NlKCk7XG4gIH07XG5cbiAgY29uc3QgbG9hZFJlZGVtcHRpb24gPSBhc3luYyAoKSA9PiB7XG4gICAgc2V0TG9hZGluZyh0cnVlKTtcbiAgICBsZXQgcmVzID0gYXdhaXQgQVBJLmdldChgL2FwaS9yZWRlbXB0aW9uLyR7cHJvcHMuZWRpdGluZ1JlZGVtcHRpb24uaWR9YCk7XG4gICAgY29uc3QgeyBzdWNjZXNzLCBtZXNzYWdlLCBkYXRhIH0gPSByZXMuZGF0YTtcbiAgICBpZiAoc3VjY2Vzcykge1xuICAgICAgaWYgKGRhdGEuZXhwaXJlZF90aW1lID09PSAwKSB7XG4gICAgICAgIGRhdGEuZXhwaXJlZF90aW1lID0gbnVsbDtcbiAgICAgIH0gZWxzZSB7XG4gICAgICAgIGRhdGEuZXhwaXJlZF90aW1lID0gbmV3IERhdGUoZGF0YS5leHBpcmVkX3RpbWUgKiAxMDAwKTtcbiAgICAgIH1cbiAgICAgIGRhdGEuYW1vdW50ID0gTnVtYmVyKHF1b3RhVG9EaXNwbGF5QW1vdW50KGRhdGEucXVvdGEgfHwgMCkudG9GaXhlZCg2KSk7XG4gICAgICBmb3JtQXBpUmVmLmN1cnJlbnQ/LnNldFZhbHVlcyh7IC4uLmdldEluaXRWYWx1ZXMoKSwgLi4uZGF0YSB9KTtcbiAgICB9IGVsc2Uge1xuICAgICAgc2hvd0Vycm9yKG1lc3NhZ2UpO1xuICAgIH1cbiAgICBzZXRMb2FkaW5nKGZhbHNlKTtcbiAgfTtcblxuICB1c2VFZmZlY3QoKCkgPT4ge1xuICAgIGlmIChmb3JtQXBpUmVmLmN1cnJlbnQpIHtcbiAgICAgIGlmIChpc0VkaXQpIHtcbiAgICAgICAgbG9hZFJlZGVtcHRpb24oKTtcbiAgICAgIH0gZWxzZSB7XG4gICAgICAgIGZvcm1BcGlSZWYuY3VycmVudC5zZXRWYWx1ZXMoZ2V0SW5pdFZhbHVlcygpKTtcbiAgICAgIH1cbiAgICB9XG4gIH0sIFtwcm9wcy5lZGl0aW5nUmVkZW1wdGlvbi5pZF0pO1xuXG4gIGNvbnN0IHN1Ym1pdCA9IGFzeW5jICh2YWx1ZXMpID0+IHtcbiAgICBsZXQgbmFtZSA9IHZhbHVlcy5uYW1lO1xuICAgIGlmICghaXNFZGl0ICYmICghbmFtZSB8fCBuYW1lID09PSAnJykpIHtcbiAgICAgIG5hbWUgPSByZW5kZXJRdW90YSh2YWx1ZXMucXVvdGEpO1xuICAgIH1cbiAgICBzZXRMb2FkaW5nKHRydWUpO1xuICAgIGxldCBsb2NhbElucHV0cyA9IHsgLi4udmFsdWVzIH07XG4gICAgbG9jYWxJbnB1dHMuY291bnQgPSBwYXJzZUludChsb2NhbElucHV0cy5jb3VudCkgfHwgMDtcbiAgICBsb2NhbElucHV0cy5xdW90YSA9IGRpc3BsYXlBbW91bnRUb1F1b3RhKGxvY2FsSW5wdXRzLmFtb3VudCk7XG4gICAgaWYgKGxvY2FsSW5wdXRzLnF1b3RhIDw9IDApIHtcbiAgICAgIHNob3dFcnJvcih0KCfor7fovpPlhaXph5Hpop0nKSk7XG4gICAgICBzZXRMb2FkaW5nKGZhbHNlKTtcbiAgICAgIHJldHVybjtcbiAgICB9XG4gICAgbG9jYWxJbnB1dHMubmFtZSA9IG5hbWU7XG4gICAgaWYgKCFsb2NhbElucHV0cy5leHBpcmVkX3RpbWUpIHtcbiAgICAgIGxvY2FsSW5wdXRzLmV4cGlyZWRfdGltZSA9IDA7XG4gICAgfSBlbHNlIHtcbiAgICAgIGxvY2FsSW5wdXRzLmV4cGlyZWRfdGltZSA9IE1hdGguZmxvb3IoXG4gICAgICAgIGxvY2FsSW5wdXRzLmV4cGlyZWRfdGltZS5nZXRUaW1lKCkgLyAxMDAwLFxuICAgICAgKTtcbiAgICB9XG4gICAgbGV0IHJlcztcbiAgICBpZiAoaXNFZGl0KSB7XG4gICAgICByZXMgPSBhd2FpdCBBUEkucHV0KGAvYXBpL3JlZGVtcHRpb24vYCwge1xuICAgICAgICAuLi5sb2NhbElucHV0cyxcbiAgICAgICAgaWQ6IHBhcnNlSW50KHByb3BzLmVkaXRpbmdSZWRlbXB0aW9uLmlkKSxcbiAgICAgIH0pO1xuICAgIH0gZWxzZSB7XG4gICAgICByZXMgPSBhd2FpdCBBUEkucG9zdChgL2FwaS9yZWRlbXB0aW9uL2AsIHtcbiAgICAgICAgLi4ubG9jYWxJbnB1dHMsXG4gICAgICB9KTtcbiAgICB9XG4gICAgY29uc3QgeyBzdWNjZXNzLCBtZXNzYWdlLCBkYXRhIH0gPSByZXMuZGF0YTtcbiAgICBpZiAoc3VjY2Vzcykge1xuICAgICAgaWYgKGlzRWRpdCkge1xuICAgICAgICBzaG93U3VjY2Vzcyh0KCflhZHmjaLnoIHmm7TmlrDmiJDlip/vvIEnKSk7XG4gICAgICAgIHByb3BzLnJlZnJlc2goKTtcbiAgICAgICAgcHJvcHMuaGFuZGxlQ2xvc2UoKTtcbiAgICAgIH0gZWxzZSB7XG4gICAgICAgIHNob3dTdWNjZXNzKHQoJ+WFkeaNoueggeWIm+W7uuaIkOWKn++8gScpKTtcbiAgICAgICAgcHJvcHMucmVmcmVzaCgpO1xuICAgICAgICBmb3JtQXBpUmVmLmN1cnJlbnQ/LnNldFZhbHVlcyhnZXRJbml0VmFsdWVzKCkpO1xuICAgICAgICBwcm9wcy5oYW5kbGVDbG9zZSgpO1xuICAgICAgfVxuICAgIH0gZWxzZSB7XG4gICAgICBzaG93RXJyb3IobWVzc2FnZSk7XG4gICAgfVxuICAgIGlmICghaXNFZGl0ICYmIGRhdGEpIHtcbiAgICAgIGxldCB0ZXh0ID0gJyc7XG4gICAgICBmb3IgKGxldCBpID0gMDsgaSA8IGRhdGEubGVuZ3RoOyBpKyspIHtcbiAgICAgICAgdGV4dCArPSBkYXRhW2ldICsgJ1xcbic7XG4gICAgICB9XG4gICAgICBNb2RhbC5jb25maXJtKHtcbiAgICAgICAgdGl0bGU6IHQoJ+WFkeaNoueggeWIm+W7uuaIkOWKnycpLFxuICAgICAgICBjb250ZW50OiAoXG4gICAgICAgICAgPGRpdiBkYXRhLWluc3AtcGF0aD1cIndlYi9jbGFzc2ljL3NyYy9jb21wb25lbnRzL3RhYmxlL3JlZGVtcHRpb25zL21vZGFscy9FZGl0UmVkZW1wdGlvbk1vZGFsLmpzeDoxNjM6MTE6ZGl2XCI+XG4gICAgICAgICAgICA8cCBkYXRhLWluc3AtcGF0aD1cIndlYi9jbGFzc2ljL3NyYy9jb21wb25lbnRzL3RhYmxlL3JlZGVtcHRpb25zL21vZGFscy9FZGl0UmVkZW1wdGlvbk1vZGFsLmpzeDoxNjQ6MTM6cFwiPnt0KCflhZHmjaLnoIHliJvlu7rmiJDlip/vvIzmmK/lkKbkuIvovb3lhZHmjaLnoIHvvJ8nKX08L3A+XG4gICAgICAgICAgICA8cCBkYXRhLWluc3AtcGF0aD1cIndlYi9jbGFzc2ljL3NyYy9jb21wb25lbnRzL3RhYmxlL3JlZGVtcHRpb25zL21vZGFscy9FZGl0UmVkZW1wdGlvbk1vZGFsLmpzeDoxNjU6MTM6cFwiPnt0KCflhZHmjaLnoIHlsIbku6XmlofmnKzmlofku7bnmoTlvaLlvI/kuIvovb3vvIzmlofku7blkI3kuLrlhZHmjaLnoIHnmoTlkI3np7DjgIInKX08L3A+XG4gICAgICAgICAgPC9kaXY+XG4gICAgICAgICksXG4gICAgICAgIG9uT2s6ICgpID0+IHtcbiAgICAgICAgICBkb3dubG9hZFRleHRBc0ZpbGUodGV4dCwgYCR7bG9jYWxJbnB1dHMubmFtZX0udHh0YCk7XG4gICAgICAgIH0sXG4gICAgICB9KTtcbiAgICB9XG4gICAgc2V0TG9hZGluZyhmYWxzZSk7XG4gIH07XG5cbiAgcmV0dXJuIChcbiAgICA8PlxuICAgICAgPFNpZGVTaGVldFxuICAgICAgICBwbGFjZW1lbnQ9e2lzRWRpdCA/ICdyaWdodCcgOiAnbGVmdCd9XG4gICAgICAgIHRpdGxlPXtcbiAgICAgICAgICA8U3BhY2UgZGF0YS1pbnNwLXBhdGg9XCJ3ZWIvY2xhc3NpYy9zcmMvY29tcG9uZW50cy90YWJsZS9yZWRlbXB0aW9ucy9tb2RhbHMvRWRpdFJlZGVtcHRpb25Nb2RhbC5qc3g6MTgxOjExOlNwYWNlXCI+XG4gICAgICAgICAgICB7aXNFZGl0ID8gKFxuICAgICAgICAgICAgICA8VGFnIGNvbG9yPSdibHVlJyBzaGFwZT0nY2lyY2xlJyBkYXRhLWluc3AtcGF0aD1cIndlYi9jbGFzc2ljL3NyYy9jb21wb25lbnRzL3RhYmxlL3JlZGVtcHRpb25zL21vZGFscy9FZGl0UmVkZW1wdGlvbk1vZGFsLmpzeDoxODM6MTU6VGFnXCIgPlxuICAgICAgICAgICAgICAgIHt0KCfmm7TmlrAnKX1cbiAgICAgICAgICAgICAgPC9UYWc+XG4gICAgICAgICAgICApIDogKFxuICAgICAgICAgICAgICA8VGFnIGNvbG9yPSdncmVlbicgc2hhcGU9J2NpcmNsZScgZGF0YS1pbnNwLXBhdGg9XCJ3ZWIvY2xhc3NpYy9zcmMvY29tcG9uZW50cy90YWJsZS9yZWRlbXB0aW9ucy9tb2RhbHMvRWRpdFJlZGVtcHRpb25Nb2RhbC5qc3g6MTg3OjE1OlRhZ1wiID5cbiAgICAgICAgICAgICAgICB7dCgn5paw5bu6Jyl9XG4gICAgICAgICAgICAgIDwvVGFnPlxuICAgICAgICAgICAgKX1cbiAgICAgICAgICAgIDxUaXRsZSBoZWFkaW5nPXs0fSBjbGFzc05hbWU9J20tMCcgZGF0YS1pbnNwLXBhdGg9XCJ3ZWIvY2xhc3NpYy9zcmMvY29tcG9uZW50cy90YWJsZS9yZWRlbXB0aW9ucy9tb2RhbHMvRWRpdFJlZGVtcHRpb25Nb2RhbC5qc3g6MTkxOjEzOlRpdGxlXCIgPlxuICAgICAgICAgICAgICB7aXNFZGl0ID8gdCgn5pu05paw5YWR5o2i56CB5L+h5oGvJykgOiB0KCfliJvlu7rmlrDnmoTlhZHmjaLnoIEnKX1cbiAgICAgICAgICAgIDwvVGl0bGU+XG4gICAgICAgICAgPC9TcGFjZT5cbiAgICAgICAgfVxuICAgICAgICBib2R5U3R5bGU9e3sgcGFkZGluZzogJzAnIH19XG4gICAgICAgIHZpc2libGU9e3Byb3BzLnZpc2lhYmxlfVxuICAgICAgICB3aWR0aD17aXNNb2JpbGUgPyAnMTAwJScgOiA2MDB9XG4gICAgICAgIGZvb3Rlcj17XG4gICAgICAgICAgPGRpdiBjbGFzc05hbWU9J2ZsZXgganVzdGlmeS1lbmQgYmctd2hpdGUnIGRhdGEtaW5zcC1wYXRoPVwid2ViL2NsYXNzaWMvc3JjL2NvbXBvbmVudHMvdGFibGUvcmVkZW1wdGlvbnMvbW9kYWxzL0VkaXRSZWRlbXB0aW9uTW9kYWwuanN4OjIwMDoxMTpkaXZcIiA+XG4gICAgICAgICAgICA8U3BhY2UgZGF0YS1pbnNwLXBhdGg9XCJ3ZWIvY2xhc3NpYy9zcmMvY29tcG9uZW50cy90YWJsZS9yZWRlbXB0aW9ucy9tb2RhbHMvRWRpdFJlZGVtcHRpb25Nb2RhbC5qc3g6MjAxOjEzOlNwYWNlXCI+XG4gICAgICAgICAgICAgIDxCdXR0b25cbiAgICAgICAgICAgICAgICB0aGVtZT0nc29saWQnXG4gICAgICAgICAgICAgICAgb25DbGljaz17KCkgPT4gZm9ybUFwaVJlZi5jdXJyZW50Py5zdWJtaXRGb3JtKCl9XG4gICAgICAgICAgICAgICAgaWNvbj17PEljb25TYXZlICBkYXRhLWluc3AtcGF0aD1cIndlYi9jbGFzc2ljL3NyYy9jb21wb25lbnRzL3RhYmxlL3JlZGVtcHRpb25zL21vZGFscy9FZGl0UmVkZW1wdGlvbk1vZGFsLmpzeDoyMDU6MjM6SWNvblNhdmVcIi8+fVxuICAgICAgICAgICAgICAgIGxvYWRpbmc9e2xvYWRpbmd9XG4gICAgICAgICAgICAgICBkYXRhLWluc3AtcGF0aD1cIndlYi9jbGFzc2ljL3NyYy9jb21wb25lbnRzL3RhYmxlL3JlZGVtcHRpb25zL21vZGFscy9FZGl0UmVkZW1wdGlvbk1vZGFsLmpzeDoyMDI6MTU6QnV0dG9uXCIgPlxuICAgICAgICAgICAgICAgIHt0KCfmj5DkuqQnKX1cbiAgICAgICAgICAgICAgPC9CdXR0b24+XG4gICAgICAgICAgICAgIDxCdXR0b25cbiAgICAgICAgICAgICAgICB0aGVtZT0nbGlnaHQnXG4gICAgICAgICAgICAgICAgdHlwZT0ncHJpbWFyeSdcbiAgICAgICAgICAgICAgICBvbkNsaWNrPXtoYW5kbGVDYW5jZWx9XG4gICAgICAgICAgICAgICAgaWNvbj17PEljb25DbG9zZSAgZGF0YS1pbnNwLXBhdGg9XCJ3ZWIvY2xhc3NpYy9zcmMvY29tcG9uZW50cy90YWJsZS9yZWRlbXB0aW9ucy9tb2RhbHMvRWRpdFJlZGVtcHRpb25Nb2RhbC5qc3g6MjE0OjIzOkljb25DbG9zZVwiLz59XG4gICAgICAgICAgICAgICBkYXRhLWluc3AtcGF0aD1cIndlYi9jbGFzc2ljL3NyYy9jb21wb25lbnRzL3RhYmxlL3JlZGVtcHRpb25zL21vZGFscy9FZGl0UmVkZW1wdGlvbk1vZGFsLmpzeDoyMTA6MTU6QnV0dG9uXCIgPlxuICAgICAgICAgICAgICAgIHt0KCflj5bmtognKX1cbiAgICAgICAgICAgICAgPC9CdXR0b24+XG4gICAgICAgICAgICA8L1NwYWNlPlxuICAgICAgICAgIDwvZGl2PlxuICAgICAgICB9XG4gICAgICAgIGNsb3NlSWNvbj17bnVsbH1cbiAgICAgICAgb25DYW5jZWw9eygpID0+IGhhbmRsZUNhbmNlbCgpfVxuICAgICAgIGRhdGEtaW5zcC1wYXRoPVwid2ViL2NsYXNzaWMvc3JjL2NvbXBvbmVudHMvdGFibGUvcmVkZW1wdGlvbnMvbW9kYWxzL0VkaXRSZWRlbXB0aW9uTW9kYWwuanN4OjE3ODo3OlNpZGVTaGVldFwiID5cbiAgICAgICAgPFNwaW4gc3Bpbm5pbmc9e2xvYWRpbmd9IGRhdGEtaW5zcC1wYXRoPVwid2ViL2NsYXNzaWMvc3JjL2NvbXBvbmVudHMvdGFibGUvcmVkZW1wdGlvbnMvbW9kYWxzL0VkaXRSZWRlbXB0aW9uTW9kYWwuanN4OjIyNDo5OlNwaW5cIiA+XG4gICAgICAgICAgPEZvcm1cbiAgICAgICAgICAgIGluaXRWYWx1ZXM9e2dldEluaXRWYWx1ZXMoKX1cbiAgICAgICAgICAgIGdldEZvcm1BcGk9eyhhcGkpID0+IChmb3JtQXBpUmVmLmN1cnJlbnQgPSBhcGkpfVxuICAgICAgICAgICAgb25TdWJtaXQ9e3N1Ym1pdH1cbiAgICAgICAgICAgZGF0YS1pbnNwLXBhdGg9XCJ3ZWIvY2xhc3NpYy9zcmMvY29tcG9uZW50cy90YWJsZS9yZWRlbXB0aW9ucy9tb2RhbHMvRWRpdFJlZGVtcHRpb25Nb2RhbC5qc3g6MjI1OjExOkZvcm1cIiA+XG4gICAgICAgICAgICB7KHsgdmFsdWVzIH0pID0+IChcbiAgICAgICAgICAgICAgPGRpdiBjbGFzc05hbWU9J3AtMicgZGF0YS1pbnNwLXBhdGg9XCJ3ZWIvY2xhc3NpYy9zcmMvY29tcG9uZW50cy90YWJsZS9yZWRlbXB0aW9ucy9tb2RhbHMvRWRpdFJlZGVtcHRpb25Nb2RhbC5qc3g6MjMxOjE1OmRpdlwiID5cbiAgICAgICAgICAgICAgICA8Q2FyZCBjbGFzc05hbWU9JyFyb3VuZGVkLTJ4bCBzaGFkb3ctc20gYm9yZGVyLTAgbWItNicgZGF0YS1pbnNwLXBhdGg9XCJ3ZWIvY2xhc3NpYy9zcmMvY29tcG9uZW50cy90YWJsZS9yZWRlbXB0aW9ucy9tb2RhbHMvRWRpdFJlZGVtcHRpb25Nb2RhbC5qc3g6MjMyOjE3OkNhcmRcIiA+XG4gICAgICAgICAgICAgICAgICB7LyogSGVhZGVyOiBCYXNpYyBJbmZvICovfVxuICAgICAgICAgICAgICAgICAgPGRpdiBjbGFzc05hbWU9J2ZsZXggaXRlbXMtY2VudGVyIG1iLTInIGRhdGEtaW5zcC1wYXRoPVwid2ViL2NsYXNzaWMvc3JjL2NvbXBvbmVudHMvdGFibGUvcmVkZW1wdGlvbnMvbW9kYWxzL0VkaXRSZWRlbXB0aW9uTW9kYWwuanN4OjIzNDoxOTpkaXZcIiA+XG4gICAgICAgICAgICAgICAgICAgIDxBdmF0YXJcbiAgICAgICAgICAgICAgICAgICAgICBzaXplPSdzbWFsbCdcbiAgICAgICAgICAgICAgICAgICAgICBjb2xvcj0nYmx1ZSdcbiAgICAgICAgICAgICAgICAgICAgICBjbGFzc05hbWU9J21yLTIgc2hhZG93LW1kJ1xuICAgICAgICAgICAgICAgICAgICAgZGF0YS1pbnNwLXBhdGg9XCJ3ZWIvY2xhc3NpYy9zcmMvY29tcG9uZW50cy90YWJsZS9yZWRlbXB0aW9ucy9tb2RhbHMvRWRpdFJlZGVtcHRpb25Nb2RhbC5qc3g6MjM1OjIxOkF2YXRhclwiID5cbiAgICAgICAgICAgICAgICAgICAgICA8SWNvbkdpZnQgc2l6ZT17MTZ9ICBkYXRhLWluc3AtcGF0aD1cIndlYi9jbGFzc2ljL3NyYy9jb21wb25lbnRzL3RhYmxlL3JlZGVtcHRpb25zL21vZGFscy9FZGl0UmVkZW1wdGlvbk1vZGFsLmpzeDoyNDA6MjM6SWNvbkdpZnRcIiAvPlxuICAgICAgICAgICAgICAgICAgICA8L0F2YXRhcj5cbiAgICAgICAgICAgICAgICAgICAgPGRpdiBkYXRhLWluc3AtcGF0aD1cIndlYi9jbGFzc2ljL3NyYy9jb21wb25lbnRzL3RhYmxlL3JlZGVtcHRpb25zL21vZGFscy9FZGl0UmVkZW1wdGlvbk1vZGFsLmpzeDoyNDI6MjE6ZGl2XCI+XG4gICAgICAgICAgICAgICAgICAgICAgPFRleHQgY2xhc3NOYW1lPSd0ZXh0LWxnIGZvbnQtbWVkaXVtJyBkYXRhLWluc3AtcGF0aD1cIndlYi9jbGFzc2ljL3NyYy9jb21wb25lbnRzL3RhYmxlL3JlZGVtcHRpb25zL21vZGFscy9FZGl0UmVkZW1wdGlvbk1vZGFsLmpzeDoyNDM6MjM6VGV4dFwiID5cbiAgICAgICAgICAgICAgICAgICAgICAgIHt0KCfln7rmnKzkv6Hmga8nKX1cbiAgICAgICAgICAgICAgICAgICAgICA8L1RleHQ+XG4gICAgICAgICAgICAgICAgICAgICAgPGRpdiBjbGFzc05hbWU9J3RleHQteHMgdGV4dC1ncmF5LTYwMCcgZGF0YS1pbnNwLXBhdGg9XCJ3ZWIvY2xhc3NpYy9zcmMvY29tcG9uZW50cy90YWJsZS9yZWRlbXB0aW9ucy9tb2RhbHMvRWRpdFJlZGVtcHRpb25Nb2RhbC5qc3g6MjQ2OjIzOmRpdlwiID5cbiAgICAgICAgICAgICAgICAgICAgICAgIHt0KCforr7nva7lhZHmjaLnoIHnmoTln7rmnKzkv6Hmga8nKX1cbiAgICAgICAgICAgICAgICAgICAgICA8L2Rpdj5cbiAgICAgICAgICAgICAgICAgICAgPC9kaXY+XG4gICAgICAgICAgICAgICAgICA8L2Rpdj5cblxuICAgICAgICAgICAgICAgICAgPFJvdyBndXR0ZXI9ezEyfSBkYXRhLWluc3AtcGF0aD1cIndlYi9jbGFzc2ljL3NyYy9jb21wb25lbnRzL3RhYmxlL3JlZGVtcHRpb25zL21vZGFscy9FZGl0UmVkZW1wdGlvbk1vZGFsLmpzeDoyNTI6MTk6Um93XCIgPlxuICAgICAgICAgICAgICAgICAgICA8Q29sIHNwYW49ezI0fSBkYXRhLWluc3AtcGF0aD1cIndlYi9jbGFzc2ljL3NyYy9jb21wb25lbnRzL3RhYmxlL3JlZGVtcHRpb25zL21vZGFscy9FZGl0UmVkZW1wdGlvbk1vZGFsLmpzeDoyNTM6MjE6Q29sXCIgPlxuICAgICAgICAgICAgICAgICAgICAgIDxGb3JtLklucHV0XG4gICAgICAgICAgICAgICAgICAgICAgICBmaWVsZD0nbmFtZSdcbiAgICAgICAgICAgICAgICAgICAgICAgIGxhYmVsPXt0KCflkI3np7AnKX1cbiAgICAgICAgICAgICAgICAgICAgICAgIHBsYWNlaG9sZGVyPXt0KCfor7fovpPlhaXlkI3np7AnKX1cbiAgICAgICAgICAgICAgICAgICAgICAgIHN0eWxlPXt7IHdpZHRoOiAnMTAwJScgfX1cbiAgICAgICAgICAgICAgICAgICAgICAgIHJ1bGVzPXtcbiAgICAgICAgICAgICAgICAgICAgICAgICAgIWlzRWRpdFxuICAgICAgICAgICAgICAgICAgICAgICAgICAgID8gW11cbiAgICAgICAgICAgICAgICAgICAgICAgICAgICA6IFt7IHJlcXVpcmVkOiB0cnVlLCBtZXNzYWdlOiB0KCfor7fovpPlhaXlkI3np7AnKSB9XVxuICAgICAgICAgICAgICAgICAgICAgICAgfVxuICAgICAgICAgICAgICAgICAgICAgICAgc2hvd0NsZWFyXG4gICAgICAgICAgICAgICAgICAgICAgLz5cbiAgICAgICAgICAgICAgICAgICAgPC9Db2w+XG4gICAgICAgICAgICAgICAgICAgIDxDb2wgc3Bhbj17MjR9IGRhdGEtaW5zcC1wYXRoPVwid2ViL2NsYXNzaWMvc3JjL2NvbXBvbmVudHMvdGFibGUvcmVkZW1wdGlvbnMvbW9kYWxzL0VkaXRSZWRlbXB0aW9uTW9kYWwuanN4OjI2NzoyMTpDb2xcIiA+XG4gICAgICAgICAgICAgICAgICAgICAgPEZvcm0uRGF0ZVBpY2tlclxuICAgICAgICAgICAgICAgICAgICAgICAgZmllbGQ9J2V4cGlyZWRfdGltZSdcbiAgICAgICAgICAgICAgICAgICAgICAgIGxhYmVsPXt0KCfov4fmnJ/ml7bpl7QnKX1cbiAgICAgICAgICAgICAgICAgICAgICAgIHR5cGU9J2RhdGVUaW1lJ1xuICAgICAgICAgICAgICAgICAgICAgICAgcGxhY2Vob2xkZXI9e3QoJ+mAieaLqei/h+acn+aXtumXtO+8iOWPr+mAie+8jOeVmeepuuS4uuawuOS5he+8iScpfVxuICAgICAgICAgICAgICAgICAgICAgICAgc3R5bGU9e3sgd2lkdGg6ICcxMDAlJyB9fVxuICAgICAgICAgICAgICAgICAgICAgICAgc2hvd0NsZWFyXG4gICAgICAgICAgICAgICAgICAgICAgLz5cbiAgICAgICAgICAgICAgICAgICAgPC9Db2w+XG4gICAgICAgICAgICAgICAgICA8L1Jvdz5cbiAgICAgICAgICAgICAgICA8L0NhcmQ+XG5cbiAgICAgICAgICAgICAgICA8Q2FyZCBjbGFzc05hbWU9JyFyb3VuZGVkLTJ4bCBzaGFkb3ctc20gYm9yZGVyLTAnIGRhdGEtaW5zcC1wYXRoPVwid2ViL2NsYXNzaWMvc3JjL2NvbXBvbmVudHMvdGFibGUvcmVkZW1wdGlvbnMvbW9kYWxzL0VkaXRSZWRlbXB0aW9uTW9kYWwuanN4OjI4MDoxNzpDYXJkXCIgPlxuICAgICAgICAgICAgICAgICAgey8qIEhlYWRlcjogUXVvdGEgU2V0dGluZ3MgKi99XG4gICAgICAgICAgICAgICAgICA8ZGl2IGNsYXNzTmFtZT0nZmxleCBpdGVtcy1jZW50ZXIgbWItMicgZGF0YS1pbnNwLXBhdGg9XCJ3ZWIvY2xhc3NpYy9zcmMvY29tcG9uZW50cy90YWJsZS9yZWRlbXB0aW9ucy9tb2RhbHMvRWRpdFJlZGVtcHRpb25Nb2RhbC5qc3g6MjgyOjE5OmRpdlwiID5cbiAgICAgICAgICAgICAgICAgICAgPEF2YXRhclxuICAgICAgICAgICAgICAgICAgICAgIHNpemU9J3NtYWxsJ1xuICAgICAgICAgICAgICAgICAgICAgIGNvbG9yPSdncmVlbidcbiAgICAgICAgICAgICAgICAgICAgICBjbGFzc05hbWU9J21yLTIgc2hhZG93LW1kJ1xuICAgICAgICAgICAgICAgICAgICAgZGF0YS1pbnNwLXBhdGg9XCJ3ZWIvY2xhc3NpYy9zcmMvY29tcG9uZW50cy90YWJsZS9yZWRlbXB0aW9ucy9tb2RhbHMvRWRpdFJlZGVtcHRpb25Nb2RhbC5qc3g6MjgzOjIxOkF2YXRhclwiID5cbiAgICAgICAgICAgICAgICAgICAgICA8SWNvbkNyZWRpdENhcmQgc2l6ZT17MTZ9ICBkYXRhLWluc3AtcGF0aD1cIndlYi9jbGFzc2ljL3NyYy9jb21wb25lbnRzL3RhYmxlL3JlZGVtcHRpb25zL21vZGFscy9FZGl0UmVkZW1wdGlvbk1vZGFsLmpzeDoyODg6MjM6SWNvbkNyZWRpdENhcmRcIiAvPlxuICAgICAgICAgICAgICAgICAgICA8L0F2YXRhcj5cbiAgICAgICAgICAgICAgICAgICAgPGRpdiBkYXRhLWluc3AtcGF0aD1cIndlYi9jbGFzc2ljL3NyYy9jb21wb25lbnRzL3RhYmxlL3JlZGVtcHRpb25zL21vZGFscy9FZGl0UmVkZW1wdGlvbk1vZGFsLmpzeDoyOTA6MjE6ZGl2XCI+XG4gICAgICAgICAgICAgICAgICAgICAgPFRleHQgY2xhc3NOYW1lPSd0ZXh0LWxnIGZvbnQtbWVkaXVtJyBkYXRhLWluc3AtcGF0aD1cIndlYi9jbGFzc2ljL3NyYy9jb21wb25lbnRzL3RhYmxlL3JlZGVtcHRpb25zL21vZGFscy9FZGl0UmVkZW1wdGlvbk1vZGFsLmpzeDoyOTE6MjM6VGV4dFwiID5cbiAgICAgICAgICAgICAgICAgICAgICAgIHt0KCfpop3luqborr7nva4nKX1cbiAgICAgICAgICAgICAgICAgICAgICA8L1RleHQ+XG4gICAgICAgICAgICAgICAgICAgICAgPGRpdiBjbGFzc05hbWU9J3RleHQteHMgdGV4dC1ncmF5LTYwMCcgZGF0YS1pbnNwLXBhdGg9XCJ3ZWIvY2xhc3NpYy9zcmMvY29tcG9uZW50cy90YWJsZS9yZWRlbXB0aW9ucy9tb2RhbHMvRWRpdFJlZGVtcHRpb25Nb2RhbC5qc3g6Mjk0OjIzOmRpdlwiID5cbiAgICAgICAgICAgICAgICAgICAgICAgIHt0KCforr7nva7lhZHmjaLnoIHnmoTpop3luqblkozmlbDph48nKX1cbiAgICAgICAgICAgICAgICAgICAgICA8L2Rpdj5cbiAgICAgICAgICAgICAgICAgICAgPC9kaXY+XG4gICAgICAgICAgICAgICAgICA8L2Rpdj5cblxuICAgICAgICAgICAgICAgICAgPFJvdyBndXR0ZXI9ezEyfSBkYXRhLWluc3AtcGF0aD1cIndlYi9jbGFzc2ljL3NyYy9jb21wb25lbnRzL3RhYmxlL3JlZGVtcHRpb25zL21vZGFscy9FZGl0UmVkZW1wdGlvbk1vZGFsLmpzeDozMDA6MTk6Um93XCIgPlxuICAgICAgICAgICAgICAgICAgICA8Q29sIHNwYW49ezI0fSBkYXRhLWluc3AtcGF0aD1cIndlYi9jbGFzc2ljL3NyYy9jb21wb25lbnRzL3RhYmxlL3JlZGVtcHRpb25zL21vZGFscy9FZGl0UmVkZW1wdGlvbk1vZGFsLmpzeDozMDE6MjE6Q29sXCIgPlxuICAgICAgICAgICAgICAgICAgICAgIDxGb3JtLklucHV0TnVtYmVyXG4gICAgICAgICAgICAgICAgICAgICAgICBmaWVsZD0nYW1vdW50J1xuICAgICAgICAgICAgICAgICAgICAgICAgbGFiZWw9e3QoJ+mHkeminScpfVxuICAgICAgICAgICAgICAgICAgICAgICAgcHJlZml4PXtnZXRDdXJyZW5jeUNvbmZpZygpLnN5bWJvbH1cbiAgICAgICAgICAgICAgICAgICAgICAgIHBsYWNlaG9sZGVyPXt0KCfovpPlhaXph5Hpop0nKX1cbiAgICAgICAgICAgICAgICAgICAgICAgIHByZWNpc2lvbj17Nn1cbiAgICAgICAgICAgICAgICAgICAgICAgIG1pbj17MH1cbiAgICAgICAgICAgICAgICAgICAgICAgIHN0ZXA9ezAuMDAwMDAxfVxuICAgICAgICAgICAgICAgICAgICAgICAgc3R5bGU9e3sgd2lkdGg6ICcxMDAlJyB9fVxuICAgICAgICAgICAgICAgICAgICAgICAgb25DaGFuZ2U9eyh2YWwpID0+IHtcbiAgICAgICAgICAgICAgICAgICAgICAgICAgY29uc3QgYW1vdW50ID0gdmFsID09PSAnJyB8fCB2YWwgPT0gbnVsbCA/IDAgOiB2YWw7XG4gICAgICAgICAgICAgICAgICAgICAgICAgIGZvcm1BcGlSZWYuY3VycmVudD8uc2V0VmFsdWUoJ2Ftb3VudCcsIGFtb3VudCk7XG4gICAgICAgICAgICAgICAgICAgICAgICAgIGZvcm1BcGlSZWYuY3VycmVudD8uc2V0VmFsdWUoXG4gICAgICAgICAgICAgICAgICAgICAgICAgICAgJ3F1b3RhJyxcbiAgICAgICAgICAgICAgICAgICAgICAgICAgICBkaXNwbGF5QW1vdW50VG9RdW90YShhbW91bnQpLFxuICAgICAgICAgICAgICAgICAgICAgICAgICApO1xuICAgICAgICAgICAgICAgICAgICAgICAgfX1cbiAgICAgICAgICAgICAgICAgICAgICAgIHNob3dDbGVhclxuICAgICAgICAgICAgICAgICAgICAgIC8+XG4gICAgICAgICAgICAgICAgICAgICAgPGRpdlxuICAgICAgICAgICAgICAgICAgICAgICAgY2xhc3NOYW1lPSd0ZXh0LXhzIGN1cnNvci1wb2ludGVyIG10LTEnXG4gICAgICAgICAgICAgICAgICAgICAgICBzdHlsZT17eyBjb2xvcjogJ3ZhcigtLXNlbWktY29sb3ItdGV4dC0yKScgfX1cbiAgICAgICAgICAgICAgICAgICAgICAgIG9uQ2xpY2s9eygpID0+IHNldFNob3dRdW90YUlucHV0KCh2KSA9PiAhdil9XG4gICAgICAgICAgICAgICAgICAgICAgIGRhdGEtaW5zcC1wYXRoPVwid2ViL2NsYXNzaWMvc3JjL2NvbXBvbmVudHMvdGFibGUvcmVkZW1wdGlvbnMvbW9kYWxzL0VkaXRSZWRlbXB0aW9uTW9kYWwuanN4OjMyMToyMzpkaXZcIiA+XG4gICAgICAgICAgICAgICAgICAgICAgICB7c2hvd1F1b3RhSW5wdXRcbiAgICAgICAgICAgICAgICAgICAgICAgICAgPyBg4pa+ICR7dCgn5pS26LW35Y6f55Sf6aKd5bqm6L6T5YWlJyl9YFxuICAgICAgICAgICAgICAgICAgICAgICAgICA6IGDilrggJHt0KCfkvb/nlKjljp/nlJ/pop3luqbovpPlhaUnKX1gfVxuICAgICAgICAgICAgICAgICAgICAgIDwvZGl2PlxuICAgICAgICAgICAgICAgICAgICAgIDxkaXYgc3R5bGU9e3sgZGlzcGxheTogc2hvd1F1b3RhSW5wdXQgPyAnYmxvY2snIDogJ25vbmUnIH19IGNsYXNzTmFtZT0nbXQtMicgZGF0YS1pbnNwLXBhdGg9XCJ3ZWIvY2xhc3NpYy9zcmMvY29tcG9uZW50cy90YWJsZS9yZWRlbXB0aW9ucy9tb2RhbHMvRWRpdFJlZGVtcHRpb25Nb2RhbC5qc3g6MzMwOjIzOmRpdlwiID5cbiAgICAgICAgICAgICAgICAgICAgICAgIDxGb3JtLklucHV0TnVtYmVyXG4gICAgICAgICAgICAgICAgICAgICAgICAgIGZpZWxkPSdxdW90YSdcbiAgICAgICAgICAgICAgICAgICAgICAgICAgbGFiZWw9e3QoJ+mineW6picpfVxuICAgICAgICAgICAgICAgICAgICAgICAgICBwbGFjZWhvbGRlcj17dCgn6L6T5YWl6aKd5bqmJyl9XG4gICAgICAgICAgICAgICAgICAgICAgICAgIHJ1bGVzPXtbXG4gICAgICAgICAgICAgICAgICAgICAgICAgICAgeyByZXF1aXJlZDogdHJ1ZSwgbWVzc2FnZTogdCgn6K+36L6T5YWl6aKd5bqmJykgfSxcbiAgICAgICAgICAgICAgICAgICAgICAgICAgICB7XG4gICAgICAgICAgICAgICAgICAgICAgICAgICAgICB2YWxpZGF0b3I6IChydWxlLCB2KSA9PiB7XG4gICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIGNvbnN0IG51bSA9IHBhcnNlSW50KHYsIDEwKTtcbiAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgcmV0dXJuIG51bSA+IDBcbiAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICA/IFByb21pc2UucmVzb2x2ZSgpXG4gICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgOiBQcm9taXNlLnJlamVjdCh0KCfpop3luqblv4XpobvlpKfkuo4wJykpO1xuICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgfSxcbiAgICAgICAgICAgICAgICAgICAgICAgICAgICB9LFxuICAgICAgICAgICAgICAgICAgICAgICAgICBdfVxuICAgICAgICAgICAgICAgICAgICAgICAgICBvbkNoYW5nZT17KHZhbCkgPT4ge1xuICAgICAgICAgICAgICAgICAgICAgICAgICAgIGNvbnN0IHF1b3RhID0gdmFsID09PSAnJyB8fCB2YWwgPT0gbnVsbCA/IDAgOiB2YWw7XG4gICAgICAgICAgICAgICAgICAgICAgICAgICAgZm9ybUFwaVJlZi5jdXJyZW50Py5zZXRWYWx1ZSgncXVvdGEnLCBxdW90YSk7XG4gICAgICAgICAgICAgICAgICAgICAgICAgICAgZm9ybUFwaVJlZi5jdXJyZW50Py5zZXRWYWx1ZShcbiAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICdhbW91bnQnLFxuICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgTnVtYmVyKHF1b3RhVG9EaXNwbGF5QW1vdW50KHF1b3RhKS50b0ZpeGVkKDYpKSxcbiAgICAgICAgICAgICAgICAgICAgICAgICAgICApO1xuICAgICAgICAgICAgICAgICAgICAgICAgICB9fVxuICAgICAgICAgICAgICAgICAgICAgICAgICBzdHlsZT17eyB3aWR0aDogJzEwMCUnIH19XG4gICAgICAgICAgICAgICAgICAgICAgICAgIHNob3dDbGVhclxuICAgICAgICAgICAgICAgICAgICAgICAgLz5cbiAgICAgICAgICAgICAgICAgICAgICA8L2Rpdj5cbiAgICAgICAgICAgICAgICAgICAgPC9Db2w+XG4gICAgICAgICAgICAgICAgICAgIHshaXNFZGl0ICYmIChcbiAgICAgICAgICAgICAgICAgICAgICA8Q29sIHNwYW49ezEyfSBkYXRhLWluc3AtcGF0aD1cIndlYi9jbGFzc2ljL3NyYy9jb21wb25lbnRzL3RhYmxlL3JlZGVtcHRpb25zL21vZGFscy9FZGl0UmVkZW1wdGlvbk1vZGFsLmpzeDozNjA6MjM6Q29sXCIgPlxuICAgICAgICAgICAgICAgICAgICAgICAgPEZvcm0uSW5wdXROdW1iZXJcbiAgICAgICAgICAgICAgICAgICAgICAgICAgZmllbGQ9J2NvdW50J1xuICAgICAgICAgICAgICAgICAgICAgICAgICBsYWJlbD17dCgn55Sf5oiQ5pWw6YePJyl9XG4gICAgICAgICAgICAgICAgICAgICAgICAgIG1pbj17MX1cbiAgICAgICAgICAgICAgICAgICAgICAgICAgcnVsZXM9e1tcbiAgICAgICAgICAgICAgICAgICAgICAgICAgICB7IHJlcXVpcmVkOiB0cnVlLCBtZXNzYWdlOiB0KCfor7fovpPlhaXnlJ/miJDmlbDph48nKSB9LFxuICAgICAgICAgICAgICAgICAgICAgICAgICAgIHtcbiAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIHZhbGlkYXRvcjogKHJ1bGUsIHYpID0+IHtcbiAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgY29uc3QgbnVtID0gcGFyc2VJbnQodiwgMTApO1xuICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICByZXR1cm4gbnVtID4gMFxuICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgID8gUHJvbWlzZS5yZXNvbHZlKClcbiAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICA6IFByb21pc2UucmVqZWN0KHQoJ+eUn+aIkOaVsOmHj+W/hemhu+Wkp+S6jjAnKSk7XG4gICAgICAgICAgICAgICAgICAgICAgICAgICAgICB9LFxuICAgICAgICAgICAgICAgICAgICAgICAgICAgIH0sXG4gICAgICAgICAgICAgICAgICAgICAgICAgIF19XG4gICAgICAgICAgICAgICAgICAgICAgICAgIHN0eWxlPXt7IHdpZHRoOiAnMTAwJScgfX1cbiAgICAgICAgICAgICAgICAgICAgICAgICAgc2hvd0NsZWFyXG4gICAgICAgICAgICAgICAgICAgICAgICAvPlxuICAgICAgICAgICAgICAgICAgICAgIDwvQ29sPlxuICAgICAgICAgICAgICAgICAgICApfVxuICAgICAgICAgICAgICAgICAgPC9Sb3c+XG4gICAgICAgICAgICAgICAgPC9DYXJkPlxuICAgICAgICAgICAgICA8L2Rpdj5cbiAgICAgICAgICAgICl9XG4gICAgICAgICAgPC9Gb3JtPlxuICAgICAgICA8L1NwaW4+XG4gICAgICA8L1NpZGVTaGVldD5cbiAgICA8Lz5cbiAgKTtcbn07XG5cbmV4cG9ydCBkZWZhdWx0IEVkaXRSZWRlbXB0aW9uTW9kYWw7XG4iXSwiZmlsZSI6IkU6L25ldy1hcGkvd2ViL2NsYXNzaWMvc3JjL2NvbXBvbmVudHMvdGFibGUvcmVkZW1wdGlvbnMvbW9kYWxzL0VkaXRSZWRlbXB0aW9uTW9kYWwuanN4In0=

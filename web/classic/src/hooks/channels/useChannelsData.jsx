@@ -656,15 +656,17 @@ export const useChannelsData = () => {
 
   // Row style
   const handleRow = (record, index) => {
-    if (record.status !== 1) {
+    if (record.status === 2) {
       return {
-        style: {
-          background: 'var(--semi-color-disabled-border)',
-        },
+        className: 'neo-channel-row-disabled',
       };
-    } else {
-      return {};
     }
+    if (record.status === 3) {
+      return {
+        className: 'neo-channel-row-auto-disabled',
+      };
+    }
+    return {};
   };
 
   // Batch operations
