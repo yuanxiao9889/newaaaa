@@ -1,0 +1,505 @@
+import { createHotContext as __vite__createHotContext } from "/@vite/client";import.meta.hot = __vite__createHotContext("/src/pages/Setting/Model/SettingModelDeployment.jsx");import __vite__cjsImport0_react_jsxDevRuntime from "/node_modules/.vite/deps/react_jsx-dev-runtime.js?v=1c6fcc49"; const Fragment = __vite__cjsImport0_react_jsxDevRuntime["Fragment"]; const jsxDEV = __vite__cjsImport0_react_jsxDevRuntime["jsxDEV"];
+import RefreshRuntime from "/@react-refresh";
+const inWebWorker = typeof WorkerGlobalScope !== "undefined" && self instanceof WorkerGlobalScope;
+let prevRefreshReg;
+let prevRefreshSig;
+if (import.meta.hot && !inWebWorker) {
+  if (!window.__vite_plugin_react_preamble_installed__) {
+    throw new Error("@vitejs/plugin-react can't detect preamble. Something is wrong. See https://github.com/vitejs/vite-plugin-react/pull/11#discussion_r430879201");
+  }
+  prevRefreshReg = window.$RefreshReg$;
+  prevRefreshSig = window.$RefreshSig$;
+  window.$RefreshReg$ = (type, id) => {
+    RefreshRuntime.register(type, "E:/new-api/web/classic/src/pages/Setting/Model/SettingModelDeployment.jsx " + id);
+  };
+  window.$RefreshSig$ = RefreshRuntime.createSignatureFunctionForTransform;
+}
+var _s = $RefreshSig$();
+import __vite__cjsImport3_react from "/node_modules/.vite/deps/react.js?v=1c6fcc49"; const React = __vite__cjsImport3_react.__esModule ? __vite__cjsImport3_react.default : __vite__cjsImport3_react; const useEffect = __vite__cjsImport3_react["useEffect"]; const useState = __vite__cjsImport3_react["useState"]; const useRef = __vite__cjsImport3_react["useRef"];
+import {
+  Button,
+  Col,
+  Form,
+  Row,
+  Spin,
+  Card,
+  Typography
+} from "/node_modules/.vite/deps/@douyinfe_semi-ui.js?v=0f3c8be3";
+import {
+  compareObjects,
+  API,
+  showError,
+  showSuccess,
+  showWarning
+} from "/src/helpers/index.js";
+import { useTranslation } from "/node_modules/.vite/deps/react-i18next.js?v=8646de14";
+import { Server, Cloud, Zap, ArrowUpRight } from "/node_modules/.vite/deps/lucide-react.js?v=321bfe9b";
+const { Text } = Typography;
+export default function SettingModelDeployment(props) {
+  _s();
+  const { t } = useTranslation();
+  const [loading, setLoading] = useState(false);
+  const [inputs, setInputs] = useState({
+    "model_deployment.ionet.api_key": "",
+    "model_deployment.ionet.enabled": false
+  });
+  const refForm = useRef();
+  const [inputsRow, setInputsRow] = useState({
+    "model_deployment.ionet.api_key": "",
+    "model_deployment.ionet.enabled": false
+  });
+  const [testing, setTesting] = useState(false);
+  const testApiKey = async () => {
+    const apiKey = inputs["model_deployment.ionet.api_key"];
+    const getLocalizedMessage = (message) => {
+      switch (message) {
+        case "invalid request payload":
+          return t("请求参数无效");
+        case "api_key is required":
+          return t("请先填写 API Key");
+        case "failed to validate api key":
+          return t("API Key 验证失败");
+        default:
+          return message;
+      }
+    };
+    setTesting(true);
+    try {
+      const response = await API.post(
+        "/api/deployments/settings/test-connection",
+        apiKey && apiKey.trim() !== "" ? { api_key: apiKey.trim() } : {},
+        {
+          skipErrorHandler: true
+        }
+      );
+      if (response?.data?.success) {
+        showSuccess(t("API Key 验证成功！连接到 io.net 服务正常"));
+      } else {
+        const rawMessage = response?.data?.message;
+        const localizedMessage = rawMessage ? getLocalizedMessage(rawMessage) : t("API Key 验证失败");
+        showError(localizedMessage);
+      }
+    } catch (error) {
+      console.error("io.net API test error:", error);
+      if (error?.code === "ERR_NETWORK") {
+        showError(t("网络连接失败，请检查网络设置或稍后重试"));
+      } else {
+        const rawMessage = error?.response?.data?.message || error?.message || "";
+        const localizedMessage = rawMessage ? getLocalizedMessage(rawMessage) : t("未知错误");
+        showError(t("测试失败：") + localizedMessage);
+      }
+    } finally {
+      setTesting(false);
+    }
+  };
+  function onSubmit() {
+    const updateArray = compareObjects(inputs, inputsRow);
+    if (!updateArray.length) return showWarning(t("你似乎并没有修改什么"));
+    const requestQueue = updateArray.map((item) => {
+      let value = String(inputs[item.key]);
+      return API.put("/api/option/", {
+        key: item.key,
+        value
+      });
+    });
+    setLoading(true);
+    Promise.all(requestQueue).then((res) => {
+      if (requestQueue.length === 1) {
+        if (res.includes(void 0)) return;
+      } else if (requestQueue.length > 1) {
+        if (res.includes(void 0))
+          return showError(t("部分保存失败，请重试"));
+      }
+      showSuccess(t("保存成功"));
+      setInputsRow(structuredClone(inputs));
+      props.refresh();
+    }).catch(() => {
+      showError(t("保存失败，请重试"));
+    }).finally(() => {
+      setLoading(false);
+    });
+  }
+  useEffect(() => {
+    if (props.options) {
+      const defaultInputs = {
+        "model_deployment.ionet.api_key": "",
+        "model_deployment.ionet.enabled": false
+      };
+      const currentInputs = {};
+      for (let key in defaultInputs) {
+        if (props.options.hasOwnProperty(key)) {
+          currentInputs[key] = props.options[key];
+        } else {
+          currentInputs[key] = defaultInputs[key];
+        }
+      }
+      setInputs(currentInputs);
+      setInputsRow(structuredClone(currentInputs));
+      refForm.current?.setValues(currentInputs);
+    }
+  }, [props.options]);
+  return /* @__PURE__ */ jsxDEV(Fragment, { children: /* @__PURE__ */ jsxDEV(Spin, { spinning: loading, "data-insp-path": "web/classic/src/pages/Setting/Model/SettingModelDeployment.jsx:168:7:Spin", children: /* @__PURE__ */ jsxDEV(
+    Form,
+    {
+      values: inputs,
+      getFormApi: (formAPI) => refForm.current = formAPI,
+      style: { marginBottom: 15 },
+      "data-insp-path": "web/classic/src/pages/Setting/Model/SettingModelDeployment.jsx:169:9:Form",
+      children: /* @__PURE__ */ jsxDEV(
+        Form.Section,
+        {
+          text: /* @__PURE__ */ jsxDEV(
+            "div",
+            {
+              style: { display: "flex", alignItems: "center", gap: "8px" },
+              "data-insp-path": "web/classic/src/pages/Setting/Model/SettingModelDeployment.jsx:176:15:div",
+              children: /* @__PURE__ */ jsxDEV("span", { "data-insp-path": "web/classic/src/pages/Setting/Model/SettingModelDeployment.jsx:179:17:span", children: t("模型部署设置") }, void 0, false, {
+                fileName: "E:/new-api/web/classic/src/pages/Setting/Model/SettingModelDeployment.jsx",
+                lineNumber: 179,
+                columnNumber: 17
+              }, this)
+            },
+            void 0,
+            false,
+            {
+              fileName: "E:/new-api/web/classic/src/pages/Setting/Model/SettingModelDeployment.jsx",
+              lineNumber: 176,
+              columnNumber: 13
+            },
+            this
+          ),
+          children: [
+            /* @__PURE__ */ jsxDEV(
+              Card,
+              {
+                title: /* @__PURE__ */ jsxDEV(
+                  "div",
+                  {
+                    style: { display: "flex", alignItems: "center", gap: "8px" },
+                    "data-insp-path": "web/classic/src/pages/Setting/Model/SettingModelDeployment.jsx:197:17:div",
+                    children: [
+                      /* @__PURE__ */ jsxDEV(Cloud, { size: 18, "data-insp-path": "web/classic/src/pages/Setting/Model/SettingModelDeployment.jsx:200:19:Cloud" }, void 0, false, {
+                        fileName: "E:/new-api/web/classic/src/pages/Setting/Model/SettingModelDeployment.jsx",
+                        lineNumber: 200,
+                        columnNumber: 19
+                      }, this),
+                      /* @__PURE__ */ jsxDEV("span", { "data-insp-path": "web/classic/src/pages/Setting/Model/SettingModelDeployment.jsx:201:19:span", children: "io.net" }, void 0, false, {
+                        fileName: "E:/new-api/web/classic/src/pages/Setting/Model/SettingModelDeployment.jsx",
+                        lineNumber: 201,
+                        columnNumber: 19
+                      }, this)
+                    ]
+                  },
+                  void 0,
+                  true,
+                  {
+                    fileName: "E:/new-api/web/classic/src/pages/Setting/Model/SettingModelDeployment.jsx",
+                    lineNumber: 197,
+                    columnNumber: 15
+                  },
+                  this
+                ),
+                bodyStyle: { padding: "20px" },
+                style: { marginBottom: "16px" },
+                "data-insp-path": "web/classic/src/pages/Setting/Model/SettingModelDeployment.jsx:195:13:Card",
+                children: /* @__PURE__ */ jsxDEV(Row, { gutter: 24, "data-insp-path": "web/classic/src/pages/Setting/Model/SettingModelDeployment.jsx:207:15:Row", children: [
+                  /* @__PURE__ */ jsxDEV(Col, { xs: 24, lg: 14, "data-insp-path": "web/classic/src/pages/Setting/Model/SettingModelDeployment.jsx:208:17:Col", children: /* @__PURE__ */ jsxDEV(
+                    "div",
+                    {
+                      style: {
+                        display: "flex",
+                        flexDirection: "column",
+                        gap: "16px"
+                      },
+                      "data-insp-path": "web/classic/src/pages/Setting/Model/SettingModelDeployment.jsx:209:19:div",
+                      children: [
+                        /* @__PURE__ */ jsxDEV(
+                          Form.Switch,
+                          {
+                            label: t("启用 io.net 部署"),
+                            field: "model_deployment.ionet.enabled",
+                            onChange: (value) => setInputs({
+                              ...inputs,
+                              "model_deployment.ionet.enabled": value
+                            }),
+                            extraText: t("启用后可接入 io.net GPU 资源")
+                          },
+                          void 0,
+                          false,
+                          {
+                            fileName: "E:/new-api/web/classic/src/pages/Setting/Model/SettingModelDeployment.jsx",
+                            lineNumber: 216,
+                            columnNumber: 21
+                          },
+                          this
+                        ),
+                        /* @__PURE__ */ jsxDEV(
+                          Form.Input,
+                          {
+                            label: t("API Key"),
+                            field: "model_deployment.ionet.api_key",
+                            placeholder: t("请输入 io.net API Key（敏感信息不显示）"),
+                            onChange: (value) => setInputs({
+                              ...inputs,
+                              "model_deployment.ionet.api_key": value
+                            }),
+                            disabled: !inputs["model_deployment.ionet.enabled"],
+                            extraText: t("请使用 Project 为 io.cloud 的密钥"),
+                            mode: "password"
+                          },
+                          void 0,
+                          false,
+                          {
+                            fileName: "E:/new-api/web/classic/src/pages/Setting/Model/SettingModelDeployment.jsx",
+                            lineNumber: 227,
+                            columnNumber: 21
+                          },
+                          this
+                        ),
+                        /* @__PURE__ */ jsxDEV("div", { style: { display: "flex", gap: "12px" }, "data-insp-path": "web/classic/src/pages/Setting/Model/SettingModelDeployment.jsx:241:21:div", children: /* @__PURE__ */ jsxDEV(
+                          Button,
+                          {
+                            type: "outline",
+                            size: "small",
+                            icon: /* @__PURE__ */ jsxDEV(Zap, { size: 16, "data-insp-path": "web/classic/src/pages/Setting/Model/SettingModelDeployment.jsx:245:31:Zap" }, void 0, false, {
+                              fileName: "E:/new-api/web/classic/src/pages/Setting/Model/SettingModelDeployment.jsx",
+                              lineNumber: 245,
+                              columnNumber: 31
+                            }, this),
+                            onClick: testApiKey,
+                            loading: testing,
+                            disabled: !inputs["model_deployment.ionet.enabled"],
+                            style: {
+                              height: "32px",
+                              fontSize: "13px",
+                              borderRadius: "6px",
+                              fontWeight: "500",
+                              borderColor: testing ? "var(--semi-color-primary)" : "var(--semi-color-border)",
+                              color: testing ? "var(--semi-color-primary)" : "var(--semi-color-text-0)"
+                            },
+                            "data-insp-path": "web/classic/src/pages/Setting/Model/SettingModelDeployment.jsx:242:23:Button",
+                            children: testing ? t("连接测试中...") : t("测试连接")
+                          },
+                          void 0,
+                          false,
+                          {
+                            fileName: "E:/new-api/web/classic/src/pages/Setting/Model/SettingModelDeployment.jsx",
+                            lineNumber: 242,
+                            columnNumber: 23
+                          },
+                          this
+                        ) }, void 0, false, {
+                          fileName: "E:/new-api/web/classic/src/pages/Setting/Model/SettingModelDeployment.jsx",
+                          lineNumber: 241,
+                          columnNumber: 21
+                        }, this)
+                      ]
+                    },
+                    void 0,
+                    true,
+                    {
+                      fileName: "E:/new-api/web/classic/src/pages/Setting/Model/SettingModelDeployment.jsx",
+                      lineNumber: 209,
+                      columnNumber: 19
+                    },
+                    this
+                  ) }, void 0, false, {
+                    fileName: "E:/new-api/web/classic/src/pages/Setting/Model/SettingModelDeployment.jsx",
+                    lineNumber: 208,
+                    columnNumber: 17
+                  }, this),
+                  /* @__PURE__ */ jsxDEV(Col, { xs: 24, lg: 10, "data-insp-path": "web/classic/src/pages/Setting/Model/SettingModelDeployment.jsx:267:17:Col", children: /* @__PURE__ */ jsxDEV(
+                    "div",
+                    {
+                      style: {
+                        background: "var(--semi-color-fill-0)",
+                        padding: "16px",
+                        borderRadius: "8px",
+                        border: "1px solid var(--semi-color-border)",
+                        height: "100%",
+                        display: "flex",
+                        flexDirection: "column",
+                        gap: "12px",
+                        justifyContent: "space-between"
+                      },
+                      "data-insp-path": "web/classic/src/pages/Setting/Model/SettingModelDeployment.jsx:268:19:div",
+                      children: [
+                        /* @__PURE__ */ jsxDEV("div", { "data-insp-path": "web/classic/src/pages/Setting/Model/SettingModelDeployment.jsx:281:21:div", children: [
+                          /* @__PURE__ */ jsxDEV(
+                            Text,
+                            {
+                              strong: true,
+                              style: { display: "block", marginBottom: "8px" },
+                              "data-insp-path": "web/classic/src/pages/Setting/Model/SettingModelDeployment.jsx:282:23:Text",
+                              children: t("获取 io.net API Key")
+                            },
+                            void 0,
+                            false,
+                            {
+                              fileName: "E:/new-api/web/classic/src/pages/Setting/Model/SettingModelDeployment.jsx",
+                              lineNumber: 282,
+                              columnNumber: 23
+                            },
+                            this
+                          ),
+                          /* @__PURE__ */ jsxDEV(
+                            "ul",
+                            {
+                              style: {
+                                margin: 0,
+                                paddingLeft: "18px",
+                                display: "flex",
+                                flexDirection: "column",
+                                gap: "6px",
+                                color: "var(--semi-color-text-2)",
+                                fontSize: "13px",
+                                lineHeight: 1.6
+                              },
+                              "data-insp-path": "web/classic/src/pages/Setting/Model/SettingModelDeployment.jsx:288:23:ul",
+                              children: [
+                                /* @__PURE__ */ jsxDEV("li", { "data-insp-path": "web/classic/src/pages/Setting/Model/SettingModelDeployment.jsx:300:25:li", children: t("访问 io.net 控制台的 API Keys 页面") }, void 0, false, {
+                                  fileName: "E:/new-api/web/classic/src/pages/Setting/Model/SettingModelDeployment.jsx",
+                                  lineNumber: 300,
+                                  columnNumber: 25
+                                }, this),
+                                /* @__PURE__ */ jsxDEV("li", { "data-insp-path": "web/classic/src/pages/Setting/Model/SettingModelDeployment.jsx:301:25:li", children: t("创建或选择密钥时，将 Project 设置为 io.cloud") }, void 0, false, {
+                                  fileName: "E:/new-api/web/classic/src/pages/Setting/Model/SettingModelDeployment.jsx",
+                                  lineNumber: 301,
+                                  columnNumber: 25
+                                }, this),
+                                /* @__PURE__ */ jsxDEV("li", { "data-insp-path": "web/classic/src/pages/Setting/Model/SettingModelDeployment.jsx:304:25:li", children: t("复制生成的密钥并粘贴到此处") }, void 0, false, {
+                                  fileName: "E:/new-api/web/classic/src/pages/Setting/Model/SettingModelDeployment.jsx",
+                                  lineNumber: 304,
+                                  columnNumber: 25
+                                }, this)
+                              ]
+                            },
+                            void 0,
+                            true,
+                            {
+                              fileName: "E:/new-api/web/classic/src/pages/Setting/Model/SettingModelDeployment.jsx",
+                              lineNumber: 288,
+                              columnNumber: 23
+                            },
+                            this
+                          )
+                        ] }, void 0, true, {
+                          fileName: "E:/new-api/web/classic/src/pages/Setting/Model/SettingModelDeployment.jsx",
+                          lineNumber: 281,
+                          columnNumber: 21
+                        }, this),
+                        /* @__PURE__ */ jsxDEV(
+                          Button,
+                          {
+                            icon: /* @__PURE__ */ jsxDEV(ArrowUpRight, { size: 16, "data-insp-path": "web/classic/src/pages/Setting/Model/SettingModelDeployment.jsx:308:29:ArrowUpRight" }, void 0, false, {
+                              fileName: "E:/new-api/web/classic/src/pages/Setting/Model/SettingModelDeployment.jsx",
+                              lineNumber: 308,
+                              columnNumber: 29
+                            }, this),
+                            type: "primary",
+                            theme: "solid",
+                            style: { width: "100%" },
+                            onClick: () => window.open("https://ai.io.net/ai/api-keys", "_blank"),
+                            "data-insp-path": "web/classic/src/pages/Setting/Model/SettingModelDeployment.jsx:307:21:Button",
+                            children: t("前往 io.net API Keys")
+                          },
+                          void 0,
+                          false,
+                          {
+                            fileName: "E:/new-api/web/classic/src/pages/Setting/Model/SettingModelDeployment.jsx",
+                            lineNumber: 307,
+                            columnNumber: 21
+                          },
+                          this
+                        )
+                      ]
+                    },
+                    void 0,
+                    true,
+                    {
+                      fileName: "E:/new-api/web/classic/src/pages/Setting/Model/SettingModelDeployment.jsx",
+                      lineNumber: 268,
+                      columnNumber: 19
+                    },
+                    this
+                  ) }, void 0, false, {
+                    fileName: "E:/new-api/web/classic/src/pages/Setting/Model/SettingModelDeployment.jsx",
+                    lineNumber: 267,
+                    columnNumber: 17
+                  }, this)
+                ] }, void 0, true, {
+                  fileName: "E:/new-api/web/classic/src/pages/Setting/Model/SettingModelDeployment.jsx",
+                  lineNumber: 207,
+                  columnNumber: 15
+                }, this)
+              },
+              void 0,
+              false,
+              {
+                fileName: "E:/new-api/web/classic/src/pages/Setting/Model/SettingModelDeployment.jsx",
+                lineNumber: 195,
+                columnNumber: 13
+              },
+              this
+            ),
+            /* @__PURE__ */ jsxDEV(Row, { "data-insp-path": "web/classic/src/pages/Setting/Model/SettingModelDeployment.jsx:323:13:Row", children: /* @__PURE__ */ jsxDEV(Button, { size: "default", type: "primary", onClick: onSubmit, "data-insp-path": "web/classic/src/pages/Setting/Model/SettingModelDeployment.jsx:324:15:Button", children: t("保存设置") }, void 0, false, {
+              fileName: "E:/new-api/web/classic/src/pages/Setting/Model/SettingModelDeployment.jsx",
+              lineNumber: 324,
+              columnNumber: 15
+            }, this) }, void 0, false, {
+              fileName: "E:/new-api/web/classic/src/pages/Setting/Model/SettingModelDeployment.jsx",
+              lineNumber: 323,
+              columnNumber: 13
+            }, this)
+          ]
+        },
+        void 0,
+        true,
+        {
+          fileName: "E:/new-api/web/classic/src/pages/Setting/Model/SettingModelDeployment.jsx",
+          lineNumber: 174,
+          columnNumber: 11
+        },
+        this
+      )
+    },
+    void 0,
+    false,
+    {
+      fileName: "E:/new-api/web/classic/src/pages/Setting/Model/SettingModelDeployment.jsx",
+      lineNumber: 169,
+      columnNumber: 9
+    },
+    this
+  ) }, void 0, false, {
+    fileName: "E:/new-api/web/classic/src/pages/Setting/Model/SettingModelDeployment.jsx",
+    lineNumber: 168,
+    columnNumber: 7
+  }, this) }, void 0, false, {
+    fileName: "E:/new-api/web/classic/src/pages/Setting/Model/SettingModelDeployment.jsx",
+    lineNumber: 167,
+    columnNumber: 5
+  }, this);
+}
+_s(SettingModelDeployment, "qpcy0xzP054jpISfJvWLpZogvhM=", false, function() {
+  return [useTranslation];
+});
+_c = SettingModelDeployment;
+var _c;
+$RefreshReg$(_c, "SettingModelDeployment");
+if (import.meta.hot && !inWebWorker) {
+  window.$RefreshReg$ = prevRefreshReg;
+  window.$RefreshSig$ = prevRefreshSig;
+}
+if (import.meta.hot && !inWebWorker) {
+  RefreshRuntime.__hmr_import(import.meta.url).then((currentExports) => {
+    RefreshRuntime.registerExportsForReactRefresh("E:/new-api/web/classic/src/pages/Setting/Model/SettingModelDeployment.jsx", currentExports);
+    import.meta.hot.accept((nextExports) => {
+      if (!nextExports) return;
+      const invalidateMessage = RefreshRuntime.validateRefreshBoundaryAndEnqueueUpdate("E:/new-api/web/classic/src/pages/Setting/Model/SettingModelDeployment.jsx", currentExports, nextExports);
+      if (invalidateMessage) import.meta.hot.invalidate(invalidateMessage);
+    });
+  });
+}
+
+//# sourceMappingURL=data:application/json;base64,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LElBL0pGO0FBQUE7QUFBQTtBQUFBO0FBQUE7QUFBQTtBQUFBO0FBQUE7QUFBQSxFQWdLQSxLQWpLRjtBQUFBO0FBQUE7QUFBQTtBQUFBLFNBa0tBLEtBbktGO0FBQUE7QUFBQTtBQUFBO0FBQUEsU0FvS0E7QUFFSjtBQUFDRCxHQW5TdUJGLHdCQUFzQjtBQUFBLFVBQzlCTixjQUFjO0FBQUE7QUFBQW1GLEtBRE43RTtBQUFzQixJQUFBNkU7QUFBQUMsYUFBQUQsSUFBQSIsIm5hbWVzIjpbIlJlYWN0IiwidXNlRWZmZWN0IiwidXNlU3RhdGUiLCJ1c2VSZWYiLCJCdXR0b24iLCJDb2wiLCJGb3JtIiwiUm93IiwiU3BpbiIsIkNhcmQiLCJUeXBvZ3JhcGh5IiwiY29tcGFyZU9iamVjdHMiLCJBUEkiLCJzaG93RXJyb3IiLCJzaG93U3VjY2VzcyIsInNob3dXYXJuaW5nIiwidXNlVHJhbnNsYXRpb24iLCJTZXJ2ZXIiLCJDbG91ZCIsIlphcCIsIkFycm93VXBSaWdodCIsIlRleHQiLCJTZXR0aW5nTW9kZWxEZXBsb3ltZW50IiwicHJvcHMiLCJfcyIsInQiLCJsb2FkaW5nIiwic2V0TG9hZGluZyIsImlucHV0cyIsInNldElucHV0cyIsInJlZkZvcm0iLCJpbnB1dHNSb3ciLCJzZXRJbnB1dHNSb3ciLCJ0ZXN0aW5nIiwic2V0VGVzdGluZyIsInRlc3RBcGlLZXkiLCJhcGlLZXkiLCJnZXRMb2NhbGl6ZWRNZXNzYWdlIiwibWVzc2FnZSIsInJlc3BvbnNlIiwicG9zdCIsInRyaW0iLCJhcGlfa2V5Iiwic2tpcEVycm9ySGFuZGxlciIsImRhdGEiLCJzdWNjZXNzIiwicmF3TWVzc2FnZSIsImxvY2FsaXplZE1lc3NhZ2UiLCJlcnJvciIsImNvbnNvbGUiLCJjb2RlIiwib25TdWJtaXQiLCJ1cGRhdGVBcnJheSIsImxlbmd0aCIsInJlcXVlc3RRdWV1ZSIsIm1hcCIsIml0ZW0iLCJ2YWx1ZSIsIlN0cmluZyIsImtleSIsInB1dCIsIlByb21pc2UiLCJhbGwiLCJ0aGVuIiwicmVzIiwiaW5jbHVkZXMiLCJ1bmRlZmluZWQiLCJzdHJ1Y3R1cmVkQ2xvbmUiLCJyZWZyZXNoIiwiY2F0Y2giLCJmaW5hbGx5Iiwib3B0aW9ucyIsImRlZmF1bHRJbnB1dHMiLCJjdXJyZW50SW5wdXRzIiwiaGFzT3duUHJvcGVydHkiLCJjdXJyZW50Iiwic2V0VmFsdWVzIiwiZm9ybUFQSSIsIm1hcmdpbkJvdHRvbSIsImRpc3BsYXkiLCJhbGlnbkl0ZW1zIiwiZ2FwIiwicGFkZGluZyIsImZsZXhEaXJlY3Rpb24iLCJoZWlnaHQiLCJmb250U2l6ZSIsImJvcmRlclJhZGl1cyIsImZvbnRXZWlnaHQiLCJib3JkZXJDb2xvciIsImNvbG9yIiwiYmFja2dyb3VuZCIsImJvcmRlciIsImp1c3RpZnlDb250ZW50IiwibWFyZ2luIiwicGFkZGluZ0xlZnQiLCJsaW5lSGVpZ2h0Iiwid2lkdGgiLCJ3aW5kb3ciLCJvcGVuIiwiX2MiLCIkUmVmcmVzaFJlZyQiXSwiaWdub3JlTGlzdCI6W10sInNvdXJjZXMiOlsiU2V0dGluZ01vZGVsRGVwbG95bWVudC5qc3giXSwic291cmNlc0NvbnRlbnQiOlsiLypcbkNvcHlyaWdodCAoQykgMjAyNSBRdWFudHVtTm91c1xuXG5UaGlzIHByb2dyYW0gaXMgZnJlZSBzb2Z0d2FyZTogeW91IGNhbiByZWRpc3RyaWJ1dGUgaXQgYW5kL29yIG1vZGlmeVxuaXQgdW5kZXIgdGhlIHRlcm1zIG9mIHRoZSBHTlUgQWZmZXJvIEdlbmVyYWwgUHVibGljIExpY2Vuc2UgYXNcbnB1Ymxpc2hlZCBieSB0aGUgRnJlZSBTb2Z0d2FyZSBGb3VuZGF0aW9uLCBlaXRoZXIgdmVyc2lvbiAzIG9mIHRoZVxuTGljZW5zZSwgb3IgKGF0IHlvdXIgb3B0aW9uKSBhbnkgbGF0ZXIgdmVyc2lvbi5cblxuVGhpcyBwcm9ncmFtIGlzIGRpc3RyaWJ1dGVkIGluIHRoZSBob3BlIHRoYXQgaXQgd2lsbCBiZSB1c2VmdWwsXG5idXQgV0lUSE9VVCBBTlkgV0FSUkFOVFk7IHdpdGhvdXQgZXZlbiB0aGUgaW1wbGllZCB3YXJyYW50eSBvZlxuTUVSQ0hBTlRBQklMSVRZIG9yIEZJVE5FU1MgRk9SIEEgUEFSVElDVUxBUiBQVVJQT1NFLiBTZWUgdGhlXG5HTlUgQWZmZXJvIEdlbmVyYWwgUHVibGljIExpY2Vuc2UgZm9yIG1vcmUgZGV0YWlscy5cblxuWW91IHNob3VsZCBoYXZlIHJlY2VpdmVkIGEgY29weSBvZiB0aGUgR05VIEFmZmVybyBHZW5lcmFsIFB1YmxpYyBMaWNlbnNlXG5hbG9uZyB3aXRoIHRoaXMgcHJvZ3JhbS4gSWYgbm90LCBzZWUgPGh0dHBzOi8vd3d3LmdudS5vcmcvbGljZW5zZXMvPi5cblxuRm9yIGNvbW1lcmNpYWwgbGljZW5zaW5nLCBwbGVhc2UgY29udGFjdCBzdXBwb3J0QHF1YW50dW1ub3VzLmNvbVxuKi9cblxuaW1wb3J0IFJlYWN0LCB7IHVzZUVmZmVjdCwgdXNlU3RhdGUsIHVzZVJlZiB9IGZyb20gJ3JlYWN0JztcbmltcG9ydCB7XG4gIEJ1dHRvbixcbiAgQ29sLFxuICBGb3JtLFxuICBSb3csXG4gIFNwaW4sXG4gIENhcmQsXG4gIFR5cG9ncmFwaHksXG59IGZyb20gJ0Bkb3V5aW5mZS9zZW1pLXVpJztcbmltcG9ydCB7XG4gIGNvbXBhcmVPYmplY3RzLFxuICBBUEksXG4gIHNob3dFcnJvcixcbiAgc2hvd1N1Y2Nlc3MsXG4gIHNob3dXYXJuaW5nLFxufSBmcm9tICcuLi8uLi8uLi9oZWxwZXJzJztcbmltcG9ydCB7IHVzZVRyYW5zbGF0aW9uIH0gZnJvbSAncmVhY3QtaTE4bmV4dCc7XG5pbXBvcnQgeyBTZXJ2ZXIsIENsb3VkLCBaYXAsIEFycm93VXBSaWdodCB9IGZyb20gJ2x1Y2lkZS1yZWFjdCc7XG5cbmNvbnN0IHsgVGV4dCB9ID0gVHlwb2dyYXBoeTtcblxuZXhwb3J0IGRlZmF1bHQgZnVuY3Rpb24gU2V0dGluZ01vZGVsRGVwbG95bWVudChwcm9wcykge1xuICBjb25zdCB7IHQgfSA9IHVzZVRyYW5zbGF0aW9uKCk7XG5cbiAgY29uc3QgW2xvYWRpbmcsIHNldExvYWRpbmddID0gdXNlU3RhdGUoZmFsc2UpO1xuICBjb25zdCBbaW5wdXRzLCBzZXRJbnB1dHNdID0gdXNlU3RhdGUoe1xuICAgICdtb2RlbF9kZXBsb3ltZW50LmlvbmV0LmFwaV9rZXknOiAnJyxcbiAgICAnbW9kZWxfZGVwbG95bWVudC5pb25ldC5lbmFibGVkJzogZmFsc2UsXG4gIH0pO1xuICBjb25zdCByZWZGb3JtID0gdXNlUmVmKCk7XG4gIGNvbnN0IFtpbnB1dHNSb3csIHNldElucHV0c1Jvd10gPSB1c2VTdGF0ZSh7XG4gICAgJ21vZGVsX2RlcGxveW1lbnQuaW9uZXQuYXBpX2tleSc6ICcnLFxuICAgICdtb2RlbF9kZXBsb3ltZW50LmlvbmV0LmVuYWJsZWQnOiBmYWxzZSxcbiAgfSk7XG4gIGNvbnN0IFt0ZXN0aW5nLCBzZXRUZXN0aW5nXSA9IHVzZVN0YXRlKGZhbHNlKTtcblxuICBjb25zdCB0ZXN0QXBpS2V5ID0gYXN5bmMgKCkgPT4ge1xuICAgIGNvbnN0IGFwaUtleSA9IGlucHV0c1snbW9kZWxfZGVwbG95bWVudC5pb25ldC5hcGlfa2V5J107XG5cbiAgICBjb25zdCBnZXRMb2NhbGl6ZWRNZXNzYWdlID0gKG1lc3NhZ2UpID0+IHtcbiAgICAgIHN3aXRjaCAobWVzc2FnZSkge1xuICAgICAgICBjYXNlICdpbnZhbGlkIHJlcXVlc3QgcGF5bG9hZCc6XG4gICAgICAgICAgcmV0dXJuIHQoJ+ivt+axguWPguaVsOaXoOaViCcpO1xuICAgICAgICBjYXNlICdhcGlfa2V5IGlzIHJlcXVpcmVkJzpcbiAgICAgICAgICByZXR1cm4gdCgn6K+35YWI5aGr5YaZIEFQSSBLZXknKTtcbiAgICAgICAgY2FzZSAnZmFpbGVkIHRvIHZhbGlkYXRlIGFwaSBrZXknOlxuICAgICAgICAgIHJldHVybiB0KCdBUEkgS2V5IOmqjOivgeWksei0pScpO1xuICAgICAgICBkZWZhdWx0OlxuICAgICAgICAgIHJldHVybiBtZXNzYWdlO1xuICAgICAgfVxuICAgIH07XG5cbiAgICBzZXRUZXN0aW5nKHRydWUpO1xuICAgIHRyeSB7XG4gICAgICBjb25zdCByZXNwb25zZSA9IGF3YWl0IEFQSS5wb3N0KFxuICAgICAgICAnL2FwaS9kZXBsb3ltZW50cy9zZXR0aW5ncy90ZXN0LWNvbm5lY3Rpb24nLFxuICAgICAgICBhcGlLZXkgJiYgYXBpS2V5LnRyaW0oKSAhPT0gJycgPyB7IGFwaV9rZXk6IGFwaUtleS50cmltKCkgfSA6IHt9LFxuICAgICAgICB7XG4gICAgICAgICAgc2tpcEVycm9ySGFuZGxlcjogdHJ1ZSxcbiAgICAgICAgfSxcbiAgICAgICk7XG5cbiAgICAgIGlmIChyZXNwb25zZT8uZGF0YT8uc3VjY2Vzcykge1xuICAgICAgICBzaG93U3VjY2Vzcyh0KCdBUEkgS2V5IOmqjOivgeaIkOWKn++8gei/nuaOpeWIsCBpby5uZXQg5pyN5Yqh5q2j5bi4JykpO1xuICAgICAgfSBlbHNlIHtcbiAgICAgICAgY29uc3QgcmF3TWVzc2FnZSA9IHJlc3BvbnNlPy5kYXRhPy5tZXNzYWdlO1xuICAgICAgICBjb25zdCBsb2NhbGl6ZWRNZXNzYWdlID0gcmF3TWVzc2FnZVxuICAgICAgICAgID8gZ2V0TG9jYWxpemVkTWVzc2FnZShyYXdNZXNzYWdlKVxuICAgICAgICAgIDogdCgnQVBJIEtleSDpqozor4HlpLHotKUnKTtcbiAgICAgICAgc2hvd0Vycm9yKGxvY2FsaXplZE1lc3NhZ2UpO1xuICAgICAgfVxuICAgIH0gY2F0Y2ggKGVycm9yKSB7XG4gICAgICBjb25zb2xlLmVycm9yKCdpby5uZXQgQVBJIHRlc3QgZXJyb3I6JywgZXJyb3IpO1xuXG4gICAgICBpZiAoZXJyb3I/LmNvZGUgPT09ICdFUlJfTkVUV09SSycpIHtcbiAgICAgICAgc2hvd0Vycm9yKHQoJ+e9kee7nOi/nuaOpeWksei0pe+8jOivt+ajgOafpee9kee7nOiuvue9ruaIlueojeWQjumHjeivlScpKTtcbiAgICAgIH0gZWxzZSB7XG4gICAgICAgIGNvbnN0IHJhd01lc3NhZ2UgPVxuICAgICAgICAgIGVycm9yPy5yZXNwb25zZT8uZGF0YT8ubWVzc2FnZSB8fCBlcnJvcj8ubWVzc2FnZSB8fCAnJztcbiAgICAgICAgY29uc3QgbG9jYWxpemVkTWVzc2FnZSA9IHJhd01lc3NhZ2VcbiAgICAgICAgICA/IGdldExvY2FsaXplZE1lc3NhZ2UocmF3TWVzc2FnZSlcbiAgICAgICAgICA6IHQoJ+acquefpemUmeivrycpO1xuICAgICAgICBzaG93RXJyb3IodCgn5rWL6K+V5aSx6LSl77yaJykgKyBsb2NhbGl6ZWRNZXNzYWdlKTtcbiAgICAgIH1cbiAgICB9IGZpbmFsbHkge1xuICAgICAgc2V0VGVzdGluZyhmYWxzZSk7XG4gICAgfVxuICB9O1xuXG4gIGZ1bmN0aW9uIG9uU3VibWl0KCkge1xuICAgIGNvbnN0IHVwZGF0ZUFycmF5ID0gY29tcGFyZU9iamVjdHMoaW5wdXRzLCBpbnB1dHNSb3cpO1xuICAgIGlmICghdXBkYXRlQXJyYXkubGVuZ3RoKSByZXR1cm4gc2hvd1dhcm5pbmcodCgn5L2g5Ly85LmO5bm25rKh5pyJ5L+u5pS55LuA5LmIJykpO1xuXG4gICAgY29uc3QgcmVxdWVzdFF1ZXVlID0gdXBkYXRlQXJyYXkubWFwKChpdGVtKSA9PiB7XG4gICAgICBsZXQgdmFsdWUgPSBTdHJpbmcoaW5wdXRzW2l0ZW0ua2V5XSk7XG4gICAgICByZXR1cm4gQVBJLnB1dCgnL2FwaS9vcHRpb24vJywge1xuICAgICAgICBrZXk6IGl0ZW0ua2V5LFxuICAgICAgICB2YWx1ZSxcbiAgICAgIH0pO1xuICAgIH0pO1xuXG4gICAgc2V0TG9hZGluZyh0cnVlKTtcbiAgICBQcm9taXNlLmFsbChyZXF1ZXN0UXVldWUpXG4gICAgICAudGhlbigocmVzKSA9PiB7XG4gICAgICAgIGlmIChyZXF1ZXN0UXVldWUubGVuZ3RoID09PSAxKSB7XG4gICAgICAgICAgaWYgKHJlcy5pbmNsdWRlcyh1bmRlZmluZWQpKSByZXR1cm47XG4gICAgICAgIH0gZWxzZSBpZiAocmVxdWVzdFF1ZXVlLmxlbmd0aCA+IDEpIHtcbiAgICAgICAgICBpZiAocmVzLmluY2x1ZGVzKHVuZGVmaW5lZCkpXG4gICAgICAgICAgICByZXR1cm4gc2hvd0Vycm9yKHQoJ+mDqOWIhuS/neWtmOWksei0pe+8jOivt+mHjeivlScpKTtcbiAgICAgICAgfVxuICAgICAgICBzaG93U3VjY2Vzcyh0KCfkv53lrZjmiJDlip8nKSk7XG4gICAgICAgIC8vIOabtOaWsCBpbnB1dHNSb3cg5Lul5Y+N5pig5bey5L+d5a2Y55qE54q25oCBXG4gICAgICAgIHNldElucHV0c1JvdyhzdHJ1Y3R1cmVkQ2xvbmUoaW5wdXRzKSk7XG4gICAgICAgIHByb3BzLnJlZnJlc2goKTtcbiAgICAgIH0pXG4gICAgICAuY2F0Y2goKCkgPT4ge1xuICAgICAgICBzaG93RXJyb3IodCgn5L+d5a2Y5aSx6LSl77yM6K+36YeN6K+VJykpO1xuICAgICAgfSlcbiAgICAgIC5maW5hbGx5KCgpID0+IHtcbiAgICAgICAgc2V0TG9hZGluZyhmYWxzZSk7XG4gICAgICB9KTtcbiAgfVxuXG4gIHVzZUVmZmVjdCgoKSA9PiB7XG4gICAgaWYgKHByb3BzLm9wdGlvbnMpIHtcbiAgICAgIGNvbnN0IGRlZmF1bHRJbnB1dHMgPSB7XG4gICAgICAgICdtb2RlbF9kZXBsb3ltZW50LmlvbmV0LmFwaV9rZXknOiAnJyxcbiAgICAgICAgJ21vZGVsX2RlcGxveW1lbnQuaW9uZXQuZW5hYmxlZCc6IGZhbHNlLFxuICAgICAgfTtcblxuICAgICAgY29uc3QgY3VycmVudElucHV0cyA9IHt9O1xuICAgICAgZm9yIChsZXQga2V5IGluIGRlZmF1bHRJbnB1dHMpIHtcbiAgICAgICAgaWYgKHByb3BzLm9wdGlvbnMuaGFzT3duUHJvcGVydHkoa2V5KSkge1xuICAgICAgICAgIGN1cnJlbnRJbnB1dHNba2V5XSA9IHByb3BzLm9wdGlvbnNba2V5XTtcbiAgICAgICAgfSBlbHNlIHtcbiAgICAgICAgICBjdXJyZW50SW5wdXRzW2tleV0gPSBkZWZhdWx0SW5wdXRzW2tleV07XG4gICAgICAgIH1cbiAgICAgIH1cblxuICAgICAgc2V0SW5wdXRzKGN1cnJlbnRJbnB1dHMpO1xuICAgICAgc2V0SW5wdXRzUm93KHN0cnVjdHVyZWRDbG9uZShjdXJyZW50SW5wdXRzKSk7XG4gICAgICByZWZGb3JtLmN1cnJlbnQ/LnNldFZhbHVlcyhjdXJyZW50SW5wdXRzKTtcbiAgICB9XG4gIH0sIFtwcm9wcy5vcHRpb25zXSk7XG5cbiAgcmV0dXJuIChcbiAgICA8PlxuICAgICAgPFNwaW4gc3Bpbm5pbmc9e2xvYWRpbmd9IGRhdGEtaW5zcC1wYXRoPVwid2ViL2NsYXNzaWMvc3JjL3BhZ2VzL1NldHRpbmcvTW9kZWwvU2V0dGluZ01vZGVsRGVwbG95bWVudC5qc3g6MTY4Ojc6U3BpblwiID5cbiAgICAgICAgPEZvcm1cbiAgICAgICAgICB2YWx1ZXM9e2lucHV0c31cbiAgICAgICAgICBnZXRGb3JtQXBpPXsoZm9ybUFQSSkgPT4gKHJlZkZvcm0uY3VycmVudCA9IGZvcm1BUEkpfVxuICAgICAgICAgIHN0eWxlPXt7IG1hcmdpbkJvdHRvbTogMTUgfX1cbiAgICAgICAgIGRhdGEtaW5zcC1wYXRoPVwid2ViL2NsYXNzaWMvc3JjL3BhZ2VzL1NldHRpbmcvTW9kZWwvU2V0dGluZ01vZGVsRGVwbG95bWVudC5qc3g6MTY5Ojk6Rm9ybVwiID5cbiAgICAgICAgICA8Rm9ybS5TZWN0aW9uXG4gICAgICAgICAgICB0ZXh0PXtcbiAgICAgICAgICAgICAgPGRpdlxuICAgICAgICAgICAgICAgIHN0eWxlPXt7IGRpc3BsYXk6ICdmbGV4JywgYWxpZ25JdGVtczogJ2NlbnRlcicsIGdhcDogJzhweCcgfX1cbiAgICAgICAgICAgICAgIGRhdGEtaW5zcC1wYXRoPVwid2ViL2NsYXNzaWMvc3JjL3BhZ2VzL1NldHRpbmcvTW9kZWwvU2V0dGluZ01vZGVsRGVwbG95bWVudC5qc3g6MTc2OjE1OmRpdlwiID5cbiAgICAgICAgICAgICAgICA8c3BhbiBkYXRhLWluc3AtcGF0aD1cIndlYi9jbGFzc2ljL3NyYy9wYWdlcy9TZXR0aW5nL01vZGVsL1NldHRpbmdNb2RlbERlcGxveW1lbnQuanN4OjE3OToxNzpzcGFuXCI+e3QoJ+aooeWei+mDqOe9suiuvue9ricpfTwvc3Bhbj5cbiAgICAgICAgICAgICAgPC9kaXY+XG4gICAgICAgICAgICB9XG4gICAgICAgICAgPlxuICAgICAgICAgICAgey8qPFRleHQgKi99XG4gICAgICAgICAgICB7LyogIHR5cGU9XCJzZWNvbmRhcnlcIiAqL31cbiAgICAgICAgICAgIHsvKiAgc2l6ZT1cInNtYWxsXCIqL31cbiAgICAgICAgICAgIHsvKiAgc3R5bGU9e3sgKi99XG4gICAgICAgICAgICB7LyogICAgZGlzcGxheTogJ2Jsb2NrJywgKi99XG4gICAgICAgICAgICB7LyogICAgbWFyZ2luQm90dG9tOiAnMjBweCcsKi99XG4gICAgICAgICAgICB7LyogICAgY29sb3I6ICd2YXIoLS1zZW1pLWNvbG9yLXRleHQtMiknKi99XG4gICAgICAgICAgICB7LyogIH19Ki99XG4gICAgICAgICAgICB7Lyo+Ki99XG4gICAgICAgICAgICB7LyogIHt0KCfphY3nva7mqKHlnovpg6jnvbLmnI3liqHmj5DkvpvllYbnmoRBUEnlr4bpkqXlkozlkK/nlKjnirbmgIEnKX0qL31cbiAgICAgICAgICAgIHsvKjwvVGV4dD4qL31cblxuICAgICAgICAgICAgPENhcmRcbiAgICAgICAgICAgICAgdGl0bGU9e1xuICAgICAgICAgICAgICAgIDxkaXZcbiAgICAgICAgICAgICAgICAgIHN0eWxlPXt7IGRpc3BsYXk6ICdmbGV4JywgYWxpZ25JdGVtczogJ2NlbnRlcicsIGdhcDogJzhweCcgfX1cbiAgICAgICAgICAgICAgICAgZGF0YS1pbnNwLXBhdGg9XCJ3ZWIvY2xhc3NpYy9zcmMvcGFnZXMvU2V0dGluZy9Nb2RlbC9TZXR0aW5nTW9kZWxEZXBsb3ltZW50LmpzeDoxOTc6MTc6ZGl2XCIgPlxuICAgICAgICAgICAgICAgICAgPENsb3VkIHNpemU9ezE4fSAgZGF0YS1pbnNwLXBhdGg9XCJ3ZWIvY2xhc3NpYy9zcmMvcGFnZXMvU2V0dGluZy9Nb2RlbC9TZXR0aW5nTW9kZWxEZXBsb3ltZW50LmpzeDoyMDA6MTk6Q2xvdWRcIiAvPlxuICAgICAgICAgICAgICAgICAgPHNwYW4gZGF0YS1pbnNwLXBhdGg9XCJ3ZWIvY2xhc3NpYy9zcmMvcGFnZXMvU2V0dGluZy9Nb2RlbC9TZXR0aW5nTW9kZWxEZXBsb3ltZW50LmpzeDoyMDE6MTk6c3BhblwiPmlvLm5ldDwvc3Bhbj5cbiAgICAgICAgICAgICAgICA8L2Rpdj5cbiAgICAgICAgICAgICAgfVxuICAgICAgICAgICAgICBib2R5U3R5bGU9e3sgcGFkZGluZzogJzIwcHgnIH19XG4gICAgICAgICAgICAgIHN0eWxlPXt7IG1hcmdpbkJvdHRvbTogJzE2cHgnIH19XG4gICAgICAgICAgICAgZGF0YS1pbnNwLXBhdGg9XCJ3ZWIvY2xhc3NpYy9zcmMvcGFnZXMvU2V0dGluZy9Nb2RlbC9TZXR0aW5nTW9kZWxEZXBsb3ltZW50LmpzeDoxOTU6MTM6Q2FyZFwiID5cbiAgICAgICAgICAgICAgPFJvdyBndXR0ZXI9ezI0fSBkYXRhLWluc3AtcGF0aD1cIndlYi9jbGFzc2ljL3NyYy9wYWdlcy9TZXR0aW5nL01vZGVsL1NldHRpbmdNb2RlbERlcGxveW1lbnQuanN4OjIwNzoxNTpSb3dcIiA+XG4gICAgICAgICAgICAgICAgPENvbCB4cz17MjR9IGxnPXsxNH0gZGF0YS1pbnNwLXBhdGg9XCJ3ZWIvY2xhc3NpYy9zcmMvcGFnZXMvU2V0dGluZy9Nb2RlbC9TZXR0aW5nTW9kZWxEZXBsb3ltZW50LmpzeDoyMDg6MTc6Q29sXCIgPlxuICAgICAgICAgICAgICAgICAgPGRpdlxuICAgICAgICAgICAgICAgICAgICBzdHlsZT17e1xuICAgICAgICAgICAgICAgICAgICAgIGRpc3BsYXk6ICdmbGV4JyxcbiAgICAgICAgICAgICAgICAgICAgICBmbGV4RGlyZWN0aW9uOiAnY29sdW1uJyxcbiAgICAgICAgICAgICAgICAgICAgICBnYXA6ICcxNnB4JyxcbiAgICAgICAgICAgICAgICAgICAgfX1cbiAgICAgICAgICAgICAgICAgICBkYXRhLWluc3AtcGF0aD1cIndlYi9jbGFzc2ljL3NyYy9wYWdlcy9TZXR0aW5nL01vZGVsL1NldHRpbmdNb2RlbERlcGxveW1lbnQuanN4OjIwOToxOTpkaXZcIiA+XG4gICAgICAgICAgICAgICAgICAgIDxGb3JtLlN3aXRjaFxuICAgICAgICAgICAgICAgICAgICAgIGxhYmVsPXt0KCflkK/nlKggaW8ubmV0IOmDqOe9sicpfVxuICAgICAgICAgICAgICAgICAgICAgIGZpZWxkPXsnbW9kZWxfZGVwbG95bWVudC5pb25ldC5lbmFibGVkJ31cbiAgICAgICAgICAgICAgICAgICAgICBvbkNoYW5nZT17KHZhbHVlKSA9PlxuICAgICAgICAgICAgICAgICAgICAgICAgc2V0SW5wdXRzKHtcbiAgICAgICAgICAgICAgICAgICAgICAgICAgLi4uaW5wdXRzLFxuICAgICAgICAgICAgICAgICAgICAgICAgICAnbW9kZWxfZGVwbG95bWVudC5pb25ldC5lbmFibGVkJzogdmFsdWUsXG4gICAgICAgICAgICAgICAgICAgICAgICB9KVxuICAgICAgICAgICAgICAgICAgICAgIH1cbiAgICAgICAgICAgICAgICAgICAgICBleHRyYVRleHQ9e3QoJ+WQr+eUqOWQjuWPr+aOpeWFpSBpby5uZXQgR1BVIOi1hOa6kCcpfVxuICAgICAgICAgICAgICAgICAgICAvPlxuICAgICAgICAgICAgICAgICAgICA8Rm9ybS5JbnB1dFxuICAgICAgICAgICAgICAgICAgICAgIGxhYmVsPXt0KCdBUEkgS2V5Jyl9XG4gICAgICAgICAgICAgICAgICAgICAgZmllbGQ9eydtb2RlbF9kZXBsb3ltZW50LmlvbmV0LmFwaV9rZXknfVxuICAgICAgICAgICAgICAgICAgICAgIHBsYWNlaG9sZGVyPXt0KCfor7fovpPlhaUgaW8ubmV0IEFQSSBLZXnvvIjmlY/mhJ/kv6Hmga/kuI3mmL7npLrvvIknKX1cbiAgICAgICAgICAgICAgICAgICAgICBvbkNoYW5nZT17KHZhbHVlKSA9PlxuICAgICAgICAgICAgICAgICAgICAgICAgc2V0SW5wdXRzKHtcbiAgICAgICAgICAgICAgICAgICAgICAgICAgLi4uaW5wdXRzLFxuICAgICAgICAgICAgICAgICAgICAgICAgICAnbW9kZWxfZGVwbG95bWVudC5pb25ldC5hcGlfa2V5JzogdmFsdWUsXG4gICAgICAgICAgICAgICAgICAgICAgICB9KVxuICAgICAgICAgICAgICAgICAgICAgIH1cbiAgICAgICAgICAgICAgICAgICAgICBkaXNhYmxlZD17IWlucHV0c1snbW9kZWxfZGVwbG95bWVudC5pb25ldC5lbmFibGVkJ119XG4gICAgICAgICAgICAgICAgICAgICAgZXh0cmFUZXh0PXt0KCfor7fkvb/nlKggUHJvamVjdCDkuLogaW8uY2xvdWQg55qE5a+G6ZKlJyl9XG4gICAgICAgICAgICAgICAgICAgICAgbW9kZT0ncGFzc3dvcmQnXG4gICAgICAgICAgICAgICAgICAgIC8+XG4gICAgICAgICAgICAgICAgICAgIDxkaXYgc3R5bGU9e3sgZGlzcGxheTogJ2ZsZXgnLCBnYXA6ICcxMnB4JyB9fSBkYXRhLWluc3AtcGF0aD1cIndlYi9jbGFzc2ljL3NyYy9wYWdlcy9TZXR0aW5nL01vZGVsL1NldHRpbmdNb2RlbERlcGxveW1lbnQuanN4OjI0MToyMTpkaXZcIiA+XG4gICAgICAgICAgICAgICAgICAgICAgPEJ1dHRvblxuICAgICAgICAgICAgICAgICAgICAgICAgdHlwZT0nb3V0bGluZSdcbiAgICAgICAgICAgICAgICAgICAgICAgIHNpemU9J3NtYWxsJ1xuICAgICAgICAgICAgICAgICAgICAgICAgaWNvbj17PFphcCBzaXplPXsxNn0gIGRhdGEtaW5zcC1wYXRoPVwid2ViL2NsYXNzaWMvc3JjL3BhZ2VzL1NldHRpbmcvTW9kZWwvU2V0dGluZ01vZGVsRGVwbG95bWVudC5qc3g6MjQ1OjMxOlphcFwiIC8+fVxuICAgICAgICAgICAgICAgICAgICAgICAgb25DbGljaz17dGVzdEFwaUtleX1cbiAgICAgICAgICAgICAgICAgICAgICAgIGxvYWRpbmc9e3Rlc3Rpbmd9XG4gICAgICAgICAgICAgICAgICAgICAgICBkaXNhYmxlZD17IWlucHV0c1snbW9kZWxfZGVwbG95bWVudC5pb25ldC5lbmFibGVkJ119XG4gICAgICAgICAgICAgICAgICAgICAgICBzdHlsZT17e1xuICAgICAgICAgICAgICAgICAgICAgICAgICBoZWlnaHQ6ICczMnB4JyxcbiAgICAgICAgICAgICAgICAgICAgICAgICAgZm9udFNpemU6ICcxM3B4JyxcbiAgICAgICAgICAgICAgICAgICAgICAgICAgYm9yZGVyUmFkaXVzOiAnNnB4JyxcbiAgICAgICAgICAgICAgICAgICAgICAgICAgZm9udFdlaWdodDogJzUwMCcsXG4gICAgICAgICAgICAgICAgICAgICAgICAgIGJvcmRlckNvbG9yOiB0ZXN0aW5nXG4gICAgICAgICAgICAgICAgICAgICAgICAgICAgPyAndmFyKC0tc2VtaS1jb2xvci1wcmltYXJ5KSdcbiAgICAgICAgICAgICAgICAgICAgICAgICAgICA6ICd2YXIoLS1zZW1pLWNvbG9yLWJvcmRlciknLFxuICAgICAgICAgICAgICAgICAgICAgICAgICBjb2xvcjogdGVzdGluZ1xuICAgICAgICAgICAgICAgICAgICAgICAgICAgID8gJ3ZhcigtLXNlbWktY29sb3ItcHJpbWFyeSknXG4gICAgICAgICAgICAgICAgICAgICAgICAgICAgOiAndmFyKC0tc2VtaS1jb2xvci10ZXh0LTApJyxcbiAgICAgICAgICAgICAgICAgICAgICAgIH19XG4gICAgICAgICAgICAgICAgICAgICAgIGRhdGEtaW5zcC1wYXRoPVwid2ViL2NsYXNzaWMvc3JjL3BhZ2VzL1NldHRpbmcvTW9kZWwvU2V0dGluZ01vZGVsRGVwbG95bWVudC5qc3g6MjQyOjIzOkJ1dHRvblwiID5cbiAgICAgICAgICAgICAgICAgICAgICAgIHt0ZXN0aW5nID8gdCgn6L+e5o6l5rWL6K+V5LitLi4uJykgOiB0KCfmtYvor5Xov57mjqUnKX1cbiAgICAgICAgICAgICAgICAgICAgICA8L0J1dHRvbj5cbiAgICAgICAgICAgICAgICAgICAgPC9kaXY+XG4gICAgICAgICAgICAgICAgICA8L2Rpdj5cbiAgICAgICAgICAgICAgICA8L0NvbD5cbiAgICAgICAgICAgICAgICA8Q29sIHhzPXsyNH0gbGc9ezEwfSBkYXRhLWluc3AtcGF0aD1cIndlYi9jbGFzc2ljL3NyYy9wYWdlcy9TZXR0aW5nL01vZGVsL1NldHRpbmdNb2RlbERlcGxveW1lbnQuanN4OjI2NzoxNzpDb2xcIiA+XG4gICAgICAgICAgICAgICAgICA8ZGl2XG4gICAgICAgICAgICAgICAgICAgIHN0eWxlPXt7XG4gICAgICAgICAgICAgICAgICAgICAgYmFja2dyb3VuZDogJ3ZhcigtLXNlbWktY29sb3ItZmlsbC0wKScsXG4gICAgICAgICAgICAgICAgICAgICAgcGFkZGluZzogJzE2cHgnLFxuICAgICAgICAgICAgICAgICAgICAgIGJvcmRlclJhZGl1czogJzhweCcsXG4gICAgICAgICAgICAgICAgICAgICAgYm9yZGVyOiAnMXB4IHNvbGlkIHZhcigtLXNlbWktY29sb3ItYm9yZGVyKScsXG4gICAgICAgICAgICAgICAgICAgICAgaGVpZ2h0OiAnMTAwJScsXG4gICAgICAgICAgICAgICAgICAgICAgZGlzcGxheTogJ2ZsZXgnLFxuICAgICAgICAgICAgICAgICAgICAgIGZsZXhEaXJlY3Rpb246ICdjb2x1bW4nLFxuICAgICAgICAgICAgICAgICAgICAgIGdhcDogJzEycHgnLFxuICAgICAgICAgICAgICAgICAgICAgIGp1c3RpZnlDb250ZW50OiAnc3BhY2UtYmV0d2VlbicsXG4gICAgICAgICAgICAgICAgICAgIH19XG4gICAgICAgICAgICAgICAgICAgZGF0YS1pbnNwLXBhdGg9XCJ3ZWIvY2xhc3NpYy9zcmMvcGFnZXMvU2V0dGluZy9Nb2RlbC9TZXR0aW5nTW9kZWxEZXBsb3ltZW50LmpzeDoyNjg6MTk6ZGl2XCIgPlxuICAgICAgICAgICAgICAgICAgICA8ZGl2IGRhdGEtaW5zcC1wYXRoPVwid2ViL2NsYXNzaWMvc3JjL3BhZ2VzL1NldHRpbmcvTW9kZWwvU2V0dGluZ01vZGVsRGVwbG95bWVudC5qc3g6MjgxOjIxOmRpdlwiPlxuICAgICAgICAgICAgICAgICAgICAgIDxUZXh0XG4gICAgICAgICAgICAgICAgICAgICAgICBzdHJvbmdcbiAgICAgICAgICAgICAgICAgICAgICAgIHN0eWxlPXt7IGRpc3BsYXk6ICdibG9jaycsIG1hcmdpbkJvdHRvbTogJzhweCcgfX1cbiAgICAgICAgICAgICAgICAgICAgICAgZGF0YS1pbnNwLXBhdGg9XCJ3ZWIvY2xhc3NpYy9zcmMvcGFnZXMvU2V0dGluZy9Nb2RlbC9TZXR0aW5nTW9kZWxEZXBsb3ltZW50LmpzeDoyODI6MjM6VGV4dFwiID5cbiAgICAgICAgICAgICAgICAgICAgICAgIHt0KCfojrflj5YgaW8ubmV0IEFQSSBLZXknKX1cbiAgICAgICAgICAgICAgICAgICAgICA8L1RleHQ+XG4gICAgICAgICAgICAgICAgICAgICAgPHVsXG4gICAgICAgICAgICAgICAgICAgICAgICBzdHlsZT17e1xuICAgICAgICAgICAgICAgICAgICAgICAgICBtYXJnaW46IDAsXG4gICAgICAgICAgICAgICAgICAgICAgICAgIHBhZGRpbmdMZWZ0OiAnMThweCcsXG4gICAgICAgICAgICAgICAgICAgICAgICAgIGRpc3BsYXk6ICdmbGV4JyxcbiAgICAgICAgICAgICAgICAgICAgICAgICAgZmxleERpcmVjdGlvbjogJ2NvbHVtbicsXG4gICAgICAgICAgICAgICAgICAgICAgICAgIGdhcDogJzZweCcsXG4gICAgICAgICAgICAgICAgICAgICAgICAgIGNvbG9yOiAndmFyKC0tc2VtaS1jb2xvci10ZXh0LTIpJyxcbiAgICAgICAgICAgICAgICAgICAgICAgICAgZm9udFNpemU6ICcxM3B4JyxcbiAgICAgICAgICAgICAgICAgICAgICAgICAgbGluZUhlaWdodDogMS42LFxuICAgICAgICAgICAgICAgICAgICAgICAgfX1cbiAgICAgICAgICAgICAgICAgICAgICAgZGF0YS1pbnNwLXBhdGg9XCJ3ZWIvY2xhc3NpYy9zcmMvcGFnZXMvU2V0dGluZy9Nb2RlbC9TZXR0aW5nTW9kZWxEZXBsb3ltZW50LmpzeDoyODg6MjM6dWxcIiA+XG4gICAgICAgICAgICAgICAgICAgICAgICA8bGkgZGF0YS1pbnNwLXBhdGg9XCJ3ZWIvY2xhc3NpYy9zcmMvcGFnZXMvU2V0dGluZy9Nb2RlbC9TZXR0aW5nTW9kZWxEZXBsb3ltZW50LmpzeDozMDA6MjU6bGlcIj57dCgn6K6/6ZeuIGlvLm5ldCDmjqfliLblj7DnmoQgQVBJIEtleXMg6aG16Z2iJyl9PC9saT5cbiAgICAgICAgICAgICAgICAgICAgICAgIDxsaSBkYXRhLWluc3AtcGF0aD1cIndlYi9jbGFzc2ljL3NyYy9wYWdlcy9TZXR0aW5nL01vZGVsL1NldHRpbmdNb2RlbERlcGxveW1lbnQuanN4OjMwMToyNTpsaVwiPlxuICAgICAgICAgICAgICAgICAgICAgICAgICB7dCgn5Yib5bu65oiW6YCJ5oup5a+G6ZKl5pe277yM5bCGIFByb2plY3Qg6K6+572u5Li6IGlvLmNsb3VkJyl9XG4gICAgICAgICAgICAgICAgICAgICAgICA8L2xpPlxuICAgICAgICAgICAgICAgICAgICAgICAgPGxpIGRhdGEtaW5zcC1wYXRoPVwid2ViL2NsYXNzaWMvc3JjL3BhZ2VzL1NldHRpbmcvTW9kZWwvU2V0dGluZ01vZGVsRGVwbG95bWVudC5qc3g6MzA0OjI1OmxpXCI+e3QoJ+WkjeWItueUn+aIkOeahOWvhumSpeW5tueymOi0tOWIsOatpOWkhCcpfTwvbGk+XG4gICAgICAgICAgICAgICAgICAgICAgPC91bD5cbiAgICAgICAgICAgICAgICAgICAgPC9kaXY+XG4gICAgICAgICAgICAgICAgICAgIDxCdXR0b25cbiAgICAgICAgICAgICAgICAgICAgICBpY29uPXs8QXJyb3dVcFJpZ2h0IHNpemU9ezE2fSAgZGF0YS1pbnNwLXBhdGg9XCJ3ZWIvY2xhc3NpYy9zcmMvcGFnZXMvU2V0dGluZy9Nb2RlbC9TZXR0aW5nTW9kZWxEZXBsb3ltZW50LmpzeDozMDg6Mjk6QXJyb3dVcFJpZ2h0XCIgLz59XG4gICAgICAgICAgICAgICAgICAgICAgdHlwZT0ncHJpbWFyeSdcbiAgICAgICAgICAgICAgICAgICAgICB0aGVtZT0nc29saWQnXG4gICAgICAgICAgICAgICAgICAgICAgc3R5bGU9e3sgd2lkdGg6ICcxMDAlJyB9fVxuICAgICAgICAgICAgICAgICAgICAgIG9uQ2xpY2s9eygpID0+XG4gICAgICAgICAgICAgICAgICAgICAgICB3aW5kb3cub3BlbignaHR0cHM6Ly9haS5pby5uZXQvYWkvYXBpLWtleXMnLCAnX2JsYW5rJylcbiAgICAgICAgICAgICAgICAgICAgICB9XG4gICAgICAgICAgICAgICAgICAgICBkYXRhLWluc3AtcGF0aD1cIndlYi9jbGFzc2ljL3NyYy9wYWdlcy9TZXR0aW5nL01vZGVsL1NldHRpbmdNb2RlbERlcGxveW1lbnQuanN4OjMwNzoyMTpCdXR0b25cIiA+XG4gICAgICAgICAgICAgICAgICAgICAge3QoJ+WJjeW+gCBpby5uZXQgQVBJIEtleXMnKX1cbiAgICAgICAgICAgICAgICAgICAgPC9CdXR0b24+XG4gICAgICAgICAgICAgICAgICA8L2Rpdj5cbiAgICAgICAgICAgICAgICA8L0NvbD5cbiAgICAgICAgICAgICAgPC9Sb3c+XG4gICAgICAgICAgICA8L0NhcmQ+XG5cbiAgICAgICAgICAgIDxSb3cgZGF0YS1pbnNwLXBhdGg9XCJ3ZWIvY2xhc3NpYy9zcmMvcGFnZXMvU2V0dGluZy9Nb2RlbC9TZXR0aW5nTW9kZWxEZXBsb3ltZW50LmpzeDozMjM6MTM6Um93XCI+XG4gICAgICAgICAgICAgIDxCdXR0b24gc2l6ZT0nZGVmYXVsdCcgdHlwZT0ncHJpbWFyeScgb25DbGljaz17b25TdWJtaXR9IGRhdGEtaW5zcC1wYXRoPVwid2ViL2NsYXNzaWMvc3JjL3BhZ2VzL1NldHRpbmcvTW9kZWwvU2V0dGluZ01vZGVsRGVwbG95bWVudC5qc3g6MzI0OjE1OkJ1dHRvblwiID5cbiAgICAgICAgICAgICAgICB7dCgn5L+d5a2Y6K6+572uJyl9XG4gICAgICAgICAgICAgIDwvQnV0dG9uPlxuICAgICAgICAgICAgPC9Sb3c+XG4gICAgICAgICAgPC9Gb3JtLlNlY3Rpb24+XG4gICAgICAgIDwvRm9ybT5cbiAgICAgIDwvU3Bpbj5cbiAgICA8Lz5cbiAgKTtcbn1cbiJdLCJmaWxlIjoiRTovbmV3LWFwaS93ZWIvY2xhc3NpYy9zcmMvcGFnZXMvU2V0dGluZy9Nb2RlbC9TZXR0aW5nTW9kZWxEZXBsb3ltZW50LmpzeCJ9

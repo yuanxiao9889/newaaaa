@@ -1,0 +1,195 @@
+import { createHotContext as __vite__createHotContext } from "/@vite/client";import.meta.hot = __vite__createHotContext("/src/components/setup/components/steps/DatabaseStep.jsx");import __vite__cjsImport0_react_jsxDevRuntime from "/node_modules/.vite/deps/react_jsx-dev-runtime.js?v=1c6fcc49"; const Fragment = __vite__cjsImport0_react_jsxDevRuntime["Fragment"]; const jsxDEV = __vite__cjsImport0_react_jsxDevRuntime["jsxDEV"];
+import RefreshRuntime from "/@react-refresh";
+const inWebWorker = typeof WorkerGlobalScope !== "undefined" && self instanceof WorkerGlobalScope;
+let prevRefreshReg;
+let prevRefreshSig;
+if (import.meta.hot && !inWebWorker) {
+  if (!window.__vite_plugin_react_preamble_installed__) {
+    throw new Error("@vitejs/plugin-react can't detect preamble. Something is wrong. See https://github.com/vitejs/vite-plugin-react/pull/11#discussion_r430879201");
+  }
+  prevRefreshReg = window.$RefreshReg$;
+  prevRefreshSig = window.$RefreshSig$;
+  window.$RefreshReg$ = (type, id) => {
+    RefreshRuntime.register(type, "E:/new-api/web/classic/src/components/setup/components/steps/DatabaseStep.jsx " + id);
+  };
+  window.$RefreshSig$ = RefreshRuntime.createSignatureFunctionForTransform;
+}
+import __vite__cjsImport3_react from "/node_modules/.vite/deps/react.js?v=1c6fcc49"; const React = __vite__cjsImport3_react.__esModule ? __vite__cjsImport3_react.default : __vite__cjsImport3_react;
+import { Banner } from "/node_modules/.vite/deps/@douyinfe_semi-ui.js?v=0f3c8be3";
+const DatabaseStep = ({ setupStatus, renderNavigationButtons, t }) => {
+  const isElectron = typeof window !== "undefined" && window.electron?.isElectron;
+  return /* @__PURE__ */ jsxDEV(Fragment, { children: [
+    setupStatus.database_type === "sqlite" && /* @__PURE__ */ jsxDEV(
+      Banner,
+      {
+        type: isElectron ? "info" : "warning",
+        closeIcon: null,
+        title: isElectron ? t("本地数据存储") : t("数据库警告"),
+        description: isElectron ? /* @__PURE__ */ jsxDEV("div", { "data-insp-path": "web/classic/src/components/setup/components/steps/DatabaseStep.jsx:42:15:div", children: [
+          /* @__PURE__ */ jsxDEV("p", { "data-insp-path": "web/classic/src/components/setup/components/steps/DatabaseStep.jsx:43:17:p", children: t(
+            "您的数据将安全地存储在本地计算机上。所有配置、用户信息和使用记录都会自动保存，关闭应用后不会丢失。"
+          ) }, void 0, false, {
+            fileName: "E:/new-api/web/classic/src/components/setup/components/steps/DatabaseStep.jsx",
+            lineNumber: 43,
+            columnNumber: 17
+          }, this),
+          window.electron?.dataDir && /* @__PURE__ */ jsxDEV("p", { className: "mt-2 text-sm opacity-80", "data-insp-path": "web/classic/src/components/setup/components/steps/DatabaseStep.jsx:49:19:p", children: [
+            /* @__PURE__ */ jsxDEV("strong", { "data-insp-path": "web/classic/src/components/setup/components/steps/DatabaseStep.jsx:50:21:strong", children: t("数据存储位置：") }, void 0, false, {
+              fileName: "E:/new-api/web/classic/src/components/setup/components/steps/DatabaseStep.jsx",
+              lineNumber: 50,
+              columnNumber: 21
+            }, this),
+            /* @__PURE__ */ jsxDEV("br", { "data-insp-path": "web/classic/src/components/setup/components/steps/DatabaseStep.jsx:51:21:br" }, void 0, false, {
+              fileName: "E:/new-api/web/classic/src/components/setup/components/steps/DatabaseStep.jsx",
+              lineNumber: 51,
+              columnNumber: 21
+            }, this),
+            /* @__PURE__ */ jsxDEV("code", { className: "bg-gray-100 dark:bg-gray-800 px-2 py-1 rounded", "data-insp-path": "web/classic/src/components/setup/components/steps/DatabaseStep.jsx:52:21:code", children: window.electron.dataDir }, void 0, false, {
+              fileName: "E:/new-api/web/classic/src/components/setup/components/steps/DatabaseStep.jsx",
+              lineNumber: 52,
+              columnNumber: 21
+            }, this)
+          ] }, void 0, true, {
+            fileName: "E:/new-api/web/classic/src/components/setup/components/steps/DatabaseStep.jsx",
+            lineNumber: 49,
+            columnNumber: 11
+          }, this),
+          /* @__PURE__ */ jsxDEV("p", { className: "mt-2 text-sm opacity-70", "data-insp-path": "web/classic/src/components/setup/components/steps/DatabaseStep.jsx:57:17:p", children: [
+            "💡 ",
+            t("提示：如需备份数据，只需复制上述目录即可")
+          ] }, void 0, true, {
+            fileName: "E:/new-api/web/classic/src/components/setup/components/steps/DatabaseStep.jsx",
+            lineNumber: 57,
+            columnNumber: 17
+          }, this)
+        ] }, void 0, true, {
+          fileName: "E:/new-api/web/classic/src/components/setup/components/steps/DatabaseStep.jsx",
+          lineNumber: 42,
+          columnNumber: 9
+        }, this) : /* @__PURE__ */ jsxDEV("div", { "data-insp-path": "web/classic/src/components/setup/components/steps/DatabaseStep.jsx:62:15:div", children: [
+          /* @__PURE__ */ jsxDEV("p", { "data-insp-path": "web/classic/src/components/setup/components/steps/DatabaseStep.jsx:63:17:p", children: t(
+            "您正在使用 SQLite 数据库。如果您在容器环境中运行，请确保已正确设置数据库文件的持久化映射，否则容器重启后所有数据将丢失！"
+          ) }, void 0, false, {
+            fileName: "E:/new-api/web/classic/src/components/setup/components/steps/DatabaseStep.jsx",
+            lineNumber: 63,
+            columnNumber: 17
+          }, this),
+          /* @__PURE__ */ jsxDEV("p", { className: "mt-1", "data-insp-path": "web/classic/src/components/setup/components/steps/DatabaseStep.jsx:68:17:p", children: /* @__PURE__ */ jsxDEV("strong", { "data-insp-path": "web/classic/src/components/setup/components/steps/DatabaseStep.jsx:69:19:strong", children: t(
+            "建议在生产环境中使用 MySQL 或 PostgreSQL 数据库，或确保 SQLite 数据库文件已映射到宿主机的持久化存储。"
+          ) }, void 0, false, {
+            fileName: "E:/new-api/web/classic/src/components/setup/components/steps/DatabaseStep.jsx",
+            lineNumber: 69,
+            columnNumber: 19
+          }, this) }, void 0, false, {
+            fileName: "E:/new-api/web/classic/src/components/setup/components/steps/DatabaseStep.jsx",
+            lineNumber: 68,
+            columnNumber: 17
+          }, this)
+        ] }, void 0, true, {
+          fileName: "E:/new-api/web/classic/src/components/setup/components/steps/DatabaseStep.jsx",
+          lineNumber: 62,
+          columnNumber: 9
+        }, this),
+        className: "!rounded-lg",
+        fullMode: false,
+        bordered: true,
+        "data-insp-path": "web/classic/src/components/setup/components/steps/DatabaseStep.jsx:36:9:Banner"
+      },
+      void 0,
+      false,
+      {
+        fileName: "E:/new-api/web/classic/src/components/setup/components/steps/DatabaseStep.jsx",
+        lineNumber: 36,
+        columnNumber: 7
+      },
+      this
+    ),
+    setupStatus.database_type === "mysql" && /* @__PURE__ */ jsxDEV(
+      Banner,
+      {
+        type: "success",
+        closeIcon: null,
+        title: t("数据库信息"),
+        description: /* @__PURE__ */ jsxDEV("div", { "data-insp-path": "web/classic/src/components/setup/components/steps/DatabaseStep.jsx:91:13:div", children: /* @__PURE__ */ jsxDEV("p", { "data-insp-path": "web/classic/src/components/setup/components/steps/DatabaseStep.jsx:92:15:p", children: t(
+          "您正在使用 MySQL 数据库。MySQL 是一个可靠的关系型数据库管理系统，适合生产环境使用。"
+        ) }, void 0, false, {
+          fileName: "E:/new-api/web/classic/src/components/setup/components/steps/DatabaseStep.jsx",
+          lineNumber: 92,
+          columnNumber: 15
+        }, this) }, void 0, false, {
+          fileName: "E:/new-api/web/classic/src/components/setup/components/steps/DatabaseStep.jsx",
+          lineNumber: 91,
+          columnNumber: 9
+        }, this),
+        className: "!rounded-lg",
+        fullMode: false,
+        bordered: true,
+        "data-insp-path": "web/classic/src/components/setup/components/steps/DatabaseStep.jsx:86:9:Banner"
+      },
+      void 0,
+      false,
+      {
+        fileName: "E:/new-api/web/classic/src/components/setup/components/steps/DatabaseStep.jsx",
+        lineNumber: 86,
+        columnNumber: 7
+      },
+      this
+    ),
+    setupStatus.database_type === "postgres" && /* @__PURE__ */ jsxDEV(
+      Banner,
+      {
+        type: "success",
+        closeIcon: null,
+        title: t("数据库信息"),
+        description: /* @__PURE__ */ jsxDEV("div", { "data-insp-path": "web/classic/src/components/setup/components/steps/DatabaseStep.jsx:112:13:div", children: /* @__PURE__ */ jsxDEV("p", { "data-insp-path": "web/classic/src/components/setup/components/steps/DatabaseStep.jsx:113:15:p", children: t(
+          "您正在使用 PostgreSQL 数据库。PostgreSQL 是一个功能强大的开源关系型数据库系统，提供了出色的可靠性和数据完整性，适合生产环境使用。"
+        ) }, void 0, false, {
+          fileName: "E:/new-api/web/classic/src/components/setup/components/steps/DatabaseStep.jsx",
+          lineNumber: 113,
+          columnNumber: 15
+        }, this) }, void 0, false, {
+          fileName: "E:/new-api/web/classic/src/components/setup/components/steps/DatabaseStep.jsx",
+          lineNumber: 112,
+          columnNumber: 9
+        }, this),
+        className: "!rounded-lg",
+        fullMode: false,
+        bordered: true,
+        "data-insp-path": "web/classic/src/components/setup/components/steps/DatabaseStep.jsx:107:9:Banner"
+      },
+      void 0,
+      false,
+      {
+        fileName: "E:/new-api/web/classic/src/components/setup/components/steps/DatabaseStep.jsx",
+        lineNumber: 107,
+        columnNumber: 7
+      },
+      this
+    ),
+    renderNavigationButtons && renderNavigationButtons()
+  ] }, void 0, true, {
+    fileName: "E:/new-api/web/classic/src/components/setup/components/steps/DatabaseStep.jsx",
+    lineNumber: 33,
+    columnNumber: 5
+  }, this);
+};
+_c = DatabaseStep;
+export default DatabaseStep;
+var _c;
+$RefreshReg$(_c, "DatabaseStep");
+if (import.meta.hot && !inWebWorker) {
+  window.$RefreshReg$ = prevRefreshReg;
+  window.$RefreshSig$ = prevRefreshSig;
+}
+if (import.meta.hot && !inWebWorker) {
+  RefreshRuntime.__hmr_import(import.meta.url).then((currentExports) => {
+    RefreshRuntime.registerExportsForReactRefresh("E:/new-api/web/classic/src/components/setup/components/steps/DatabaseStep.jsx", currentExports);
+    import.meta.hot.accept((nextExports) => {
+      if (!nextExports) return;
+      const invalidateMessage = RefreshRuntime.validateRefreshBoundaryAndEnqueueUpdate("E:/new-api/web/classic/src/components/setup/components/steps/DatabaseStep.jsx", currentExports, nextExports);
+      if (invalidateMessage) import.meta.hot.invalidate(invalidateMessage);
+    });
+  });
+}
+
+//# sourceMappingURL=data:application/json;base64,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LFlBQVlNLGtCQUFrQixjQUM3QjtBQUFBLE1BQUM7QUFBQTtBQUFBLFFBQ0MsTUFBSztBQUFBLFFBQ0wsV0FBVztBQUFBLFFBQ1gsT0FBT0osRUFBRSxPQUFPO0FBQUEsUUFDaEIsYUFDRSx1QkFBQyxTQUFJLGtCQUFlLGlGQUNsQixpQ0FBQyxPQUFFLGtCQUFlLCtFQUNmQTtBQUFBQSxVQUNDO0FBQUEsUUFDRixLQUhGO0FBQUE7QUFBQTtBQUFBO0FBQUEsZUFJQSxLQUxGO0FBQUE7QUFBQTtBQUFBO0FBQUEsZUFNQTtBQUFBLFFBRUYsV0FBVTtBQUFBLFFBQ1YsVUFBVTtBQUFBLFFBQ1Y7QUFBQSxRQUNELGtCQUFlO0FBQUE7QUFBQSxNQWhCaEI7QUFBQTtBQUFBO0FBQUE7QUFBQTtBQUFBO0FBQUE7QUFBQTtBQUFBLElBZ0JpRztBQUFBLElBRWxHRCwyQkFBMkJBLHdCQUF3QjtBQUFBLE9BNUZ0RDtBQUFBO0FBQUE7QUFBQTtBQUFBLFNBNkZBO0FBRUo7QUFBRU8sS0FyR0lUO0FBdUdOLGVBQWVBO0FBQWEsSUFBQVM7QUFBQUMsYUFBQUQsSUFBQSIsIm5hbWVzIjpbIlJlYWN0IiwiQmFubmVyIiwiRGF0YWJhc2VTdGVwIiwic2V0dXBTdGF0dXMiLCJyZW5kZXJOYXZpZ2F0aW9uQnV0dG9ucyIsInQiLCJpc0VsZWN0cm9uIiwid2luZG93IiwiZWxlY3Ryb24iLCJkYXRhYmFzZV90eXBlIiwiZGF0YURpciIsIl9jIiwiJFJlZnJlc2hSZWckIl0sImlnbm9yZUxpc3QiOltdLCJzb3VyY2VzIjpbIkRhdGFiYXNlU3RlcC5qc3giXSwic291cmNlc0NvbnRlbnQiOlsiLypcbkNvcHlyaWdodCAoQykgMjAyNSBRdWFudHVtTm91c1xuXG5UaGlzIHByb2dyYW0gaXMgZnJlZSBzb2Z0d2FyZTogeW91IGNhbiByZWRpc3RyaWJ1dGUgaXQgYW5kL29yIG1vZGlmeVxuaXQgdW5kZXIgdGhlIHRlcm1zIG9mIHRoZSBHTlUgQWZmZXJvIEdlbmVyYWwgUHVibGljIExpY2Vuc2UgYXNcbnB1Ymxpc2hlZCBieSB0aGUgRnJlZSBTb2Z0d2FyZSBGb3VuZGF0aW9uLCBlaXRoZXIgdmVyc2lvbiAzIG9mIHRoZVxuTGljZW5zZSwgb3IgKGF0IHlvdXIgb3B0aW9uKSBhbnkgbGF0ZXIgdmVyc2lvbi5cblxuVGhpcyBwcm9ncmFtIGlzIGRpc3RyaWJ1dGVkIGluIHRoZSBob3BlIHRoYXQgaXQgd2lsbCBiZSB1c2VmdWwsXG5idXQgV0lUSE9VVCBBTlkgV0FSUkFOVFk7IHdpdGhvdXQgZXZlbiB0aGUgaW1wbGllZCB3YXJyYW50eSBvZlxuTUVSQ0hBTlRBQklMSVRZIG9yIEZJVE5FU1MgRk9SIEEgUEFSVElDVUxBUiBQVVJQT1NFLiBTZWUgdGhlXG5HTlUgQWZmZXJvIEdlbmVyYWwgUHVibGljIExpY2Vuc2UgZm9yIG1vcmUgZGV0YWlscy5cblxuWW91IHNob3VsZCBoYXZlIHJlY2VpdmVkIGEgY29weSBvZiB0aGUgR05VIEFmZmVybyBHZW5lcmFsIFB1YmxpYyBMaWNlbnNlXG5hbG9uZyB3aXRoIHRoaXMgcHJvZ3JhbS4gSWYgbm90LCBzZWUgPGh0dHBzOi8vd3d3LmdudS5vcmcvbGljZW5zZXMvPi5cblxuRm9yIGNvbW1lcmNpYWwgbGljZW5zaW5nLCBwbGVhc2UgY29udGFjdCBzdXBwb3J0QHF1YW50dW1ub3VzLmNvbVxuKi9cblxuaW1wb3J0IFJlYWN0IGZyb20gJ3JlYWN0JztcbmltcG9ydCB7IEJhbm5lciB9IGZyb20gJ0Bkb3V5aW5mZS9zZW1pLXVpJztcblxuLyoqXG4gKiDmlbDmja7lupPmo4Dmn6XmraXpqqTnu4Tku7ZcbiAqIOaYvuekuuW9k+WJjeaVsOaNruW6k+exu+Wei+WSjOebuOWFs+itpuWRiuS/oeaBr1xuICovXG5jb25zdCBEYXRhYmFzZVN0ZXAgPSAoeyBzZXR1cFN0YXR1cywgcmVuZGVyTmF2aWdhdGlvbkJ1dHRvbnMsIHQgfSkgPT4ge1xuICAvLyDmo4DmtYvmmK/lkKblnKggRWxlY3Ryb24g546v5aKD5Lit6L+Q6KGMXG4gIGNvbnN0IGlzRWxlY3Ryb24gPVxuICAgIHR5cGVvZiB3aW5kb3cgIT09ICd1bmRlZmluZWQnICYmIHdpbmRvdy5lbGVjdHJvbj8uaXNFbGVjdHJvbjtcblxuICByZXR1cm4gKFxuICAgIDw+XG4gICAgICB7Lyog5pWw5o2u5bqT6K2m5ZGKICovfVxuICAgICAge3NldHVwU3RhdHVzLmRhdGFiYXNlX3R5cGUgPT09ICdzcWxpdGUnICYmIChcbiAgICAgICAgPEJhbm5lclxuICAgICAgICAgIHR5cGU9e2lzRWxlY3Ryb24gPyAnaW5mbycgOiAnd2FybmluZyd9XG4gICAgICAgICAgY2xvc2VJY29uPXtudWxsfVxuICAgICAgICAgIHRpdGxlPXtpc0VsZWN0cm9uID8gdCgn5pys5Zyw5pWw5o2u5a2Y5YKoJykgOiB0KCfmlbDmja7lupPorablkYonKX1cbiAgICAgICAgICBkZXNjcmlwdGlvbj17XG4gICAgICAgICAgICBpc0VsZWN0cm9uID8gKFxuICAgICAgICAgICAgICA8ZGl2IGRhdGEtaW5zcC1wYXRoPVwid2ViL2NsYXNzaWMvc3JjL2NvbXBvbmVudHMvc2V0dXAvY29tcG9uZW50cy9zdGVwcy9EYXRhYmFzZVN0ZXAuanN4OjQyOjE1OmRpdlwiPlxuICAgICAgICAgICAgICAgIDxwIGRhdGEtaW5zcC1wYXRoPVwid2ViL2NsYXNzaWMvc3JjL2NvbXBvbmVudHMvc2V0dXAvY29tcG9uZW50cy9zdGVwcy9EYXRhYmFzZVN0ZXAuanN4OjQzOjE3OnBcIj5cbiAgICAgICAgICAgICAgICAgIHt0KFxuICAgICAgICAgICAgICAgICAgICAn5oKo55qE5pWw5o2u5bCG5a6J5YWo5Zyw5a2Y5YKo5Zyo5pys5Zyw6K6h566X5py65LiK44CC5omA5pyJ6YWN572u44CB55So5oi35L+h5oGv5ZKM5L2/55So6K6w5b2V6YO95Lya6Ieq5Yqo5L+d5a2Y77yM5YWz6Zet5bqU55So5ZCO5LiN5Lya5Lii5aSx44CCJyxcbiAgICAgICAgICAgICAgICAgICl9XG4gICAgICAgICAgICAgICAgPC9wPlxuICAgICAgICAgICAgICAgIHt3aW5kb3cuZWxlY3Ryb24/LmRhdGFEaXIgJiYgKFxuICAgICAgICAgICAgICAgICAgPHAgY2xhc3NOYW1lPSdtdC0yIHRleHQtc20gb3BhY2l0eS04MCcgZGF0YS1pbnNwLXBhdGg9XCJ3ZWIvY2xhc3NpYy9zcmMvY29tcG9uZW50cy9zZXR1cC9jb21wb25lbnRzL3N0ZXBzL0RhdGFiYXNlU3RlcC5qc3g6NDk6MTk6cFwiID5cbiAgICAgICAgICAgICAgICAgICAgPHN0cm9uZyBkYXRhLWluc3AtcGF0aD1cIndlYi9jbGFzc2ljL3NyYy9jb21wb25lbnRzL3NldHVwL2NvbXBvbmVudHMvc3RlcHMvRGF0YWJhc2VTdGVwLmpzeDo1MDoyMTpzdHJvbmdcIj57dCgn5pWw5o2u5a2Y5YKo5L2N572u77yaJyl9PC9zdHJvbmc+XG4gICAgICAgICAgICAgICAgICAgIDxiciAgZGF0YS1pbnNwLXBhdGg9XCJ3ZWIvY2xhc3NpYy9zcmMvY29tcG9uZW50cy9zZXR1cC9jb21wb25lbnRzL3N0ZXBzL0RhdGFiYXNlU3RlcC5qc3g6NTE6MjE6YnJcIi8+XG4gICAgICAgICAgICAgICAgICAgIDxjb2RlIGNsYXNzTmFtZT0nYmctZ3JheS0xMDAgZGFyazpiZy1ncmF5LTgwMCBweC0yIHB5LTEgcm91bmRlZCcgZGF0YS1pbnNwLXBhdGg9XCJ3ZWIvY2xhc3NpYy9zcmMvY29tcG9uZW50cy9zZXR1cC9jb21wb25lbnRzL3N0ZXBzL0RhdGFiYXNlU3RlcC5qc3g6NTI6MjE6Y29kZVwiID5cbiAgICAgICAgICAgICAgICAgICAgICB7d2luZG93LmVsZWN0cm9uLmRhdGFEaXJ9XG4gICAgICAgICAgICAgICAgICAgIDwvY29kZT5cbiAgICAgICAgICAgICAgICAgIDwvcD5cbiAgICAgICAgICAgICAgICApfVxuICAgICAgICAgICAgICAgIDxwIGNsYXNzTmFtZT0nbXQtMiB0ZXh0LXNtIG9wYWNpdHktNzAnIGRhdGEtaW5zcC1wYXRoPVwid2ViL2NsYXNzaWMvc3JjL2NvbXBvbmVudHMvc2V0dXAvY29tcG9uZW50cy9zdGVwcy9EYXRhYmFzZVN0ZXAuanN4OjU3OjE3OnBcIiA+XG4gICAgICAgICAgICAgICAgICDwn5KhIHt0KCfmj5DnpLrvvJrlpoLpnIDlpIfku73mlbDmja7vvIzlj6rpnIDlpI3liLbkuIrov7Dnm67lvZXljbPlj68nKX1cbiAgICAgICAgICAgICAgICA8L3A+XG4gICAgICAgICAgICAgIDwvZGl2PlxuICAgICAgICAgICAgKSA6IChcbiAgICAgICAgICAgICAgPGRpdiBkYXRhLWluc3AtcGF0aD1cIndlYi9jbGFzc2ljL3NyYy9jb21wb25lbnRzL3NldHVwL2NvbXBvbmVudHMvc3RlcHMvRGF0YWJhc2VTdGVwLmpzeDo2MjoxNTpkaXZcIj5cbiAgICAgICAgICAgICAgICA8cCBkYXRhLWluc3AtcGF0aD1cIndlYi9jbGFzc2ljL3NyYy9jb21wb25lbnRzL3NldHVwL2NvbXBvbmVudHMvc3RlcHMvRGF0YWJhc2VTdGVwLmpzeDo2MzoxNzpwXCI+XG4gICAgICAgICAgICAgICAgICB7dChcbiAgICAgICAgICAgICAgICAgICAgJ+aCqOato+WcqOS9v+eUqCBTUUxpdGUg5pWw5o2u5bqT44CC5aaC5p6c5oKo5Zyo5a655Zmo546v5aKD5Lit6L+Q6KGM77yM6K+356Gu5L+d5bey5q2j56Gu6K6+572u5pWw5o2u5bqT5paH5Lu255qE5oyB5LmF5YyW5pig5bCE77yM5ZCm5YiZ5a655Zmo6YeN5ZCv5ZCO5omA5pyJ5pWw5o2u5bCG5Lii5aSx77yBJyxcbiAgICAgICAgICAgICAgICAgICl9XG4gICAgICAgICAgICAgICAgPC9wPlxuICAgICAgICAgICAgICAgIDxwIGNsYXNzTmFtZT0nbXQtMScgZGF0YS1pbnNwLXBhdGg9XCJ3ZWIvY2xhc3NpYy9zcmMvY29tcG9uZW50cy9zZXR1cC9jb21wb25lbnRzL3N0ZXBzL0RhdGFiYXNlU3RlcC5qc3g6Njg6MTc6cFwiID5cbiAgICAgICAgICAgICAgICAgIDxzdHJvbmcgZGF0YS1pbnNwLXBhdGg9XCJ3ZWIvY2xhc3NpYy9zcmMvY29tcG9uZW50cy9zZXR1cC9jb21wb25lbnRzL3N0ZXBzL0RhdGFiYXNlU3RlcC5qc3g6Njk6MTk6c3Ryb25nXCI+XG4gICAgICAgICAgICAgICAgICAgIHt0KFxuICAgICAgICAgICAgICAgICAgICAgICflu7rorq7lnKjnlJ/kuqfnjq/looPkuK3kvb/nlKggTXlTUUwg5oiWIFBvc3RncmVTUUwg5pWw5o2u5bqT77yM5oiW56Gu5L+dIFNRTGl0ZSDmlbDmja7lupPmlofku7blt7LmmKDlsITliLDlrr/kuLvmnLrnmoTmjIHkuYXljJblrZjlgqjjgIInLFxuICAgICAgICAgICAgICAgICAgICApfVxuICAgICAgICAgICAgICAgICAgPC9zdHJvbmc+XG4gICAgICAgICAgICAgICAgPC9wPlxuICAgICAgICAgICAgICA8L2Rpdj5cbiAgICAgICAgICAgIClcbiAgICAgICAgICB9XG4gICAgICAgICAgY2xhc3NOYW1lPSchcm91bmRlZC1sZydcbiAgICAgICAgICBmdWxsTW9kZT17ZmFsc2V9XG4gICAgICAgICAgYm9yZGVyZWRcbiAgICAgICAgIGRhdGEtaW5zcC1wYXRoPVwid2ViL2NsYXNzaWMvc3JjL2NvbXBvbmVudHMvc2V0dXAvY29tcG9uZW50cy9zdGVwcy9EYXRhYmFzZVN0ZXAuanN4OjM2Ojk6QmFubmVyXCIgLz5cbiAgICAgICl9XG5cbiAgICAgIHsvKiBNeVNRTOaVsOaNruW6k+aPkOekuiAqL31cbiAgICAgIHtzZXR1cFN0YXR1cy5kYXRhYmFzZV90eXBlID09PSAnbXlzcWwnICYmIChcbiAgICAgICAgPEJhbm5lclxuICAgICAgICAgIHR5cGU9J3N1Y2Nlc3MnXG4gICAgICAgICAgY2xvc2VJY29uPXtudWxsfVxuICAgICAgICAgIHRpdGxlPXt0KCfmlbDmja7lupPkv6Hmga8nKX1cbiAgICAgICAgICBkZXNjcmlwdGlvbj17XG4gICAgICAgICAgICA8ZGl2IGRhdGEtaW5zcC1wYXRoPVwid2ViL2NsYXNzaWMvc3JjL2NvbXBvbmVudHMvc2V0dXAvY29tcG9uZW50cy9zdGVwcy9EYXRhYmFzZVN0ZXAuanN4OjkxOjEzOmRpdlwiPlxuICAgICAgICAgICAgICA8cCBkYXRhLWluc3AtcGF0aD1cIndlYi9jbGFzc2ljL3NyYy9jb21wb25lbnRzL3NldHVwL2NvbXBvbmVudHMvc3RlcHMvRGF0YWJhc2VTdGVwLmpzeDo5MjoxNTpwXCI+XG4gICAgICAgICAgICAgICAge3QoXG4gICAgICAgICAgICAgICAgICAn5oKo5q2j5Zyo5L2/55SoIE15U1FMIOaVsOaNruW6k+OAgk15U1FMIOaYr+S4gOS4quWPr+mdoOeahOWFs+ezu+Wei+aVsOaNruW6k+euoeeQhuezu+e7n++8jOmAguWQiOeUn+S6p+eOr+Wig+S9v+eUqOOAgicsXG4gICAgICAgICAgICAgICAgKX1cbiAgICAgICAgICAgICAgPC9wPlxuICAgICAgICAgICAgPC9kaXY+XG4gICAgICAgICAgfVxuICAgICAgICAgIGNsYXNzTmFtZT0nIXJvdW5kZWQtbGcnXG4gICAgICAgICAgZnVsbE1vZGU9e2ZhbHNlfVxuICAgICAgICAgIGJvcmRlcmVkXG4gICAgICAgICBkYXRhLWluc3AtcGF0aD1cIndlYi9jbGFzc2ljL3NyYy9jb21wb25lbnRzL3NldHVwL2NvbXBvbmVudHMvc3RlcHMvRGF0YWJhc2VTdGVwLmpzeDo4Njo5OkJhbm5lclwiIC8+XG4gICAgICApfVxuXG4gICAgICB7LyogUG9zdGdyZVNRTOaVsOaNruW6k+aPkOekuiAqL31cbiAgICAgIHtzZXR1cFN0YXR1cy5kYXRhYmFzZV90eXBlID09PSAncG9zdGdyZXMnICYmIChcbiAgICAgICAgPEJhbm5lclxuICAgICAgICAgIHR5cGU9J3N1Y2Nlc3MnXG4gICAgICAgICAgY2xvc2VJY29uPXtudWxsfVxuICAgICAgICAgIHRpdGxlPXt0KCfmlbDmja7lupPkv6Hmga8nKX1cbiAgICAgICAgICBkZXNjcmlwdGlvbj17XG4gICAgICAgICAgICA8ZGl2IGRhdGEtaW5zcC1wYXRoPVwid2ViL2NsYXNzaWMvc3JjL2NvbXBvbmVudHMvc2V0dXAvY29tcG9uZW50cy9zdGVwcy9EYXRhYmFzZVN0ZXAuanN4OjExMjoxMzpkaXZcIj5cbiAgICAgICAgICAgICAgPHAgZGF0YS1pbnNwLXBhdGg9XCJ3ZWIvY2xhc3NpYy9zcmMvY29tcG9uZW50cy9zZXR1cC9jb21wb25lbnRzL3N0ZXBzL0RhdGFiYXNlU3RlcC5qc3g6MTEzOjE1OnBcIj5cbiAgICAgICAgICAgICAgICB7dChcbiAgICAgICAgICAgICAgICAgICfmgqjmraPlnKjkvb/nlKggUG9zdGdyZVNRTCDmlbDmja7lupPjgIJQb3N0Z3JlU1FMIOaYr+S4gOS4quWKn+iDveW8uuWkp+eahOW8gOa6kOWFs+ezu+Wei+aVsOaNruW6k+ezu+e7n++8jOaPkOS+m+S6huWHuuiJsueahOWPr+mdoOaAp+WSjOaVsOaNruWujOaVtOaAp++8jOmAguWQiOeUn+S6p+eOr+Wig+S9v+eUqOOAgicsXG4gICAgICAgICAgICAgICAgKX1cbiAgICAgICAgICAgICAgPC9wPlxuICAgICAgICAgICAgPC9kaXY+XG4gICAgICAgICAgfVxuICAgICAgICAgIGNsYXNzTmFtZT0nIXJvdW5kZWQtbGcnXG4gICAgICAgICAgZnVsbE1vZGU9e2ZhbHNlfVxuICAgICAgICAgIGJvcmRlcmVkXG4gICAgICAgICBkYXRhLWluc3AtcGF0aD1cIndlYi9jbGFzc2ljL3NyYy9jb21wb25lbnRzL3NldHVwL2NvbXBvbmVudHMvc3RlcHMvRGF0YWJhc2VTdGVwLmpzeDoxMDc6OTpCYW5uZXJcIiAvPlxuICAgICAgKX1cbiAgICAgIHtyZW5kZXJOYXZpZ2F0aW9uQnV0dG9ucyAmJiByZW5kZXJOYXZpZ2F0aW9uQnV0dG9ucygpfVxuICAgIDwvPlxuICApO1xufTtcblxuZXhwb3J0IGRlZmF1bHQgRGF0YWJhc2VTdGVwO1xuIl0sImZpbGUiOiJFOi9uZXctYXBpL3dlYi9jbGFzc2ljL3NyYy9jb21wb25lbnRzL3NldHVwL2NvbXBvbmVudHMvc3RlcHMvRGF0YWJhc2VTdGVwLmpzeCJ9

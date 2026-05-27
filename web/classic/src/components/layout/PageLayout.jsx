@@ -49,6 +49,7 @@ const PageLayout = () => {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const { i18n } = useTranslation();
   const location = useLocation();
+  const [hideHomeShell, setHideHomeShell] = useState(false);
 
   const cardProPages = [
     '/console/channel',
@@ -62,7 +63,8 @@ const PageLayout = () => {
     '/pricing',
   ];
 
-  const shouldHideFooter = cardProPages.includes(location.pathname);
+  const shouldHideFooter =
+    hideHomeShell || cardProPages.includes(location.pathname);
 
   const shouldInnerPadding =
     location.pathname.includes('/console') &&
@@ -70,7 +72,41 @@ const PageLayout = () => {
     location.pathname !== '/console/playground';
 
   const isConsoleRoute = location.pathname.startsWith('/console');
+  const isHomeRoute = location.pathname === '/';
+  const neoRouteClass = isHomeRoute ? '' : 'neo-console-shell';
+  const routeClass = `neo-route-${location.pathname
+    .replace(/^\/+/, '')
+    .replace(/[^a-zA-Z0-9]+/g, '-')
+    .replace(/^-|-$/g, '') || 'home'}`;
   const showSider = isConsoleRoute && (!isMobile || drawerOpen);
+
+  useEffect(() => {
+    document.body.classList.toggle('neo-console-page', !isHomeRoute);
+    document.body.classList.toggle('neo-home-page', isHomeRoute);
+
+    return () => {
+      document.body.classList.remove('neo-console-page', 'neo-home-page');
+    };
+  }, [isHomeRoute]);
+
+  useEffect(() => {
+    if (location.pathname !== '/') {
+      setHideHomeShell(false);
+      return;
+    }
+
+    const cachedHomeContent = localStorage.getItem('home_page_content') || '';
+    setHideHomeShell(cachedHomeContent === '');
+
+    const handleHomeShellMode = (event) => {
+      setHideHomeShell(Boolean(event.detail?.hideShell));
+    };
+
+    window.addEventListener('newapi:home-shell-mode', handleHomeShellMode);
+    return () => {
+      window.removeEventListener('newapi:home-shell-mode', handleHomeShellMode);
+    };
+  }, [location.pathname]);
 
   useEffect(() => {
     if (isMobile && drawerOpen && collapsed) {
@@ -146,30 +182,33 @@ const PageLayout = () => {
 
   return (
     <Layout
-      className='app-layout'
+      className={`app-layout ${neoRouteClass} ${routeClass}`}
       style={{
         display: 'flex',
         flexDirection: 'column',
         overflow: isMobile ? 'visible' : 'hidden',
       }}
     >
-      <Header
-        style={{
-          padding: 0,
-          height: 'auto',
-          lineHeight: 'normal',
-          position: 'fixed',
-          width: '100%',
-          top: 0,
-          zIndex: 100,
-        }}
-      >
-        <HeaderBar
-          onMobileMenuToggle={() => setDrawerOpen((prev) => !prev)}
-          drawerOpen={drawerOpen}
-        />
-      </Header>
+      {!hideHomeShell && (
+        <Header
+          style={{
+            padding: 0,
+            height: 'auto',
+            lineHeight: 'normal',
+            position: 'fixed',
+            width: '100%',
+            top: 0,
+            zIndex: 100,
+          }}
+        >
+          <HeaderBar
+            onMobileMenuToggle={() => setDrawerOpen((prev) => !prev)}
+            drawerOpen={drawerOpen}
+          />
+        </Header>
+      )}
       <Layout
+        className='neo-console-main-layout'
         style={{
           overflow: isMobile ? 'visible' : 'auto',
           display: 'flex',
@@ -178,7 +217,7 @@ const PageLayout = () => {
       >
         {showSider && (
           <Sider
-            className='app-sider'
+            className='app-sider neo-console-sider'
             style={{
               position: 'fixed',
               left: 0,
@@ -197,6 +236,7 @@ const PageLayout = () => {
           </Sider>
         )}
         <Layout
+          className='neo-console-workspace'
           style={{
             marginLeft: isMobile
               ? '0'
@@ -209,6 +249,7 @@ const PageLayout = () => {
           }}
         >
           <Content
+            className='neo-console-content'
             style={{
               flex: '1 0 auto',
               overflowY: isMobile ? 'visible' : 'hidden',

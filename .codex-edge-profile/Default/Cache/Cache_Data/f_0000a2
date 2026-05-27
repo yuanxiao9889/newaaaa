@@ -1,0 +1,499 @@
+import { createHotContext as __vite__createHotContext } from "/@vite/client";import.meta.hot = __vite__createHotContext("/src/components/topup/InvitationCard.jsx");import __vite__cjsImport0_react_jsxDevRuntime from "/node_modules/.vite/deps/react_jsx-dev-runtime.js?v=1c6fcc49"; const jsxDEV = __vite__cjsImport0_react_jsxDevRuntime["jsxDEV"];
+import RefreshRuntime from "/@react-refresh";
+const inWebWorker = typeof WorkerGlobalScope !== "undefined" && self instanceof WorkerGlobalScope;
+let prevRefreshReg;
+let prevRefreshSig;
+if (import.meta.hot && !inWebWorker) {
+  if (!window.__vite_plugin_react_preamble_installed__) {
+    throw new Error("@vitejs/plugin-react can't detect preamble. Something is wrong. See https://github.com/vitejs/vite-plugin-react/pull/11#discussion_r430879201");
+  }
+  prevRefreshReg = window.$RefreshReg$;
+  prevRefreshSig = window.$RefreshSig$;
+  window.$RefreshReg$ = (type, id) => {
+    RefreshRuntime.register(type, "E:/new-api/web/classic/src/components/topup/InvitationCard.jsx " + id);
+  };
+  window.$RefreshSig$ = RefreshRuntime.createSignatureFunctionForTransform;
+}
+import __vite__cjsImport3_react from "/node_modules/.vite/deps/react.js?v=1c6fcc49"; const React = __vite__cjsImport3_react.__esModule ? __vite__cjsImport3_react.default : __vite__cjsImport3_react;
+import {
+  Avatar,
+  Typography,
+  Card,
+  Button,
+  Input,
+  Badge,
+  Space
+} from "/node_modules/.vite/deps/@douyinfe_semi-ui.js?v=0f3c8be3";
+import { Copy, Users, BarChart2, TrendingUp, Gift, Zap } from "/node_modules/.vite/deps/lucide-react.js?v=321bfe9b";
+const { Text } = Typography;
+const InvitationCard = ({
+  t,
+  userState,
+  renderQuota,
+  setOpenTransfer,
+  affLink,
+  handleAffLinkClick
+}) => {
+  return /* @__PURE__ */ jsxDEV(Card, { className: "!rounded-2xl shadow-sm border-0", "data-insp-path": "web/classic/src/components/topup/InvitationCard.jsx:43:5:Card", children: [
+    /* @__PURE__ */ jsxDEV("div", { className: "flex items-center mb-4", "data-insp-path": "web/classic/src/components/topup/InvitationCard.jsx:45:7:div", children: [
+      /* @__PURE__ */ jsxDEV(Avatar, { size: "small", color: "green", className: "mr-3 shadow-md", "data-insp-path": "web/classic/src/components/topup/InvitationCard.jsx:46:9:Avatar", children: /* @__PURE__ */ jsxDEV(Gift, { size: 16, "data-insp-path": "web/classic/src/components/topup/InvitationCard.jsx:47:11:Gift" }, void 0, false, {
+        fileName: "E:/new-api/web/classic/src/components/topup/InvitationCard.jsx",
+        lineNumber: 47,
+        columnNumber: 11
+      }, this) }, void 0, false, {
+        fileName: "E:/new-api/web/classic/src/components/topup/InvitationCard.jsx",
+        lineNumber: 46,
+        columnNumber: 9
+      }, this),
+      /* @__PURE__ */ jsxDEV("div", { "data-insp-path": "web/classic/src/components/topup/InvitationCard.jsx:49:9:div", children: [
+        /* @__PURE__ */ jsxDEV(Typography.Text, { className: "text-lg font-medium", children: t("邀请奖励") }, void 0, false, {
+          fileName: "E:/new-api/web/classic/src/components/topup/InvitationCard.jsx",
+          lineNumber: 50,
+          columnNumber: 11
+        }, this),
+        /* @__PURE__ */ jsxDEV("div", { className: "text-xs", "data-insp-path": "web/classic/src/components/topup/InvitationCard.jsx:53:11:div", children: t("邀请好友获得额外奖励") }, void 0, false, {
+          fileName: "E:/new-api/web/classic/src/components/topup/InvitationCard.jsx",
+          lineNumber: 53,
+          columnNumber: 11
+        }, this)
+      ] }, void 0, true, {
+        fileName: "E:/new-api/web/classic/src/components/topup/InvitationCard.jsx",
+        lineNumber: 49,
+        columnNumber: 9
+      }, this)
+    ] }, void 0, true, {
+      fileName: "E:/new-api/web/classic/src/components/topup/InvitationCard.jsx",
+      lineNumber: 45,
+      columnNumber: 7
+    }, this),
+    /* @__PURE__ */ jsxDEV(Space, { vertical: true, style: { width: "100%" }, "data-insp-path": "web/classic/src/components/topup/InvitationCard.jsx:58:7:Space", children: [
+      /* @__PURE__ */ jsxDEV(
+        Card,
+        {
+          className: "!rounded-xl w-full",
+          cover: /* @__PURE__ */ jsxDEV(
+            "div",
+            {
+              className: "relative h-30",
+              style: {
+                "--palette-primary-darkerChannel": "0 75 80",
+                backgroundImage: `linear-gradient(0deg, rgba(var(--palette-primary-darkerChannel) / 80%), rgba(var(--palette-primary-darkerChannel) / 80%)), url('/cover-4.webp')`,
+                backgroundSize: "cover",
+                backgroundPosition: "center",
+                backgroundRepeat: "no-repeat"
+              },
+              "data-insp-path": "web/classic/src/components/topup/InvitationCard.jsx:63:13:div",
+              children: /* @__PURE__ */ jsxDEV("div", { className: "relative z-10 h-full flex flex-col justify-between p-4", "data-insp-path": "web/classic/src/components/topup/InvitationCard.jsx:74:15:div", children: [
+                /* @__PURE__ */ jsxDEV("div", { className: "flex justify-between items-center", "data-insp-path": "web/classic/src/components/topup/InvitationCard.jsx:75:17:div", children: [
+                  /* @__PURE__ */ jsxDEV(Text, { strong: true, style: { color: "white", fontSize: "16px" }, "data-insp-path": "web/classic/src/components/topup/InvitationCard.jsx:76:19:Text", children: t("收益统计") }, void 0, false, {
+                    fileName: "E:/new-api/web/classic/src/components/topup/InvitationCard.jsx",
+                    lineNumber: 76,
+                    columnNumber: 19
+                  }, this),
+                  /* @__PURE__ */ jsxDEV(
+                    Button,
+                    {
+                      type: "primary",
+                      theme: "solid",
+                      size: "small",
+                      disabled: !userState?.user?.aff_quota || userState?.user?.aff_quota <= 0,
+                      onClick: () => setOpenTransfer(true),
+                      className: "!rounded-lg",
+                      "data-insp-path": "web/classic/src/components/topup/InvitationCard.jsx:79:19:Button",
+                      children: [
+                        /* @__PURE__ */ jsxDEV(Zap, { size: 12, className: "mr-1", "data-insp-path": "web/classic/src/components/topup/InvitationCard.jsx:90:21:Zap" }, void 0, false, {
+                          fileName: "E:/new-api/web/classic/src/components/topup/InvitationCard.jsx",
+                          lineNumber: 90,
+                          columnNumber: 21
+                        }, this),
+                        t("划转到余额")
+                      ]
+                    },
+                    void 0,
+                    true,
+                    {
+                      fileName: "E:/new-api/web/classic/src/components/topup/InvitationCard.jsx",
+                      lineNumber: 79,
+                      columnNumber: 19
+                    },
+                    this
+                  )
+                ] }, void 0, true, {
+                  fileName: "E:/new-api/web/classic/src/components/topup/InvitationCard.jsx",
+                  lineNumber: 75,
+                  columnNumber: 17
+                }, this),
+                /* @__PURE__ */ jsxDEV("div", { className: "grid grid-cols-3 gap-6 mt-4", "data-insp-path": "web/classic/src/components/topup/InvitationCard.jsx:96:17:div", children: [
+                  /* @__PURE__ */ jsxDEV("div", { className: "text-center", "data-insp-path": "web/classic/src/components/topup/InvitationCard.jsx:98:19:div", children: [
+                    /* @__PURE__ */ jsxDEV(
+                      "div",
+                      {
+                        className: "text-base sm:text-2xl font-bold mb-2",
+                        style: { color: "white" },
+                        "data-insp-path": "web/classic/src/components/topup/InvitationCard.jsx:99:21:div",
+                        children: renderQuota(userState?.user?.aff_quota || 0)
+                      },
+                      void 0,
+                      false,
+                      {
+                        fileName: "E:/new-api/web/classic/src/components/topup/InvitationCard.jsx",
+                        lineNumber: 99,
+                        columnNumber: 21
+                      },
+                      this
+                    ),
+                    /* @__PURE__ */ jsxDEV("div", { className: "flex items-center justify-center text-sm", "data-insp-path": "web/classic/src/components/topup/InvitationCard.jsx:105:21:div", children: [
+                      /* @__PURE__ */ jsxDEV(
+                        TrendingUp,
+                        {
+                          size: 14,
+                          className: "mr-1",
+                          style: { color: "rgba(255,255,255,0.8)" },
+                          "data-insp-path": "web/classic/src/components/topup/InvitationCard.jsx:106:23:TrendingUp"
+                        },
+                        void 0,
+                        false,
+                        {
+                          fileName: "E:/new-api/web/classic/src/components/topup/InvitationCard.jsx",
+                          lineNumber: 106,
+                          columnNumber: 23
+                        },
+                        this
+                      ),
+                      /* @__PURE__ */ jsxDEV(
+                        Text,
+                        {
+                          style: {
+                            color: "rgba(255,255,255,0.8)",
+                            fontSize: "12px"
+                          },
+                          "data-insp-path": "web/classic/src/components/topup/InvitationCard.jsx:111:23:Text",
+                          children: t("待使用收益")
+                        },
+                        void 0,
+                        false,
+                        {
+                          fileName: "E:/new-api/web/classic/src/components/topup/InvitationCard.jsx",
+                          lineNumber: 111,
+                          columnNumber: 23
+                        },
+                        this
+                      )
+                    ] }, void 0, true, {
+                      fileName: "E:/new-api/web/classic/src/components/topup/InvitationCard.jsx",
+                      lineNumber: 105,
+                      columnNumber: 21
+                    }, this)
+                  ] }, void 0, true, {
+                    fileName: "E:/new-api/web/classic/src/components/topup/InvitationCard.jsx",
+                    lineNumber: 98,
+                    columnNumber: 19
+                  }, this),
+                  /* @__PURE__ */ jsxDEV("div", { className: "text-center", "data-insp-path": "web/classic/src/components/topup/InvitationCard.jsx:123:19:div", children: [
+                    /* @__PURE__ */ jsxDEV(
+                      "div",
+                      {
+                        className: "text-base sm:text-2xl font-bold mb-2",
+                        style: { color: "white" },
+                        "data-insp-path": "web/classic/src/components/topup/InvitationCard.jsx:124:21:div",
+                        children: renderQuota(userState?.user?.aff_history_quota || 0)
+                      },
+                      void 0,
+                      false,
+                      {
+                        fileName: "E:/new-api/web/classic/src/components/topup/InvitationCard.jsx",
+                        lineNumber: 124,
+                        columnNumber: 21
+                      },
+                      this
+                    ),
+                    /* @__PURE__ */ jsxDEV("div", { className: "flex items-center justify-center text-sm", "data-insp-path": "web/classic/src/components/topup/InvitationCard.jsx:130:21:div", children: [
+                      /* @__PURE__ */ jsxDEV(
+                        BarChart2,
+                        {
+                          size: 14,
+                          className: "mr-1",
+                          style: { color: "rgba(255,255,255,0.8)" },
+                          "data-insp-path": "web/classic/src/components/topup/InvitationCard.jsx:131:23:BarChart2"
+                        },
+                        void 0,
+                        false,
+                        {
+                          fileName: "E:/new-api/web/classic/src/components/topup/InvitationCard.jsx",
+                          lineNumber: 131,
+                          columnNumber: 23
+                        },
+                        this
+                      ),
+                      /* @__PURE__ */ jsxDEV(
+                        Text,
+                        {
+                          style: {
+                            color: "rgba(255,255,255,0.8)",
+                            fontSize: "12px"
+                          },
+                          "data-insp-path": "web/classic/src/components/topup/InvitationCard.jsx:136:23:Text",
+                          children: t("总收益")
+                        },
+                        void 0,
+                        false,
+                        {
+                          fileName: "E:/new-api/web/classic/src/components/topup/InvitationCard.jsx",
+                          lineNumber: 136,
+                          columnNumber: 23
+                        },
+                        this
+                      )
+                    ] }, void 0, true, {
+                      fileName: "E:/new-api/web/classic/src/components/topup/InvitationCard.jsx",
+                      lineNumber: 130,
+                      columnNumber: 21
+                    }, this)
+                  ] }, void 0, true, {
+                    fileName: "E:/new-api/web/classic/src/components/topup/InvitationCard.jsx",
+                    lineNumber: 123,
+                    columnNumber: 19
+                  }, this),
+                  /* @__PURE__ */ jsxDEV("div", { className: "text-center", "data-insp-path": "web/classic/src/components/topup/InvitationCard.jsx:148:19:div", children: [
+                    /* @__PURE__ */ jsxDEV(
+                      "div",
+                      {
+                        className: "text-base sm:text-2xl font-bold mb-2",
+                        style: { color: "white" },
+                        "data-insp-path": "web/classic/src/components/topup/InvitationCard.jsx:149:21:div",
+                        children: userState?.user?.aff_count || 0
+                      },
+                      void 0,
+                      false,
+                      {
+                        fileName: "E:/new-api/web/classic/src/components/topup/InvitationCard.jsx",
+                        lineNumber: 149,
+                        columnNumber: 21
+                      },
+                      this
+                    ),
+                    /* @__PURE__ */ jsxDEV("div", { className: "flex items-center justify-center text-sm", "data-insp-path": "web/classic/src/components/topup/InvitationCard.jsx:155:21:div", children: [
+                      /* @__PURE__ */ jsxDEV(
+                        Users,
+                        {
+                          size: 14,
+                          className: "mr-1",
+                          style: { color: "rgba(255,255,255,0.8)" },
+                          "data-insp-path": "web/classic/src/components/topup/InvitationCard.jsx:156:23:Users"
+                        },
+                        void 0,
+                        false,
+                        {
+                          fileName: "E:/new-api/web/classic/src/components/topup/InvitationCard.jsx",
+                          lineNumber: 156,
+                          columnNumber: 23
+                        },
+                        this
+                      ),
+                      /* @__PURE__ */ jsxDEV(
+                        Text,
+                        {
+                          style: {
+                            color: "rgba(255,255,255,0.8)",
+                            fontSize: "12px"
+                          },
+                          "data-insp-path": "web/classic/src/components/topup/InvitationCard.jsx:161:23:Text",
+                          children: t("邀请人数")
+                        },
+                        void 0,
+                        false,
+                        {
+                          fileName: "E:/new-api/web/classic/src/components/topup/InvitationCard.jsx",
+                          lineNumber: 161,
+                          columnNumber: 23
+                        },
+                        this
+                      )
+                    ] }, void 0, true, {
+                      fileName: "E:/new-api/web/classic/src/components/topup/InvitationCard.jsx",
+                      lineNumber: 155,
+                      columnNumber: 21
+                    }, this)
+                  ] }, void 0, true, {
+                    fileName: "E:/new-api/web/classic/src/components/topup/InvitationCard.jsx",
+                    lineNumber: 148,
+                    columnNumber: 19
+                  }, this)
+                ] }, void 0, true, {
+                  fileName: "E:/new-api/web/classic/src/components/topup/InvitationCard.jsx",
+                  lineNumber: 96,
+                  columnNumber: 17
+                }, this)
+              ] }, void 0, true, {
+                fileName: "E:/new-api/web/classic/src/components/topup/InvitationCard.jsx",
+                lineNumber: 74,
+                columnNumber: 15
+              }, this)
+            },
+            void 0,
+            false,
+            {
+              fileName: "E:/new-api/web/classic/src/components/topup/InvitationCard.jsx",
+              lineNumber: 63,
+              columnNumber: 11
+            },
+            this
+          ),
+          "data-insp-path": "web/classic/src/components/topup/InvitationCard.jsx:60:9:Card",
+          children: /* @__PURE__ */ jsxDEV(
+            Input,
+            {
+              value: affLink,
+              readonly: true,
+              className: "!rounded-lg",
+              prefix: t("邀请链接"),
+              suffix: /* @__PURE__ */ jsxDEV(
+                Button,
+                {
+                  type: "primary",
+                  theme: "solid",
+                  onClick: handleAffLinkClick,
+                  icon: /* @__PURE__ */ jsxDEV(Copy, { size: 14, "data-insp-path": "web/classic/src/components/topup/InvitationCard.jsx:187:23:Copy" }, void 0, false, {
+                    fileName: "E:/new-api/web/classic/src/components/topup/InvitationCard.jsx",
+                    lineNumber: 187,
+                    columnNumber: 21
+                  }, this),
+                  className: "!rounded-lg",
+                  "data-insp-path": "web/classic/src/components/topup/InvitationCard.jsx:183:15:Button",
+                  children: t("复制")
+                },
+                void 0,
+                false,
+                {
+                  fileName: "E:/new-api/web/classic/src/components/topup/InvitationCard.jsx",
+                  lineNumber: 183,
+                  columnNumber: 13
+                },
+                this
+              ),
+              "data-insp-path": "web/classic/src/components/topup/InvitationCard.jsx:177:11:Input"
+            },
+            void 0,
+            false,
+            {
+              fileName: "E:/new-api/web/classic/src/components/topup/InvitationCard.jsx",
+              lineNumber: 177,
+              columnNumber: 11
+            },
+            this
+          )
+        },
+        void 0,
+        false,
+        {
+          fileName: "E:/new-api/web/classic/src/components/topup/InvitationCard.jsx",
+          lineNumber: 60,
+          columnNumber: 9
+        },
+        this
+      ),
+      /* @__PURE__ */ jsxDEV(
+        Card,
+        {
+          className: "!rounded-xl w-full",
+          title: /* @__PURE__ */ jsxDEV(Text, { type: "tertiary", "data-insp-path": "web/classic/src/components/topup/InvitationCard.jsx:199:18:Text", children: t("奖励说明") }, void 0, false, {
+            fileName: "E:/new-api/web/classic/src/components/topup/InvitationCard.jsx",
+            lineNumber: 199,
+            columnNumber: 18
+          }, this),
+          "data-insp-path": "web/classic/src/components/topup/InvitationCard.jsx:197:9:Card",
+          children: /* @__PURE__ */ jsxDEV("div", { className: "space-y-3", "data-insp-path": "web/classic/src/components/topup/InvitationCard.jsx:201:11:div", children: [
+            /* @__PURE__ */ jsxDEV("div", { className: "flex items-start gap-2", "data-insp-path": "web/classic/src/components/topup/InvitationCard.jsx:202:13:div", children: [
+              /* @__PURE__ */ jsxDEV(Badge, { dot: true, type: "success", "data-insp-path": "web/classic/src/components/topup/InvitationCard.jsx:203:15:Badge" }, void 0, false, {
+                fileName: "E:/new-api/web/classic/src/components/topup/InvitationCard.jsx",
+                lineNumber: 203,
+                columnNumber: 15
+              }, this),
+              /* @__PURE__ */ jsxDEV(Text, { type: "tertiary", className: "text-sm", "data-insp-path": "web/classic/src/components/topup/InvitationCard.jsx:204:15:Text", children: t("邀请好友注册，好友充值后您可获得相应奖励") }, void 0, false, {
+                fileName: "E:/new-api/web/classic/src/components/topup/InvitationCard.jsx",
+                lineNumber: 204,
+                columnNumber: 15
+              }, this)
+            ] }, void 0, true, {
+              fileName: "E:/new-api/web/classic/src/components/topup/InvitationCard.jsx",
+              lineNumber: 202,
+              columnNumber: 13
+            }, this),
+            /* @__PURE__ */ jsxDEV("div", { className: "flex items-start gap-2", "data-insp-path": "web/classic/src/components/topup/InvitationCard.jsx:209:13:div", children: [
+              /* @__PURE__ */ jsxDEV(Badge, { dot: true, type: "success", "data-insp-path": "web/classic/src/components/topup/InvitationCard.jsx:210:15:Badge" }, void 0, false, {
+                fileName: "E:/new-api/web/classic/src/components/topup/InvitationCard.jsx",
+                lineNumber: 210,
+                columnNumber: 15
+              }, this),
+              /* @__PURE__ */ jsxDEV(Text, { type: "tertiary", className: "text-sm", "data-insp-path": "web/classic/src/components/topup/InvitationCard.jsx:211:15:Text", children: t("通过划转功能将奖励额度转入到您的账户余额中") }, void 0, false, {
+                fileName: "E:/new-api/web/classic/src/components/topup/InvitationCard.jsx",
+                lineNumber: 211,
+                columnNumber: 15
+              }, this)
+            ] }, void 0, true, {
+              fileName: "E:/new-api/web/classic/src/components/topup/InvitationCard.jsx",
+              lineNumber: 209,
+              columnNumber: 13
+            }, this),
+            /* @__PURE__ */ jsxDEV("div", { className: "flex items-start gap-2", "data-insp-path": "web/classic/src/components/topup/InvitationCard.jsx:216:13:div", children: [
+              /* @__PURE__ */ jsxDEV(Badge, { dot: true, type: "success", "data-insp-path": "web/classic/src/components/topup/InvitationCard.jsx:217:15:Badge" }, void 0, false, {
+                fileName: "E:/new-api/web/classic/src/components/topup/InvitationCard.jsx",
+                lineNumber: 217,
+                columnNumber: 15
+              }, this),
+              /* @__PURE__ */ jsxDEV(Text, { type: "tertiary", className: "text-sm", "data-insp-path": "web/classic/src/components/topup/InvitationCard.jsx:218:15:Text", children: t("邀请的好友越多，获得的奖励越多") }, void 0, false, {
+                fileName: "E:/new-api/web/classic/src/components/topup/InvitationCard.jsx",
+                lineNumber: 218,
+                columnNumber: 15
+              }, this)
+            ] }, void 0, true, {
+              fileName: "E:/new-api/web/classic/src/components/topup/InvitationCard.jsx",
+              lineNumber: 216,
+              columnNumber: 13
+            }, this)
+          ] }, void 0, true, {
+            fileName: "E:/new-api/web/classic/src/components/topup/InvitationCard.jsx",
+            lineNumber: 201,
+            columnNumber: 11
+          }, this)
+        },
+        void 0,
+        false,
+        {
+          fileName: "E:/new-api/web/classic/src/components/topup/InvitationCard.jsx",
+          lineNumber: 197,
+          columnNumber: 9
+        },
+        this
+      )
+    ] }, void 0, true, {
+      fileName: "E:/new-api/web/classic/src/components/topup/InvitationCard.jsx",
+      lineNumber: 58,
+      columnNumber: 7
+    }, this)
+  ] }, void 0, true, {
+    fileName: "E:/new-api/web/classic/src/components/topup/InvitationCard.jsx",
+    lineNumber: 43,
+    columnNumber: 5
+  }, this);
+};
+_c = InvitationCard;
+export default InvitationCard;
+var _c;
+$RefreshReg$(_c, "InvitationCard");
+if (import.meta.hot && !inWebWorker) {
+  window.$RefreshReg$ = prevRefreshReg;
+  window.$RefreshSig$ = prevRefreshSig;
+}
+if (import.meta.hot && !inWebWorker) {
+  RefreshRuntime.__hmr_import(import.meta.url).then((currentExports) => {
+    RefreshRuntime.registerExportsForReactRefresh("E:/new-api/web/classic/src/components/topup/InvitationCard.jsx", currentExports);
+    import.meta.hot.accept((nextExports) => {
+      if (!nextExports) return;
+      const invalidateMessage = RefreshRuntime.validateRefreshBoundaryAndEnqueueUpdate("E:/new-api/web/classic/src/components/topup/InvitationCard.jsx", currentExports, nextExports);
+      if (invalidateMessage) import.meta.hot.invalidate(invalidateMessage);
+    });
+  });
+}
+
+//# sourceMappingURL=data:application/json;base64,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dUJBQUMsU0FBSSxXQUFVLDBCQUF5QixrQkFBZSxrRUFDckQ7QUFBQSxxQ0FBQyxTQUFNLEtBQUcsTUFBQyxNQUFLLFdBQVcsa0JBQWUsc0VBQTFDO0FBQUE7QUFBQTtBQUFBO0FBQUEscUJBQTRHO0FBQUEsY0FDNUcsdUJBQUMsUUFBSyxNQUFLLFlBQVcsV0FBVSxXQUFVLGtCQUFlLG1FQUN0REEsWUFBRSxpQkFBaUIsS0FEdEI7QUFBQTtBQUFBO0FBQUE7QUFBQSxxQkFFQTtBQUFBLGlCQUpGO0FBQUE7QUFBQTtBQUFBO0FBQUEsbUJBS0E7QUFBQSxlQXBCRjtBQUFBO0FBQUE7QUFBQTtBQUFBLGlCQXFCQTtBQUFBO0FBQUEsUUF6QkY7QUFBQTtBQUFBO0FBQUE7QUFBQTtBQUFBO0FBQUE7QUFBQTtBQUFBLE1BMEJBO0FBQUEsU0FyS0Y7QUFBQTtBQUFBO0FBQUE7QUFBQSxXQXNLQTtBQUFBLE9BckxGO0FBQUE7QUFBQTtBQUFBO0FBQUEsU0FzTEE7QUFFSjtBQUFFaUIsS0FqTUlsQjtBQW1NTixlQUFlQTtBQUFlLElBQUFrQjtBQUFBQyxhQUFBRCxJQUFBIiwibmFtZXMiOlsiUmVhY3QiLCJBdmF0YXIiLCJUeXBvZ3JhcGh5IiwiQ2FyZCIsIkJ1dHRvbiIsIklucHV0IiwiQmFkZ2UiLCJTcGFjZSIsIkNvcHkiLCJVc2VycyIsIkJhckNoYXJ0MiIsIlRyZW5kaW5nVXAiLCJHaWZ0IiwiWmFwIiwiVGV4dCIsIkludml0YXRpb25DYXJkIiwidCIsInVzZXJTdGF0ZSIsInJlbmRlclF1b3RhIiwic2V0T3BlblRyYW5zZmVyIiwiYWZmTGluayIsImhhbmRsZUFmZkxpbmtDbGljayIsIndpZHRoIiwiYmFja2dyb3VuZEltYWdlIiwiYmFja2dyb3VuZFNpemUiLCJiYWNrZ3JvdW5kUG9zaXRpb24iLCJiYWNrZ3JvdW5kUmVwZWF0IiwiY29sb3IiLCJmb250U2l6ZSIsInVzZXIiLCJhZmZfcXVvdGEiLCJhZmZfaGlzdG9yeV9xdW90YSIsImFmZl9jb3VudCIsIl9jIiwiJFJlZnJlc2hSZWckIl0sImlnbm9yZUxpc3QiOltdLCJzb3VyY2VzIjpbIkludml0YXRpb25DYXJkLmpzeCJdLCJzb3VyY2VzQ29udGVudCI6WyIvKlxuQ29weXJpZ2h0IChDKSAyMDI1IFF1YW50dW1Ob3VzXG5cblRoaXMgcHJvZ3JhbSBpcyBmcmVlIHNvZnR3YXJlOiB5b3UgY2FuIHJlZGlzdHJpYnV0ZSBpdCBhbmQvb3IgbW9kaWZ5XG5pdCB1bmRlciB0aGUgdGVybXMgb2YgdGhlIEdOVSBBZmZlcm8gR2VuZXJhbCBQdWJsaWMgTGljZW5zZSBhc1xucHVibGlzaGVkIGJ5IHRoZSBGcmVlIFNvZnR3YXJlIEZvdW5kYXRpb24sIGVpdGhlciB2ZXJzaW9uIDMgb2YgdGhlXG5MaWNlbnNlLCBvciAoYXQgeW91ciBvcHRpb24pIGFueSBsYXRlciB2ZXJzaW9uLlxuXG5UaGlzIHByb2dyYW0gaXMgZGlzdHJpYnV0ZWQgaW4gdGhlIGhvcGUgdGhhdCBpdCB3aWxsIGJlIHVzZWZ1bCxcbmJ1dCBXSVRIT1VUIEFOWSBXQVJSQU5UWTsgd2l0aG91dCBldmVuIHRoZSBpbXBsaWVkIHdhcnJhbnR5IG9mXG5NRVJDSEFOVEFCSUxJVFkgb3IgRklUTkVTUyBGT1IgQSBQQVJUSUNVTEFSIFBVUlBPU0UuIFNlZSB0aGVcbkdOVSBBZmZlcm8gR2VuZXJhbCBQdWJsaWMgTGljZW5zZSBmb3IgbW9yZSBkZXRhaWxzLlxuXG5Zb3Ugc2hvdWxkIGhhdmUgcmVjZWl2ZWQgYSBjb3B5IG9mIHRoZSBHTlUgQWZmZXJvIEdlbmVyYWwgUHVibGljIExpY2Vuc2VcbmFsb25nIHdpdGggdGhpcyBwcm9ncmFtLiBJZiBub3QsIHNlZSA8aHR0cHM6Ly93d3cuZ251Lm9yZy9saWNlbnNlcy8+LlxuXG5Gb3IgY29tbWVyY2lhbCBsaWNlbnNpbmcsIHBsZWFzZSBjb250YWN0IHN1cHBvcnRAcXVhbnR1bW5vdXMuY29tXG4qL1xuXG5pbXBvcnQgUmVhY3QgZnJvbSAncmVhY3QnO1xuaW1wb3J0IHtcbiAgQXZhdGFyLFxuICBUeXBvZ3JhcGh5LFxuICBDYXJkLFxuICBCdXR0b24sXG4gIElucHV0LFxuICBCYWRnZSxcbiAgU3BhY2UsXG59IGZyb20gJ0Bkb3V5aW5mZS9zZW1pLXVpJztcbmltcG9ydCB7IENvcHksIFVzZXJzLCBCYXJDaGFydDIsIFRyZW5kaW5nVXAsIEdpZnQsIFphcCB9IGZyb20gJ2x1Y2lkZS1yZWFjdCc7XG5cbmNvbnN0IHsgVGV4dCB9ID0gVHlwb2dyYXBoeTtcblxuY29uc3QgSW52aXRhdGlvbkNhcmQgPSAoe1xuICB0LFxuICB1c2VyU3RhdGUsXG4gIHJlbmRlclF1b3RhLFxuICBzZXRPcGVuVHJhbnNmZXIsXG4gIGFmZkxpbmssXG4gIGhhbmRsZUFmZkxpbmtDbGljayxcbn0pID0+IHtcbiAgcmV0dXJuIChcbiAgICA8Q2FyZCBjbGFzc05hbWU9JyFyb3VuZGVkLTJ4bCBzaGFkb3ctc20gYm9yZGVyLTAnIGRhdGEtaW5zcC1wYXRoPVwid2ViL2NsYXNzaWMvc3JjL2NvbXBvbmVudHMvdG9wdXAvSW52aXRhdGlvbkNhcmQuanN4OjQzOjU6Q2FyZFwiID5cbiAgICAgIHsvKiDljaHniYflpLTpg6ggKi99XG4gICAgICA8ZGl2IGNsYXNzTmFtZT0nZmxleCBpdGVtcy1jZW50ZXIgbWItNCcgZGF0YS1pbnNwLXBhdGg9XCJ3ZWIvY2xhc3NpYy9zcmMvY29tcG9uZW50cy90b3B1cC9JbnZpdGF0aW9uQ2FyZC5qc3g6NDU6NzpkaXZcIiA+XG4gICAgICAgIDxBdmF0YXIgc2l6ZT0nc21hbGwnIGNvbG9yPSdncmVlbicgY2xhc3NOYW1lPSdtci0zIHNoYWRvdy1tZCcgZGF0YS1pbnNwLXBhdGg9XCJ3ZWIvY2xhc3NpYy9zcmMvY29tcG9uZW50cy90b3B1cC9JbnZpdGF0aW9uQ2FyZC5qc3g6NDY6OTpBdmF0YXJcIiA+XG4gICAgICAgICAgPEdpZnQgc2l6ZT17MTZ9ICBkYXRhLWluc3AtcGF0aD1cIndlYi9jbGFzc2ljL3NyYy9jb21wb25lbnRzL3RvcHVwL0ludml0YXRpb25DYXJkLmpzeDo0NzoxMTpHaWZ0XCIgLz5cbiAgICAgICAgPC9BdmF0YXI+XG4gICAgICAgIDxkaXYgZGF0YS1pbnNwLXBhdGg9XCJ3ZWIvY2xhc3NpYy9zcmMvY29tcG9uZW50cy90b3B1cC9JbnZpdGF0aW9uQ2FyZC5qc3g6NDk6OTpkaXZcIj5cbiAgICAgICAgICA8VHlwb2dyYXBoeS5UZXh0IGNsYXNzTmFtZT0ndGV4dC1sZyBmb250LW1lZGl1bSc+XG4gICAgICAgICAgICB7dCgn6YKA6K+35aWW5YqxJyl9XG4gICAgICAgICAgPC9UeXBvZ3JhcGh5LlRleHQ+XG4gICAgICAgICAgPGRpdiBjbGFzc05hbWU9J3RleHQteHMnIGRhdGEtaW5zcC1wYXRoPVwid2ViL2NsYXNzaWMvc3JjL2NvbXBvbmVudHMvdG9wdXAvSW52aXRhdGlvbkNhcmQuanN4OjUzOjExOmRpdlwiID57dCgn6YKA6K+35aW95Y+L6I635b6X6aKd5aSW5aWW5YqxJyl9PC9kaXY+XG4gICAgICAgIDwvZGl2PlxuICAgICAgPC9kaXY+XG5cbiAgICAgIHsvKiDmlLbnm4rlsZXnpLrljLrln58gKi99XG4gICAgICA8U3BhY2UgdmVydGljYWwgc3R5bGU9e3sgd2lkdGg6ICcxMDAlJyB9fSBkYXRhLWluc3AtcGF0aD1cIndlYi9jbGFzc2ljL3NyYy9jb21wb25lbnRzL3RvcHVwL0ludml0YXRpb25DYXJkLmpzeDo1ODo3OlNwYWNlXCIgPlxuICAgICAgICB7Lyog57uf6K6h5pWw5o2u57uf5LiA5Y2h54mHICovfVxuICAgICAgICA8Q2FyZFxuICAgICAgICAgIGNsYXNzTmFtZT0nIXJvdW5kZWQteGwgdy1mdWxsJ1xuICAgICAgICAgIGNvdmVyPXtcbiAgICAgICAgICAgIDxkaXZcbiAgICAgICAgICAgICAgY2xhc3NOYW1lPSdyZWxhdGl2ZSBoLTMwJ1xuICAgICAgICAgICAgICBzdHlsZT17e1xuICAgICAgICAgICAgICAgICctLXBhbGV0dGUtcHJpbWFyeS1kYXJrZXJDaGFubmVsJzogJzAgNzUgODAnLFxuICAgICAgICAgICAgICAgIGJhY2tncm91bmRJbWFnZTogYGxpbmVhci1ncmFkaWVudCgwZGVnLCByZ2JhKHZhcigtLXBhbGV0dGUtcHJpbWFyeS1kYXJrZXJDaGFubmVsKSAvIDgwJSksIHJnYmEodmFyKC0tcGFsZXR0ZS1wcmltYXJ5LWRhcmtlckNoYW5uZWwpIC8gODAlKSksIHVybCgnL2NvdmVyLTQud2VicCcpYCxcbiAgICAgICAgICAgICAgICBiYWNrZ3JvdW5kU2l6ZTogJ2NvdmVyJyxcbiAgICAgICAgICAgICAgICBiYWNrZ3JvdW5kUG9zaXRpb246ICdjZW50ZXInLFxuICAgICAgICAgICAgICAgIGJhY2tncm91bmRSZXBlYXQ6ICduby1yZXBlYXQnLFxuICAgICAgICAgICAgICB9fVxuICAgICAgICAgICAgIGRhdGEtaW5zcC1wYXRoPVwid2ViL2NsYXNzaWMvc3JjL2NvbXBvbmVudHMvdG9wdXAvSW52aXRhdGlvbkNhcmQuanN4OjYzOjEzOmRpdlwiID5cbiAgICAgICAgICAgICAgey8qIOagh+mimOWSjOaMiemSriAqL31cbiAgICAgICAgICAgICAgPGRpdiBjbGFzc05hbWU9J3JlbGF0aXZlIHotMTAgaC1mdWxsIGZsZXggZmxleC1jb2wganVzdGlmeS1iZXR3ZWVuIHAtNCcgZGF0YS1pbnNwLXBhdGg9XCJ3ZWIvY2xhc3NpYy9zcmMvY29tcG9uZW50cy90b3B1cC9JbnZpdGF0aW9uQ2FyZC5qc3g6NzQ6MTU6ZGl2XCIgPlxuICAgICAgICAgICAgICAgIDxkaXYgY2xhc3NOYW1lPSdmbGV4IGp1c3RpZnktYmV0d2VlbiBpdGVtcy1jZW50ZXInIGRhdGEtaW5zcC1wYXRoPVwid2ViL2NsYXNzaWMvc3JjL2NvbXBvbmVudHMvdG9wdXAvSW52aXRhdGlvbkNhcmQuanN4Ojc1OjE3OmRpdlwiID5cbiAgICAgICAgICAgICAgICAgIDxUZXh0IHN0cm9uZyBzdHlsZT17eyBjb2xvcjogJ3doaXRlJywgZm9udFNpemU6ICcxNnB4JyB9fSBkYXRhLWluc3AtcGF0aD1cIndlYi9jbGFzc2ljL3NyYy9jb21wb25lbnRzL3RvcHVwL0ludml0YXRpb25DYXJkLmpzeDo3NjoxOTpUZXh0XCIgPlxuICAgICAgICAgICAgICAgICAgICB7dCgn5pS255uK57uf6K6hJyl9XG4gICAgICAgICAgICAgICAgICA8L1RleHQ+XG4gICAgICAgICAgICAgICAgICA8QnV0dG9uXG4gICAgICAgICAgICAgICAgICAgIHR5cGU9J3ByaW1hcnknXG4gICAgICAgICAgICAgICAgICAgIHRoZW1lPSdzb2xpZCdcbiAgICAgICAgICAgICAgICAgICAgc2l6ZT0nc21hbGwnXG4gICAgICAgICAgICAgICAgICAgIGRpc2FibGVkPXtcbiAgICAgICAgICAgICAgICAgICAgICAhdXNlclN0YXRlPy51c2VyPy5hZmZfcXVvdGEgfHxcbiAgICAgICAgICAgICAgICAgICAgICB1c2VyU3RhdGU/LnVzZXI/LmFmZl9xdW90YSA8PSAwXG4gICAgICAgICAgICAgICAgICAgIH1cbiAgICAgICAgICAgICAgICAgICAgb25DbGljaz17KCkgPT4gc2V0T3BlblRyYW5zZmVyKHRydWUpfVxuICAgICAgICAgICAgICAgICAgICBjbGFzc05hbWU9JyFyb3VuZGVkLWxnJ1xuICAgICAgICAgICAgICAgICAgIGRhdGEtaW5zcC1wYXRoPVwid2ViL2NsYXNzaWMvc3JjL2NvbXBvbmVudHMvdG9wdXAvSW52aXRhdGlvbkNhcmQuanN4Ojc5OjE5OkJ1dHRvblwiID5cbiAgICAgICAgICAgICAgICAgICAgPFphcCBzaXplPXsxMn0gY2xhc3NOYW1lPSdtci0xJyAgZGF0YS1pbnNwLXBhdGg9XCJ3ZWIvY2xhc3NpYy9zcmMvY29tcG9uZW50cy90b3B1cC9JbnZpdGF0aW9uQ2FyZC5qc3g6OTA6MjE6WmFwXCIgLz5cbiAgICAgICAgICAgICAgICAgICAge3QoJ+WIkui9rOWIsOS9meminScpfVxuICAgICAgICAgICAgICAgICAgPC9CdXR0b24+XG4gICAgICAgICAgICAgICAgPC9kaXY+XG5cbiAgICAgICAgICAgICAgICB7Lyog57uf6K6h5pWw5o2uICovfVxuICAgICAgICAgICAgICAgIDxkaXYgY2xhc3NOYW1lPSdncmlkIGdyaWQtY29scy0zIGdhcC02IG10LTQnIGRhdGEtaW5zcC1wYXRoPVwid2ViL2NsYXNzaWMvc3JjL2NvbXBvbmVudHMvdG9wdXAvSW52aXRhdGlvbkNhcmQuanN4Ojk2OjE3OmRpdlwiID5cbiAgICAgICAgICAgICAgICAgIHsvKiDlvoXkvb/nlKjmlLbnm4ogKi99XG4gICAgICAgICAgICAgICAgICA8ZGl2IGNsYXNzTmFtZT0ndGV4dC1jZW50ZXInIGRhdGEtaW5zcC1wYXRoPVwid2ViL2NsYXNzaWMvc3JjL2NvbXBvbmVudHMvdG9wdXAvSW52aXRhdGlvbkNhcmQuanN4Ojk4OjE5OmRpdlwiID5cbiAgICAgICAgICAgICAgICAgICAgPGRpdlxuICAgICAgICAgICAgICAgICAgICAgIGNsYXNzTmFtZT0ndGV4dC1iYXNlIHNtOnRleHQtMnhsIGZvbnQtYm9sZCBtYi0yJ1xuICAgICAgICAgICAgICAgICAgICAgIHN0eWxlPXt7IGNvbG9yOiAnd2hpdGUnIH19XG4gICAgICAgICAgICAgICAgICAgICBkYXRhLWluc3AtcGF0aD1cIndlYi9jbGFzc2ljL3NyYy9jb21wb25lbnRzL3RvcHVwL0ludml0YXRpb25DYXJkLmpzeDo5OToyMTpkaXZcIiA+XG4gICAgICAgICAgICAgICAgICAgICAge3JlbmRlclF1b3RhKHVzZXJTdGF0ZT8udXNlcj8uYWZmX3F1b3RhIHx8IDApfVxuICAgICAgICAgICAgICAgICAgICA8L2Rpdj5cbiAgICAgICAgICAgICAgICAgICAgPGRpdiBjbGFzc05hbWU9J2ZsZXggaXRlbXMtY2VudGVyIGp1c3RpZnktY2VudGVyIHRleHQtc20nIGRhdGEtaW5zcC1wYXRoPVwid2ViL2NsYXNzaWMvc3JjL2NvbXBvbmVudHMvdG9wdXAvSW52aXRhdGlvbkNhcmQuanN4OjEwNToyMTpkaXZcIiA+XG4gICAgICAgICAgICAgICAgICAgICAgPFRyZW5kaW5nVXBcbiAgICAgICAgICAgICAgICAgICAgICAgIHNpemU9ezE0fVxuICAgICAgICAgICAgICAgICAgICAgICAgY2xhc3NOYW1lPSdtci0xJ1xuICAgICAgICAgICAgICAgICAgICAgICAgc3R5bGU9e3sgY29sb3I6ICdyZ2JhKDI1NSwyNTUsMjU1LDAuOCknIH19XG4gICAgICAgICAgICAgICAgICAgICAgIGRhdGEtaW5zcC1wYXRoPVwid2ViL2NsYXNzaWMvc3JjL2NvbXBvbmVudHMvdG9wdXAvSW52aXRhdGlvbkNhcmQuanN4OjEwNjoyMzpUcmVuZGluZ1VwXCIgLz5cbiAgICAgICAgICAgICAgICAgICAgICA8VGV4dFxuICAgICAgICAgICAgICAgICAgICAgICAgc3R5bGU9e3tcbiAgICAgICAgICAgICAgICAgICAgICAgICAgY29sb3I6ICdyZ2JhKDI1NSwyNTUsMjU1LDAuOCknLFxuICAgICAgICAgICAgICAgICAgICAgICAgICBmb250U2l6ZTogJzEycHgnLFxuICAgICAgICAgICAgICAgICAgICAgICAgfX1cbiAgICAgICAgICAgICAgICAgICAgICAgZGF0YS1pbnNwLXBhdGg9XCJ3ZWIvY2xhc3NpYy9zcmMvY29tcG9uZW50cy90b3B1cC9JbnZpdGF0aW9uQ2FyZC5qc3g6MTExOjIzOlRleHRcIiA+XG4gICAgICAgICAgICAgICAgICAgICAgICB7dCgn5b6F5L2/55So5pS255uKJyl9XG4gICAgICAgICAgICAgICAgICAgICAgPC9UZXh0PlxuICAgICAgICAgICAgICAgICAgICA8L2Rpdj5cbiAgICAgICAgICAgICAgICAgIDwvZGl2PlxuXG4gICAgICAgICAgICAgICAgICB7Lyog5oC75pS255uKICovfVxuICAgICAgICAgICAgICAgICAgPGRpdiBjbGFzc05hbWU9J3RleHQtY2VudGVyJyBkYXRhLWluc3AtcGF0aD1cIndlYi9jbGFzc2ljL3NyYy9jb21wb25lbnRzL3RvcHVwL0ludml0YXRpb25DYXJkLmpzeDoxMjM6MTk6ZGl2XCIgPlxuICAgICAgICAgICAgICAgICAgICA8ZGl2XG4gICAgICAgICAgICAgICAgICAgICAgY2xhc3NOYW1lPSd0ZXh0LWJhc2Ugc206dGV4dC0yeGwgZm9udC1ib2xkIG1iLTInXG4gICAgICAgICAgICAgICAgICAgICAgc3R5bGU9e3sgY29sb3I6ICd3aGl0ZScgfX1cbiAgICAgICAgICAgICAgICAgICAgIGRhdGEtaW5zcC1wYXRoPVwid2ViL2NsYXNzaWMvc3JjL2NvbXBvbmVudHMvdG9wdXAvSW52aXRhdGlvbkNhcmQuanN4OjEyNDoyMTpkaXZcIiA+XG4gICAgICAgICAgICAgICAgICAgICAge3JlbmRlclF1b3RhKHVzZXJTdGF0ZT8udXNlcj8uYWZmX2hpc3RvcnlfcXVvdGEgfHwgMCl9XG4gICAgICAgICAgICAgICAgICAgIDwvZGl2PlxuICAgICAgICAgICAgICAgICAgICA8ZGl2IGNsYXNzTmFtZT0nZmxleCBpdGVtcy1jZW50ZXIganVzdGlmeS1jZW50ZXIgdGV4dC1zbScgZGF0YS1pbnNwLXBhdGg9XCJ3ZWIvY2xhc3NpYy9zcmMvY29tcG9uZW50cy90b3B1cC9JbnZpdGF0aW9uQ2FyZC5qc3g6MTMwOjIxOmRpdlwiID5cbiAgICAgICAgICAgICAgICAgICAgICA8QmFyQ2hhcnQyXG4gICAgICAgICAgICAgICAgICAgICAgICBzaXplPXsxNH1cbiAgICAgICAgICAgICAgICAgICAgICAgIGNsYXNzTmFtZT0nbXItMSdcbiAgICAgICAgICAgICAgICAgICAgICAgIHN0eWxlPXt7IGNvbG9yOiAncmdiYSgyNTUsMjU1LDI1NSwwLjgpJyB9fVxuICAgICAgICAgICAgICAgICAgICAgICBkYXRhLWluc3AtcGF0aD1cIndlYi9jbGFzc2ljL3NyYy9jb21wb25lbnRzL3RvcHVwL0ludml0YXRpb25DYXJkLmpzeDoxMzE6MjM6QmFyQ2hhcnQyXCIgLz5cbiAgICAgICAgICAgICAgICAgICAgICA8VGV4dFxuICAgICAgICAgICAgICAgICAgICAgICAgc3R5bGU9e3tcbiAgICAgICAgICAgICAgICAgICAgICAgICAgY29sb3I6ICdyZ2JhKDI1NSwyNTUsMjU1LDAuOCknLFxuICAgICAgICAgICAgICAgICAgICAgICAgICBmb250U2l6ZTogJzEycHgnLFxuICAgICAgICAgICAgICAgICAgICAgICAgfX1cbiAgICAgICAgICAgICAgICAgICAgICAgZGF0YS1pbnNwLXBhdGg9XCJ3ZWIvY2xhc3NpYy9zcmMvY29tcG9uZW50cy90b3B1cC9JbnZpdGF0aW9uQ2FyZC5qc3g6MTM2OjIzOlRleHRcIiA+XG4gICAgICAgICAgICAgICAgICAgICAgICB7dCgn5oC75pS255uKJyl9XG4gICAgICAgICAgICAgICAgICAgICAgPC9UZXh0PlxuICAgICAgICAgICAgICAgICAgICA8L2Rpdj5cbiAgICAgICAgICAgICAgICAgIDwvZGl2PlxuXG4gICAgICAgICAgICAgICAgICB7Lyog6YKA6K+35Lq65pWwICovfVxuICAgICAgICAgICAgICAgICAgPGRpdiBjbGFzc05hbWU9J3RleHQtY2VudGVyJyBkYXRhLWluc3AtcGF0aD1cIndlYi9jbGFzc2ljL3NyYy9jb21wb25lbnRzL3RvcHVwL0ludml0YXRpb25DYXJkLmpzeDoxNDg6MTk6ZGl2XCIgPlxuICAgICAgICAgICAgICAgICAgICA8ZGl2XG4gICAgICAgICAgICAgICAgICAgICAgY2xhc3NOYW1lPSd0ZXh0LWJhc2Ugc206dGV4dC0yeGwgZm9udC1ib2xkIG1iLTInXG4gICAgICAgICAgICAgICAgICAgICAgc3R5bGU9e3sgY29sb3I6ICd3aGl0ZScgfX1cbiAgICAgICAgICAgICAgICAgICAgIGRhdGEtaW5zcC1wYXRoPVwid2ViL2NsYXNzaWMvc3JjL2NvbXBvbmVudHMvdG9wdXAvSW52aXRhdGlvbkNhcmQuanN4OjE0OToyMTpkaXZcIiA+XG4gICAgICAgICAgICAgICAgICAgICAge3VzZXJTdGF0ZT8udXNlcj8uYWZmX2NvdW50IHx8IDB9XG4gICAgICAgICAgICAgICAgICAgIDwvZGl2PlxuICAgICAgICAgICAgICAgICAgICA8ZGl2IGNsYXNzTmFtZT0nZmxleCBpdGVtcy1jZW50ZXIganVzdGlmeS1jZW50ZXIgdGV4dC1zbScgZGF0YS1pbnNwLXBhdGg9XCJ3ZWIvY2xhc3NpYy9zcmMvY29tcG9uZW50cy90b3B1cC9JbnZpdGF0aW9uQ2FyZC5qc3g6MTU1OjIxOmRpdlwiID5cbiAgICAgICAgICAgICAgICAgICAgICA8VXNlcnNcbiAgICAgICAgICAgICAgICAgICAgICAgIHNpemU9ezE0fVxuICAgICAgICAgICAgICAgICAgICAgICAgY2xhc3NOYW1lPSdtci0xJ1xuICAgICAgICAgICAgICAgICAgICAgICAgc3R5bGU9e3sgY29sb3I6ICdyZ2JhKDI1NSwyNTUsMjU1LDAuOCknIH19XG4gICAgICAgICAgICAgICAgICAgICAgIGRhdGEtaW5zcC1wYXRoPVwid2ViL2NsYXNzaWMvc3JjL2NvbXBvbmVudHMvdG9wdXAvSW52aXRhdGlvbkNhcmQuanN4OjE1NjoyMzpVc2Vyc1wiIC8+XG4gICAgICAgICAgICAgICAgICAgICAgPFRleHRcbiAgICAgICAgICAgICAgICAgICAgICAgIHN0eWxlPXt7XG4gICAgICAgICAgICAgICAgICAgICAgICAgIGNvbG9yOiAncmdiYSgyNTUsMjU1LDI1NSwwLjgpJyxcbiAgICAgICAgICAgICAgICAgICAgICAgICAgZm9udFNpemU6ICcxMnB4JyxcbiAgICAgICAgICAgICAgICAgICAgICAgIH19XG4gICAgICAgICAgICAgICAgICAgICAgIGRhdGEtaW5zcC1wYXRoPVwid2ViL2NsYXNzaWMvc3JjL2NvbXBvbmVudHMvdG9wdXAvSW52aXRhdGlvbkNhcmQuanN4OjE2MToyMzpUZXh0XCIgPlxuICAgICAgICAgICAgICAgICAgICAgICAge3QoJ+mCgOivt+S6uuaVsCcpfVxuICAgICAgICAgICAgICAgICAgICAgIDwvVGV4dD5cbiAgICAgICAgICAgICAgICAgICAgPC9kaXY+XG4gICAgICAgICAgICAgICAgICA8L2Rpdj5cbiAgICAgICAgICAgICAgICA8L2Rpdj5cbiAgICAgICAgICAgICAgPC9kaXY+XG4gICAgICAgICAgICA8L2Rpdj5cbiAgICAgICAgICB9XG4gICAgICAgICBkYXRhLWluc3AtcGF0aD1cIndlYi9jbGFzc2ljL3NyYy9jb21wb25lbnRzL3RvcHVwL0ludml0YXRpb25DYXJkLmpzeDo2MDo5OkNhcmRcIiA+XG4gICAgICAgICAgey8qIOmCgOivt+mTvuaOpemDqOWIhiAqL31cbiAgICAgICAgICA8SW5wdXRcbiAgICAgICAgICAgIHZhbHVlPXthZmZMaW5rfVxuICAgICAgICAgICAgcmVhZG9ubHlcbiAgICAgICAgICAgIGNsYXNzTmFtZT0nIXJvdW5kZWQtbGcnXG4gICAgICAgICAgICBwcmVmaXg9e3QoJ+mCgOivt+mTvuaOpScpfVxuICAgICAgICAgICAgc3VmZml4PXtcbiAgICAgICAgICAgICAgPEJ1dHRvblxuICAgICAgICAgICAgICAgIHR5cGU9J3ByaW1hcnknXG4gICAgICAgICAgICAgICAgdGhlbWU9J3NvbGlkJ1xuICAgICAgICAgICAgICAgIG9uQ2xpY2s9e2hhbmRsZUFmZkxpbmtDbGlja31cbiAgICAgICAgICAgICAgICBpY29uPXs8Q29weSBzaXplPXsxNH0gIGRhdGEtaW5zcC1wYXRoPVwid2ViL2NsYXNzaWMvc3JjL2NvbXBvbmVudHMvdG9wdXAvSW52aXRhdGlvbkNhcmQuanN4OjE4NzoyMzpDb3B5XCIgLz59XG4gICAgICAgICAgICAgICAgY2xhc3NOYW1lPSchcm91bmRlZC1sZydcbiAgICAgICAgICAgICAgIGRhdGEtaW5zcC1wYXRoPVwid2ViL2NsYXNzaWMvc3JjL2NvbXBvbmVudHMvdG9wdXAvSW52aXRhdGlvbkNhcmQuanN4OjE4MzoxNTpCdXR0b25cIiA+XG4gICAgICAgICAgICAgICAge3QoJ+WkjeWIticpfVxuICAgICAgICAgICAgICA8L0J1dHRvbj5cbiAgICAgICAgICAgIH1cbiAgICAgICAgICAgZGF0YS1pbnNwLXBhdGg9XCJ3ZWIvY2xhc3NpYy9zcmMvY29tcG9uZW50cy90b3B1cC9JbnZpdGF0aW9uQ2FyZC5qc3g6MTc3OjExOklucHV0XCIgLz5cbiAgICAgICAgPC9DYXJkPlxuXG4gICAgICAgIHsvKiDlpZblirHor7TmmI4gKi99XG4gICAgICAgIDxDYXJkXG4gICAgICAgICAgY2xhc3NOYW1lPSchcm91bmRlZC14bCB3LWZ1bGwnXG4gICAgICAgICAgdGl0bGU9ezxUZXh0IHR5cGU9J3RlcnRpYXJ5JyBkYXRhLWluc3AtcGF0aD1cIndlYi9jbGFzc2ljL3NyYy9jb21wb25lbnRzL3RvcHVwL0ludml0YXRpb25DYXJkLmpzeDoxOTk6MTg6VGV4dFwiID57dCgn5aWW5Yqx6K+05piOJyl9PC9UZXh0Pn1cbiAgICAgICAgIGRhdGEtaW5zcC1wYXRoPVwid2ViL2NsYXNzaWMvc3JjL2NvbXBvbmVudHMvdG9wdXAvSW52aXRhdGlvbkNhcmQuanN4OjE5Nzo5OkNhcmRcIiA+XG4gICAgICAgICAgPGRpdiBjbGFzc05hbWU9J3NwYWNlLXktMycgZGF0YS1pbnNwLXBhdGg9XCJ3ZWIvY2xhc3NpYy9zcmMvY29tcG9uZW50cy90b3B1cC9JbnZpdGF0aW9uQ2FyZC5qc3g6MjAxOjExOmRpdlwiID5cbiAgICAgICAgICAgIDxkaXYgY2xhc3NOYW1lPSdmbGV4IGl0ZW1zLXN0YXJ0IGdhcC0yJyBkYXRhLWluc3AtcGF0aD1cIndlYi9jbGFzc2ljL3NyYy9jb21wb25lbnRzL3RvcHVwL0ludml0YXRpb25DYXJkLmpzeDoyMDI6MTM6ZGl2XCIgPlxuICAgICAgICAgICAgICA8QmFkZ2UgZG90IHR5cGU9J3N1Y2Nlc3MnICBkYXRhLWluc3AtcGF0aD1cIndlYi9jbGFzc2ljL3NyYy9jb21wb25lbnRzL3RvcHVwL0ludml0YXRpb25DYXJkLmpzeDoyMDM6MTU6QmFkZ2VcIiAvPlxuICAgICAgICAgICAgICA8VGV4dCB0eXBlPSd0ZXJ0aWFyeScgY2xhc3NOYW1lPSd0ZXh0LXNtJyBkYXRhLWluc3AtcGF0aD1cIndlYi9jbGFzc2ljL3NyYy9jb21wb25lbnRzL3RvcHVwL0ludml0YXRpb25DYXJkLmpzeDoyMDQ6MTU6VGV4dFwiID5cbiAgICAgICAgICAgICAgICB7dCgn6YKA6K+35aW95Y+L5rOo5YaM77yM5aW95Y+L5YWF5YC85ZCO5oKo5Y+v6I635b6X55u45bqU5aWW5YqxJyl9XG4gICAgICAgICAgICAgIDwvVGV4dD5cbiAgICAgICAgICAgIDwvZGl2PlxuXG4gICAgICAgICAgICA8ZGl2IGNsYXNzTmFtZT0nZmxleCBpdGVtcy1zdGFydCBnYXAtMicgZGF0YS1pbnNwLXBhdGg9XCJ3ZWIvY2xhc3NpYy9zcmMvY29tcG9uZW50cy90b3B1cC9JbnZpdGF0aW9uQ2FyZC5qc3g6MjA5OjEzOmRpdlwiID5cbiAgICAgICAgICAgICAgPEJhZGdlIGRvdCB0eXBlPSdzdWNjZXNzJyAgZGF0YS1pbnNwLXBhdGg9XCJ3ZWIvY2xhc3NpYy9zcmMvY29tcG9uZW50cy90b3B1cC9JbnZpdGF0aW9uQ2FyZC5qc3g6MjEwOjE1OkJhZGdlXCIgLz5cbiAgICAgICAgICAgICAgPFRleHQgdHlwZT0ndGVydGlhcnknIGNsYXNzTmFtZT0ndGV4dC1zbScgZGF0YS1pbnNwLXBhdGg9XCJ3ZWIvY2xhc3NpYy9zcmMvY29tcG9uZW50cy90b3B1cC9JbnZpdGF0aW9uQ2FyZC5qc3g6MjExOjE1OlRleHRcIiA+XG4gICAgICAgICAgICAgICAge3QoJ+mAmui/h+WIkui9rOWKn+iDveWwhuWlluWKsemineW6pui9rOWFpeWIsOaCqOeahOi0puaIt+S9memineS4rScpfVxuICAgICAgICAgICAgICA8L1RleHQ+XG4gICAgICAgICAgICA8L2Rpdj5cblxuICAgICAgICAgICAgPGRpdiBjbGFzc05hbWU9J2ZsZXggaXRlbXMtc3RhcnQgZ2FwLTInIGRhdGEtaW5zcC1wYXRoPVwid2ViL2NsYXNzaWMvc3JjL2NvbXBvbmVudHMvdG9wdXAvSW52aXRhdGlvbkNhcmQuanN4OjIxNjoxMzpkaXZcIiA+XG4gICAgICAgICAgICAgIDxCYWRnZSBkb3QgdHlwZT0nc3VjY2VzcycgIGRhdGEtaW5zcC1wYXRoPVwid2ViL2NsYXNzaWMvc3JjL2NvbXBvbmVudHMvdG9wdXAvSW52aXRhdGlvbkNhcmQuanN4OjIxNzoxNTpCYWRnZVwiIC8+XG4gICAgICAgICAgICAgIDxUZXh0IHR5cGU9J3RlcnRpYXJ5JyBjbGFzc05hbWU9J3RleHQtc20nIGRhdGEtaW5zcC1wYXRoPVwid2ViL2NsYXNzaWMvc3JjL2NvbXBvbmVudHMvdG9wdXAvSW52aXRhdGlvbkNhcmQuanN4OjIxODoxNTpUZXh0XCIgPlxuICAgICAgICAgICAgICAgIHt0KCfpgoDor7fnmoTlpb3lj4votorlpJrvvIzojrflvpfnmoTlpZblirHotorlpJonKX1cbiAgICAgICAgICAgICAgPC9UZXh0PlxuICAgICAgICAgICAgPC9kaXY+XG4gICAgICAgICAgPC9kaXY+XG4gICAgICAgIDwvQ2FyZD5cbiAgICAgIDwvU3BhY2U+XG4gICAgPC9DYXJkPlxuICApO1xufTtcblxuZXhwb3J0IGRlZmF1bHQgSW52aXRhdGlvbkNhcmQ7XG4iXSwiZmlsZSI6IkU6L25ldy1hcGkvd2ViL2NsYXNzaWMvc3JjL2NvbXBvbmVudHMvdG9wdXAvSW52aXRhdGlvbkNhcmQuanN4In0=

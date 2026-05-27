@@ -38,16 +38,26 @@ const HeaderLogo = ({
   }
 
   return (
-    <Link to='/' className='group flex items-center gap-2'>
-      <div className='relative w-8 h-8 md:w-8 md:h-8'>
+    <Link
+      to='/'
+      className='neo-header-logo group flex items-center'
+      aria-label={systemName}
+      title={systemName}
+    >
+      <div className='neo-header-logo-mark relative'>
         <SkeletonWrapper loading={isLoading || !logoLoaded} type='image' />
         <img
           src={logo}
           alt='logo'
-          className={`absolute inset-0 w-full h-full transition-all duration-200 group-hover:scale-110 rounded-full ${!isLoading && logoLoaded ? 'opacity-100' : 'opacity-0'}`}
+          onError={(event) => {
+            if (event.currentTarget.src.endsWith('/logo.png')) return;
+            event.currentTarget.src = '/logo.png';
+            event.currentTarget.style.opacity = '1';
+          }}
+          className={`absolute inset-0 w-full h-full object-contain transition-all duration-200 group-hover:scale-105 ${!isLoading && logoLoaded ? 'opacity-100' : 'opacity-0'}`}
         />
       </div>
-      <div className='hidden md:flex items-center gap-2'>
+      <div className='neo-header-logo-text hidden md:flex items-center'>
         <div className='flex items-center gap-2'>
           <SkeletonWrapper
             loading={isLoading}
@@ -57,9 +67,9 @@ const HeaderLogo = ({
           >
             <Typography.Title
               heading={4}
-              className='!text-lg !font-semibold !mb-0'
+              className='neo-header-brand-word !mb-0'
             >
-              {systemName}
+              pii
             </Typography.Title>
           </SkeletonWrapper>
           {(isSelfUseMode || isDemoSiteMode) && !isLoading && (

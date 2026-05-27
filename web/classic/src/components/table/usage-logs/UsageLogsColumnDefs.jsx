@@ -105,7 +105,10 @@ function renderType(type, t) {
       );
     case 2:
       return (
-        <Tag color='lime' shape='circle'>
+        <Tag
+          className='usage-log-type-tag usage-log-type-consume'
+          shape='circle'
+        >
           {t('消费')}
         </Tag>
       );
@@ -123,7 +126,10 @@ function renderType(type, t) {
       );
     case 5:
       return (
-        <Tag color='red' shape='circle'>
+        <Tag
+          className='usage-log-type-tag usage-log-type-error'
+          shape='circle'
+        >
           {t('错误')}
         </Tag>
       );

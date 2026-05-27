@@ -28,14 +28,21 @@ import {
 import { HugeiconsIcon } from '@hugeicons/react'
 import { Toaster as Sonner, type ToasterProps } from 'sonner'
 import { useTheme } from '@/context/theme-provider'
+import { cn } from '@/lib/utils'
 
-const Toaster = (props: ToasterProps) => {
+function Toaster({
+  className,
+  style,
+  toastOptions,
+  ...props
+}: ToasterProps) {
   const { resolvedTheme } = useTheme()
 
   return (
     <Sonner
+      {...props}
       theme={resolvedTheme}
-      className='toaster group'
+      className={cn('toaster group [&_div[data-content]]:w-full', className)}
       icons={{
         success: (
           <HugeiconsIcon
@@ -75,6 +82,7 @@ const Toaster = (props: ToasterProps) => {
       }}
       style={
         {
+          ...style,
           '--normal-bg': 'var(--popover)',
           '--normal-text': 'var(--popover-foreground)',
           '--normal-border': 'var(--border)',
@@ -100,7 +108,22 @@ const Toaster = (props: ToasterProps) => {
           '--border-radius': 'var(--radius)',
         } as React.CSSProperties
       }
-      {...props}
+      toastOptions={{
+        ...toastOptions,
+        classNames: {
+          toast:
+            'group toast group-[.toaster]:bg-popover group-[.toaster]:text-popover-foreground group-[.toaster]:border-border group-[.toaster]:shadow-lg',
+          title: 'group-[.toast]:text-popover-foreground',
+          description: 'group-[.toast]:text-muted-foreground',
+          closeButton:
+            'group-[.toast]:bg-popover group-[.toast]:text-popover-foreground group-[.toast]:border-border',
+          actionButton:
+            'group-[.toast]:bg-primary group-[.toast]:text-primary-foreground',
+          cancelButton:
+            'group-[.toast]:bg-muted group-[.toast]:text-muted-foreground',
+          ...toastOptions?.classNames,
+        },
+      }}
     />
   )
 }

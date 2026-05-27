@@ -158,6 +158,16 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 
 	// common.SetContextKey(c, constant.ContextKeyTokenCountMeta, meta)
 
+	if relayFormat == types.RelayFormatOpenAIImage && relay.IsAsyncImageRequest(c) && common.GetAsyncImageInternalTaskEnabled() {
+		imageReq, ok := request.(*dto.ImageRequest)
+		if !ok {
+			newAPIError = types.NewErrorWithStatusCode(fmt.Errorf("invalid request type, expected dto.ImageRequest, got %T", request), types.ErrorCodeInvalidRequest, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
+			return
+		}
+		newAPIError = relay.SubmitInternalAsyncImageTask(c, relayInfo, imageReq)
+		return
+	}
+
 	if priceData.FreeModel {
 		logger.LogInfo(c, fmt.Sprintf("模型 %s 免费，跳过预扣费", relayInfo.OriginModelName))
 	} else {

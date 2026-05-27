@@ -1,0 +1,135 @@
+import { createHotContext as __vite__createHotContext } from "/@vite/client";import.meta.hot = __vite__createHotContext("/src/components/table/model-pricing/modal/components/ModelEndpoints.jsx");import __vite__cjsImport0_react_jsxDevRuntime from "/node_modules/.vite/deps/react_jsx-dev-runtime.js?v=1c6fcc49"; const jsxDEV = __vite__cjsImport0_react_jsxDevRuntime["jsxDEV"];
+import RefreshRuntime from "/@react-refresh";
+const inWebWorker = typeof WorkerGlobalScope !== "undefined" && self instanceof WorkerGlobalScope;
+let prevRefreshReg;
+let prevRefreshSig;
+if (import.meta.hot && !inWebWorker) {
+  if (!window.__vite_plugin_react_preamble_installed__) {
+    throw new Error("@vitejs/plugin-react can't detect preamble. Something is wrong. See https://github.com/vitejs/vite-plugin-react/pull/11#discussion_r430879201");
+  }
+  prevRefreshReg = window.$RefreshReg$;
+  prevRefreshSig = window.$RefreshSig$;
+  window.$RefreshReg$ = (type, id) => {
+    RefreshRuntime.register(type, "E:/new-api/web/classic/src/components/table/model-pricing/modal/components/ModelEndpoints.jsx " + id);
+  };
+  window.$RefreshSig$ = RefreshRuntime.createSignatureFunctionForTransform;
+}
+import __vite__cjsImport3_react from "/node_modules/.vite/deps/react.js?v=1c6fcc49"; const React = __vite__cjsImport3_react.__esModule ? __vite__cjsImport3_react.default : __vite__cjsImport3_react;
+import { Avatar, Typography, Badge } from "/node_modules/.vite/deps/@douyinfe_semi-ui.js?v=0f3c8be3";
+import { IconLink } from "/node_modules/.vite/deps/@douyinfe_semi-icons.js?v=4a36e176";
+const { Text } = Typography;
+const ModelEndpoints = ({ modelData, endpointMap = {}, t }) => {
+  const renderAPIEndpoints = () => {
+    if (!modelData) return null;
+    const mapping = endpointMap;
+    const types = modelData.supported_endpoint_types || [];
+    return types.map((type) => {
+      const info = mapping[type] || {};
+      let path = info.path || "";
+      if (path.includes("{model}")) {
+        const modelName = modelData.model_name || modelData.modelName || "";
+        path = path.replaceAll("{model}", modelName);
+      }
+      const method = info.method || "POST";
+      return /* @__PURE__ */ jsxDEV(
+        "div",
+        {
+          className: "flex justify-between border-b border-dashed last:border-0 py-2 last:pb-0",
+          style: { borderColor: "var(--semi-color-border)" },
+          "data-insp-path": "web/classic/src/components/table/model-pricing/modal/components/ModelEndpoints.jsx:43:9:div",
+          children: [
+            /* @__PURE__ */ jsxDEV("span", { className: "flex items-center pr-5", "data-insp-path": "web/classic/src/components/table/model-pricing/modal/components/ModelEndpoints.jsx:48:11:span", children: [
+              /* @__PURE__ */ jsxDEV(Badge, { dot: true, type: "success", className: "mr-2", "data-insp-path": "web/classic/src/components/table/model-pricing/modal/components/ModelEndpoints.jsx:49:13:Badge" }, void 0, false, {
+                fileName: "E:/new-api/web/classic/src/components/table/model-pricing/modal/components/ModelEndpoints.jsx",
+                lineNumber: 49,
+                columnNumber: 13
+              }, this),
+              type,
+              path && "：",
+              path && /* @__PURE__ */ jsxDEV("span", { className: "text-gray-500 md:ml-1 break-all", "data-insp-path": "web/classic/src/components/table/model-pricing/modal/components/ModelEndpoints.jsx:53:15:span", children: path }, void 0, false, {
+                fileName: "E:/new-api/web/classic/src/components/table/model-pricing/modal/components/ModelEndpoints.jsx",
+                lineNumber: 53,
+                columnNumber: 13
+              }, this)
+            ] }, void 0, true, {
+              fileName: "E:/new-api/web/classic/src/components/table/model-pricing/modal/components/ModelEndpoints.jsx",
+              lineNumber: 48,
+              columnNumber: 11
+            }, this),
+            path && /* @__PURE__ */ jsxDEV("span", { className: "text-gray-500 text-xs md:ml-1", "data-insp-path": "web/classic/src/components/table/model-pricing/modal/components/ModelEndpoints.jsx:57:13:span", children: method }, void 0, false, {
+              fileName: "E:/new-api/web/classic/src/components/table/model-pricing/modal/components/ModelEndpoints.jsx",
+              lineNumber: 57,
+              columnNumber: 11
+            }, this)
+          ]
+        },
+        type,
+        true,
+        {
+          fileName: "E:/new-api/web/classic/src/components/table/model-pricing/modal/components/ModelEndpoints.jsx",
+          lineNumber: 43,
+          columnNumber: 9
+        },
+        this
+      );
+    });
+  };
+  return /* @__PURE__ */ jsxDEV("div", { "data-insp-path": "web/classic/src/components/table/model-pricing/modal/components/ModelEndpoints.jsx:65:5:div", children: [
+    /* @__PURE__ */ jsxDEV("div", { className: "flex items-center mb-4", "data-insp-path": "web/classic/src/components/table/model-pricing/modal/components/ModelEndpoints.jsx:66:7:div", children: [
+      /* @__PURE__ */ jsxDEV(Avatar, { size: "small", color: "purple", className: "mr-2 shadow-md", "data-insp-path": "web/classic/src/components/table/model-pricing/modal/components/ModelEndpoints.jsx:67:9:Avatar", children: /* @__PURE__ */ jsxDEV(IconLink, { size: 16, "data-insp-path": "web/classic/src/components/table/model-pricing/modal/components/ModelEndpoints.jsx:68:11:IconLink" }, void 0, false, {
+        fileName: "E:/new-api/web/classic/src/components/table/model-pricing/modal/components/ModelEndpoints.jsx",
+        lineNumber: 68,
+        columnNumber: 11
+      }, this) }, void 0, false, {
+        fileName: "E:/new-api/web/classic/src/components/table/model-pricing/modal/components/ModelEndpoints.jsx",
+        lineNumber: 67,
+        columnNumber: 9
+      }, this),
+      /* @__PURE__ */ jsxDEV("div", { "data-insp-path": "web/classic/src/components/table/model-pricing/modal/components/ModelEndpoints.jsx:70:9:div", children: [
+        /* @__PURE__ */ jsxDEV(Text, { className: "text-lg font-medium", "data-insp-path": "web/classic/src/components/table/model-pricing/modal/components/ModelEndpoints.jsx:71:11:Text", children: t("API端点") }, void 0, false, {
+          fileName: "E:/new-api/web/classic/src/components/table/model-pricing/modal/components/ModelEndpoints.jsx",
+          lineNumber: 71,
+          columnNumber: 11
+        }, this),
+        /* @__PURE__ */ jsxDEV("div", { className: "text-xs text-gray-600", "data-insp-path": "web/classic/src/components/table/model-pricing/modal/components/ModelEndpoints.jsx:72:11:div", children: t("模型支持的接口端点信息") }, void 0, false, {
+          fileName: "E:/new-api/web/classic/src/components/table/model-pricing/modal/components/ModelEndpoints.jsx",
+          lineNumber: 72,
+          columnNumber: 11
+        }, this)
+      ] }, void 0, true, {
+        fileName: "E:/new-api/web/classic/src/components/table/model-pricing/modal/components/ModelEndpoints.jsx",
+        lineNumber: 70,
+        columnNumber: 9
+      }, this)
+    ] }, void 0, true, {
+      fileName: "E:/new-api/web/classic/src/components/table/model-pricing/modal/components/ModelEndpoints.jsx",
+      lineNumber: 66,
+      columnNumber: 7
+    }, this),
+    renderAPIEndpoints()
+  ] }, void 0, true, {
+    fileName: "E:/new-api/web/classic/src/components/table/model-pricing/modal/components/ModelEndpoints.jsx",
+    lineNumber: 65,
+    columnNumber: 5
+  }, this);
+};
+_c = ModelEndpoints;
+export default ModelEndpoints;
+var _c;
+$RefreshReg$(_c, "ModelEndpoints");
+if (import.meta.hot && !inWebWorker) {
+  window.$RefreshReg$ = prevRefreshReg;
+  window.$RefreshSig$ = prevRefreshSig;
+}
+if (import.meta.hot && !inWebWorker) {
+  RefreshRuntime.__hmr_import(import.meta.url).then((currentExports) => {
+    RefreshRuntime.registerExportsForReactRefresh("E:/new-api/web/classic/src/components/table/model-pricing/modal/components/ModelEndpoints.jsx", currentExports);
+    import.meta.hot.accept((nextExports) => {
+      if (!nextExports) return;
+      const invalidateMessage = RefreshRuntime.validateRefreshBoundaryAndEnqueueUpdate("E:/new-api/web/classic/src/components/table/model-pricing/modal/components/ModelEndpoints.jsx", currentExports, nextExports);
+      if (invalidateMessage) import.meta.hot.invalidate(invalidateMessage);
+    });
+  });
+}
+
+//# sourceMappingURL=data:application/json;base64,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LCJuYW1lcyI6WyJSZWFjdCIsIkF2YXRhciIsIlR5cG9ncmFwaHkiLCJCYWRnZSIsIkljb25MaW5rIiwiVGV4dCIsIk1vZGVsRW5kcG9pbnRzIiwibW9kZWxEYXRhIiwiZW5kcG9pbnRNYXAiLCJ0IiwicmVuZGVyQVBJRW5kcG9pbnRzIiwibWFwcGluZyIsInR5cGVzIiwic3VwcG9ydGVkX2VuZHBvaW50X3R5cGVzIiwibWFwIiwidHlwZSIsImluZm8iLCJwYXRoIiwiaW5jbHVkZXMiLCJtb2RlbE5hbWUiLCJtb2RlbF9uYW1lIiwicmVwbGFjZUFsbCIsIm1ldGhvZCIsImJvcmRlckNvbG9yIiwiX2MiLCIkUmVmcmVzaFJlZyQiXSwiaWdub3JlTGlzdCI6W10sInNvdXJjZXMiOlsiTW9kZWxFbmRwb2ludHMuanN4Il0sInNvdXJjZXNDb250ZW50IjpbIi8qXG5Db3B5cmlnaHQgKEMpIDIwMjUgUXVhbnR1bU5vdXNcblxuVGhpcyBwcm9ncmFtIGlzIGZyZWUgc29mdHdhcmU6IHlvdSBjYW4gcmVkaXN0cmlidXRlIGl0IGFuZC9vciBtb2RpZnlcbml0IHVuZGVyIHRoZSB0ZXJtcyBvZiB0aGUgR05VIEFmZmVybyBHZW5lcmFsIFB1YmxpYyBMaWNlbnNlIGFzXG5wdWJsaXNoZWQgYnkgdGhlIEZyZWUgU29mdHdhcmUgRm91bmRhdGlvbiwgZWl0aGVyIHZlcnNpb24gMyBvZiB0aGVcbkxpY2Vuc2UsIG9yIChhdCB5b3VyIG9wdGlvbikgYW55IGxhdGVyIHZlcnNpb24uXG5cblRoaXMgcHJvZ3JhbSBpcyBkaXN0cmlidXRlZCBpbiB0aGUgaG9wZSB0aGF0IGl0IHdpbGwgYmUgdXNlZnVsLFxuYnV0IFdJVEhPVVQgQU5ZIFdBUlJBTlRZOyB3aXRob3V0IGV2ZW4gdGhlIGltcGxpZWQgd2FycmFudHkgb2Zcbk1FUkNIQU5UQUJJTElUWSBvciBGSVRORVNTIEZPUiBBIFBBUlRJQ1VMQVIgUFVSUE9TRS4gU2VlIHRoZVxuR05VIEFmZmVybyBHZW5lcmFsIFB1YmxpYyBMaWNlbnNlIGZvciBtb3JlIGRldGFpbHMuXG5cbllvdSBzaG91bGQgaGF2ZSByZWNlaXZlZCBhIGNvcHkgb2YgdGhlIEdOVSBBZmZlcm8gR2VuZXJhbCBQdWJsaWMgTGljZW5zZVxuYWxvbmcgd2l0aCB0aGlzIHByb2dyYW0uIElmIG5vdCwgc2VlIDxodHRwczovL3d3dy5nbnUub3JnL2xpY2Vuc2VzLz4uXG5cbkZvciBjb21tZXJjaWFsIGxpY2Vuc2luZywgcGxlYXNlIGNvbnRhY3Qgc3VwcG9ydEBxdWFudHVtbm91cy5jb21cbiovXG5cbmltcG9ydCBSZWFjdCBmcm9tICdyZWFjdCc7XG5pbXBvcnQgeyBBdmF0YXIsIFR5cG9ncmFwaHksIEJhZGdlIH0gZnJvbSAnQGRvdXlpbmZlL3NlbWktdWknO1xuaW1wb3J0IHsgSWNvbkxpbmsgfSBmcm9tICdAZG91eWluZmUvc2VtaS1pY29ucyc7XG5cbmNvbnN0IHsgVGV4dCB9ID0gVHlwb2dyYXBoeTtcblxuY29uc3QgTW9kZWxFbmRwb2ludHMgPSAoeyBtb2RlbERhdGEsIGVuZHBvaW50TWFwID0ge30sIHQgfSkgPT4ge1xuICBjb25zdCByZW5kZXJBUElFbmRwb2ludHMgPSAoKSA9PiB7XG4gICAgaWYgKCFtb2RlbERhdGEpIHJldHVybiBudWxsO1xuXG4gICAgY29uc3QgbWFwcGluZyA9IGVuZHBvaW50TWFwO1xuICAgIGNvbnN0IHR5cGVzID0gbW9kZWxEYXRhLnN1cHBvcnRlZF9lbmRwb2ludF90eXBlcyB8fCBbXTtcblxuICAgIHJldHVybiB0eXBlcy5tYXAoKHR5cGUpID0+IHtcbiAgICAgIGNvbnN0IGluZm8gPSBtYXBwaW5nW3R5cGVdIHx8IHt9O1xuICAgICAgbGV0IHBhdGggPSBpbmZvLnBhdGggfHwgJyc7XG4gICAgICAvLyDlpoLmnpzot6/lvoTkuK3ljIXlkKsge21vZGVsfSDljaDkvY3nrKbvvIzmm7/mjaLkuLrnnJ/lrp7mqKHlnovlkI3np7BcbiAgICAgIGlmIChwYXRoLmluY2x1ZGVzKCd7bW9kZWx9JykpIHtcbiAgICAgICAgY29uc3QgbW9kZWxOYW1lID0gbW9kZWxEYXRhLm1vZGVsX25hbWUgfHwgbW9kZWxEYXRhLm1vZGVsTmFtZSB8fCAnJztcbiAgICAgICAgcGF0aCA9IHBhdGgucmVwbGFjZUFsbCgne21vZGVsfScsIG1vZGVsTmFtZSk7XG4gICAgICB9XG4gICAgICBjb25zdCBtZXRob2QgPSBpbmZvLm1ldGhvZCB8fCAnUE9TVCc7XG4gICAgICByZXR1cm4gKFxuICAgICAgICA8ZGl2XG4gICAgICAgICAga2V5PXt0eXBlfVxuICAgICAgICAgIGNsYXNzTmFtZT0nZmxleCBqdXN0aWZ5LWJldHdlZW4gYm9yZGVyLWIgYm9yZGVyLWRhc2hlZCBsYXN0OmJvcmRlci0wIHB5LTIgbGFzdDpwYi0wJ1xuICAgICAgICAgIHN0eWxlPXt7IGJvcmRlckNvbG9yOiAndmFyKC0tc2VtaS1jb2xvci1ib3JkZXIpJyB9fVxuICAgICAgICAgZGF0YS1pbnNwLXBhdGg9XCJ3ZWIvY2xhc3NpYy9zcmMvY29tcG9uZW50cy90YWJsZS9tb2RlbC1wcmljaW5nL21vZGFsL2NvbXBvbmVudHMvTW9kZWxFbmRwb2ludHMuanN4OjQzOjk6ZGl2XCIgPlxuICAgICAgICAgIDxzcGFuIGNsYXNzTmFtZT0nZmxleCBpdGVtcy1jZW50ZXIgcHItNScgZGF0YS1pbnNwLXBhdGg9XCJ3ZWIvY2xhc3NpYy9zcmMvY29tcG9uZW50cy90YWJsZS9tb2RlbC1wcmljaW5nL21vZGFsL2NvbXBvbmVudHMvTW9kZWxFbmRwb2ludHMuanN4OjQ4OjExOnNwYW5cIiA+XG4gICAgICAgICAgICA8QmFkZ2UgZG90IHR5cGU9J3N1Y2Nlc3MnIGNsYXNzTmFtZT0nbXItMicgIGRhdGEtaW5zcC1wYXRoPVwid2ViL2NsYXNzaWMvc3JjL2NvbXBvbmVudHMvdGFibGUvbW9kZWwtcHJpY2luZy9tb2RhbC9jb21wb25lbnRzL01vZGVsRW5kcG9pbnRzLmpzeDo0OToxMzpCYWRnZVwiIC8+XG4gICAgICAgICAgICB7dHlwZX1cbiAgICAgICAgICAgIHtwYXRoICYmICfvvJonfVxuICAgICAgICAgICAge3BhdGggJiYgKFxuICAgICAgICAgICAgICA8c3BhbiBjbGFzc05hbWU9J3RleHQtZ3JheS01MDAgbWQ6bWwtMSBicmVhay1hbGwnIGRhdGEtaW5zcC1wYXRoPVwid2ViL2NsYXNzaWMvc3JjL2NvbXBvbmVudHMvdGFibGUvbW9kZWwtcHJpY2luZy9tb2RhbC9jb21wb25lbnRzL01vZGVsRW5kcG9pbnRzLmpzeDo1MzoxNTpzcGFuXCIgPntwYXRofTwvc3Bhbj5cbiAgICAgICAgICAgICl9XG4gICAgICAgICAgPC9zcGFuPlxuICAgICAgICAgIHtwYXRoICYmIChcbiAgICAgICAgICAgIDxzcGFuIGNsYXNzTmFtZT0ndGV4dC1ncmF5LTUwMCB0ZXh0LXhzIG1kOm1sLTEnIGRhdGEtaW5zcC1wYXRoPVwid2ViL2NsYXNzaWMvc3JjL2NvbXBvbmVudHMvdGFibGUvbW9kZWwtcHJpY2luZy9tb2RhbC9jb21wb25lbnRzL01vZGVsRW5kcG9pbnRzLmpzeDo1NzoxMzpzcGFuXCIgPnttZXRob2R9PC9zcGFuPlxuICAgICAgICAgICl9XG4gICAgICAgIDwvZGl2PlxuICAgICAgKTtcbiAgICB9KTtcbiAgfTtcblxuICByZXR1cm4gKFxuICAgIDxkaXYgZGF0YS1pbnNwLXBhdGg9XCJ3ZWIvY2xhc3NpYy9zcmMvY29tcG9uZW50cy90YWJsZS9tb2RlbC1wcmljaW5nL21vZGFsL2NvbXBvbmVudHMvTW9kZWxFbmRwb2ludHMuanN4OjY1OjU6ZGl2XCI+XG4gICAgICA8ZGl2IGNsYXNzTmFtZT0nZmxleCBpdGVtcy1jZW50ZXIgbWItNCcgZGF0YS1pbnNwLXBhdGg9XCJ3ZWIvY2xhc3NpYy9zcmMvY29tcG9uZW50cy90YWJsZS9tb2RlbC1wcmljaW5nL21vZGFsL2NvbXBvbmVudHMvTW9kZWxFbmRwb2ludHMuanN4OjY2Ojc6ZGl2XCIgPlxuICAgICAgICA8QXZhdGFyIHNpemU9J3NtYWxsJyBjb2xvcj0ncHVycGxlJyBjbGFzc05hbWU9J21yLTIgc2hhZG93LW1kJyBkYXRhLWluc3AtcGF0aD1cIndlYi9jbGFzc2ljL3NyYy9jb21wb25lbnRzL3RhYmxlL21vZGVsLXByaWNpbmcvbW9kYWwvY29tcG9uZW50cy9Nb2RlbEVuZHBvaW50cy5qc3g6Njc6OTpBdmF0YXJcIiA+XG4gICAgICAgICAgPEljb25MaW5rIHNpemU9ezE2fSAgZGF0YS1pbnNwLXBhdGg9XCJ3ZWIvY2xhc3NpYy9zcmMvY29tcG9uZW50cy90YWJsZS9tb2RlbC1wcmljaW5nL21vZGFsL2NvbXBvbmVudHMvTW9kZWxFbmRwb2ludHMuanN4OjY4OjExOkljb25MaW5rXCIgLz5cbiAgICAgICAgPC9BdmF0YXI+XG4gICAgICAgIDxkaXYgZGF0YS1pbnNwLXBhdGg9XCJ3ZWIvY2xhc3NpYy9zcmMvY29tcG9uZW50cy90YWJsZS9tb2RlbC1wcmljaW5nL21vZGFsL2NvbXBvbmVudHMvTW9kZWxFbmRwb2ludHMuanN4OjcwOjk6ZGl2XCI+XG4gICAgICAgICAgPFRleHQgY2xhc3NOYW1lPSd0ZXh0LWxnIGZvbnQtbWVkaXVtJyBkYXRhLWluc3AtcGF0aD1cIndlYi9jbGFzc2ljL3NyYy9jb21wb25lbnRzL3RhYmxlL21vZGVsLXByaWNpbmcvbW9kYWwvY29tcG9uZW50cy9Nb2RlbEVuZHBvaW50cy5qc3g6NzE6MTE6VGV4dFwiID57dCgnQVBJ56uv54K5Jyl9PC9UZXh0PlxuICAgICAgICAgIDxkaXYgY2xhc3NOYW1lPSd0ZXh0LXhzIHRleHQtZ3JheS02MDAnIGRhdGEtaW5zcC1wYXRoPVwid2ViL2NsYXNzaWMvc3JjL2NvbXBvbmVudHMvdGFibGUvbW9kZWwtcHJpY2luZy9tb2RhbC9jb21wb25lbnRzL01vZGVsRW5kcG9pbnRzLmpzeDo3MjoxMTpkaXZcIiA+XG4gICAgICAgICAgICB7dCgn5qih5Z6L5pSv5oyB55qE5o6l5Y+j56uv54K55L+h5oGvJyl9XG4gICAgICAgICAgPC9kaXY+XG4gICAgICAgIDwvZGl2PlxuICAgICAgPC9kaXY+XG4gICAgICB7cmVuZGVyQVBJRW5kcG9pbnRzKCl9XG4gICAgPC9kaXY+XG4gICk7XG59O1xuXG5leHBvcnQgZGVmYXVsdCBNb2RlbEVuZHBvaW50cztcbiJdLCJmaWxlIjoiRTovbmV3LWFwaS93ZWIvY2xhc3NpYy9zcmMvY29tcG9uZW50cy90YWJsZS9tb2RlbC1wcmljaW5nL21vZGFsL2NvbXBvbmVudHMvTW9kZWxFbmRwb2ludHMuanN4In0=

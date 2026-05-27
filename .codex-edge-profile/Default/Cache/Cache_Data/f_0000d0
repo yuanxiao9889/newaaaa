@@ -1,0 +1,1245 @@
+import { createHotContext as __vite__createHotContext } from "/@vite/client";import.meta.hot = __vite__createHotContext("/src/components/settings/personal/components/TwoFASetting.jsx");import __vite__cjsImport0_react_jsxDevRuntime from "/node_modules/.vite/deps/react_jsx-dev-runtime.js?v=1c6fcc49"; const Fragment = __vite__cjsImport0_react_jsxDevRuntime["Fragment"]; const jsxDEV = __vite__cjsImport0_react_jsxDevRuntime["jsxDEV"];
+import RefreshRuntime from "/@react-refresh";
+const inWebWorker = typeof WorkerGlobalScope !== "undefined" && self instanceof WorkerGlobalScope;
+let prevRefreshReg;
+let prevRefreshSig;
+if (import.meta.hot && !inWebWorker) {
+  if (!window.__vite_plugin_react_preamble_installed__) {
+    throw new Error("@vitejs/plugin-react can't detect preamble. Something is wrong. See https://github.com/vitejs/vite-plugin-react/pull/11#discussion_r430879201");
+  }
+  prevRefreshReg = window.$RefreshReg$;
+  prevRefreshSig = window.$RefreshSig$;
+  window.$RefreshReg$ = (type, id) => {
+    RefreshRuntime.register(type, "E:/new-api/web/classic/src/components/settings/personal/components/TwoFASetting.jsx " + id);
+  };
+  window.$RefreshSig$ = RefreshRuntime.createSignatureFunctionForTransform;
+}
+var _s = $RefreshSig$();
+import { API, showError, showSuccess, showWarning } from "/src/helpers/index.js";
+import {
+  Banner,
+  Button,
+  Card,
+  Checkbox,
+  Divider,
+  Input,
+  Modal,
+  Tag,
+  Typography,
+  Steps,
+  Space,
+  Badge
+} from "/node_modules/.vite/deps/@douyinfe_semi-ui.js?v=0f3c8be3";
+import {
+  IconShield,
+  IconAlertTriangle,
+  IconRefresh,
+  IconCopy
+} from "/node_modules/.vite/deps/@douyinfe_semi-icons.js?v=4a36e176";
+import __vite__cjsImport6_react from "/node_modules/.vite/deps/react.js?v=1c6fcc49"; const React = __vite__cjsImport6_react.__esModule ? __vite__cjsImport6_react.default : __vite__cjsImport6_react; const useEffect = __vite__cjsImport6_react["useEffect"]; const useState = __vite__cjsImport6_react["useState"];
+import { QRCodeSVG } from "/node_modules/.vite/deps/qrcode__react.js?v=c43e9699";
+const { Text, Paragraph } = Typography;
+const TwoFASetting = ({ t }) => {
+  _s();
+  const [loading, setLoading] = useState(false);
+  const [status, setStatus] = useState({
+    enabled: false,
+    locked: false,
+    backup_codes_remaining: 0
+  });
+  const [setupModalVisible, setSetupModalVisible] = useState(false);
+  const [enableModalVisible, setEnableModalVisible] = useState(false);
+  const [disableModalVisible, setDisableModalVisible] = useState(false);
+  const [backupModalVisible, setBackupModalVisible] = useState(false);
+  const [setupData, setSetupData] = useState(null);
+  const [verificationCode, setVerificationCode] = useState("");
+  const [backupCodes, setBackupCodes] = useState([]);
+  const [confirmDisable, setConfirmDisable] = useState(false);
+  const [currentStep, setCurrentStep] = useState(0);
+  const fetchStatus = async () => {
+    try {
+      const res = await API.get("/api/user/2fa/status");
+      if (res.data.success) {
+        setStatus(res.data.data);
+      }
+    } catch (error) {
+      showError(t("获取2FA状态失败"));
+    }
+  };
+  useEffect(() => {
+    fetchStatus();
+  }, []);
+  const handleSetup2FA = async () => {
+    setLoading(true);
+    try {
+      const res = await API.post("/api/user/2fa/setup");
+      if (res.data.success) {
+        setSetupData(res.data.data);
+        setSetupModalVisible(true);
+        setCurrentStep(0);
+      } else {
+        showError(res.data.message);
+      }
+    } catch (error) {
+      showError(t("设置2FA失败"));
+    } finally {
+      setLoading(false);
+    }
+  };
+  const handleEnable2FA = async () => {
+    if (!verificationCode) {
+      showWarning(t("请输入验证码"));
+      return;
+    }
+    setLoading(true);
+    try {
+      const res = await API.post("/api/user/2fa/enable", {
+        code: verificationCode
+      });
+      if (res.data.success) {
+        showSuccess(t("两步验证启用成功！"));
+        setEnableModalVisible(false);
+        setSetupModalVisible(false);
+        setVerificationCode("");
+        setCurrentStep(0);
+        fetchStatus();
+      } else {
+        showError(res.data.message);
+      }
+    } catch (error) {
+      showError(t("启用2FA失败"));
+    } finally {
+      setLoading(false);
+    }
+  };
+  const handleDisable2FA = async () => {
+    if (!verificationCode) {
+      showWarning(t("请输入验证码或备用码"));
+      return;
+    }
+    if (!confirmDisable) {
+      showWarning(t("请确认您已了解禁用两步验证的后果"));
+      return;
+    }
+    setLoading(true);
+    try {
+      const res = await API.post("/api/user/2fa/disable", {
+        code: verificationCode
+      });
+      if (res.data.success) {
+        showSuccess(t("两步验证已禁用"));
+        setDisableModalVisible(false);
+        setVerificationCode("");
+        setConfirmDisable(false);
+        fetchStatus();
+      } else {
+        showError(res.data.message);
+      }
+    } catch (error) {
+      showError(t("禁用2FA失败"));
+    } finally {
+      setLoading(false);
+    }
+  };
+  const handleRegenerateBackupCodes = async () => {
+    if (!verificationCode) {
+      showWarning(t("请输入验证码"));
+      return;
+    }
+    setLoading(true);
+    try {
+      const res = await API.post("/api/user/2fa/backup_codes", {
+        code: verificationCode
+      });
+      if (res.data.success) {
+        setBackupCodes(res.data.data.backup_codes);
+        showSuccess(t("备用码重新生成成功"));
+        setVerificationCode("");
+        fetchStatus();
+      } else {
+        showError(res.data.message);
+      }
+    } catch (error) {
+      showError(t("重新生成备用码失败"));
+    } finally {
+      setLoading(false);
+    }
+  };
+  const copyTextToClipboard = (text, successMessage = t("已复制到剪贴板")) => {
+    navigator.clipboard.writeText(text).then(() => {
+      showSuccess(successMessage);
+    }).catch(() => {
+      showError(t("复制失败，请手动复制"));
+    });
+  };
+  const copyBackupCodes = () => {
+    const codesText = backupCodes.join("\n");
+    copyTextToClipboard(codesText, t("备用码已复制到剪贴板"));
+  };
+  const BackupCodesDisplay = ({ codes, title, onCopy }) => {
+    return /* @__PURE__ */ jsxDEV(Card, { className: "!rounded-xl", style: { width: "100%" }, "data-insp-path": "web/classic/src/components/settings/personal/components/TwoFASetting.jsx:211:7:Card", children: /* @__PURE__ */ jsxDEV("div", { className: "space-y-3", "data-insp-path": "web/classic/src/components/settings/personal/components/TwoFASetting.jsx:212:9:div", children: [
+      /* @__PURE__ */ jsxDEV("div", { className: "flex items-center justify-between", "data-insp-path": "web/classic/src/components/settings/personal/components/TwoFASetting.jsx:213:11:div", children: /* @__PURE__ */ jsxDEV(Text, { strong: true, className: "text-slate-700 dark:text-slate-200", "data-insp-path": "web/classic/src/components/settings/personal/components/TwoFASetting.jsx:214:13:Text", children: title }, void 0, false, {
+        fileName: "E:/new-api/web/classic/src/components/settings/personal/components/TwoFASetting.jsx",
+        lineNumber: 214,
+        columnNumber: 13
+      }, this) }, void 0, false, {
+        fileName: "E:/new-api/web/classic/src/components/settings/personal/components/TwoFASetting.jsx",
+        lineNumber: 213,
+        columnNumber: 11
+      }, this),
+      /* @__PURE__ */ jsxDEV("div", { className: "grid grid-cols-1 sm:grid-cols-2 gap-2", "data-insp-path": "web/classic/src/components/settings/personal/components/TwoFASetting.jsx:219:11:div", children: codes.map(
+        (code, index) => /* @__PURE__ */ jsxDEV("div", { className: "rounded-lg p-3", "data-insp-path": "web/classic/src/components/settings/personal/components/TwoFASetting.jsx:221:15:div", children: /* @__PURE__ */ jsxDEV("div", { className: "flex items-center justify-between", "data-insp-path": "web/classic/src/components/settings/personal/components/TwoFASetting.jsx:222:17:div", children: [
+          /* @__PURE__ */ jsxDEV(
+            Text,
+            {
+              code: true,
+              className: "text-sm font-mono text-slate-700 dark:text-slate-200",
+              "data-insp-path": "web/classic/src/components/settings/personal/components/TwoFASetting.jsx:223:19:Text",
+              children: code
+            },
+            void 0,
+            false,
+            {
+              fileName: "E:/new-api/web/classic/src/components/settings/personal/components/TwoFASetting.jsx",
+              lineNumber: 223,
+              columnNumber: 19
+            },
+            this
+          ),
+          /* @__PURE__ */ jsxDEV(Text, { type: "quaternary", className: "text-xs", "data-insp-path": "web/classic/src/components/settings/personal/components/TwoFASetting.jsx:229:19:Text", children: [
+            "#",
+            (index + 1).toString().padStart(2, "0")
+          ] }, void 0, true, {
+            fileName: "E:/new-api/web/classic/src/components/settings/personal/components/TwoFASetting.jsx",
+            lineNumber: 229,
+            columnNumber: 19
+          }, this)
+        ] }, void 0, true, {
+          fileName: "E:/new-api/web/classic/src/components/settings/personal/components/TwoFASetting.jsx",
+          lineNumber: 222,
+          columnNumber: 17
+        }, this) }, index, false, {
+          fileName: "E:/new-api/web/classic/src/components/settings/personal/components/TwoFASetting.jsx",
+          lineNumber: 221,
+          columnNumber: 13
+        }, this)
+      ) }, void 0, false, {
+        fileName: "E:/new-api/web/classic/src/components/settings/personal/components/TwoFASetting.jsx",
+        lineNumber: 219,
+        columnNumber: 11
+      }, this),
+      /* @__PURE__ */ jsxDEV(Divider, { margin: 12, "data-insp-path": "web/classic/src/components/settings/personal/components/TwoFASetting.jsx:237:11:Divider" }, void 0, false, {
+        fileName: "E:/new-api/web/classic/src/components/settings/personal/components/TwoFASetting.jsx",
+        lineNumber: 237,
+        columnNumber: 11
+      }, this),
+      /* @__PURE__ */ jsxDEV(
+        Button,
+        {
+          type: "primary",
+          theme: "solid",
+          icon: /* @__PURE__ */ jsxDEV(IconCopy, { "data-insp-path": "web/classic/src/components/settings/personal/components/TwoFASetting.jsx:241:19:IconCopy" }, void 0, false, {
+            fileName: "E:/new-api/web/classic/src/components/settings/personal/components/TwoFASetting.jsx",
+            lineNumber: 241,
+            columnNumber: 19
+          }, this),
+          onClick: onCopy,
+          className: "!rounded-lg !bg-slate-600 hover:!bg-slate-700 w-full",
+          "data-insp-path": "web/classic/src/components/settings/personal/components/TwoFASetting.jsx:238:11:Button",
+          children: t("复制所有代码")
+        },
+        void 0,
+        false,
+        {
+          fileName: "E:/new-api/web/classic/src/components/settings/personal/components/TwoFASetting.jsx",
+          lineNumber: 238,
+          columnNumber: 11
+        },
+        this
+      )
+    ] }, void 0, true, {
+      fileName: "E:/new-api/web/classic/src/components/settings/personal/components/TwoFASetting.jsx",
+      lineNumber: 212,
+      columnNumber: 9
+    }, this) }, void 0, false, {
+      fileName: "E:/new-api/web/classic/src/components/settings/personal/components/TwoFASetting.jsx",
+      lineNumber: 211,
+      columnNumber: 7
+    }, this);
+  };
+  const renderSetupModalFooter = () => {
+    return /* @__PURE__ */ jsxDEV(Fragment, { children: [
+      currentStep > 0 && /* @__PURE__ */ jsxDEV(
+        Button,
+        {
+          onClick: () => setCurrentStep(currentStep - 1),
+          className: "!rounded-lg",
+          "data-insp-path": "web/classic/src/components/settings/personal/components/TwoFASetting.jsx:257:11:Button",
+          children: t("上一步")
+        },
+        void 0,
+        false,
+        {
+          fileName: "E:/new-api/web/classic/src/components/settings/personal/components/TwoFASetting.jsx",
+          lineNumber: 257,
+          columnNumber: 9
+        },
+        this
+      ),
+      currentStep < 2 ? /* @__PURE__ */ jsxDEV(
+        Button,
+        {
+          type: "primary",
+          theme: "solid",
+          onClick: () => setCurrentStep(currentStep + 1),
+          className: "!rounded-lg !bg-slate-600 hover:!bg-slate-700",
+          "data-insp-path": "web/classic/src/components/settings/personal/components/TwoFASetting.jsx:265:11:Button",
+          children: t("下一步")
+        },
+        void 0,
+        false,
+        {
+          fileName: "E:/new-api/web/classic/src/components/settings/personal/components/TwoFASetting.jsx",
+          lineNumber: 265,
+          columnNumber: 9
+        },
+        this
+      ) : /* @__PURE__ */ jsxDEV(
+        Button,
+        {
+          type: "primary",
+          theme: "solid",
+          loading,
+          onClick: () => {
+            if (!verificationCode) {
+              showWarning(t("请输入验证码"));
+              return;
+            }
+            handleEnable2FA();
+          },
+          className: "!rounded-lg !bg-slate-600 hover:!bg-slate-700",
+          "data-insp-path": "web/classic/src/components/settings/personal/components/TwoFASetting.jsx:274:11:Button",
+          children: t("完成设置并启用两步验证")
+        },
+        void 0,
+        false,
+        {
+          fileName: "E:/new-api/web/classic/src/components/settings/personal/components/TwoFASetting.jsx",
+          lineNumber: 274,
+          columnNumber: 9
+        },
+        this
+      )
+    ] }, void 0, true, {
+      fileName: "E:/new-api/web/classic/src/components/settings/personal/components/TwoFASetting.jsx",
+      lineNumber: 255,
+      columnNumber: 7
+    }, this);
+  };
+  const renderDisableModalFooter = () => {
+    return /* @__PURE__ */ jsxDEV(Fragment, { children: [
+      /* @__PURE__ */ jsxDEV(
+        Button,
+        {
+          onClick: () => {
+            setDisableModalVisible(false);
+            setVerificationCode("");
+            setConfirmDisable(false);
+          },
+          className: "!rounded-lg",
+          "data-insp-path": "web/classic/src/components/settings/personal/components/TwoFASetting.jsx:298:9:Button",
+          children: t("取消")
+        },
+        void 0,
+        false,
+        {
+          fileName: "E:/new-api/web/classic/src/components/settings/personal/components/TwoFASetting.jsx",
+          lineNumber: 298,
+          columnNumber: 9
+        },
+        this
+      ),
+      /* @__PURE__ */ jsxDEV(
+        Button,
+        {
+          type: "danger",
+          theme: "solid",
+          loading,
+          disabled: !confirmDisable || !verificationCode,
+          onClick: handleDisable2FA,
+          className: "!rounded-lg !bg-slate-500 hover:!bg-slate-600",
+          "data-insp-path": "web/classic/src/components/settings/personal/components/TwoFASetting.jsx:308:9:Button",
+          children: t("确认禁用")
+        },
+        void 0,
+        false,
+        {
+          fileName: "E:/new-api/web/classic/src/components/settings/personal/components/TwoFASetting.jsx",
+          lineNumber: 308,
+          columnNumber: 9
+        },
+        this
+      )
+    ] }, void 0, true, {
+      fileName: "E:/new-api/web/classic/src/components/settings/personal/components/TwoFASetting.jsx",
+      lineNumber: 297,
+      columnNumber: 7
+    }, this);
+  };
+  const renderRegenerateModalFooter = () => {
+    if (backupCodes.length > 0) {
+      return /* @__PURE__ */ jsxDEV(
+        Button,
+        {
+          type: "primary",
+          theme: "solid",
+          onClick: () => {
+            setBackupModalVisible(false);
+            setVerificationCode("");
+            setBackupCodes([]);
+          },
+          className: "!rounded-lg !bg-slate-600 hover:!bg-slate-700",
+          "data-insp-path": "web/classic/src/components/settings/personal/components/TwoFASetting.jsx:326:9:Button",
+          children: t("完成")
+        },
+        void 0,
+        false,
+        {
+          fileName: "E:/new-api/web/classic/src/components/settings/personal/components/TwoFASetting.jsx",
+          lineNumber: 326,
+          columnNumber: 9
+        },
+        this
+      );
+    }
+    return /* @__PURE__ */ jsxDEV(Fragment, { children: [
+      /* @__PURE__ */ jsxDEV(
+        Button,
+        {
+          onClick: () => {
+            setBackupModalVisible(false);
+            setVerificationCode("");
+            setBackupCodes([]);
+          },
+          className: "!rounded-lg",
+          "data-insp-path": "web/classic/src/components/settings/personal/components/TwoFASetting.jsx:343:9:Button",
+          children: t("取消")
+        },
+        void 0,
+        false,
+        {
+          fileName: "E:/new-api/web/classic/src/components/settings/personal/components/TwoFASetting.jsx",
+          lineNumber: 343,
+          columnNumber: 9
+        },
+        this
+      ),
+      /* @__PURE__ */ jsxDEV(
+        Button,
+        {
+          type: "primary",
+          theme: "solid",
+          loading,
+          disabled: !verificationCode,
+          onClick: handleRegenerateBackupCodes,
+          className: "!rounded-lg !bg-slate-600 hover:!bg-slate-700",
+          "data-insp-path": "web/classic/src/components/settings/personal/components/TwoFASetting.jsx:353:9:Button",
+          children: t("生成新的备用码")
+        },
+        void 0,
+        false,
+        {
+          fileName: "E:/new-api/web/classic/src/components/settings/personal/components/TwoFASetting.jsx",
+          lineNumber: 353,
+          columnNumber: 9
+        },
+        this
+      )
+    ] }, void 0, true, {
+      fileName: "E:/new-api/web/classic/src/components/settings/personal/components/TwoFASetting.jsx",
+      lineNumber: 342,
+      columnNumber: 7
+    }, this);
+  };
+  return /* @__PURE__ */ jsxDEV(Fragment, { children: [
+    /* @__PURE__ */ jsxDEV(Card, { className: "!rounded-xl w-full", "data-insp-path": "web/classic/src/components/settings/personal/components/TwoFASetting.jsx:369:7:Card", children: /* @__PURE__ */ jsxDEV("div", { className: "flex flex-col sm:flex-row items-start sm:justify-between gap-4", "data-insp-path": "web/classic/src/components/settings/personal/components/TwoFASetting.jsx:370:9:div", children: [
+      /* @__PURE__ */ jsxDEV("div", { className: "flex items-start w-full sm:w-auto", "data-insp-path": "web/classic/src/components/settings/personal/components/TwoFASetting.jsx:371:11:div", children: [
+        /* @__PURE__ */ jsxDEV("div", { className: "w-12 h-12 rounded-full bg-slate-100 dark:bg-slate-700 flex items-center justify-center mr-4 flex-shrink-0", "data-insp-path": "web/classic/src/components/settings/personal/components/TwoFASetting.jsx:372:13:div", children: /* @__PURE__ */ jsxDEV(
+          IconShield,
+          {
+            size: "large",
+            className: "text-slate-600 dark:text-slate-300",
+            "data-insp-path": "web/classic/src/components/settings/personal/components/TwoFASetting.jsx:373:15:IconShield"
+          },
+          void 0,
+          false,
+          {
+            fileName: "E:/new-api/web/classic/src/components/settings/personal/components/TwoFASetting.jsx",
+            lineNumber: 373,
+            columnNumber: 15
+          },
+          this
+        ) }, void 0, false, {
+          fileName: "E:/new-api/web/classic/src/components/settings/personal/components/TwoFASetting.jsx",
+          lineNumber: 372,
+          columnNumber: 13
+        }, this),
+        /* @__PURE__ */ jsxDEV("div", { className: "flex-1", "data-insp-path": "web/classic/src/components/settings/personal/components/TwoFASetting.jsx:378:13:div", children: [
+          /* @__PURE__ */ jsxDEV("div", { className: "flex items-center gap-2 mb-1", "data-insp-path": "web/classic/src/components/settings/personal/components/TwoFASetting.jsx:379:15:div", children: [
+            /* @__PURE__ */ jsxDEV(Typography.Title, { heading: 6, className: "mb-0", children: t("两步验证设置") }, void 0, false, {
+              fileName: "E:/new-api/web/classic/src/components/settings/personal/components/TwoFASetting.jsx",
+              lineNumber: 380,
+              columnNumber: 17
+            }, this),
+            status.enabled ? /* @__PURE__ */ jsxDEV(Tag, { color: "green", shape: "circle", size: "small", "data-insp-path": "web/classic/src/components/settings/personal/components/TwoFASetting.jsx:384:19:Tag", children: t("已启用") }, void 0, false, {
+              fileName: "E:/new-api/web/classic/src/components/settings/personal/components/TwoFASetting.jsx",
+              lineNumber: 384,
+              columnNumber: 17
+            }, this) : /* @__PURE__ */ jsxDEV(Tag, { color: "red", shape: "circle", size: "small", "data-insp-path": "web/classic/src/components/settings/personal/components/TwoFASetting.jsx:388:19:Tag", children: t("未启用") }, void 0, false, {
+              fileName: "E:/new-api/web/classic/src/components/settings/personal/components/TwoFASetting.jsx",
+              lineNumber: 388,
+              columnNumber: 17
+            }, this),
+            status.locked && /* @__PURE__ */ jsxDEV(Tag, { color: "orange", shape: "circle", size: "small", "data-insp-path": "web/classic/src/components/settings/personal/components/TwoFASetting.jsx:393:19:Tag", children: t("账户已锁定") }, void 0, false, {
+              fileName: "E:/new-api/web/classic/src/components/settings/personal/components/TwoFASetting.jsx",
+              lineNumber: 393,
+              columnNumber: 17
+            }, this)
+          ] }, void 0, true, {
+            fileName: "E:/new-api/web/classic/src/components/settings/personal/components/TwoFASetting.jsx",
+            lineNumber: 379,
+            columnNumber: 15
+          }, this),
+          /* @__PURE__ */ jsxDEV(Typography.Text, { type: "tertiary", className: "text-sm", children: t(
+            "两步验证（2FA）为您的账户提供额外的安全保护。启用后，登录时需要输入密码和验证器应用生成的验证码。"
+          ) }, void 0, false, {
+            fileName: "E:/new-api/web/classic/src/components/settings/personal/components/TwoFASetting.jsx",
+            lineNumber: 398,
+            columnNumber: 15
+          }, this),
+          status.enabled && /* @__PURE__ */ jsxDEV("div", { className: "mt-2", "data-insp-path": "web/classic/src/components/settings/personal/components/TwoFASetting.jsx:404:17:div", children: /* @__PURE__ */ jsxDEV(Text, { size: "small", type: "secondary", "data-insp-path": "web/classic/src/components/settings/personal/components/TwoFASetting.jsx:405:19:Text", children: [
+            t("剩余备用码："),
+            status.backup_codes_remaining || 0,
+            t("个")
+          ] }, void 0, true, {
+            fileName: "E:/new-api/web/classic/src/components/settings/personal/components/TwoFASetting.jsx",
+            lineNumber: 405,
+            columnNumber: 19
+          }, this) }, void 0, false, {
+            fileName: "E:/new-api/web/classic/src/components/settings/personal/components/TwoFASetting.jsx",
+            lineNumber: 404,
+            columnNumber: 15
+          }, this)
+        ] }, void 0, true, {
+          fileName: "E:/new-api/web/classic/src/components/settings/personal/components/TwoFASetting.jsx",
+          lineNumber: 378,
+          columnNumber: 13
+        }, this)
+      ] }, void 0, true, {
+        fileName: "E:/new-api/web/classic/src/components/settings/personal/components/TwoFASetting.jsx",
+        lineNumber: 371,
+        columnNumber: 11
+      }, this),
+      /* @__PURE__ */ jsxDEV("div", { className: "flex flex-col space-y-2 w-full sm:w-auto", "data-insp-path": "web/classic/src/components/settings/personal/components/TwoFASetting.jsx:414:11:div", children: !status.enabled ? /* @__PURE__ */ jsxDEV(
+        Button,
+        {
+          type: "primary",
+          theme: "solid",
+          size: "default",
+          onClick: handleSetup2FA,
+          loading,
+          className: "!rounded-lg !bg-slate-600 hover:!bg-slate-700",
+          icon: /* @__PURE__ */ jsxDEV(IconShield, { "data-insp-path": "web/classic/src/components/settings/personal/components/TwoFASetting.jsx:423:23:IconShield" }, void 0, false, {
+            fileName: "E:/new-api/web/classic/src/components/settings/personal/components/TwoFASetting.jsx",
+            lineNumber: 423,
+            columnNumber: 21
+          }, this),
+          "data-insp-path": "web/classic/src/components/settings/personal/components/TwoFASetting.jsx:416:15:Button",
+          children: t("启用验证")
+        },
+        void 0,
+        false,
+        {
+          fileName: "E:/new-api/web/classic/src/components/settings/personal/components/TwoFASetting.jsx",
+          lineNumber: 416,
+          columnNumber: 13
+        },
+        this
+      ) : /* @__PURE__ */ jsxDEV("div", { className: "flex flex-col space-y-2", "data-insp-path": "web/classic/src/components/settings/personal/components/TwoFASetting.jsx:428:15:div", children: [
+        /* @__PURE__ */ jsxDEV(
+          Button,
+          {
+            type: "danger",
+            theme: "solid",
+            size: "default",
+            onClick: () => setDisableModalVisible(true),
+            className: "!rounded-lg !bg-slate-500 hover:!bg-slate-600",
+            icon: /* @__PURE__ */ jsxDEV(IconAlertTriangle, { "data-insp-path": "web/classic/src/components/settings/personal/components/TwoFASetting.jsx:435:25:IconAlertTriangle" }, void 0, false, {
+              fileName: "E:/new-api/web/classic/src/components/settings/personal/components/TwoFASetting.jsx",
+              lineNumber: 435,
+              columnNumber: 23
+            }, this),
+            "data-insp-path": "web/classic/src/components/settings/personal/components/TwoFASetting.jsx:429:17:Button",
+            children: t("禁用两步验证")
+          },
+          void 0,
+          false,
+          {
+            fileName: "E:/new-api/web/classic/src/components/settings/personal/components/TwoFASetting.jsx",
+            lineNumber: 429,
+            columnNumber: 17
+          },
+          this
+        ),
+        /* @__PURE__ */ jsxDEV(
+          Button,
+          {
+            type: "primary",
+            theme: "solid",
+            size: "default",
+            onClick: () => setBackupModalVisible(true),
+            className: "!rounded-lg",
+            icon: /* @__PURE__ */ jsxDEV(IconRefresh, { "data-insp-path": "web/classic/src/components/settings/personal/components/TwoFASetting.jsx:445:25:IconRefresh" }, void 0, false, {
+              fileName: "E:/new-api/web/classic/src/components/settings/personal/components/TwoFASetting.jsx",
+              lineNumber: 445,
+              columnNumber: 23
+            }, this),
+            "data-insp-path": "web/classic/src/components/settings/personal/components/TwoFASetting.jsx:439:17:Button",
+            children: t("重新生成备用码")
+          },
+          void 0,
+          false,
+          {
+            fileName: "E:/new-api/web/classic/src/components/settings/personal/components/TwoFASetting.jsx",
+            lineNumber: 439,
+            columnNumber: 17
+          },
+          this
+        )
+      ] }, void 0, true, {
+        fileName: "E:/new-api/web/classic/src/components/settings/personal/components/TwoFASetting.jsx",
+        lineNumber: 428,
+        columnNumber: 13
+      }, this) }, void 0, false, {
+        fileName: "E:/new-api/web/classic/src/components/settings/personal/components/TwoFASetting.jsx",
+        lineNumber: 414,
+        columnNumber: 11
+      }, this)
+    ] }, void 0, true, {
+      fileName: "E:/new-api/web/classic/src/components/settings/personal/components/TwoFASetting.jsx",
+      lineNumber: 370,
+      columnNumber: 9
+    }, this) }, void 0, false, {
+      fileName: "E:/new-api/web/classic/src/components/settings/personal/components/TwoFASetting.jsx",
+      lineNumber: 369,
+      columnNumber: 7
+    }, this),
+    /* @__PURE__ */ jsxDEV(
+      Modal,
+      {
+        title: /* @__PURE__ */ jsxDEV("div", { className: "flex items-center", "data-insp-path": "web/classic/src/components/settings/personal/components/TwoFASetting.jsx:458:11:div", children: [
+          /* @__PURE__ */ jsxDEV(IconShield, { className: "mr-2 text-slate-600", "data-insp-path": "web/classic/src/components/settings/personal/components/TwoFASetting.jsx:459:13:IconShield" }, void 0, false, {
+            fileName: "E:/new-api/web/classic/src/components/settings/personal/components/TwoFASetting.jsx",
+            lineNumber: 459,
+            columnNumber: 13
+          }, this),
+          t("设置两步验证")
+        ] }, void 0, true, {
+          fileName: "E:/new-api/web/classic/src/components/settings/personal/components/TwoFASetting.jsx",
+          lineNumber: 458,
+          columnNumber: 9
+        }, this),
+        visible: setupModalVisible,
+        onCancel: () => {
+          setSetupModalVisible(false);
+          setSetupData(null);
+          setCurrentStep(0);
+          setVerificationCode("");
+        },
+        footer: renderSetupModalFooter(),
+        width: 650,
+        style: { maxWidth: "90vw" },
+        "data-insp-path": "web/classic/src/components/settings/personal/components/TwoFASetting.jsx:456:7:Modal",
+        children: setupData && /* @__PURE__ */ jsxDEV("div", { className: "space-y-6", "data-insp-path": "web/classic/src/components/settings/personal/components/TwoFASetting.jsx:475:11:div", children: [
+          /* @__PURE__ */ jsxDEV(Steps, { type: "basic", size: "small", current: currentStep, "data-insp-path": "web/classic/src/components/settings/personal/components/TwoFASetting.jsx:477:13:Steps", children: [
+            /* @__PURE__ */ jsxDEV(
+              Steps.Step,
+              {
+                title: t("扫描二维码"),
+                description: t("使用认证器应用扫描二维码")
+              },
+              void 0,
+              false,
+              {
+                fileName: "E:/new-api/web/classic/src/components/settings/personal/components/TwoFASetting.jsx",
+                lineNumber: 478,
+                columnNumber: 15
+              },
+              this
+            ),
+            /* @__PURE__ */ jsxDEV(
+              Steps.Step,
+              {
+                title: t("保存备用码"),
+                description: t("保存备用码以备不时之需")
+              },
+              void 0,
+              false,
+              {
+                fileName: "E:/new-api/web/classic/src/components/settings/personal/components/TwoFASetting.jsx",
+                lineNumber: 482,
+                columnNumber: 15
+              },
+              this
+            ),
+            /* @__PURE__ */ jsxDEV(
+              Steps.Step,
+              {
+                title: t("验证设置"),
+                description: t("输入验证码完成设置")
+              },
+              void 0,
+              false,
+              {
+                fileName: "E:/new-api/web/classic/src/components/settings/personal/components/TwoFASetting.jsx",
+                lineNumber: 486,
+                columnNumber: 15
+              },
+              this
+            )
+          ] }, void 0, true, {
+            fileName: "E:/new-api/web/classic/src/components/settings/personal/components/TwoFASetting.jsx",
+            lineNumber: 477,
+            columnNumber: 13
+          }, this),
+          /* @__PURE__ */ jsxDEV("div", { className: "rounded-xl", "data-insp-path": "web/classic/src/components/settings/personal/components/TwoFASetting.jsx:493:13:div", children: [
+            currentStep === 0 && /* @__PURE__ */ jsxDEV("div", { "data-insp-path": "web/classic/src/components/settings/personal/components/TwoFASetting.jsx:495:17:div", children: [
+              /* @__PURE__ */ jsxDEV(Paragraph, { className: "text-gray-600 dark:text-gray-300 mb-4", "data-insp-path": "web/classic/src/components/settings/personal/components/TwoFASetting.jsx:496:19:Paragraph", children: t(
+                "使用认证器应用（如 Google Authenticator、Microsoft Authenticator）扫描下方二维码："
+              ) }, void 0, false, {
+                fileName: "E:/new-api/web/classic/src/components/settings/personal/components/TwoFASetting.jsx",
+                lineNumber: 496,
+                columnNumber: 19
+              }, this),
+              /* @__PURE__ */ jsxDEV("div", { className: "flex justify-center mb-4", "data-insp-path": "web/classic/src/components/settings/personal/components/TwoFASetting.jsx:501:19:div", children: /* @__PURE__ */ jsxDEV("div", { className: "bg-white p-4 rounded-lg shadow-sm", "data-insp-path": "web/classic/src/components/settings/personal/components/TwoFASetting.jsx:502:21:div", children: /* @__PURE__ */ jsxDEV(QRCodeSVG, { value: setupData.qr_code_data, size: 180, "data-insp-path": "web/classic/src/components/settings/personal/components/TwoFASetting.jsx:503:23:QRCodeSVG" }, void 0, false, {
+                fileName: "E:/new-api/web/classic/src/components/settings/personal/components/TwoFASetting.jsx",
+                lineNumber: 503,
+                columnNumber: 23
+              }, this) }, void 0, false, {
+                fileName: "E:/new-api/web/classic/src/components/settings/personal/components/TwoFASetting.jsx",
+                lineNumber: 502,
+                columnNumber: 21
+              }, this) }, void 0, false, {
+                fileName: "E:/new-api/web/classic/src/components/settings/personal/components/TwoFASetting.jsx",
+                lineNumber: 501,
+                columnNumber: 19
+              }, this),
+              /* @__PURE__ */ jsxDEV("div", { className: "bg-blue-50 dark:bg-blue-900 rounded-lg p-3", "data-insp-path": "web/classic/src/components/settings/personal/components/TwoFASetting.jsx:506:19:div", children: /* @__PURE__ */ jsxDEV(Text, { className: "text-blue-800 dark:text-blue-200 text-sm", "data-insp-path": "web/classic/src/components/settings/personal/components/TwoFASetting.jsx:507:21:Text", children: [
+                t("或手动输入密钥："),
+                /* @__PURE__ */ jsxDEV(Text, { code: true, copyable: true, className: "ml-2", "data-insp-path": "web/classic/src/components/settings/personal/components/TwoFASetting.jsx:509:23:Text", children: setupData.secret }, void 0, false, {
+                  fileName: "E:/new-api/web/classic/src/components/settings/personal/components/TwoFASetting.jsx",
+                  lineNumber: 509,
+                  columnNumber: 23
+                }, this)
+              ] }, void 0, true, {
+                fileName: "E:/new-api/web/classic/src/components/settings/personal/components/TwoFASetting.jsx",
+                lineNumber: 507,
+                columnNumber: 21
+              }, this) }, void 0, false, {
+                fileName: "E:/new-api/web/classic/src/components/settings/personal/components/TwoFASetting.jsx",
+                lineNumber: 506,
+                columnNumber: 19
+              }, this)
+            ] }, void 0, true, {
+              fileName: "E:/new-api/web/classic/src/components/settings/personal/components/TwoFASetting.jsx",
+              lineNumber: 495,
+              columnNumber: 13
+            }, this),
+            currentStep === 1 && /* @__PURE__ */ jsxDEV("div", { className: "space-y-4", "data-insp-path": "web/classic/src/components/settings/personal/components/TwoFASetting.jsx:518:17:div", children: /* @__PURE__ */ jsxDEV(
+              BackupCodesDisplay,
+              {
+                codes: setupData.backup_codes,
+                title: t("备用恢复代码"),
+                onCopy: () => {
+                  const codesText = setupData.backup_codes.join("\n");
+                  copyTextToClipboard(codesText, t("备用码已复制到剪贴板"));
+                },
+                "data-insp-path": "web/classic/src/components/settings/personal/components/TwoFASetting.jsx:520:19:BackupCodesDisplay"
+              },
+              void 0,
+              false,
+              {
+                fileName: "E:/new-api/web/classic/src/components/settings/personal/components/TwoFASetting.jsx",
+                lineNumber: 520,
+                columnNumber: 19
+              },
+              this
+            ) }, void 0, false, {
+              fileName: "E:/new-api/web/classic/src/components/settings/personal/components/TwoFASetting.jsx",
+              lineNumber: 518,
+              columnNumber: 13
+            }, this),
+            currentStep === 2 && /* @__PURE__ */ jsxDEV(
+              Input,
+              {
+                placeholder: t("输入认证器应用显示的6位数字验证码"),
+                value: verificationCode,
+                onChange: setVerificationCode,
+                size: "large",
+                maxLength: 6,
+                className: "!rounded-lg",
+                "data-insp-path": "web/classic/src/components/settings/personal/components/TwoFASetting.jsx:532:17:Input"
+              },
+              void 0,
+              false,
+              {
+                fileName: "E:/new-api/web/classic/src/components/settings/personal/components/TwoFASetting.jsx",
+                lineNumber: 532,
+                columnNumber: 13
+              },
+              this
+            )
+          ] }, void 0, true, {
+            fileName: "E:/new-api/web/classic/src/components/settings/personal/components/TwoFASetting.jsx",
+            lineNumber: 493,
+            columnNumber: 13
+          }, this)
+        ] }, void 0, true, {
+          fileName: "E:/new-api/web/classic/src/components/settings/personal/components/TwoFASetting.jsx",
+          lineNumber: 475,
+          columnNumber: 9
+        }, this)
+      },
+      void 0,
+      false,
+      {
+        fileName: "E:/new-api/web/classic/src/components/settings/personal/components/TwoFASetting.jsx",
+        lineNumber: 456,
+        columnNumber: 7
+      },
+      this
+    ),
+    /* @__PURE__ */ jsxDEV(
+      Modal,
+      {
+        title: /* @__PURE__ */ jsxDEV("div", { className: "flex items-center", "data-insp-path": "web/classic/src/components/settings/personal/components/TwoFASetting.jsx:549:11:div", children: [
+          /* @__PURE__ */ jsxDEV(IconAlertTriangle, { className: "mr-2 text-red-500", "data-insp-path": "web/classic/src/components/settings/personal/components/TwoFASetting.jsx:550:13:IconAlertTriangle" }, void 0, false, {
+            fileName: "E:/new-api/web/classic/src/components/settings/personal/components/TwoFASetting.jsx",
+            lineNumber: 550,
+            columnNumber: 13
+          }, this),
+          t("禁用两步验证")
+        ] }, void 0, true, {
+          fileName: "E:/new-api/web/classic/src/components/settings/personal/components/TwoFASetting.jsx",
+          lineNumber: 549,
+          columnNumber: 9
+        }, this),
+        visible: disableModalVisible,
+        onCancel: () => {
+          setDisableModalVisible(false);
+          setVerificationCode("");
+          setConfirmDisable(false);
+        },
+        footer: renderDisableModalFooter(),
+        width: 550,
+        style: { maxWidth: "90vw" },
+        "data-insp-path": "web/classic/src/components/settings/personal/components/TwoFASetting.jsx:547:7:Modal",
+        children: /* @__PURE__ */ jsxDEV("div", { className: "space-y-6", "data-insp-path": "web/classic/src/components/settings/personal/components/TwoFASetting.jsx:564:9:div", children: [
+          /* @__PURE__ */ jsxDEV("div", { className: "rounded-xl", "data-insp-path": "web/classic/src/components/settings/personal/components/TwoFASetting.jsx:566:11:div", children: /* @__PURE__ */ jsxDEV(
+            Banner,
+            {
+              type: "warning",
+              description: t(
+                "警告：禁用两步验证将永久删除您的验证设置和所有备用码，此操作不可撤销！"
+              ),
+              className: "!rounded-lg",
+              "data-insp-path": "web/classic/src/components/settings/personal/components/TwoFASetting.jsx:567:13:Banner"
+            },
+            void 0,
+            false,
+            {
+              fileName: "E:/new-api/web/classic/src/components/settings/personal/components/TwoFASetting.jsx",
+              lineNumber: 567,
+              columnNumber: 13
+            },
+            this
+          ) }, void 0, false, {
+            fileName: "E:/new-api/web/classic/src/components/settings/personal/components/TwoFASetting.jsx",
+            lineNumber: 566,
+            columnNumber: 11
+          }, this),
+          /* @__PURE__ */ jsxDEV("div", { className: "space-y-4", "data-insp-path": "web/classic/src/components/settings/personal/components/TwoFASetting.jsx:577:11:div", children: [
+            /* @__PURE__ */ jsxDEV("div", { "data-insp-path": "web/classic/src/components/settings/personal/components/TwoFASetting.jsx:578:13:div", children: [
+              /* @__PURE__ */ jsxDEV(
+                Text,
+                {
+                  strong: true,
+                  className: "block mb-2 text-slate-700 dark:text-slate-200",
+                  "data-insp-path": "web/classic/src/components/settings/personal/components/TwoFASetting.jsx:579:15:Text",
+                  children: t("禁用后的影响：")
+                },
+                void 0,
+                false,
+                {
+                  fileName: "E:/new-api/web/classic/src/components/settings/personal/components/TwoFASetting.jsx",
+                  lineNumber: 579,
+                  columnNumber: 15
+                },
+                this
+              ),
+              /* @__PURE__ */ jsxDEV("ul", { className: "space-y-2 text-sm text-slate-600 dark:text-slate-300", "data-insp-path": "web/classic/src/components/settings/personal/components/TwoFASetting.jsx:585:15:ul", children: [
+                /* @__PURE__ */ jsxDEV("li", { className: "flex items-start gap-2", "data-insp-path": "web/classic/src/components/settings/personal/components/TwoFASetting.jsx:586:17:li", children: [
+                  /* @__PURE__ */ jsxDEV(Badge, { dot: true, type: "warning", "data-insp-path": "web/classic/src/components/settings/personal/components/TwoFASetting.jsx:587:19:Badge" }, void 0, false, {
+                    fileName: "E:/new-api/web/classic/src/components/settings/personal/components/TwoFASetting.jsx",
+                    lineNumber: 587,
+                    columnNumber: 19
+                  }, this),
+                  t("降低您账户的安全性")
+                ] }, void 0, true, {
+                  fileName: "E:/new-api/web/classic/src/components/settings/personal/components/TwoFASetting.jsx",
+                  lineNumber: 586,
+                  columnNumber: 17
+                }, this),
+                /* @__PURE__ */ jsxDEV("li", { className: "flex items-start gap-2", "data-insp-path": "web/classic/src/components/settings/personal/components/TwoFASetting.jsx:590:17:li", children: [
+                  /* @__PURE__ */ jsxDEV(Badge, { dot: true, type: "warning", "data-insp-path": "web/classic/src/components/settings/personal/components/TwoFASetting.jsx:591:19:Badge" }, void 0, false, {
+                    fileName: "E:/new-api/web/classic/src/components/settings/personal/components/TwoFASetting.jsx",
+                    lineNumber: 591,
+                    columnNumber: 19
+                  }, this),
+                  t("需要重新完整设置才能再次启用")
+                ] }, void 0, true, {
+                  fileName: "E:/new-api/web/classic/src/components/settings/personal/components/TwoFASetting.jsx",
+                  lineNumber: 590,
+                  columnNumber: 17
+                }, this),
+                /* @__PURE__ */ jsxDEV("li", { className: "flex items-start gap-2", "data-insp-path": "web/classic/src/components/settings/personal/components/TwoFASetting.jsx:594:17:li", children: [
+                  /* @__PURE__ */ jsxDEV(Badge, { dot: true, type: "danger", "data-insp-path": "web/classic/src/components/settings/personal/components/TwoFASetting.jsx:595:19:Badge" }, void 0, false, {
+                    fileName: "E:/new-api/web/classic/src/components/settings/personal/components/TwoFASetting.jsx",
+                    lineNumber: 595,
+                    columnNumber: 19
+                  }, this),
+                  t("永久删除您的两步验证设置")
+                ] }, void 0, true, {
+                  fileName: "E:/new-api/web/classic/src/components/settings/personal/components/TwoFASetting.jsx",
+                  lineNumber: 594,
+                  columnNumber: 17
+                }, this),
+                /* @__PURE__ */ jsxDEV("li", { className: "flex items-start gap-2", "data-insp-path": "web/classic/src/components/settings/personal/components/TwoFASetting.jsx:598:17:li", children: [
+                  /* @__PURE__ */ jsxDEV(Badge, { dot: true, type: "danger", "data-insp-path": "web/classic/src/components/settings/personal/components/TwoFASetting.jsx:599:19:Badge" }, void 0, false, {
+                    fileName: "E:/new-api/web/classic/src/components/settings/personal/components/TwoFASetting.jsx",
+                    lineNumber: 599,
+                    columnNumber: 19
+                  }, this),
+                  t("永久删除所有备用码（包括未使用的）")
+                ] }, void 0, true, {
+                  fileName: "E:/new-api/web/classic/src/components/settings/personal/components/TwoFASetting.jsx",
+                  lineNumber: 598,
+                  columnNumber: 17
+                }, this)
+              ] }, void 0, true, {
+                fileName: "E:/new-api/web/classic/src/components/settings/personal/components/TwoFASetting.jsx",
+                lineNumber: 585,
+                columnNumber: 15
+              }, this)
+            ] }, void 0, true, {
+              fileName: "E:/new-api/web/classic/src/components/settings/personal/components/TwoFASetting.jsx",
+              lineNumber: 578,
+              columnNumber: 13
+            }, this),
+            /* @__PURE__ */ jsxDEV(Divider, { margin: 16, "data-insp-path": "web/classic/src/components/settings/personal/components/TwoFASetting.jsx:605:13:Divider" }, void 0, false, {
+              fileName: "E:/new-api/web/classic/src/components/settings/personal/components/TwoFASetting.jsx",
+              lineNumber: 605,
+              columnNumber: 13
+            }, this),
+            /* @__PURE__ */ jsxDEV("div", { className: "space-y-4", "data-insp-path": "web/classic/src/components/settings/personal/components/TwoFASetting.jsx:607:13:div", children: [
+              /* @__PURE__ */ jsxDEV("div", { "data-insp-path": "web/classic/src/components/settings/personal/components/TwoFASetting.jsx:608:15:div", children: [
+                /* @__PURE__ */ jsxDEV(
+                  Text,
+                  {
+                    strong: true,
+                    className: "block mb-2 text-slate-700 dark:text-slate-200",
+                    "data-insp-path": "web/classic/src/components/settings/personal/components/TwoFASetting.jsx:609:17:Text",
+                    children: t("验证身份")
+                  },
+                  void 0,
+                  false,
+                  {
+                    fileName: "E:/new-api/web/classic/src/components/settings/personal/components/TwoFASetting.jsx",
+                    lineNumber: 609,
+                    columnNumber: 17
+                  },
+                  this
+                ),
+                /* @__PURE__ */ jsxDEV(
+                  Input,
+                  {
+                    placeholder: t("请输入认证器验证码或备用码"),
+                    value: verificationCode,
+                    onChange: setVerificationCode,
+                    size: "large",
+                    className: "!rounded-lg",
+                    "data-insp-path": "web/classic/src/components/settings/personal/components/TwoFASetting.jsx:615:17:Input"
+                  },
+                  void 0,
+                  false,
+                  {
+                    fileName: "E:/new-api/web/classic/src/components/settings/personal/components/TwoFASetting.jsx",
+                    lineNumber: 615,
+                    columnNumber: 17
+                  },
+                  this
+                )
+              ] }, void 0, true, {
+                fileName: "E:/new-api/web/classic/src/components/settings/personal/components/TwoFASetting.jsx",
+                lineNumber: 608,
+                columnNumber: 15
+              }, this),
+              /* @__PURE__ */ jsxDEV("div", { "data-insp-path": "web/classic/src/components/settings/personal/components/TwoFASetting.jsx:624:15:div", children: /* @__PURE__ */ jsxDEV(
+                Checkbox,
+                {
+                  checked: confirmDisable,
+                  onChange: (e) => setConfirmDisable(e.target.checked),
+                  className: "text-sm",
+                  "data-insp-path": "web/classic/src/components/settings/personal/components/TwoFASetting.jsx:625:17:Checkbox",
+                  children: t(
+                    "我已了解禁用两步验证将永久删除所有相关设置和备用码，此操作不可撤销"
+                  )
+                },
+                void 0,
+                false,
+                {
+                  fileName: "E:/new-api/web/classic/src/components/settings/personal/components/TwoFASetting.jsx",
+                  lineNumber: 625,
+                  columnNumber: 17
+                },
+                this
+              ) }, void 0, false, {
+                fileName: "E:/new-api/web/classic/src/components/settings/personal/components/TwoFASetting.jsx",
+                lineNumber: 624,
+                columnNumber: 15
+              }, this)
+            ] }, void 0, true, {
+              fileName: "E:/new-api/web/classic/src/components/settings/personal/components/TwoFASetting.jsx",
+              lineNumber: 607,
+              columnNumber: 13
+            }, this)
+          ] }, void 0, true, {
+            fileName: "E:/new-api/web/classic/src/components/settings/personal/components/TwoFASetting.jsx",
+            lineNumber: 577,
+            columnNumber: 11
+          }, this)
+        ] }, void 0, true, {
+          fileName: "E:/new-api/web/classic/src/components/settings/personal/components/TwoFASetting.jsx",
+          lineNumber: 564,
+          columnNumber: 9
+        }, this)
+      },
+      void 0,
+      false,
+      {
+        fileName: "E:/new-api/web/classic/src/components/settings/personal/components/TwoFASetting.jsx",
+        lineNumber: 547,
+        columnNumber: 7
+      },
+      this
+    ),
+    /* @__PURE__ */ jsxDEV(
+      Modal,
+      {
+        title: /* @__PURE__ */ jsxDEV("div", { className: "flex items-center", "data-insp-path": "web/classic/src/components/settings/personal/components/TwoFASetting.jsx:643:11:div", children: [
+          /* @__PURE__ */ jsxDEV(IconRefresh, { className: "mr-2 text-slate-600", "data-insp-path": "web/classic/src/components/settings/personal/components/TwoFASetting.jsx:644:13:IconRefresh" }, void 0, false, {
+            fileName: "E:/new-api/web/classic/src/components/settings/personal/components/TwoFASetting.jsx",
+            lineNumber: 644,
+            columnNumber: 13
+          }, this),
+          t("重新生成备用码")
+        ] }, void 0, true, {
+          fileName: "E:/new-api/web/classic/src/components/settings/personal/components/TwoFASetting.jsx",
+          lineNumber: 643,
+          columnNumber: 9
+        }, this),
+        visible: backupModalVisible,
+        onCancel: () => {
+          setBackupModalVisible(false);
+          setVerificationCode("");
+          setBackupCodes([]);
+        },
+        footer: renderRegenerateModalFooter(),
+        width: 500,
+        style: { maxWidth: "90vw" },
+        "data-insp-path": "web/classic/src/components/settings/personal/components/TwoFASetting.jsx:641:7:Modal",
+        children: /* @__PURE__ */ jsxDEV("div", { className: "space-y-6", "data-insp-path": "web/classic/src/components/settings/personal/components/TwoFASetting.jsx:658:9:div", children: backupCodes.length === 0 ? /* @__PURE__ */ jsxDEV(Fragment, { children: [
+          /* @__PURE__ */ jsxDEV("div", { className: "rounded-xl", "data-insp-path": "web/classic/src/components/settings/personal/components/TwoFASetting.jsx:662:15:div", children: /* @__PURE__ */ jsxDEV(
+            Banner,
+            {
+              type: "warning",
+              description: t(
+                "重新生成备用码将使现有的备用码失效，请确保您已保存了当前的备用码。"
+              ),
+              className: "!rounded-lg",
+              "data-insp-path": "web/classic/src/components/settings/personal/components/TwoFASetting.jsx:663:17:Banner"
+            },
+            void 0,
+            false,
+            {
+              fileName: "E:/new-api/web/classic/src/components/settings/personal/components/TwoFASetting.jsx",
+              lineNumber: 663,
+              columnNumber: 17
+            },
+            this
+          ) }, void 0, false, {
+            fileName: "E:/new-api/web/classic/src/components/settings/personal/components/TwoFASetting.jsx",
+            lineNumber: 662,
+            columnNumber: 15
+          }, this),
+          /* @__PURE__ */ jsxDEV("div", { className: "space-y-4", "data-insp-path": "web/classic/src/components/settings/personal/components/TwoFASetting.jsx:673:15:div", children: /* @__PURE__ */ jsxDEV("div", { "data-insp-path": "web/classic/src/components/settings/personal/components/TwoFASetting.jsx:674:17:div", children: [
+            /* @__PURE__ */ jsxDEV(
+              Text,
+              {
+                strong: true,
+                className: "block mb-2 text-slate-700 dark:text-slate-200",
+                "data-insp-path": "web/classic/src/components/settings/personal/components/TwoFASetting.jsx:675:19:Text",
+                children: t("验证身份")
+              },
+              void 0,
+              false,
+              {
+                fileName: "E:/new-api/web/classic/src/components/settings/personal/components/TwoFASetting.jsx",
+                lineNumber: 675,
+                columnNumber: 19
+              },
+              this
+            ),
+            /* @__PURE__ */ jsxDEV(
+              Input,
+              {
+                placeholder: t("请输入认证器验证码"),
+                value: verificationCode,
+                onChange: setVerificationCode,
+                size: "large",
+                className: "!rounded-lg",
+                "data-insp-path": "web/classic/src/components/settings/personal/components/TwoFASetting.jsx:681:19:Input"
+              },
+              void 0,
+              false,
+              {
+                fileName: "E:/new-api/web/classic/src/components/settings/personal/components/TwoFASetting.jsx",
+                lineNumber: 681,
+                columnNumber: 19
+              },
+              this
+            )
+          ] }, void 0, true, {
+            fileName: "E:/new-api/web/classic/src/components/settings/personal/components/TwoFASetting.jsx",
+            lineNumber: 674,
+            columnNumber: 17
+          }, this) }, void 0, false, {
+            fileName: "E:/new-api/web/classic/src/components/settings/personal/components/TwoFASetting.jsx",
+            lineNumber: 673,
+            columnNumber: 15
+          }, this)
+        ] }, void 0, true, {
+          fileName: "E:/new-api/web/classic/src/components/settings/personal/components/TwoFASetting.jsx",
+          lineNumber: 660,
+          columnNumber: 11
+        }, this) : /* @__PURE__ */ jsxDEV(Fragment, { children: /* @__PURE__ */ jsxDEV(Space, { vertical: true, style: { width: "100%" }, "data-insp-path": "web/classic/src/components/settings/personal/components/TwoFASetting.jsx:694:15:Space", children: [
+          /* @__PURE__ */ jsxDEV("div", { className: "flex items-center justify-center gap-2", "data-insp-path": "web/classic/src/components/settings/personal/components/TwoFASetting.jsx:695:17:div", children: [
+            /* @__PURE__ */ jsxDEV(Badge, { dot: true, type: "success", "data-insp-path": "web/classic/src/components/settings/personal/components/TwoFASetting.jsx:696:19:Badge" }, void 0, false, {
+              fileName: "E:/new-api/web/classic/src/components/settings/personal/components/TwoFASetting.jsx",
+              lineNumber: 696,
+              columnNumber: 19
+            }, this),
+            /* @__PURE__ */ jsxDEV(
+              Text,
+              {
+                strong: true,
+                className: "text-lg text-slate-700 dark:text-slate-200",
+                "data-insp-path": "web/classic/src/components/settings/personal/components/TwoFASetting.jsx:697:19:Text",
+                children: t("新的备用码已生成")
+              },
+              void 0,
+              false,
+              {
+                fileName: "E:/new-api/web/classic/src/components/settings/personal/components/TwoFASetting.jsx",
+                lineNumber: 697,
+                columnNumber: 19
+              },
+              this
+            )
+          ] }, void 0, true, {
+            fileName: "E:/new-api/web/classic/src/components/settings/personal/components/TwoFASetting.jsx",
+            lineNumber: 695,
+            columnNumber: 17
+          }, this),
+          /* @__PURE__ */ jsxDEV(Text, { className: "text-slate-500 dark:text-slate-400 text-sm", "data-insp-path": "web/classic/src/components/settings/personal/components/TwoFASetting.jsx:704:17:Text", children: t("旧的备用码已失效，请保存新的备用码") }, void 0, false, {
+            fileName: "E:/new-api/web/classic/src/components/settings/personal/components/TwoFASetting.jsx",
+            lineNumber: 704,
+            columnNumber: 17
+          }, this),
+          /* @__PURE__ */ jsxDEV(
+            BackupCodesDisplay,
+            {
+              codes: backupCodes,
+              title: t("新的备用恢复代码"),
+              onCopy: copyBackupCodes,
+              "data-insp-path": "web/classic/src/components/settings/personal/components/TwoFASetting.jsx:709:17:BackupCodesDisplay"
+            },
+            void 0,
+            false,
+            {
+              fileName: "E:/new-api/web/classic/src/components/settings/personal/components/TwoFASetting.jsx",
+              lineNumber: 709,
+              columnNumber: 17
+            },
+            this
+          )
+        ] }, void 0, true, {
+          fileName: "E:/new-api/web/classic/src/components/settings/personal/components/TwoFASetting.jsx",
+          lineNumber: 694,
+          columnNumber: 15
+        }, this) }, void 0, false, {
+          fileName: "E:/new-api/web/classic/src/components/settings/personal/components/TwoFASetting.jsx",
+          lineNumber: 692,
+          columnNumber: 11
+        }, this) }, void 0, false, {
+          fileName: "E:/new-api/web/classic/src/components/settings/personal/components/TwoFASetting.jsx",
+          lineNumber: 658,
+          columnNumber: 9
+        }, this)
+      },
+      void 0,
+      false,
+      {
+        fileName: "E:/new-api/web/classic/src/components/settings/personal/components/TwoFASetting.jsx",
+        lineNumber: 641,
+        columnNumber: 7
+      },
+      this
+    )
+  ] }, void 0, true, {
+    fileName: "E:/new-api/web/classic/src/components/settings/personal/components/TwoFASetting.jsx",
+    lineNumber: 368,
+    columnNumber: 5
+  }, this);
+};
+_s(TwoFASetting, "Hj9rGU9v6EVxtznnjR80uQy3xSI=");
+_c = TwoFASetting;
+export default TwoFASetting;
+var _c;
+$RefreshReg$(_c, "TwoFASetting");
+if (import.meta.hot && !inWebWorker) {
+  window.$RefreshReg$ = prevRefreshReg;
+  window.$RefreshSig$ = prevRefreshSig;
+}
+if (import.meta.hot && !inWebWorker) {
+  RefreshRuntime.__hmr_import(import.meta.url).then((currentExports) => {
+    RefreshRuntime.registerExportsForReactRefresh("E:/new-api/web/classic/src/components/settings/personal/components/TwoFASetting.jsx", currentExports);
+    import.meta.hot.accept((nextExports) => {
+      if (!nextExports) return;
+      const invalidateMessage = RefreshRuntime.validateRefreshBoundaryAndEnqueueUpdate("E:/new-api/web/classic/src/components/settings/personal/components/TwoFASetting.jsx", currentExports, nextExports);
+      if (invalidateMessage) import.meta.hot.invalidate(invalidateMessage);
+    });
+  });
+}
+
+//# sourceMappingURL=data:application/json;base64,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VUFDQSx1QkFBQyxRQUFLLFdBQVUsOENBQTZDLGtCQUFlLHdGQUN6RUEsWUFBRSxtQkFBbUIsS0FEeEI7QUFBQTtBQUFBO0FBQUE7QUFBQSxpQkFFQTtBQUFBLFVBR0E7QUFBQSxZQUFDO0FBQUE7QUFBQSxjQUNDLE9BQU9xQjtBQUFBQSxjQUNQLE9BQU9yQixFQUFFLFVBQVU7QUFBQSxjQUNuQixRQUFRaUQ7QUFBQUEsY0FDVCxrQkFBZTtBQUFBO0FBQUEsWUFKaEI7QUFBQTtBQUFBO0FBQUE7QUFBQTtBQUFBO0FBQUE7QUFBQTtBQUFBLFVBSW9IO0FBQUEsYUFuQnRIO0FBQUE7QUFBQTtBQUFBO0FBQUEsZUFvQkEsS0F0QkY7QUFBQTtBQUFBO0FBQUE7QUFBQSxlQXVCQSxLQXpESjtBQUFBO0FBQUE7QUFBQTtBQUFBLGVBMkRBO0FBQUE7QUFBQSxNQTVFRjtBQUFBO0FBQUE7QUFBQTtBQUFBO0FBQUE7QUFBQTtBQUFBO0FBQUEsSUE2RUE7QUFBQSxPQTlWRjtBQUFBO0FBQUE7QUFBQTtBQUFBLFNBK1ZBO0FBRUo7QUFBRWhELEdBbnFCSUYsY0FBWTtBQUFBd0UsS0FBWnhFO0FBcXFCTixlQUFlQTtBQUFhLElBQUF3RTtBQUFBQyxhQUFBRCxJQUFBIiwibmFtZXMiOlsiQVBJIiwic2hvd0Vycm9yIiwic2hvd1N1Y2Nlc3MiLCJzaG93V2FybmluZyIsIkJhbm5lciIsIkJ1dHRvbiIsIkNhcmQiLCJDaGVja2JveCIsIkRpdmlkZXIiLCJJbnB1dCIsIk1vZGFsIiwiVGFnIiwiVHlwb2dyYXBoeSIsIlN0ZXBzIiwiU3BhY2UiLCJCYWRnZSIsIkljb25TaGllbGQiLCJJY29uQWxlcnRUcmlhbmdsZSIsIkljb25SZWZyZXNoIiwiSWNvbkNvcHkiLCJSZWFjdCIsInVzZUVmZmVjdCIsInVzZVN0YXRlIiwiUVJDb2RlU1ZHIiwiVGV4dCIsIlBhcmFncmFwaCIsIlR3b0ZBU2V0dGluZyIsInQiLCJfcyIsImxvYWRpbmciLCJzZXRMb2FkaW5nIiwic3RhdHVzIiwic2V0U3RhdHVzIiwiZW5hYmxlZCIsImxvY2tlZCIsImJhY2t1cF9jb2Rlc19yZW1haW5pbmciLCJzZXR1cE1vZGFsVmlzaWJsZSIsInNldFNldHVwTW9kYWxWaXNpYmxlIiwiZW5hYmxlTW9kYWxWaXNpYmxlIiwic2V0RW5hYmxlTW9kYWxWaXNpYmxlIiwiZGlzYWJsZU1vZGFsVmlzaWJsZSIsInNldERpc2FibGVNb2RhbFZpc2libGUiLCJiYWNrdXBNb2RhbFZpc2libGUiLCJzZXRCYWNrdXBNb2RhbFZpc2libGUiLCJzZXR1cERhdGEiLCJzZXRTZXR1cERhdGEiLCJ2ZXJpZmljYXRpb25Db2RlIiwic2V0VmVyaWZpY2F0aW9uQ29kZSIsImJhY2t1cENvZGVzIiwic2V0QmFja3VwQ29kZXMiLCJjb25maXJtRGlzYWJsZSIsInNldENvbmZpcm1EaXNhYmxlIiwiY3VycmVudFN0ZXAiLCJzZXRDdXJyZW50U3RlcCIsImZldGNoU3RhdHVzIiwicmVzIiwiZ2V0IiwiZGF0YSIsInN1Y2Nlc3MiLCJlcnJvciIsImhhbmRsZVNldHVwMkZBIiwicG9zdCIsIm1lc3NhZ2UiLCJoYW5kbGVFbmFibGUyRkEiLCJjb2RlIiwiaGFuZGxlRGlzYWJsZTJGQSIsImhhbmRsZVJlZ2VuZXJhdGVCYWNrdXBDb2RlcyIsImJhY2t1cF9jb2RlcyIsImNvcHlUZXh0VG9DbGlwYm9hcmQiLCJ0ZXh0Iiwic3VjY2Vzc01lc3NhZ2UiLCJuYXZpZ2F0b3IiLCJjbGlwYm9hcmQiLCJ3cml0ZVRleHQiLCJ0aGVuIiwiY2F0Y2giLCJjb3B5QmFja3VwQ29kZXMiLCJjb2Rlc1RleHQiLCJqb2luIiwiQmFja3VwQ29kZXNEaXNwbGF5IiwiY29kZXMiLCJ0aXRsZSIsIm9uQ29weSIsIndpZHRoIiwibWFwIiwiaW5kZXgiLCJ0b1N0cmluZyIsInBhZFN0YXJ0IiwicmVuZGVyU2V0dXBNb2RhbEZvb3RlciIsInJlbmRlckRpc2FibGVNb2RhbEZvb3RlciIsInJlbmRlclJlZ2VuZXJhdGVNb2RhbEZvb3RlciIsImxlbmd0aCIsIm1heFdpZHRoIiwicXJfY29kZV9kYXRhIiwic2VjcmV0IiwiZSIsInRhcmdldCIsImNoZWNrZWQiLCJfYyIsIiRSZWZyZXNoUmVnJCJdLCJpZ25vcmVMaXN0IjpbXSwic291cmNlcyI6WyJUd29GQVNldHRpbmcuanN4Il0sInNvdXJjZXNDb250ZW50IjpbIi8qXG5Db3B5cmlnaHQgKEMpIDIwMjUgUXVhbnR1bU5vdXNcblxuVGhpcyBwcm9ncmFtIGlzIGZyZWUgc29mdHdhcmU6IHlvdSBjYW4gcmVkaXN0cmlidXRlIGl0IGFuZC9vciBtb2RpZnlcbml0IHVuZGVyIHRoZSB0ZXJtcyBvZiB0aGUgR05VIEFmZmVybyBHZW5lcmFsIFB1YmxpYyBMaWNlbnNlIGFzXG5wdWJsaXNoZWQgYnkgdGhlIEZyZWUgU29mdHdhcmUgRm91bmRhdGlvbiwgZWl0aGVyIHZlcnNpb24gMyBvZiB0aGVcbkxpY2Vuc2UsIG9yIChhdCB5b3VyIG9wdGlvbikgYW55IGxhdGVyIHZlcnNpb24uXG5cblRoaXMgcHJvZ3JhbSBpcyBkaXN0cmlidXRlZCBpbiB0aGUgaG9wZSB0aGF0IGl0IHdpbGwgYmUgdXNlZnVsLFxuYnV0IFdJVEhPVVQgQU5ZIFdBUlJBTlRZOyB3aXRob3V0IGV2ZW4gdGhlIGltcGxpZWQgd2FycmFudHkgb2Zcbk1FUkNIQU5UQUJJTElUWSBvciBGSVRORVNTIEZPUiBBIFBBUlRJQ1VMQVIgUFVSUE9TRS4gU2VlIHRoZVxuR05VIEFmZmVybyBHZW5lcmFsIFB1YmxpYyBMaWNlbnNlIGZvciBtb3JlIGRldGFpbHMuXG5cbllvdSBzaG91bGQgaGF2ZSByZWNlaXZlZCBhIGNvcHkgb2YgdGhlIEdOVSBBZmZlcm8gR2VuZXJhbCBQdWJsaWMgTGljZW5zZVxuYWxvbmcgd2l0aCB0aGlzIHByb2dyYW0uIElmIG5vdCwgc2VlIDxodHRwczovL3d3dy5nbnUub3JnL2xpY2Vuc2VzLz4uXG5cbkZvciBjb21tZXJjaWFsIGxpY2Vuc2luZywgcGxlYXNlIGNvbnRhY3Qgc3VwcG9ydEBxdWFudHVtbm91cy5jb21cbiovXG5pbXBvcnQgeyBBUEksIHNob3dFcnJvciwgc2hvd1N1Y2Nlc3MsIHNob3dXYXJuaW5nIH0gZnJvbSAnLi4vLi4vLi4vLi4vaGVscGVycyc7XG5pbXBvcnQge1xuICBCYW5uZXIsXG4gIEJ1dHRvbixcbiAgQ2FyZCxcbiAgQ2hlY2tib3gsXG4gIERpdmlkZXIsXG4gIElucHV0LFxuICBNb2RhbCxcbiAgVGFnLFxuICBUeXBvZ3JhcGh5LFxuICBTdGVwcyxcbiAgU3BhY2UsXG4gIEJhZGdlLFxufSBmcm9tICdAZG91eWluZmUvc2VtaS11aSc7XG5pbXBvcnQge1xuICBJY29uU2hpZWxkLFxuICBJY29uQWxlcnRUcmlhbmdsZSxcbiAgSWNvblJlZnJlc2gsXG4gIEljb25Db3B5LFxufSBmcm9tICdAZG91eWluZmUvc2VtaS1pY29ucyc7XG5pbXBvcnQgUmVhY3QsIHsgdXNlRWZmZWN0LCB1c2VTdGF0ZSB9IGZyb20gJ3JlYWN0JztcblxuaW1wb3J0IHsgUVJDb2RlU1ZHIH0gZnJvbSAncXJjb2RlLnJlYWN0JztcblxuY29uc3QgeyBUZXh0LCBQYXJhZ3JhcGggfSA9IFR5cG9ncmFwaHk7XG5cbmNvbnN0IFR3b0ZBU2V0dGluZyA9ICh7IHQgfSkgPT4ge1xuICBjb25zdCBbbG9hZGluZywgc2V0TG9hZGluZ10gPSB1c2VTdGF0ZShmYWxzZSk7XG4gIGNvbnN0IFtzdGF0dXMsIHNldFN0YXR1c10gPSB1c2VTdGF0ZSh7XG4gICAgZW5hYmxlZDogZmFsc2UsXG4gICAgbG9ja2VkOiBmYWxzZSxcbiAgICBiYWNrdXBfY29kZXNfcmVtYWluaW5nOiAwLFxuICB9KTtcblxuICAvLyDmqKHmgIHmoYbnirbmgIFcbiAgY29uc3QgW3NldHVwTW9kYWxWaXNpYmxlLCBzZXRTZXR1cE1vZGFsVmlzaWJsZV0gPSB1c2VTdGF0ZShmYWxzZSk7XG4gIGNvbnN0IFtlbmFibGVNb2RhbFZpc2libGUsIHNldEVuYWJsZU1vZGFsVmlzaWJsZV0gPSB1c2VTdGF0ZShmYWxzZSk7XG4gIGNvbnN0IFtkaXNhYmxlTW9kYWxWaXNpYmxlLCBzZXREaXNhYmxlTW9kYWxWaXNpYmxlXSA9IHVzZVN0YXRlKGZhbHNlKTtcbiAgY29uc3QgW2JhY2t1cE1vZGFsVmlzaWJsZSwgc2V0QmFja3VwTW9kYWxWaXNpYmxlXSA9IHVzZVN0YXRlKGZhbHNlKTtcblxuICAvLyDooajljZXmlbDmja5cbiAgY29uc3QgW3NldHVwRGF0YSwgc2V0U2V0dXBEYXRhXSA9IHVzZVN0YXRlKG51bGwpO1xuICBjb25zdCBbdmVyaWZpY2F0aW9uQ29kZSwgc2V0VmVyaWZpY2F0aW9uQ29kZV0gPSB1c2VTdGF0ZSgnJyk7XG4gIGNvbnN0IFtiYWNrdXBDb2Rlcywgc2V0QmFja3VwQ29kZXNdID0gdXNlU3RhdGUoW10pO1xuICBjb25zdCBbY29uZmlybURpc2FibGUsIHNldENvbmZpcm1EaXNhYmxlXSA9IHVzZVN0YXRlKGZhbHNlKTtcbiAgY29uc3QgW2N1cnJlbnRTdGVwLCBzZXRDdXJyZW50U3RlcF0gPSB1c2VTdGF0ZSgwKTtcblxuICAvLyDojrflj5YyRkHnirbmgIFcbiAgY29uc3QgZmV0Y2hTdGF0dXMgPSBhc3luYyAoKSA9PiB7XG4gICAgdHJ5IHtcbiAgICAgIGNvbnN0IHJlcyA9IGF3YWl0IEFQSS5nZXQoJy9hcGkvdXNlci8yZmEvc3RhdHVzJyk7XG4gICAgICBpZiAocmVzLmRhdGEuc3VjY2Vzcykge1xuICAgICAgICBzZXRTdGF0dXMocmVzLmRhdGEuZGF0YSk7XG4gICAgICB9XG4gICAgfSBjYXRjaCAoZXJyb3IpIHtcbiAgICAgIHNob3dFcnJvcih0KCfojrflj5YyRkHnirbmgIHlpLHotKUnKSk7XG4gICAgfVxuICB9O1xuXG4gIHVzZUVmZmVjdCgoKSA9PiB7XG4gICAgZmV0Y2hTdGF0dXMoKTtcbiAgfSwgW10pO1xuXG4gIC8vIOWIneWni+WMljJGQeiuvue9rlxuICBjb25zdCBoYW5kbGVTZXR1cDJGQSA9IGFzeW5jICgpID0+IHtcbiAgICBzZXRMb2FkaW5nKHRydWUpO1xuICAgIHRyeSB7XG4gICAgICBjb25zdCByZXMgPSBhd2FpdCBBUEkucG9zdCgnL2FwaS91c2VyLzJmYS9zZXR1cCcpO1xuICAgICAgaWYgKHJlcy5kYXRhLnN1Y2Nlc3MpIHtcbiAgICAgICAgc2V0U2V0dXBEYXRhKHJlcy5kYXRhLmRhdGEpO1xuICAgICAgICBzZXRTZXR1cE1vZGFsVmlzaWJsZSh0cnVlKTtcbiAgICAgICAgc2V0Q3VycmVudFN0ZXAoMCk7XG4gICAgICB9IGVsc2Uge1xuICAgICAgICBzaG93RXJyb3IocmVzLmRhdGEubWVzc2FnZSk7XG4gICAgICB9XG4gICAgfSBjYXRjaCAoZXJyb3IpIHtcbiAgICAgIHNob3dFcnJvcih0KCforr7nva4yRkHlpLHotKUnKSk7XG4gICAgfSBmaW5hbGx5IHtcbiAgICAgIHNldExvYWRpbmcoZmFsc2UpO1xuICAgIH1cbiAgfTtcblxuICAvLyDlkK/nlKgyRkFcbiAgY29uc3QgaGFuZGxlRW5hYmxlMkZBID0gYXN5bmMgKCkgPT4ge1xuICAgIGlmICghdmVyaWZpY2F0aW9uQ29kZSkge1xuICAgICAgc2hvd1dhcm5pbmcodCgn6K+36L6T5YWl6aqM6K+B56CBJykpO1xuICAgICAgcmV0dXJuO1xuICAgIH1cblxuICAgIHNldExvYWRpbmcodHJ1ZSk7XG4gICAgdHJ5IHtcbiAgICAgIGNvbnN0IHJlcyA9IGF3YWl0IEFQSS5wb3N0KCcvYXBpL3VzZXIvMmZhL2VuYWJsZScsIHtcbiAgICAgICAgY29kZTogdmVyaWZpY2F0aW9uQ29kZSxcbiAgICAgIH0pO1xuICAgICAgaWYgKHJlcy5kYXRhLnN1Y2Nlc3MpIHtcbiAgICAgICAgc2hvd1N1Y2Nlc3ModCgn5Lik5q2l6aqM6K+B5ZCv55So5oiQ5Yqf77yBJykpO1xuICAgICAgICBzZXRFbmFibGVNb2RhbFZpc2libGUoZmFsc2UpO1xuICAgICAgICBzZXRTZXR1cE1vZGFsVmlzaWJsZShmYWxzZSk7XG4gICAgICAgIHNldFZlcmlmaWNhdGlvbkNvZGUoJycpO1xuICAgICAgICBzZXRDdXJyZW50U3RlcCgwKTtcbiAgICAgICAgZmV0Y2hTdGF0dXMoKTtcbiAgICAgIH0gZWxzZSB7XG4gICAgICAgIHNob3dFcnJvcihyZXMuZGF0YS5tZXNzYWdlKTtcbiAgICAgIH1cbiAgICB9IGNhdGNoIChlcnJvcikge1xuICAgICAgc2hvd0Vycm9yKHQoJ+WQr+eUqDJGQeWksei0pScpKTtcbiAgICB9IGZpbmFsbHkge1xuICAgICAgc2V0TG9hZGluZyhmYWxzZSk7XG4gICAgfVxuICB9O1xuXG4gIC8vIOemgeeUqDJGQVxuICBjb25zdCBoYW5kbGVEaXNhYmxlMkZBID0gYXN5bmMgKCkgPT4ge1xuICAgIGlmICghdmVyaWZpY2F0aW9uQ29kZSkge1xuICAgICAgc2hvd1dhcm5pbmcodCgn6K+36L6T5YWl6aqM6K+B56CB5oiW5aSH55So56CBJykpO1xuICAgICAgcmV0dXJuO1xuICAgIH1cblxuICAgIGlmICghY29uZmlybURpc2FibGUpIHtcbiAgICAgIHNob3dXYXJuaW5nKHQoJ+ivt+ehruiupOaCqOW3suS6huino+emgeeUqOS4pOatpemqjOivgeeahOWQjuaenCcpKTtcbiAgICAgIHJldHVybjtcbiAgICB9XG5cbiAgICBzZXRMb2FkaW5nKHRydWUpO1xuICAgIHRyeSB7XG4gICAgICBjb25zdCByZXMgPSBhd2FpdCBBUEkucG9zdCgnL2FwaS91c2VyLzJmYS9kaXNhYmxlJywge1xuICAgICAgICBjb2RlOiB2ZXJpZmljYXRpb25Db2RlLFxuICAgICAgfSk7XG4gICAgICBpZiAocmVzLmRhdGEuc3VjY2Vzcykge1xuICAgICAgICBzaG93U3VjY2Vzcyh0KCfkuKTmraXpqozor4Hlt7LnpoHnlKgnKSk7XG4gICAgICAgIHNldERpc2FibGVNb2RhbFZpc2libGUoZmFsc2UpO1xuICAgICAgICBzZXRWZXJpZmljYXRpb25Db2RlKCcnKTtcbiAgICAgICAgc2V0Q29uZmlybURpc2FibGUoZmFsc2UpO1xuICAgICAgICBmZXRjaFN0YXR1cygpO1xuICAgICAgfSBlbHNlIHtcbiAgICAgICAgc2hvd0Vycm9yKHJlcy5kYXRhLm1lc3NhZ2UpO1xuICAgICAgfVxuICAgIH0gY2F0Y2ggKGVycm9yKSB7XG4gICAgICBzaG93RXJyb3IodCgn56aB55SoMkZB5aSx6LSlJykpO1xuICAgIH0gZmluYWxseSB7XG4gICAgICBzZXRMb2FkaW5nKGZhbHNlKTtcbiAgICB9XG4gIH07XG5cbiAgLy8g6YeN5paw55Sf5oiQ5aSH55So56CBXG4gIGNvbnN0IGhhbmRsZVJlZ2VuZXJhdGVCYWNrdXBDb2RlcyA9IGFzeW5jICgpID0+IHtcbiAgICBpZiAoIXZlcmlmaWNhdGlvbkNvZGUpIHtcbiAgICAgIHNob3dXYXJuaW5nKHQoJ+ivt+i+k+WFpemqjOivgeeggScpKTtcbiAgICAgIHJldHVybjtcbiAgICB9XG5cbiAgICBzZXRMb2FkaW5nKHRydWUpO1xuICAgIHRyeSB7XG4gICAgICBjb25zdCByZXMgPSBhd2FpdCBBUEkucG9zdCgnL2FwaS91c2VyLzJmYS9iYWNrdXBfY29kZXMnLCB7XG4gICAgICAgIGNvZGU6IHZlcmlmaWNhdGlvbkNvZGUsXG4gICAgICB9KTtcbiAgICAgIGlmIChyZXMuZGF0YS5zdWNjZXNzKSB7XG4gICAgICAgIHNldEJhY2t1cENvZGVzKHJlcy5kYXRhLmRhdGEuYmFja3VwX2NvZGVzKTtcbiAgICAgICAgc2hvd1N1Y2Nlc3ModCgn5aSH55So56CB6YeN5paw55Sf5oiQ5oiQ5YqfJykpO1xuICAgICAgICBzZXRWZXJpZmljYXRpb25Db2RlKCcnKTtcbiAgICAgICAgZmV0Y2hTdGF0dXMoKTtcbiAgICAgIH0gZWxzZSB7XG4gICAgICAgIHNob3dFcnJvcihyZXMuZGF0YS5tZXNzYWdlKTtcbiAgICAgIH1cbiAgICB9IGNhdGNoIChlcnJvcikge1xuICAgICAgc2hvd0Vycm9yKHQoJ+mHjeaWsOeUn+aIkOWkh+eUqOeggeWksei0pScpKTtcbiAgICB9IGZpbmFsbHkge1xuICAgICAgc2V0TG9hZGluZyhmYWxzZSk7XG4gICAgfVxuICB9O1xuXG4gIC8vIOmAmueUqOWkjeWItuWHveaVsFxuICBjb25zdCBjb3B5VGV4dFRvQ2xpcGJvYXJkID0gKHRleHQsIHN1Y2Nlc3NNZXNzYWdlID0gdCgn5bey5aSN5Yi25Yiw5Ymq6LS05p2/JykpID0+IHtcbiAgICBuYXZpZ2F0b3IuY2xpcGJvYXJkXG4gICAgICAud3JpdGVUZXh0KHRleHQpXG4gICAgICAudGhlbigoKSA9PiB7XG4gICAgICAgIHNob3dTdWNjZXNzKHN1Y2Nlc3NNZXNzYWdlKTtcbiAgICAgIH0pXG4gICAgICAuY2F0Y2goKCkgPT4ge1xuICAgICAgICBzaG93RXJyb3IodCgn5aSN5Yi25aSx6LSl77yM6K+35omL5Yqo5aSN5Yi2JykpO1xuICAgICAgfSk7XG4gIH07XG5cbiAgY29uc3QgY29weUJhY2t1cENvZGVzID0gKCkgPT4ge1xuICAgIGNvbnN0IGNvZGVzVGV4dCA9IGJhY2t1cENvZGVzLmpvaW4oJ1xcbicpO1xuICAgIGNvcHlUZXh0VG9DbGlwYm9hcmQoY29kZXNUZXh0LCB0KCflpIfnlKjnoIHlt7LlpI3liLbliLDliarotLTmnb8nKSk7XG4gIH07XG5cbiAgLy8g5aSH55So56CB5bGV56S657uE5Lu2XG4gIGNvbnN0IEJhY2t1cENvZGVzRGlzcGxheSA9ICh7IGNvZGVzLCB0aXRsZSwgb25Db3B5IH0pID0+IHtcbiAgICByZXR1cm4gKFxuICAgICAgPENhcmQgY2xhc3NOYW1lPSchcm91bmRlZC14bCcgc3R5bGU9e3sgd2lkdGg6ICcxMDAlJyB9fSBkYXRhLWluc3AtcGF0aD1cIndlYi9jbGFzc2ljL3NyYy9jb21wb25lbnRzL3NldHRpbmdzL3BlcnNvbmFsL2NvbXBvbmVudHMvVHdvRkFTZXR0aW5nLmpzeDoyMTE6NzpDYXJkXCIgPlxuICAgICAgICA8ZGl2IGNsYXNzTmFtZT0nc3BhY2UteS0zJyBkYXRhLWluc3AtcGF0aD1cIndlYi9jbGFzc2ljL3NyYy9jb21wb25lbnRzL3NldHRpbmdzL3BlcnNvbmFsL2NvbXBvbmVudHMvVHdvRkFTZXR0aW5nLmpzeDoyMTI6OTpkaXZcIiA+XG4gICAgICAgICAgPGRpdiBjbGFzc05hbWU9J2ZsZXggaXRlbXMtY2VudGVyIGp1c3RpZnktYmV0d2VlbicgZGF0YS1pbnNwLXBhdGg9XCJ3ZWIvY2xhc3NpYy9zcmMvY29tcG9uZW50cy9zZXR0aW5ncy9wZXJzb25hbC9jb21wb25lbnRzL1R3b0ZBU2V0dGluZy5qc3g6MjEzOjExOmRpdlwiID5cbiAgICAgICAgICAgIDxUZXh0IHN0cm9uZyBjbGFzc05hbWU9J3RleHQtc2xhdGUtNzAwIGRhcms6dGV4dC1zbGF0ZS0yMDAnIGRhdGEtaW5zcC1wYXRoPVwid2ViL2NsYXNzaWMvc3JjL2NvbXBvbmVudHMvc2V0dGluZ3MvcGVyc29uYWwvY29tcG9uZW50cy9Ud29GQVNldHRpbmcuanN4OjIxNDoxMzpUZXh0XCIgPlxuICAgICAgICAgICAgICB7dGl0bGV9XG4gICAgICAgICAgICA8L1RleHQ+XG4gICAgICAgICAgPC9kaXY+XG5cbiAgICAgICAgICA8ZGl2IGNsYXNzTmFtZT0nZ3JpZCBncmlkLWNvbHMtMSBzbTpncmlkLWNvbHMtMiBnYXAtMicgZGF0YS1pbnNwLXBhdGg9XCJ3ZWIvY2xhc3NpYy9zcmMvY29tcG9uZW50cy9zZXR0aW5ncy9wZXJzb25hbC9jb21wb25lbnRzL1R3b0ZBU2V0dGluZy5qc3g6MjE5OjExOmRpdlwiID5cbiAgICAgICAgICAgIHtjb2Rlcy5tYXAoKGNvZGUsIGluZGV4KSA9PiAoXG4gICAgICAgICAgICAgIDxkaXYga2V5PXtpbmRleH0gY2xhc3NOYW1lPSdyb3VuZGVkLWxnIHAtMycgZGF0YS1pbnNwLXBhdGg9XCJ3ZWIvY2xhc3NpYy9zcmMvY29tcG9uZW50cy9zZXR0aW5ncy9wZXJzb25hbC9jb21wb25lbnRzL1R3b0ZBU2V0dGluZy5qc3g6MjIxOjE1OmRpdlwiID5cbiAgICAgICAgICAgICAgICA8ZGl2IGNsYXNzTmFtZT0nZmxleCBpdGVtcy1jZW50ZXIganVzdGlmeS1iZXR3ZWVuJyBkYXRhLWluc3AtcGF0aD1cIndlYi9jbGFzc2ljL3NyYy9jb21wb25lbnRzL3NldHRpbmdzL3BlcnNvbmFsL2NvbXBvbmVudHMvVHdvRkFTZXR0aW5nLmpzeDoyMjI6MTc6ZGl2XCIgPlxuICAgICAgICAgICAgICAgICAgPFRleHRcbiAgICAgICAgICAgICAgICAgICAgY29kZVxuICAgICAgICAgICAgICAgICAgICBjbGFzc05hbWU9J3RleHQtc20gZm9udC1tb25vIHRleHQtc2xhdGUtNzAwIGRhcms6dGV4dC1zbGF0ZS0yMDAnXG4gICAgICAgICAgICAgICAgICAgZGF0YS1pbnNwLXBhdGg9XCJ3ZWIvY2xhc3NpYy9zcmMvY29tcG9uZW50cy9zZXR0aW5ncy9wZXJzb25hbC9jb21wb25lbnRzL1R3b0ZBU2V0dGluZy5qc3g6MjIzOjE5OlRleHRcIiA+XG4gICAgICAgICAgICAgICAgICAgIHtjb2RlfVxuICAgICAgICAgICAgICAgICAgPC9UZXh0PlxuICAgICAgICAgICAgICAgICAgPFRleHQgdHlwZT0ncXVhdGVybmFyeScgY2xhc3NOYW1lPSd0ZXh0LXhzJyBkYXRhLWluc3AtcGF0aD1cIndlYi9jbGFzc2ljL3NyYy9jb21wb25lbnRzL3NldHRpbmdzL3BlcnNvbmFsL2NvbXBvbmVudHMvVHdvRkFTZXR0aW5nLmpzeDoyMjk6MTk6VGV4dFwiID5cbiAgICAgICAgICAgICAgICAgICAgI3soaW5kZXggKyAxKS50b1N0cmluZygpLnBhZFN0YXJ0KDIsICcwJyl9XG4gICAgICAgICAgICAgICAgICA8L1RleHQ+XG4gICAgICAgICAgICAgICAgPC9kaXY+XG4gICAgICAgICAgICAgIDwvZGl2PlxuICAgICAgICAgICAgKSl9XG4gICAgICAgICAgPC9kaXY+XG5cbiAgICAgICAgICA8RGl2aWRlciBtYXJnaW49ezEyfSAgZGF0YS1pbnNwLXBhdGg9XCJ3ZWIvY2xhc3NpYy9zcmMvY29tcG9uZW50cy9zZXR0aW5ncy9wZXJzb25hbC9jb21wb25lbnRzL1R3b0ZBU2V0dGluZy5qc3g6MjM3OjExOkRpdmlkZXJcIiAvPlxuICAgICAgICAgIDxCdXR0b25cbiAgICAgICAgICAgIHR5cGU9J3ByaW1hcnknXG4gICAgICAgICAgICB0aGVtZT0nc29saWQnXG4gICAgICAgICAgICBpY29uPXs8SWNvbkNvcHkgIGRhdGEtaW5zcC1wYXRoPVwid2ViL2NsYXNzaWMvc3JjL2NvbXBvbmVudHMvc2V0dGluZ3MvcGVyc29uYWwvY29tcG9uZW50cy9Ud29GQVNldHRpbmcuanN4OjI0MToxOTpJY29uQ29weVwiLz59XG4gICAgICAgICAgICBvbkNsaWNrPXtvbkNvcHl9XG4gICAgICAgICAgICBjbGFzc05hbWU9JyFyb3VuZGVkLWxnICFiZy1zbGF0ZS02MDAgaG92ZXI6IWJnLXNsYXRlLTcwMCB3LWZ1bGwnXG4gICAgICAgICAgIGRhdGEtaW5zcC1wYXRoPVwid2ViL2NsYXNzaWMvc3JjL2NvbXBvbmVudHMvc2V0dGluZ3MvcGVyc29uYWwvY29tcG9uZW50cy9Ud29GQVNldHRpbmcuanN4OjIzODoxMTpCdXR0b25cIiA+XG4gICAgICAgICAgICB7dCgn5aSN5Yi25omA5pyJ5Luj56CBJyl9XG4gICAgICAgICAgPC9CdXR0b24+XG4gICAgICAgIDwvZGl2PlxuICAgICAgPC9DYXJkPlxuICAgICk7XG4gIH07XG5cbiAgLy8g5riy5p+T6K6+572u5qih5oCB5qGGZm9vdGVyXG4gIGNvbnN0IHJlbmRlclNldHVwTW9kYWxGb290ZXIgPSAoKSA9PiB7XG4gICAgcmV0dXJuIChcbiAgICAgIDw+XG4gICAgICAgIHtjdXJyZW50U3RlcCA+IDAgJiYgKFxuICAgICAgICAgIDxCdXR0b25cbiAgICAgICAgICAgIG9uQ2xpY2s9eygpID0+IHNldEN1cnJlbnRTdGVwKGN1cnJlbnRTdGVwIC0gMSl9XG4gICAgICAgICAgICBjbGFzc05hbWU9JyFyb3VuZGVkLWxnJ1xuICAgICAgICAgICBkYXRhLWluc3AtcGF0aD1cIndlYi9jbGFzc2ljL3NyYy9jb21wb25lbnRzL3NldHRpbmdzL3BlcnNvbmFsL2NvbXBvbmVudHMvVHdvRkFTZXR0aW5nLmpzeDoyNTc6MTE6QnV0dG9uXCIgPlxuICAgICAgICAgICAge3QoJ+S4iuS4gOatpScpfVxuICAgICAgICAgIDwvQnV0dG9uPlxuICAgICAgICApfVxuICAgICAgICB7Y3VycmVudFN0ZXAgPCAyID8gKFxuICAgICAgICAgIDxCdXR0b25cbiAgICAgICAgICAgIHR5cGU9J3ByaW1hcnknXG4gICAgICAgICAgICB0aGVtZT0nc29saWQnXG4gICAgICAgICAgICBvbkNsaWNrPXsoKSA9PiBzZXRDdXJyZW50U3RlcChjdXJyZW50U3RlcCArIDEpfVxuICAgICAgICAgICAgY2xhc3NOYW1lPSchcm91bmRlZC1sZyAhYmctc2xhdGUtNjAwIGhvdmVyOiFiZy1zbGF0ZS03MDAnXG4gICAgICAgICAgIGRhdGEtaW5zcC1wYXRoPVwid2ViL2NsYXNzaWMvc3JjL2NvbXBvbmVudHMvc2V0dGluZ3MvcGVyc29uYWwvY29tcG9uZW50cy9Ud29GQVNldHRpbmcuanN4OjI2NToxMTpCdXR0b25cIiA+XG4gICAgICAgICAgICB7dCgn5LiL5LiA5q2lJyl9XG4gICAgICAgICAgPC9CdXR0b24+XG4gICAgICAgICkgOiAoXG4gICAgICAgICAgPEJ1dHRvblxuICAgICAgICAgICAgdHlwZT0ncHJpbWFyeSdcbiAgICAgICAgICAgIHRoZW1lPSdzb2xpZCdcbiAgICAgICAgICAgIGxvYWRpbmc9e2xvYWRpbmd9XG4gICAgICAgICAgICBvbkNsaWNrPXsoKSA9PiB7XG4gICAgICAgICAgICAgIGlmICghdmVyaWZpY2F0aW9uQ29kZSkge1xuICAgICAgICAgICAgICAgIHNob3dXYXJuaW5nKHQoJ+ivt+i+k+WFpemqjOivgeeggScpKTtcbiAgICAgICAgICAgICAgICByZXR1cm47XG4gICAgICAgICAgICAgIH1cbiAgICAgICAgICAgICAgaGFuZGxlRW5hYmxlMkZBKCk7XG4gICAgICAgICAgICB9fVxuICAgICAgICAgICAgY2xhc3NOYW1lPSchcm91bmRlZC1sZyAhYmctc2xhdGUtNjAwIGhvdmVyOiFiZy1zbGF0ZS03MDAnXG4gICAgICAgICAgIGRhdGEtaW5zcC1wYXRoPVwid2ViL2NsYXNzaWMvc3JjL2NvbXBvbmVudHMvc2V0dGluZ3MvcGVyc29uYWwvY29tcG9uZW50cy9Ud29GQVNldHRpbmcuanN4OjI3NDoxMTpCdXR0b25cIiA+XG4gICAgICAgICAgICB7dCgn5a6M5oiQ6K6+572u5bm25ZCv55So5Lik5q2l6aqM6K+BJyl9XG4gICAgICAgICAgPC9CdXR0b24+XG4gICAgICAgICl9XG4gICAgICA8Lz5cbiAgICApO1xuICB9O1xuXG4gIC8vIOa4suafk+emgeeUqOaooeaAgeahhmZvb3RlclxuICBjb25zdCByZW5kZXJEaXNhYmxlTW9kYWxGb290ZXIgPSAoKSA9PiB7XG4gICAgcmV0dXJuIChcbiAgICAgIDw+XG4gICAgICAgIDxCdXR0b25cbiAgICAgICAgICBvbkNsaWNrPXsoKSA9PiB7XG4gICAgICAgICAgICBzZXREaXNhYmxlTW9kYWxWaXNpYmxlKGZhbHNlKTtcbiAgICAgICAgICAgIHNldFZlcmlmaWNhdGlvbkNvZGUoJycpO1xuICAgICAgICAgICAgc2V0Q29uZmlybURpc2FibGUoZmFsc2UpO1xuICAgICAgICAgIH19XG4gICAgICAgICAgY2xhc3NOYW1lPSchcm91bmRlZC1sZydcbiAgICAgICAgIGRhdGEtaW5zcC1wYXRoPVwid2ViL2NsYXNzaWMvc3JjL2NvbXBvbmVudHMvc2V0dGluZ3MvcGVyc29uYWwvY29tcG9uZW50cy9Ud29GQVNldHRpbmcuanN4OjI5ODo5OkJ1dHRvblwiID5cbiAgICAgICAgICB7dCgn5Y+W5raIJyl9XG4gICAgICAgIDwvQnV0dG9uPlxuICAgICAgICA8QnV0dG9uXG4gICAgICAgICAgdHlwZT0nZGFuZ2VyJ1xuICAgICAgICAgIHRoZW1lPSdzb2xpZCdcbiAgICAgICAgICBsb2FkaW5nPXtsb2FkaW5nfVxuICAgICAgICAgIGRpc2FibGVkPXshY29uZmlybURpc2FibGUgfHwgIXZlcmlmaWNhdGlvbkNvZGV9XG4gICAgICAgICAgb25DbGljaz17aGFuZGxlRGlzYWJsZTJGQX1cbiAgICAgICAgICBjbGFzc05hbWU9JyFyb3VuZGVkLWxnICFiZy1zbGF0ZS01MDAgaG92ZXI6IWJnLXNsYXRlLTYwMCdcbiAgICAgICAgIGRhdGEtaW5zcC1wYXRoPVwid2ViL2NsYXNzaWMvc3JjL2NvbXBvbmVudHMvc2V0dGluZ3MvcGVyc29uYWwvY29tcG9uZW50cy9Ud29GQVNldHRpbmcuanN4OjMwODo5OkJ1dHRvblwiID5cbiAgICAgICAgICB7dCgn56Gu6K6k56aB55SoJyl9XG4gICAgICAgIDwvQnV0dG9uPlxuICAgICAgPC8+XG4gICAgKTtcbiAgfTtcblxuICAvLyDmuLLmn5Pph43mlrDnlJ/miJDmqKHmgIHmoYZmb290ZXJcbiAgY29uc3QgcmVuZGVyUmVnZW5lcmF0ZU1vZGFsRm9vdGVyID0gKCkgPT4ge1xuICAgIGlmIChiYWNrdXBDb2Rlcy5sZW5ndGggPiAwKSB7XG4gICAgICByZXR1cm4gKFxuICAgICAgICA8QnV0dG9uXG4gICAgICAgICAgdHlwZT0ncHJpbWFyeSdcbiAgICAgICAgICB0aGVtZT0nc29saWQnXG4gICAgICAgICAgb25DbGljaz17KCkgPT4ge1xuICAgICAgICAgICAgc2V0QmFja3VwTW9kYWxWaXNpYmxlKGZhbHNlKTtcbiAgICAgICAgICAgIHNldFZlcmlmaWNhdGlvbkNvZGUoJycpO1xuICAgICAgICAgICAgc2V0QmFja3VwQ29kZXMoW10pO1xuICAgICAgICAgIH19XG4gICAgICAgICAgY2xhc3NOYW1lPSchcm91bmRlZC1sZyAhYmctc2xhdGUtNjAwIGhvdmVyOiFiZy1zbGF0ZS03MDAnXG4gICAgICAgICBkYXRhLWluc3AtcGF0aD1cIndlYi9jbGFzc2ljL3NyYy9jb21wb25lbnRzL3NldHRpbmdzL3BlcnNvbmFsL2NvbXBvbmVudHMvVHdvRkFTZXR0aW5nLmpzeDozMjY6OTpCdXR0b25cIiA+XG4gICAgICAgICAge3QoJ+WujOaIkCcpfVxuICAgICAgICA8L0J1dHRvbj5cbiAgICAgICk7XG4gICAgfVxuXG4gICAgcmV0dXJuIChcbiAgICAgIDw+XG4gICAgICAgIDxCdXR0b25cbiAgICAgICAgICBvbkNsaWNrPXsoKSA9PiB7XG4gICAgICAgICAgICBzZXRCYWNrdXBNb2RhbFZpc2libGUoZmFsc2UpO1xuICAgICAgICAgICAgc2V0VmVyaWZpY2F0aW9uQ29kZSgnJyk7XG4gICAgICAgICAgICBzZXRCYWNrdXBDb2RlcyhbXSk7XG4gICAgICAgICAgfX1cbiAgICAgICAgICBjbGFzc05hbWU9JyFyb3VuZGVkLWxnJ1xuICAgICAgICAgZGF0YS1pbnNwLXBhdGg9XCJ3ZWIvY2xhc3NpYy9zcmMvY29tcG9uZW50cy9zZXR0aW5ncy9wZXJzb25hbC9jb21wb25lbnRzL1R3b0ZBU2V0dGluZy5qc3g6MzQzOjk6QnV0dG9uXCIgPlxuICAgICAgICAgIHt0KCflj5bmtognKX1cbiAgICAgICAgPC9CdXR0b24+XG4gICAgICAgIDxCdXR0b25cbiAgICAgICAgICB0eXBlPSdwcmltYXJ5J1xuICAgICAgICAgIHRoZW1lPSdzb2xpZCdcbiAgICAgICAgICBsb2FkaW5nPXtsb2FkaW5nfVxuICAgICAgICAgIGRpc2FibGVkPXshdmVyaWZpY2F0aW9uQ29kZX1cbiAgICAgICAgICBvbkNsaWNrPXtoYW5kbGVSZWdlbmVyYXRlQmFja3VwQ29kZXN9XG4gICAgICAgICAgY2xhc3NOYW1lPSchcm91bmRlZC1sZyAhYmctc2xhdGUtNjAwIGhvdmVyOiFiZy1zbGF0ZS03MDAnXG4gICAgICAgICBkYXRhLWluc3AtcGF0aD1cIndlYi9jbGFzc2ljL3NyYy9jb21wb25lbnRzL3NldHRpbmdzL3BlcnNvbmFsL2NvbXBvbmVudHMvVHdvRkFTZXR0aW5nLmpzeDozNTM6OTpCdXR0b25cIiA+XG4gICAgICAgICAge3QoJ+eUn+aIkOaWsOeahOWkh+eUqOeggScpfVxuICAgICAgICA8L0J1dHRvbj5cbiAgICAgIDwvPlxuICAgICk7XG4gIH07XG5cbiAgcmV0dXJuIChcbiAgICA8PlxuICAgICAgPENhcmQgY2xhc3NOYW1lPSchcm91bmRlZC14bCB3LWZ1bGwnIGRhdGEtaW5zcC1wYXRoPVwid2ViL2NsYXNzaWMvc3JjL2NvbXBvbmVudHMvc2V0dGluZ3MvcGVyc29uYWwvY29tcG9uZW50cy9Ud29GQVNldHRpbmcuanN4OjM2OTo3OkNhcmRcIiA+XG4gICAgICAgIDxkaXYgY2xhc3NOYW1lPSdmbGV4IGZsZXgtY29sIHNtOmZsZXgtcm93IGl0ZW1zLXN0YXJ0IHNtOmp1c3RpZnktYmV0d2VlbiBnYXAtNCcgZGF0YS1pbnNwLXBhdGg9XCJ3ZWIvY2xhc3NpYy9zcmMvY29tcG9uZW50cy9zZXR0aW5ncy9wZXJzb25hbC9jb21wb25lbnRzL1R3b0ZBU2V0dGluZy5qc3g6MzcwOjk6ZGl2XCIgPlxuICAgICAgICAgIDxkaXYgY2xhc3NOYW1lPSdmbGV4IGl0ZW1zLXN0YXJ0IHctZnVsbCBzbTp3LWF1dG8nIGRhdGEtaW5zcC1wYXRoPVwid2ViL2NsYXNzaWMvc3JjL2NvbXBvbmVudHMvc2V0dGluZ3MvcGVyc29uYWwvY29tcG9uZW50cy9Ud29GQVNldHRpbmcuanN4OjM3MToxMTpkaXZcIiA+XG4gICAgICAgICAgICA8ZGl2IGNsYXNzTmFtZT0ndy0xMiBoLTEyIHJvdW5kZWQtZnVsbCBiZy1zbGF0ZS0xMDAgZGFyazpiZy1zbGF0ZS03MDAgZmxleCBpdGVtcy1jZW50ZXIganVzdGlmeS1jZW50ZXIgbXItNCBmbGV4LXNocmluay0wJyBkYXRhLWluc3AtcGF0aD1cIndlYi9jbGFzc2ljL3NyYy9jb21wb25lbnRzL3NldHRpbmdzL3BlcnNvbmFsL2NvbXBvbmVudHMvVHdvRkFTZXR0aW5nLmpzeDozNzI6MTM6ZGl2XCIgPlxuICAgICAgICAgICAgICA8SWNvblNoaWVsZFxuICAgICAgICAgICAgICAgIHNpemU9J2xhcmdlJ1xuICAgICAgICAgICAgICAgIGNsYXNzTmFtZT0ndGV4dC1zbGF0ZS02MDAgZGFyazp0ZXh0LXNsYXRlLTMwMCdcbiAgICAgICAgICAgICAgIGRhdGEtaW5zcC1wYXRoPVwid2ViL2NsYXNzaWMvc3JjL2NvbXBvbmVudHMvc2V0dGluZ3MvcGVyc29uYWwvY29tcG9uZW50cy9Ud29GQVNldHRpbmcuanN4OjM3MzoxNTpJY29uU2hpZWxkXCIgLz5cbiAgICAgICAgICAgIDwvZGl2PlxuICAgICAgICAgICAgPGRpdiBjbGFzc05hbWU9J2ZsZXgtMScgZGF0YS1pbnNwLXBhdGg9XCJ3ZWIvY2xhc3NpYy9zcmMvY29tcG9uZW50cy9zZXR0aW5ncy9wZXJzb25hbC9jb21wb25lbnRzL1R3b0ZBU2V0dGluZy5qc3g6Mzc4OjEzOmRpdlwiID5cbiAgICAgICAgICAgICAgPGRpdiBjbGFzc05hbWU9J2ZsZXggaXRlbXMtY2VudGVyIGdhcC0yIG1iLTEnIGRhdGEtaW5zcC1wYXRoPVwid2ViL2NsYXNzaWMvc3JjL2NvbXBvbmVudHMvc2V0dGluZ3MvcGVyc29uYWwvY29tcG9uZW50cy9Ud29GQVNldHRpbmcuanN4OjM3OToxNTpkaXZcIiA+XG4gICAgICAgICAgICAgICAgPFR5cG9ncmFwaHkuVGl0bGUgaGVhZGluZz17Nn0gY2xhc3NOYW1lPSdtYi0wJz5cbiAgICAgICAgICAgICAgICAgIHt0KCfkuKTmraXpqozor4Horr7nva4nKX1cbiAgICAgICAgICAgICAgICA8L1R5cG9ncmFwaHkuVGl0bGU+XG4gICAgICAgICAgICAgICAge3N0YXR1cy5lbmFibGVkID8gKFxuICAgICAgICAgICAgICAgICAgPFRhZyBjb2xvcj0nZ3JlZW4nIHNoYXBlPSdjaXJjbGUnIHNpemU9J3NtYWxsJyBkYXRhLWluc3AtcGF0aD1cIndlYi9jbGFzc2ljL3NyYy9jb21wb25lbnRzL3NldHRpbmdzL3BlcnNvbmFsL2NvbXBvbmVudHMvVHdvRkFTZXR0aW5nLmpzeDozODQ6MTk6VGFnXCIgPlxuICAgICAgICAgICAgICAgICAgICB7dCgn5bey5ZCv55SoJyl9XG4gICAgICAgICAgICAgICAgICA8L1RhZz5cbiAgICAgICAgICAgICAgICApIDogKFxuICAgICAgICAgICAgICAgICAgPFRhZyBjb2xvcj0ncmVkJyBzaGFwZT0nY2lyY2xlJyBzaXplPSdzbWFsbCcgZGF0YS1pbnNwLXBhdGg9XCJ3ZWIvY2xhc3NpYy9zcmMvY29tcG9uZW50cy9zZXR0aW5ncy9wZXJzb25hbC9jb21wb25lbnRzL1R3b0ZBU2V0dGluZy5qc3g6Mzg4OjE5OlRhZ1wiID5cbiAgICAgICAgICAgICAgICAgICAge3QoJ+acquWQr+eUqCcpfVxuICAgICAgICAgICAgICAgICAgPC9UYWc+XG4gICAgICAgICAgICAgICAgKX1cbiAgICAgICAgICAgICAgICB7c3RhdHVzLmxvY2tlZCAmJiAoXG4gICAgICAgICAgICAgICAgICA8VGFnIGNvbG9yPSdvcmFuZ2UnIHNoYXBlPSdjaXJjbGUnIHNpemU9J3NtYWxsJyBkYXRhLWluc3AtcGF0aD1cIndlYi9jbGFzc2ljL3NyYy9jb21wb25lbnRzL3NldHRpbmdzL3BlcnNvbmFsL2NvbXBvbmVudHMvVHdvRkFTZXR0aW5nLmpzeDozOTM6MTk6VGFnXCIgPlxuICAgICAgICAgICAgICAgICAgICB7dCgn6LSm5oi35bey6ZSB5a6aJyl9XG4gICAgICAgICAgICAgICAgICA8L1RhZz5cbiAgICAgICAgICAgICAgICApfVxuICAgICAgICAgICAgICA8L2Rpdj5cbiAgICAgICAgICAgICAgPFR5cG9ncmFwaHkuVGV4dCB0eXBlPSd0ZXJ0aWFyeScgY2xhc3NOYW1lPSd0ZXh0LXNtJz5cbiAgICAgICAgICAgICAgICB7dChcbiAgICAgICAgICAgICAgICAgICfkuKTmraXpqozor4HvvIgyRkHvvInkuLrmgqjnmoTotKbmiLfmj5Dkvpvpop3lpJbnmoTlronlhajkv53miqTjgILlkK/nlKjlkI7vvIznmbvlvZXml7bpnIDopoHovpPlhaXlr4bnoIHlkozpqozor4HlmajlupTnlKjnlJ/miJDnmoTpqozor4HnoIHjgIInLFxuICAgICAgICAgICAgICAgICl9XG4gICAgICAgICAgICAgIDwvVHlwb2dyYXBoeS5UZXh0PlxuICAgICAgICAgICAgICB7c3RhdHVzLmVuYWJsZWQgJiYgKFxuICAgICAgICAgICAgICAgIDxkaXYgY2xhc3NOYW1lPSdtdC0yJyBkYXRhLWluc3AtcGF0aD1cIndlYi9jbGFzc2ljL3NyYy9jb21wb25lbnRzL3NldHRpbmdzL3BlcnNvbmFsL2NvbXBvbmVudHMvVHdvRkFTZXR0aW5nLmpzeDo0MDQ6MTc6ZGl2XCIgPlxuICAgICAgICAgICAgICAgICAgPFRleHQgc2l6ZT0nc21hbGwnIHR5cGU9J3NlY29uZGFyeScgZGF0YS1pbnNwLXBhdGg9XCJ3ZWIvY2xhc3NpYy9zcmMvY29tcG9uZW50cy9zZXR0aW5ncy9wZXJzb25hbC9jb21wb25lbnRzL1R3b0ZBU2V0dGluZy5qc3g6NDA1OjE5OlRleHRcIiA+XG4gICAgICAgICAgICAgICAgICAgIHt0KCfliankvZnlpIfnlKjnoIHvvJonKX1cbiAgICAgICAgICAgICAgICAgICAge3N0YXR1cy5iYWNrdXBfY29kZXNfcmVtYWluaW5nIHx8IDB9XG4gICAgICAgICAgICAgICAgICAgIHt0KCfkuKonKX1cbiAgICAgICAgICAgICAgICAgIDwvVGV4dD5cbiAgICAgICAgICAgICAgICA8L2Rpdj5cbiAgICAgICAgICAgICAgKX1cbiAgICAgICAgICAgIDwvZGl2PlxuICAgICAgICAgIDwvZGl2PlxuICAgICAgICAgIDxkaXYgY2xhc3NOYW1lPSdmbGV4IGZsZXgtY29sIHNwYWNlLXktMiB3LWZ1bGwgc206dy1hdXRvJyBkYXRhLWluc3AtcGF0aD1cIndlYi9jbGFzc2ljL3NyYy9jb21wb25lbnRzL3NldHRpbmdzL3BlcnNvbmFsL2NvbXBvbmVudHMvVHdvRkFTZXR0aW5nLmpzeDo0MTQ6MTE6ZGl2XCIgPlxuICAgICAgICAgICAgeyFzdGF0dXMuZW5hYmxlZCA/IChcbiAgICAgICAgICAgICAgPEJ1dHRvblxuICAgICAgICAgICAgICAgIHR5cGU9J3ByaW1hcnknXG4gICAgICAgICAgICAgICAgdGhlbWU9J3NvbGlkJ1xuICAgICAgICAgICAgICAgIHNpemU9J2RlZmF1bHQnXG4gICAgICAgICAgICAgICAgb25DbGljaz17aGFuZGxlU2V0dXAyRkF9XG4gICAgICAgICAgICAgICAgbG9hZGluZz17bG9hZGluZ31cbiAgICAgICAgICAgICAgICBjbGFzc05hbWU9JyFyb3VuZGVkLWxnICFiZy1zbGF0ZS02MDAgaG92ZXI6IWJnLXNsYXRlLTcwMCdcbiAgICAgICAgICAgICAgICBpY29uPXs8SWNvblNoaWVsZCAgZGF0YS1pbnNwLXBhdGg9XCJ3ZWIvY2xhc3NpYy9zcmMvY29tcG9uZW50cy9zZXR0aW5ncy9wZXJzb25hbC9jb21wb25lbnRzL1R3b0ZBU2V0dGluZy5qc3g6NDIzOjIzOkljb25TaGllbGRcIi8+fVxuICAgICAgICAgICAgICAgZGF0YS1pbnNwLXBhdGg9XCJ3ZWIvY2xhc3NpYy9zcmMvY29tcG9uZW50cy9zZXR0aW5ncy9wZXJzb25hbC9jb21wb25lbnRzL1R3b0ZBU2V0dGluZy5qc3g6NDE2OjE1OkJ1dHRvblwiID5cbiAgICAgICAgICAgICAgICB7dCgn5ZCv55So6aqM6K+BJyl9XG4gICAgICAgICAgICAgIDwvQnV0dG9uPlxuICAgICAgICAgICAgKSA6IChcbiAgICAgICAgICAgICAgPGRpdiBjbGFzc05hbWU9J2ZsZXggZmxleC1jb2wgc3BhY2UteS0yJyBkYXRhLWluc3AtcGF0aD1cIndlYi9jbGFzc2ljL3NyYy9jb21wb25lbnRzL3NldHRpbmdzL3BlcnNvbmFsL2NvbXBvbmVudHMvVHdvRkFTZXR0aW5nLmpzeDo0Mjg6MTU6ZGl2XCIgPlxuICAgICAgICAgICAgICAgIDxCdXR0b25cbiAgICAgICAgICAgICAgICAgIHR5cGU9J2RhbmdlcidcbiAgICAgICAgICAgICAgICAgIHRoZW1lPSdzb2xpZCdcbiAgICAgICAgICAgICAgICAgIHNpemU9J2RlZmF1bHQnXG4gICAgICAgICAgICAgICAgICBvbkNsaWNrPXsoKSA9PiBzZXREaXNhYmxlTW9kYWxWaXNpYmxlKHRydWUpfVxuICAgICAgICAgICAgICAgICAgY2xhc3NOYW1lPSchcm91bmRlZC1sZyAhYmctc2xhdGUtNTAwIGhvdmVyOiFiZy1zbGF0ZS02MDAnXG4gICAgICAgICAgICAgICAgICBpY29uPXs8SWNvbkFsZXJ0VHJpYW5nbGUgIGRhdGEtaW5zcC1wYXRoPVwid2ViL2NsYXNzaWMvc3JjL2NvbXBvbmVudHMvc2V0dGluZ3MvcGVyc29uYWwvY29tcG9uZW50cy9Ud29GQVNldHRpbmcuanN4OjQzNToyNTpJY29uQWxlcnRUcmlhbmdsZVwiLz59XG4gICAgICAgICAgICAgICAgIGRhdGEtaW5zcC1wYXRoPVwid2ViL2NsYXNzaWMvc3JjL2NvbXBvbmVudHMvc2V0dGluZ3MvcGVyc29uYWwvY29tcG9uZW50cy9Ud29GQVNldHRpbmcuanN4OjQyOToxNzpCdXR0b25cIiA+XG4gICAgICAgICAgICAgICAgICB7dCgn56aB55So5Lik5q2l6aqM6K+BJyl9XG4gICAgICAgICAgICAgICAgPC9CdXR0b24+XG4gICAgICAgICAgICAgICAgPEJ1dHRvblxuICAgICAgICAgICAgICAgICAgdHlwZT0ncHJpbWFyeSdcbiAgICAgICAgICAgICAgICAgIHRoZW1lPSdzb2xpZCdcbiAgICAgICAgICAgICAgICAgIHNpemU9J2RlZmF1bHQnXG4gICAgICAgICAgICAgICAgICBvbkNsaWNrPXsoKSA9PiBzZXRCYWNrdXBNb2RhbFZpc2libGUodHJ1ZSl9XG4gICAgICAgICAgICAgICAgICBjbGFzc05hbWU9JyFyb3VuZGVkLWxnJ1xuICAgICAgICAgICAgICAgICAgaWNvbj17PEljb25SZWZyZXNoICBkYXRhLWluc3AtcGF0aD1cIndlYi9jbGFzc2ljL3NyYy9jb21wb25lbnRzL3NldHRpbmdzL3BlcnNvbmFsL2NvbXBvbmVudHMvVHdvRkFTZXR0aW5nLmpzeDo0NDU6MjU6SWNvblJlZnJlc2hcIi8+fVxuICAgICAgICAgICAgICAgICBkYXRhLWluc3AtcGF0aD1cIndlYi9jbGFzc2ljL3NyYy9jb21wb25lbnRzL3NldHRpbmdzL3BlcnNvbmFsL2NvbXBvbmVudHMvVHdvRkFTZXR0aW5nLmpzeDo0Mzk6MTc6QnV0dG9uXCIgPlxuICAgICAgICAgICAgICAgICAge3QoJ+mHjeaWsOeUn+aIkOWkh+eUqOeggScpfVxuICAgICAgICAgICAgICAgIDwvQnV0dG9uPlxuICAgICAgICAgICAgICA8L2Rpdj5cbiAgICAgICAgICAgICl9XG4gICAgICAgICAgPC9kaXY+XG4gICAgICAgIDwvZGl2PlxuICAgICAgPC9DYXJkPlxuXG4gICAgICB7LyogMkZB6K6+572u5qih5oCB5qGGICovfVxuICAgICAgPE1vZGFsXG4gICAgICAgIHRpdGxlPXtcbiAgICAgICAgICA8ZGl2IGNsYXNzTmFtZT0nZmxleCBpdGVtcy1jZW50ZXInIGRhdGEtaW5zcC1wYXRoPVwid2ViL2NsYXNzaWMvc3JjL2NvbXBvbmVudHMvc2V0dGluZ3MvcGVyc29uYWwvY29tcG9uZW50cy9Ud29GQVNldHRpbmcuanN4OjQ1ODoxMTpkaXZcIiA+XG4gICAgICAgICAgICA8SWNvblNoaWVsZCBjbGFzc05hbWU9J21yLTIgdGV4dC1zbGF0ZS02MDAnICBkYXRhLWluc3AtcGF0aD1cIndlYi9jbGFzc2ljL3NyYy9jb21wb25lbnRzL3NldHRpbmdzL3BlcnNvbmFsL2NvbXBvbmVudHMvVHdvRkFTZXR0aW5nLmpzeDo0NTk6MTM6SWNvblNoaWVsZFwiIC8+XG4gICAgICAgICAgICB7dCgn6K6+572u5Lik5q2l6aqM6K+BJyl9XG4gICAgICAgICAgPC9kaXY+XG4gICAgICAgIH1cbiAgICAgICAgdmlzaWJsZT17c2V0dXBNb2RhbFZpc2libGV9XG4gICAgICAgIG9uQ2FuY2VsPXsoKSA9PiB7XG4gICAgICAgICAgc2V0U2V0dXBNb2RhbFZpc2libGUoZmFsc2UpO1xuICAgICAgICAgIHNldFNldHVwRGF0YShudWxsKTtcbiAgICAgICAgICBzZXRDdXJyZW50U3RlcCgwKTtcbiAgICAgICAgICBzZXRWZXJpZmljYXRpb25Db2RlKCcnKTtcbiAgICAgICAgfX1cbiAgICAgICAgZm9vdGVyPXtyZW5kZXJTZXR1cE1vZGFsRm9vdGVyKCl9XG4gICAgICAgIHdpZHRoPXs2NTB9XG4gICAgICAgIHN0eWxlPXt7IG1heFdpZHRoOiAnOTB2dycgfX1cbiAgICAgICBkYXRhLWluc3AtcGF0aD1cIndlYi9jbGFzc2ljL3NyYy9jb21wb25lbnRzL3NldHRpbmdzL3BlcnNvbmFsL2NvbXBvbmVudHMvVHdvRkFTZXR0aW5nLmpzeDo0NTY6NzpNb2RhbFwiID5cbiAgICAgICAge3NldHVwRGF0YSAmJiAoXG4gICAgICAgICAgPGRpdiBjbGFzc05hbWU9J3NwYWNlLXktNicgZGF0YS1pbnNwLXBhdGg9XCJ3ZWIvY2xhc3NpYy9zcmMvY29tcG9uZW50cy9zZXR0aW5ncy9wZXJzb25hbC9jb21wb25lbnRzL1R3b0ZBU2V0dGluZy5qc3g6NDc1OjExOmRpdlwiID5cbiAgICAgICAgICAgIHsvKiDmraXpqqTov5vluqYgKi99XG4gICAgICAgICAgICA8U3RlcHMgdHlwZT0nYmFzaWMnIHNpemU9J3NtYWxsJyBjdXJyZW50PXtjdXJyZW50U3RlcH0gZGF0YS1pbnNwLXBhdGg9XCJ3ZWIvY2xhc3NpYy9zcmMvY29tcG9uZW50cy9zZXR0aW5ncy9wZXJzb25hbC9jb21wb25lbnRzL1R3b0ZBU2V0dGluZy5qc3g6NDc3OjEzOlN0ZXBzXCIgPlxuICAgICAgICAgICAgICA8U3RlcHMuU3RlcFxuICAgICAgICAgICAgICAgIHRpdGxlPXt0KCfmiavmj4/kuoznu7TnoIEnKX1cbiAgICAgICAgICAgICAgICBkZXNjcmlwdGlvbj17dCgn5L2/55So6K6k6K+B5Zmo5bqU55So5omr5o+P5LqM57u056CBJyl9XG4gICAgICAgICAgICAgIC8+XG4gICAgICAgICAgICAgIDxTdGVwcy5TdGVwXG4gICAgICAgICAgICAgICAgdGl0bGU9e3QoJ+S/neWtmOWkh+eUqOeggScpfVxuICAgICAgICAgICAgICAgIGRlc2NyaXB0aW9uPXt0KCfkv53lrZjlpIfnlKjnoIHku6XlpIfkuI3ml7bkuYvpnIAnKX1cbiAgICAgICAgICAgICAgLz5cbiAgICAgICAgICAgICAgPFN0ZXBzLlN0ZXBcbiAgICAgICAgICAgICAgICB0aXRsZT17dCgn6aqM6K+B6K6+572uJyl9XG4gICAgICAgICAgICAgICAgZGVzY3JpcHRpb249e3QoJ+i+k+WFpemqjOivgeeggeWujOaIkOiuvue9ricpfVxuICAgICAgICAgICAgICAvPlxuICAgICAgICAgICAgPC9TdGVwcz5cblxuICAgICAgICAgICAgey8qIOatpemqpOWGheWuuSAqL31cbiAgICAgICAgICAgIDxkaXYgY2xhc3NOYW1lPSdyb3VuZGVkLXhsJyBkYXRhLWluc3AtcGF0aD1cIndlYi9jbGFzc2ljL3NyYy9jb21wb25lbnRzL3NldHRpbmdzL3BlcnNvbmFsL2NvbXBvbmVudHMvVHdvRkFTZXR0aW5nLmpzeDo0OTM6MTM6ZGl2XCIgPlxuICAgICAgICAgICAgICB7Y3VycmVudFN0ZXAgPT09IDAgJiYgKFxuICAgICAgICAgICAgICAgIDxkaXYgZGF0YS1pbnNwLXBhdGg9XCJ3ZWIvY2xhc3NpYy9zcmMvY29tcG9uZW50cy9zZXR0aW5ncy9wZXJzb25hbC9jb21wb25lbnRzL1R3b0ZBU2V0dGluZy5qc3g6NDk1OjE3OmRpdlwiPlxuICAgICAgICAgICAgICAgICAgPFBhcmFncmFwaCBjbGFzc05hbWU9J3RleHQtZ3JheS02MDAgZGFyazp0ZXh0LWdyYXktMzAwIG1iLTQnIGRhdGEtaW5zcC1wYXRoPVwid2ViL2NsYXNzaWMvc3JjL2NvbXBvbmVudHMvc2V0dGluZ3MvcGVyc29uYWwvY29tcG9uZW50cy9Ud29GQVNldHRpbmcuanN4OjQ5NjoxOTpQYXJhZ3JhcGhcIiA+XG4gICAgICAgICAgICAgICAgICAgIHt0KFxuICAgICAgICAgICAgICAgICAgICAgICfkvb/nlKjorqTor4HlmajlupTnlKjvvIjlpoIgR29vZ2xlIEF1dGhlbnRpY2F0b3LjgIFNaWNyb3NvZnQgQXV0aGVudGljYXRvcu+8ieaJq+aPj+S4i+aWueS6jOe7tOegge+8micsXG4gICAgICAgICAgICAgICAgICAgICl9XG4gICAgICAgICAgICAgICAgICA8L1BhcmFncmFwaD5cbiAgICAgICAgICAgICAgICAgIDxkaXYgY2xhc3NOYW1lPSdmbGV4IGp1c3RpZnktY2VudGVyIG1iLTQnIGRhdGEtaW5zcC1wYXRoPVwid2ViL2NsYXNzaWMvc3JjL2NvbXBvbmVudHMvc2V0dGluZ3MvcGVyc29uYWwvY29tcG9uZW50cy9Ud29GQVNldHRpbmcuanN4OjUwMToxOTpkaXZcIiA+XG4gICAgICAgICAgICAgICAgICAgIDxkaXYgY2xhc3NOYW1lPSdiZy13aGl0ZSBwLTQgcm91bmRlZC1sZyBzaGFkb3ctc20nIGRhdGEtaW5zcC1wYXRoPVwid2ViL2NsYXNzaWMvc3JjL2NvbXBvbmVudHMvc2V0dGluZ3MvcGVyc29uYWwvY29tcG9uZW50cy9Ud29GQVNldHRpbmcuanN4OjUwMjoyMTpkaXZcIiA+XG4gICAgICAgICAgICAgICAgICAgICAgPFFSQ29kZVNWRyB2YWx1ZT17c2V0dXBEYXRhLnFyX2NvZGVfZGF0YX0gc2l6ZT17MTgwfSAgZGF0YS1pbnNwLXBhdGg9XCJ3ZWIvY2xhc3NpYy9zcmMvY29tcG9uZW50cy9zZXR0aW5ncy9wZXJzb25hbC9jb21wb25lbnRzL1R3b0ZBU2V0dGluZy5qc3g6NTAzOjIzOlFSQ29kZVNWR1wiIC8+XG4gICAgICAgICAgICAgICAgICAgIDwvZGl2PlxuICAgICAgICAgICAgICAgICAgPC9kaXY+XG4gICAgICAgICAgICAgICAgICA8ZGl2IGNsYXNzTmFtZT0nYmctYmx1ZS01MCBkYXJrOmJnLWJsdWUtOTAwIHJvdW5kZWQtbGcgcC0zJyBkYXRhLWluc3AtcGF0aD1cIndlYi9jbGFzc2ljL3NyYy9jb21wb25lbnRzL3NldHRpbmdzL3BlcnNvbmFsL2NvbXBvbmVudHMvVHdvRkFTZXR0aW5nLmpzeDo1MDY6MTk6ZGl2XCIgPlxuICAgICAgICAgICAgICAgICAgICA8VGV4dCBjbGFzc05hbWU9J3RleHQtYmx1ZS04MDAgZGFyazp0ZXh0LWJsdWUtMjAwIHRleHQtc20nIGRhdGEtaW5zcC1wYXRoPVwid2ViL2NsYXNzaWMvc3JjL2NvbXBvbmVudHMvc2V0dGluZ3MvcGVyc29uYWwvY29tcG9uZW50cy9Ud29GQVNldHRpbmcuanN4OjUwNzoyMTpUZXh0XCIgPlxuICAgICAgICAgICAgICAgICAgICAgIHt0KCfmiJbmiYvliqjovpPlhaXlr4bpkqXvvJonKX1cbiAgICAgICAgICAgICAgICAgICAgICA8VGV4dCBjb2RlIGNvcHlhYmxlIGNsYXNzTmFtZT0nbWwtMicgZGF0YS1pbnNwLXBhdGg9XCJ3ZWIvY2xhc3NpYy9zcmMvY29tcG9uZW50cy9zZXR0aW5ncy9wZXJzb25hbC9jb21wb25lbnRzL1R3b0ZBU2V0dGluZy5qc3g6NTA5OjIzOlRleHRcIiA+XG4gICAgICAgICAgICAgICAgICAgICAgICB7c2V0dXBEYXRhLnNlY3JldH1cbiAgICAgICAgICAgICAgICAgICAgICA8L1RleHQ+XG4gICAgICAgICAgICAgICAgICAgIDwvVGV4dD5cbiAgICAgICAgICAgICAgICAgIDwvZGl2PlxuICAgICAgICAgICAgICAgIDwvZGl2PlxuICAgICAgICAgICAgICApfVxuXG4gICAgICAgICAgICAgIHtjdXJyZW50U3RlcCA9PT0gMSAmJiAoXG4gICAgICAgICAgICAgICAgPGRpdiBjbGFzc05hbWU9J3NwYWNlLXktNCcgZGF0YS1pbnNwLXBhdGg9XCJ3ZWIvY2xhc3NpYy9zcmMvY29tcG9uZW50cy9zZXR0aW5ncy9wZXJzb25hbC9jb21wb25lbnRzL1R3b0ZBU2V0dGluZy5qc3g6NTE4OjE3OmRpdlwiID5cbiAgICAgICAgICAgICAgICAgIHsvKiDlpIfnlKjnoIHlsZXnpLogKi99XG4gICAgICAgICAgICAgICAgICA8QmFja3VwQ29kZXNEaXNwbGF5XG4gICAgICAgICAgICAgICAgICAgIGNvZGVzPXtzZXR1cERhdGEuYmFja3VwX2NvZGVzfVxuICAgICAgICAgICAgICAgICAgICB0aXRsZT17dCgn5aSH55So5oGi5aSN5Luj56CBJyl9XG4gICAgICAgICAgICAgICAgICAgIG9uQ29weT17KCkgPT4ge1xuICAgICAgICAgICAgICAgICAgICAgIGNvbnN0IGNvZGVzVGV4dCA9IHNldHVwRGF0YS5iYWNrdXBfY29kZXMuam9pbignXFxuJyk7XG4gICAgICAgICAgICAgICAgICAgICAgY29weVRleHRUb0NsaXBib2FyZChjb2Rlc1RleHQsIHQoJ+Wkh+eUqOeggeW3suWkjeWItuWIsOWJqui0tOadvycpKTtcbiAgICAgICAgICAgICAgICAgICAgfX1cbiAgICAgICAgICAgICAgICAgICBkYXRhLWluc3AtcGF0aD1cIndlYi9jbGFzc2ljL3NyYy9jb21wb25lbnRzL3NldHRpbmdzL3BlcnNvbmFsL2NvbXBvbmVudHMvVHdvRkFTZXR0aW5nLmpzeDo1MjA6MTk6QmFja3VwQ29kZXNEaXNwbGF5XCIgLz5cbiAgICAgICAgICAgICAgICA8L2Rpdj5cbiAgICAgICAgICAgICAgKX1cblxuICAgICAgICAgICAgICB7Y3VycmVudFN0ZXAgPT09IDIgJiYgKFxuICAgICAgICAgICAgICAgIDxJbnB1dFxuICAgICAgICAgICAgICAgICAgcGxhY2Vob2xkZXI9e3QoJ+i+k+WFpeiupOivgeWZqOW6lOeUqOaYvuekuueahDbkvY3mlbDlrZfpqozor4HnoIEnKX1cbiAgICAgICAgICAgICAgICAgIHZhbHVlPXt2ZXJpZmljYXRpb25Db2RlfVxuICAgICAgICAgICAgICAgICAgb25DaGFuZ2U9e3NldFZlcmlmaWNhdGlvbkNvZGV9XG4gICAgICAgICAgICAgICAgICBzaXplPSdsYXJnZSdcbiAgICAgICAgICAgICAgICAgIG1heExlbmd0aD17Nn1cbiAgICAgICAgICAgICAgICAgIGNsYXNzTmFtZT0nIXJvdW5kZWQtbGcnXG4gICAgICAgICAgICAgICAgIGRhdGEtaW5zcC1wYXRoPVwid2ViL2NsYXNzaWMvc3JjL2NvbXBvbmVudHMvc2V0dGluZ3MvcGVyc29uYWwvY29tcG9uZW50cy9Ud29GQVNldHRpbmcuanN4OjUzMjoxNzpJbnB1dFwiIC8+XG4gICAgICAgICAgICAgICl9XG4gICAgICAgICAgICA8L2Rpdj5cbiAgICAgICAgICA8L2Rpdj5cbiAgICAgICAgKX1cbiAgICAgIDwvTW9kYWw+XG5cbiAgICAgIHsvKiDnpoHnlKgyRkHmqKHmgIHmoYYgKi99XG4gICAgICA8TW9kYWxcbiAgICAgICAgdGl0bGU9e1xuICAgICAgICAgIDxkaXYgY2xhc3NOYW1lPSdmbGV4IGl0ZW1zLWNlbnRlcicgZGF0YS1pbnNwLXBhdGg9XCJ3ZWIvY2xhc3NpYy9zcmMvY29tcG9uZW50cy9zZXR0aW5ncy9wZXJzb25hbC9jb21wb25lbnRzL1R3b0ZBU2V0dGluZy5qc3g6NTQ5OjExOmRpdlwiID5cbiAgICAgICAgICAgIDxJY29uQWxlcnRUcmlhbmdsZSBjbGFzc05hbWU9J21yLTIgdGV4dC1yZWQtNTAwJyAgZGF0YS1pbnNwLXBhdGg9XCJ3ZWIvY2xhc3NpYy9zcmMvY29tcG9uZW50cy9zZXR0aW5ncy9wZXJzb25hbC9jb21wb25lbnRzL1R3b0ZBU2V0dGluZy5qc3g6NTUwOjEzOkljb25BbGVydFRyaWFuZ2xlXCIgLz5cbiAgICAgICAgICAgIHt0KCfnpoHnlKjkuKTmraXpqozor4EnKX1cbiAgICAgICAgICA8L2Rpdj5cbiAgICAgICAgfVxuICAgICAgICB2aXNpYmxlPXtkaXNhYmxlTW9kYWxWaXNpYmxlfVxuICAgICAgICBvbkNhbmNlbD17KCkgPT4ge1xuICAgICAgICAgIHNldERpc2FibGVNb2RhbFZpc2libGUoZmFsc2UpO1xuICAgICAgICAgIHNldFZlcmlmaWNhdGlvbkNvZGUoJycpO1xuICAgICAgICAgIHNldENvbmZpcm1EaXNhYmxlKGZhbHNlKTtcbiAgICAgICAgfX1cbiAgICAgICAgZm9vdGVyPXtyZW5kZXJEaXNhYmxlTW9kYWxGb290ZXIoKX1cbiAgICAgICAgd2lkdGg9ezU1MH1cbiAgICAgICAgc3R5bGU9e3sgbWF4V2lkdGg6ICc5MHZ3JyB9fVxuICAgICAgIGRhdGEtaW5zcC1wYXRoPVwid2ViL2NsYXNzaWMvc3JjL2NvbXBvbmVudHMvc2V0dGluZ3MvcGVyc29uYWwvY29tcG9uZW50cy9Ud29GQVNldHRpbmcuanN4OjU0Nzo3Ok1vZGFsXCIgPlxuICAgICAgICA8ZGl2IGNsYXNzTmFtZT0nc3BhY2UteS02JyBkYXRhLWluc3AtcGF0aD1cIndlYi9jbGFzc2ljL3NyYy9jb21wb25lbnRzL3NldHRpbmdzL3BlcnNvbmFsL2NvbXBvbmVudHMvVHdvRkFTZXR0aW5nLmpzeDo1NjQ6OTpkaXZcIiA+XG4gICAgICAgICAgey8qIOitpuWRiuaPkOekuiAqL31cbiAgICAgICAgICA8ZGl2IGNsYXNzTmFtZT0ncm91bmRlZC14bCcgZGF0YS1pbnNwLXBhdGg9XCJ3ZWIvY2xhc3NpYy9zcmMvY29tcG9uZW50cy9zZXR0aW5ncy9wZXJzb25hbC9jb21wb25lbnRzL1R3b0ZBU2V0dGluZy5qc3g6NTY2OjExOmRpdlwiID5cbiAgICAgICAgICAgIDxCYW5uZXJcbiAgICAgICAgICAgICAgdHlwZT0nd2FybmluZydcbiAgICAgICAgICAgICAgZGVzY3JpcHRpb249e3QoXG4gICAgICAgICAgICAgICAgJ+itpuWRiu+8muemgeeUqOS4pOatpemqjOivgeWwhuawuOS5heWIoOmZpOaCqOeahOmqjOivgeiuvue9ruWSjOaJgOacieWkh+eUqOegge+8jOatpOaTjeS9nOS4jeWPr+aSpOmUgO+8gScsXG4gICAgICAgICAgICAgICl9XG4gICAgICAgICAgICAgIGNsYXNzTmFtZT0nIXJvdW5kZWQtbGcnXG4gICAgICAgICAgICAgZGF0YS1pbnNwLXBhdGg9XCJ3ZWIvY2xhc3NpYy9zcmMvY29tcG9uZW50cy9zZXR0aW5ncy9wZXJzb25hbC9jb21wb25lbnRzL1R3b0ZBU2V0dGluZy5qc3g6NTY3OjEzOkJhbm5lclwiIC8+XG4gICAgICAgICAgPC9kaXY+XG5cbiAgICAgICAgICB7Lyog5YaF5a655Yy65Z+fICovfVxuICAgICAgICAgIDxkaXYgY2xhc3NOYW1lPSdzcGFjZS15LTQnIGRhdGEtaW5zcC1wYXRoPVwid2ViL2NsYXNzaWMvc3JjL2NvbXBvbmVudHMvc2V0dGluZ3MvcGVyc29uYWwvY29tcG9uZW50cy9Ud29GQVNldHRpbmcuanN4OjU3NzoxMTpkaXZcIiA+XG4gICAgICAgICAgICA8ZGl2IGRhdGEtaW5zcC1wYXRoPVwid2ViL2NsYXNzaWMvc3JjL2NvbXBvbmVudHMvc2V0dGluZ3MvcGVyc29uYWwvY29tcG9uZW50cy9Ud29GQVNldHRpbmcuanN4OjU3ODoxMzpkaXZcIj5cbiAgICAgICAgICAgICAgPFRleHRcbiAgICAgICAgICAgICAgICBzdHJvbmdcbiAgICAgICAgICAgICAgICBjbGFzc05hbWU9J2Jsb2NrIG1iLTIgdGV4dC1zbGF0ZS03MDAgZGFyazp0ZXh0LXNsYXRlLTIwMCdcbiAgICAgICAgICAgICAgIGRhdGEtaW5zcC1wYXRoPVwid2ViL2NsYXNzaWMvc3JjL2NvbXBvbmVudHMvc2V0dGluZ3MvcGVyc29uYWwvY29tcG9uZW50cy9Ud29GQVNldHRpbmcuanN4OjU3OToxNTpUZXh0XCIgPlxuICAgICAgICAgICAgICAgIHt0KCfnpoHnlKjlkI7nmoTlvbHlk43vvJonKX1cbiAgICAgICAgICAgICAgPC9UZXh0PlxuICAgICAgICAgICAgICA8dWwgY2xhc3NOYW1lPSdzcGFjZS15LTIgdGV4dC1zbSB0ZXh0LXNsYXRlLTYwMCBkYXJrOnRleHQtc2xhdGUtMzAwJyBkYXRhLWluc3AtcGF0aD1cIndlYi9jbGFzc2ljL3NyYy9jb21wb25lbnRzL3NldHRpbmdzL3BlcnNvbmFsL2NvbXBvbmVudHMvVHdvRkFTZXR0aW5nLmpzeDo1ODU6MTU6dWxcIiA+XG4gICAgICAgICAgICAgICAgPGxpIGNsYXNzTmFtZT0nZmxleCBpdGVtcy1zdGFydCBnYXAtMicgZGF0YS1pbnNwLXBhdGg9XCJ3ZWIvY2xhc3NpYy9zcmMvY29tcG9uZW50cy9zZXR0aW5ncy9wZXJzb25hbC9jb21wb25lbnRzL1R3b0ZBU2V0dGluZy5qc3g6NTg2OjE3OmxpXCIgPlxuICAgICAgICAgICAgICAgICAgPEJhZGdlIGRvdCB0eXBlPSd3YXJuaW5nJyAgZGF0YS1pbnNwLXBhdGg9XCJ3ZWIvY2xhc3NpYy9zcmMvY29tcG9uZW50cy9zZXR0aW5ncy9wZXJzb25hbC9jb21wb25lbnRzL1R3b0ZBU2V0dGluZy5qc3g6NTg3OjE5OkJhZGdlXCIgLz5cbiAgICAgICAgICAgICAgICAgIHt0KCfpmY3kvY7mgqjotKbmiLfnmoTlronlhajmgKcnKX1cbiAgICAgICAgICAgICAgICA8L2xpPlxuICAgICAgICAgICAgICAgIDxsaSBjbGFzc05hbWU9J2ZsZXggaXRlbXMtc3RhcnQgZ2FwLTInIGRhdGEtaW5zcC1wYXRoPVwid2ViL2NsYXNzaWMvc3JjL2NvbXBvbmVudHMvc2V0dGluZ3MvcGVyc29uYWwvY29tcG9uZW50cy9Ud29GQVNldHRpbmcuanN4OjU5MDoxNzpsaVwiID5cbiAgICAgICAgICAgICAgICAgIDxCYWRnZSBkb3QgdHlwZT0nd2FybmluZycgIGRhdGEtaW5zcC1wYXRoPVwid2ViL2NsYXNzaWMvc3JjL2NvbXBvbmVudHMvc2V0dGluZ3MvcGVyc29uYWwvY29tcG9uZW50cy9Ud29GQVNldHRpbmcuanN4OjU5MToxOTpCYWRnZVwiIC8+XG4gICAgICAgICAgICAgICAgICB7dCgn6ZyA6KaB6YeN5paw5a6M5pW06K6+572u5omN6IO95YaN5qyh5ZCv55SoJyl9XG4gICAgICAgICAgICAgICAgPC9saT5cbiAgICAgICAgICAgICAgICA8bGkgY2xhc3NOYW1lPSdmbGV4IGl0ZW1zLXN0YXJ0IGdhcC0yJyBkYXRhLWluc3AtcGF0aD1cIndlYi9jbGFzc2ljL3NyYy9jb21wb25lbnRzL3NldHRpbmdzL3BlcnNvbmFsL2NvbXBvbmVudHMvVHdvRkFTZXR0aW5nLmpzeDo1OTQ6MTc6bGlcIiA+XG4gICAgICAgICAgICAgICAgICA8QmFkZ2UgZG90IHR5cGU9J2RhbmdlcicgIGRhdGEtaW5zcC1wYXRoPVwid2ViL2NsYXNzaWMvc3JjL2NvbXBvbmVudHMvc2V0dGluZ3MvcGVyc29uYWwvY29tcG9uZW50cy9Ud29GQVNldHRpbmcuanN4OjU5NToxOTpCYWRnZVwiIC8+XG4gICAgICAgICAgICAgICAgICB7dCgn5rC45LmF5Yig6Zmk5oKo55qE5Lik5q2l6aqM6K+B6K6+572uJyl9XG4gICAgICAgICAgICAgICAgPC9saT5cbiAgICAgICAgICAgICAgICA8bGkgY2xhc3NOYW1lPSdmbGV4IGl0ZW1zLXN0YXJ0IGdhcC0yJyBkYXRhLWluc3AtcGF0aD1cIndlYi9jbGFzc2ljL3NyYy9jb21wb25lbnRzL3NldHRpbmdzL3BlcnNvbmFsL2NvbXBvbmVudHMvVHdvRkFTZXR0aW5nLmpzeDo1OTg6MTc6bGlcIiA+XG4gICAgICAgICAgICAgICAgICA8QmFkZ2UgZG90IHR5cGU9J2RhbmdlcicgIGRhdGEtaW5zcC1wYXRoPVwid2ViL2NsYXNzaWMvc3JjL2NvbXBvbmVudHMvc2V0dGluZ3MvcGVyc29uYWwvY29tcG9uZW50cy9Ud29GQVNldHRpbmcuanN4OjU5OToxOTpCYWRnZVwiIC8+XG4gICAgICAgICAgICAgICAgICB7dCgn5rC45LmF5Yig6Zmk5omA5pyJ5aSH55So56CB77yI5YyF5ous5pyq5L2/55So55qE77yJJyl9XG4gICAgICAgICAgICAgICAgPC9saT5cbiAgICAgICAgICAgICAgPC91bD5cbiAgICAgICAgICAgIDwvZGl2PlxuXG4gICAgICAgICAgICA8RGl2aWRlciBtYXJnaW49ezE2fSAgZGF0YS1pbnNwLXBhdGg9XCJ3ZWIvY2xhc3NpYy9zcmMvY29tcG9uZW50cy9zZXR0aW5ncy9wZXJzb25hbC9jb21wb25lbnRzL1R3b0ZBU2V0dGluZy5qc3g6NjA1OjEzOkRpdmlkZXJcIiAvPlxuXG4gICAgICAgICAgICA8ZGl2IGNsYXNzTmFtZT0nc3BhY2UteS00JyBkYXRhLWluc3AtcGF0aD1cIndlYi9jbGFzc2ljL3NyYy9jb21wb25lbnRzL3NldHRpbmdzL3BlcnNvbmFsL2NvbXBvbmVudHMvVHdvRkFTZXR0aW5nLmpzeDo2MDc6MTM6ZGl2XCIgPlxuICAgICAgICAgICAgICA8ZGl2IGRhdGEtaW5zcC1wYXRoPVwid2ViL2NsYXNzaWMvc3JjL2NvbXBvbmVudHMvc2V0dGluZ3MvcGVyc29uYWwvY29tcG9uZW50cy9Ud29GQVNldHRpbmcuanN4OjYwODoxNTpkaXZcIj5cbiAgICAgICAgICAgICAgICA8VGV4dFxuICAgICAgICAgICAgICAgICAgc3Ryb25nXG4gICAgICAgICAgICAgICAgICBjbGFzc05hbWU9J2Jsb2NrIG1iLTIgdGV4dC1zbGF0ZS03MDAgZGFyazp0ZXh0LXNsYXRlLTIwMCdcbiAgICAgICAgICAgICAgICAgZGF0YS1pbnNwLXBhdGg9XCJ3ZWIvY2xhc3NpYy9zcmMvY29tcG9uZW50cy9zZXR0aW5ncy9wZXJzb25hbC9jb21wb25lbnRzL1R3b0ZBU2V0dGluZy5qc3g6NjA5OjE3OlRleHRcIiA+XG4gICAgICAgICAgICAgICAgICB7dCgn6aqM6K+B6Lqr5Lu9Jyl9XG4gICAgICAgICAgICAgICAgPC9UZXh0PlxuICAgICAgICAgICAgICAgIDxJbnB1dFxuICAgICAgICAgICAgICAgICAgcGxhY2Vob2xkZXI9e3QoJ+ivt+i+k+WFpeiupOivgeWZqOmqjOivgeeggeaIluWkh+eUqOeggScpfVxuICAgICAgICAgICAgICAgICAgdmFsdWU9e3ZlcmlmaWNhdGlvbkNvZGV9XG4gICAgICAgICAgICAgICAgICBvbkNoYW5nZT17c2V0VmVyaWZpY2F0aW9uQ29kZX1cbiAgICAgICAgICAgICAgICAgIHNpemU9J2xhcmdlJ1xuICAgICAgICAgICAgICAgICAgY2xhc3NOYW1lPSchcm91bmRlZC1sZydcbiAgICAgICAgICAgICAgICAgZGF0YS1pbnNwLXBhdGg9XCJ3ZWIvY2xhc3NpYy9zcmMvY29tcG9uZW50cy9zZXR0aW5ncy9wZXJzb25hbC9jb21wb25lbnRzL1R3b0ZBU2V0dGluZy5qc3g6NjE1OjE3OklucHV0XCIgLz5cbiAgICAgICAgICAgICAgPC9kaXY+XG5cbiAgICAgICAgICAgICAgPGRpdiBkYXRhLWluc3AtcGF0aD1cIndlYi9jbGFzc2ljL3NyYy9jb21wb25lbnRzL3NldHRpbmdzL3BlcnNvbmFsL2NvbXBvbmVudHMvVHdvRkFTZXR0aW5nLmpzeDo2MjQ6MTU6ZGl2XCI+XG4gICAgICAgICAgICAgICAgPENoZWNrYm94XG4gICAgICAgICAgICAgICAgICBjaGVja2VkPXtjb25maXJtRGlzYWJsZX1cbiAgICAgICAgICAgICAgICAgIG9uQ2hhbmdlPXsoZSkgPT4gc2V0Q29uZmlybURpc2FibGUoZS50YXJnZXQuY2hlY2tlZCl9XG4gICAgICAgICAgICAgICAgICBjbGFzc05hbWU9J3RleHQtc20nXG4gICAgICAgICAgICAgICAgIGRhdGEtaW5zcC1wYXRoPVwid2ViL2NsYXNzaWMvc3JjL2NvbXBvbmVudHMvc2V0dGluZ3MvcGVyc29uYWwvY29tcG9uZW50cy9Ud29GQVNldHRpbmcuanN4OjYyNToxNzpDaGVja2JveFwiID5cbiAgICAgICAgICAgICAgICAgIHt0KFxuICAgICAgICAgICAgICAgICAgICAn5oiR5bey5LqG6Kej56aB55So5Lik5q2l6aqM6K+B5bCG5rC45LmF5Yig6Zmk5omA5pyJ55u45YWz6K6+572u5ZKM5aSH55So56CB77yM5q2k5pON5L2c5LiN5Y+v5pKk6ZSAJyxcbiAgICAgICAgICAgICAgICAgICl9XG4gICAgICAgICAgICAgICAgPC9DaGVja2JveD5cbiAgICAgICAgICAgICAgPC9kaXY+XG4gICAgICAgICAgICA8L2Rpdj5cbiAgICAgICAgICA8L2Rpdj5cbiAgICAgICAgPC9kaXY+XG4gICAgICA8L01vZGFsPlxuXG4gICAgICB7Lyog6YeN5paw55Sf5oiQ5aSH55So56CB5qih5oCB5qGGICovfVxuICAgICAgPE1vZGFsXG4gICAgICAgIHRpdGxlPXtcbiAgICAgICAgICA8ZGl2IGNsYXNzTmFtZT0nZmxleCBpdGVtcy1jZW50ZXInIGRhdGEtaW5zcC1wYXRoPVwid2ViL2NsYXNzaWMvc3JjL2NvbXBvbmVudHMvc2V0dGluZ3MvcGVyc29uYWwvY29tcG9uZW50cy9Ud29GQVNldHRpbmcuanN4OjY0MzoxMTpkaXZcIiA+XG4gICAgICAgICAgICA8SWNvblJlZnJlc2ggY2xhc3NOYW1lPSdtci0yIHRleHQtc2xhdGUtNjAwJyAgZGF0YS1pbnNwLXBhdGg9XCJ3ZWIvY2xhc3NpYy9zcmMvY29tcG9uZW50cy9zZXR0aW5ncy9wZXJzb25hbC9jb21wb25lbnRzL1R3b0ZBU2V0dGluZy5qc3g6NjQ0OjEzOkljb25SZWZyZXNoXCIgLz5cbiAgICAgICAgICAgIHt0KCfph43mlrDnlJ/miJDlpIfnlKjnoIEnKX1cbiAgICAgICAgICA8L2Rpdj5cbiAgICAgICAgfVxuICAgICAgICB2aXNpYmxlPXtiYWNrdXBNb2RhbFZpc2libGV9XG4gICAgICAgIG9uQ2FuY2VsPXsoKSA9PiB7XG4gICAgICAgICAgc2V0QmFja3VwTW9kYWxWaXNpYmxlKGZhbHNlKTtcbiAgICAgICAgICBzZXRWZXJpZmljYXRpb25Db2RlKCcnKTtcbiAgICAgICAgICBzZXRCYWNrdXBDb2RlcyhbXSk7XG4gICAgICAgIH19XG4gICAgICAgIGZvb3Rlcj17cmVuZGVyUmVnZW5lcmF0ZU1vZGFsRm9vdGVyKCl9XG4gICAgICAgIHdpZHRoPXs1MDB9XG4gICAgICAgIHN0eWxlPXt7IG1heFdpZHRoOiAnOTB2dycgfX1cbiAgICAgICBkYXRhLWluc3AtcGF0aD1cIndlYi9jbGFzc2ljL3NyYy9jb21wb25lbnRzL3NldHRpbmdzL3BlcnNvbmFsL2NvbXBvbmVudHMvVHdvRkFTZXR0aW5nLmpzeDo2NDE6NzpNb2RhbFwiID5cbiAgICAgICAgPGRpdiBjbGFzc05hbWU9J3NwYWNlLXktNicgZGF0YS1pbnNwLXBhdGg9XCJ3ZWIvY2xhc3NpYy9zcmMvY29tcG9uZW50cy9zZXR0aW5ncy9wZXJzb25hbC9jb21wb25lbnRzL1R3b0ZBU2V0dGluZy5qc3g6NjU4Ojk6ZGl2XCIgPlxuICAgICAgICAgIHtiYWNrdXBDb2Rlcy5sZW5ndGggPT09IDAgPyAoXG4gICAgICAgICAgICA8PlxuICAgICAgICAgICAgICB7Lyog6K2m5ZGK5o+Q56S6ICovfVxuICAgICAgICAgICAgICA8ZGl2IGNsYXNzTmFtZT0ncm91bmRlZC14bCcgZGF0YS1pbnNwLXBhdGg9XCJ3ZWIvY2xhc3NpYy9zcmMvY29tcG9uZW50cy9zZXR0aW5ncy9wZXJzb25hbC9jb21wb25lbnRzL1R3b0ZBU2V0dGluZy5qc3g6NjYyOjE1OmRpdlwiID5cbiAgICAgICAgICAgICAgICA8QmFubmVyXG4gICAgICAgICAgICAgICAgICB0eXBlPSd3YXJuaW5nJ1xuICAgICAgICAgICAgICAgICAgZGVzY3JpcHRpb249e3QoXG4gICAgICAgICAgICAgICAgICAgICfph43mlrDnlJ/miJDlpIfnlKjnoIHlsIbkvb/njrDmnInnmoTlpIfnlKjnoIHlpLHmlYjvvIzor7fnoa7kv53mgqjlt7Lkv53lrZjkuoblvZPliY3nmoTlpIfnlKjnoIHjgIInLFxuICAgICAgICAgICAgICAgICAgKX1cbiAgICAgICAgICAgICAgICAgIGNsYXNzTmFtZT0nIXJvdW5kZWQtbGcnXG4gICAgICAgICAgICAgICAgIGRhdGEtaW5zcC1wYXRoPVwid2ViL2NsYXNzaWMvc3JjL2NvbXBvbmVudHMvc2V0dGluZ3MvcGVyc29uYWwvY29tcG9uZW50cy9Ud29GQVNldHRpbmcuanN4OjY2MzoxNzpCYW5uZXJcIiAvPlxuICAgICAgICAgICAgICA8L2Rpdj5cblxuICAgICAgICAgICAgICB7Lyog6aqM6K+B5Yy65Z+fICovfVxuICAgICAgICAgICAgICA8ZGl2IGNsYXNzTmFtZT0nc3BhY2UteS00JyBkYXRhLWluc3AtcGF0aD1cIndlYi9jbGFzc2ljL3NyYy9jb21wb25lbnRzL3NldHRpbmdzL3BlcnNvbmFsL2NvbXBvbmVudHMvVHdvRkFTZXR0aW5nLmpzeDo2NzM6MTU6ZGl2XCIgPlxuICAgICAgICAgICAgICAgIDxkaXYgZGF0YS1pbnNwLXBhdGg9XCJ3ZWIvY2xhc3NpYy9zcmMvY29tcG9uZW50cy9zZXR0aW5ncy9wZXJzb25hbC9jb21wb25lbnRzL1R3b0ZBU2V0dGluZy5qc3g6Njc0OjE3OmRpdlwiPlxuICAgICAgICAgICAgICAgICAgPFRleHRcbiAgICAgICAgICAgICAgICAgICAgc3Ryb25nXG4gICAgICAgICAgICAgICAgICAgIGNsYXNzTmFtZT0nYmxvY2sgbWItMiB0ZXh0LXNsYXRlLTcwMCBkYXJrOnRleHQtc2xhdGUtMjAwJ1xuICAgICAgICAgICAgICAgICAgIGRhdGEtaW5zcC1wYXRoPVwid2ViL2NsYXNzaWMvc3JjL2NvbXBvbmVudHMvc2V0dGluZ3MvcGVyc29uYWwvY29tcG9uZW50cy9Ud29GQVNldHRpbmcuanN4OjY3NToxOTpUZXh0XCIgPlxuICAgICAgICAgICAgICAgICAgICB7dCgn6aqM6K+B6Lqr5Lu9Jyl9XG4gICAgICAgICAgICAgICAgICA8L1RleHQ+XG4gICAgICAgICAgICAgICAgICA8SW5wdXRcbiAgICAgICAgICAgICAgICAgICAgcGxhY2Vob2xkZXI9e3QoJ+ivt+i+k+WFpeiupOivgeWZqOmqjOivgeeggScpfVxuICAgICAgICAgICAgICAgICAgICB2YWx1ZT17dmVyaWZpY2F0aW9uQ29kZX1cbiAgICAgICAgICAgICAgICAgICAgb25DaGFuZ2U9e3NldFZlcmlmaWNhdGlvbkNvZGV9XG4gICAgICAgICAgICAgICAgICAgIHNpemU9J2xhcmdlJ1xuICAgICAgICAgICAgICAgICAgICBjbGFzc05hbWU9JyFyb3VuZGVkLWxnJ1xuICAgICAgICAgICAgICAgICAgIGRhdGEtaW5zcC1wYXRoPVwid2ViL2NsYXNzaWMvc3JjL2NvbXBvbmVudHMvc2V0dGluZ3MvcGVyc29uYWwvY29tcG9uZW50cy9Ud29GQVNldHRpbmcuanN4OjY4MToxOTpJbnB1dFwiIC8+XG4gICAgICAgICAgICAgICAgPC9kaXY+XG4gICAgICAgICAgICAgIDwvZGl2PlxuICAgICAgICAgICAgPC8+XG4gICAgICAgICAgKSA6IChcbiAgICAgICAgICAgIDw+XG4gICAgICAgICAgICAgIHsvKiDmiJDlip/mj5DnpLogKi99XG4gICAgICAgICAgICAgIDxTcGFjZSB2ZXJ0aWNhbCBzdHlsZT17eyB3aWR0aDogJzEwMCUnIH19IGRhdGEtaW5zcC1wYXRoPVwid2ViL2NsYXNzaWMvc3JjL2NvbXBvbmVudHMvc2V0dGluZ3MvcGVyc29uYWwvY29tcG9uZW50cy9Ud29GQVNldHRpbmcuanN4OjY5NDoxNTpTcGFjZVwiID5cbiAgICAgICAgICAgICAgICA8ZGl2IGNsYXNzTmFtZT0nZmxleCBpdGVtcy1jZW50ZXIganVzdGlmeS1jZW50ZXIgZ2FwLTInIGRhdGEtaW5zcC1wYXRoPVwid2ViL2NsYXNzaWMvc3JjL2NvbXBvbmVudHMvc2V0dGluZ3MvcGVyc29uYWwvY29tcG9uZW50cy9Ud29GQVNldHRpbmcuanN4OjY5NToxNzpkaXZcIiA+XG4gICAgICAgICAgICAgICAgICA8QmFkZ2UgZG90IHR5cGU9J3N1Y2Nlc3MnICBkYXRhLWluc3AtcGF0aD1cIndlYi9jbGFzc2ljL3NyYy9jb21wb25lbnRzL3NldHRpbmdzL3BlcnNvbmFsL2NvbXBvbmVudHMvVHdvRkFTZXR0aW5nLmpzeDo2OTY6MTk6QmFkZ2VcIiAvPlxuICAgICAgICAgICAgICAgICAgPFRleHRcbiAgICAgICAgICAgICAgICAgICAgc3Ryb25nXG4gICAgICAgICAgICAgICAgICAgIGNsYXNzTmFtZT0ndGV4dC1sZyB0ZXh0LXNsYXRlLTcwMCBkYXJrOnRleHQtc2xhdGUtMjAwJ1xuICAgICAgICAgICAgICAgICAgIGRhdGEtaW5zcC1wYXRoPVwid2ViL2NsYXNzaWMvc3JjL2NvbXBvbmVudHMvc2V0dGluZ3MvcGVyc29uYWwvY29tcG9uZW50cy9Ud29GQVNldHRpbmcuanN4OjY5NzoxOTpUZXh0XCIgPlxuICAgICAgICAgICAgICAgICAgICB7dCgn5paw55qE5aSH55So56CB5bey55Sf5oiQJyl9XG4gICAgICAgICAgICAgICAgICA8L1RleHQ+XG4gICAgICAgICAgICAgICAgPC9kaXY+XG4gICAgICAgICAgICAgICAgPFRleHQgY2xhc3NOYW1lPSd0ZXh0LXNsYXRlLTUwMCBkYXJrOnRleHQtc2xhdGUtNDAwIHRleHQtc20nIGRhdGEtaW5zcC1wYXRoPVwid2ViL2NsYXNzaWMvc3JjL2NvbXBvbmVudHMvc2V0dGluZ3MvcGVyc29uYWwvY29tcG9uZW50cy9Ud29GQVNldHRpbmcuanN4OjcwNDoxNzpUZXh0XCIgPlxuICAgICAgICAgICAgICAgICAge3QoJ+aXp+eahOWkh+eUqOeggeW3suWkseaViO+8jOivt+S/neWtmOaWsOeahOWkh+eUqOeggScpfVxuICAgICAgICAgICAgICAgIDwvVGV4dD5cblxuICAgICAgICAgICAgICAgIHsvKiDlpIfnlKjnoIHlsZXnpLogKi99XG4gICAgICAgICAgICAgICAgPEJhY2t1cENvZGVzRGlzcGxheVxuICAgICAgICAgICAgICAgICAgY29kZXM9e2JhY2t1cENvZGVzfVxuICAgICAgICAgICAgICAgICAgdGl0bGU9e3QoJ+aWsOeahOWkh+eUqOaBouWkjeS7o+eggScpfVxuICAgICAgICAgICAgICAgICAgb25Db3B5PXtjb3B5QmFja3VwQ29kZXN9XG4gICAgICAgICAgICAgICAgIGRhdGEtaW5zcC1wYXRoPVwid2ViL2NsYXNzaWMvc3JjL2NvbXBvbmVudHMvc2V0dGluZ3MvcGVyc29uYWwvY29tcG9uZW50cy9Ud29GQVNldHRpbmcuanN4OjcwOToxNzpCYWNrdXBDb2Rlc0Rpc3BsYXlcIiAvPlxuICAgICAgICAgICAgICA8L1NwYWNlPlxuICAgICAgICAgICAgPC8+XG4gICAgICAgICAgKX1cbiAgICAgICAgPC9kaXY+XG4gICAgICA8L01vZGFsPlxuICAgIDwvPlxuICApO1xufTtcblxuZXhwb3J0IGRlZmF1bHQgVHdvRkFTZXR0aW5nO1xuIl0sImZpbGUiOiJFOi9uZXctYXBpL3dlYi9jbGFzc2ljL3NyYy9jb21wb25lbnRzL3NldHRpbmdzL3BlcnNvbmFsL2NvbXBvbmVudHMvVHdvRkFTZXR0aW5nLmpzeCJ9

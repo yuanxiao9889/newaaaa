@@ -105,6 +105,30 @@ type TaskPrivateData struct {
 	SubscriptionId int                 `json:"subscription_id,omitempty"` // 订阅 ID，用于订阅退款
 	TokenId        int                 `json:"token_id,omitempty"`        // 令牌 ID，用于令牌额度退款
 	BillingContext *TaskBillingContext `json:"billing_context,omitempty"` // 计费参数快照（用于轮询阶段重新计算）
+
+	AssetType string `json:"asset_type,omitempty"`
+	LocalPath string `json:"local_path,omitempty"`
+	MimeType  string `json:"mime_type,omitempty"`
+	FileSize  int64  `json:"file_size,omitempty"`
+	StoredAt  int64  `json:"stored_at,omitempty"`
+	ExpiresAt int64  `json:"expires_at,omitempty"`
+	SourceURL string `json:"source_url,omitempty"`
+
+	InternalAsync      bool   `json:"internal_async,omitempty"`
+	RequestBodyPath    string `json:"request_body_path,omitempty"`
+	RequestContentType string `json:"request_content_type,omitempty"`
+	RequestBodySize    int64  `json:"request_body_size,omitempty"`
+	RequestMethod      string `json:"request_method,omitempty"`
+	RequestPath        string `json:"request_path,omitempty"`
+	RequestQuery       string `json:"request_query,omitempty"`
+	WorkerAttempts    int    `json:"worker_attempts,omitempty"`
+	WorkerHeartbeatAt int64  `json:"worker_heartbeat_at,omitempty"`
+
+	BillingState     string `json:"billing_state,omitempty"`
+	PreConsumedQuota int    `json:"pre_consumed_quota,omitempty"`
+	ActualQuota      int    `json:"actual_quota,omitempty"`
+	BillingError     string `json:"billing_error,omitempty"`
+	BillingUpdatedAt int64  `json:"billing_updated_at,omitempty"`
 }
 
 // TaskBillingContext 记录任务提交时的计费参数，以便轮询阶段可以重新计算额度。
@@ -308,6 +332,79 @@ func GetAllUnFinishSyncTasks(limit int) []*Task {
 	var err error
 	// get all tasks progress is not 100%
 	err = DB.Where("progress != ?", "100%").Where("status != ?", TaskStatusFailure).Where("status != ?", TaskStatusSuccess).Limit(limit).Order("id").Find(&tasks).Error
+	if err != nil {
+		return nil
+	}
+	return tasks
+}
+
+func CountUnfinishedInternalAsyncImageTasks(limit int) int {
+	if limit <= 0 {
+		limit = 1000
+	}
+	var count int64
+	query := DB.Model(&Task{}).
+		Where("platform = ?", constant.TaskPlatformInternalImage).
+		Where("action IN ?", []string{constant.TaskActionImageGenerate, constant.TaskActionImageEdit}).
+		Where("status NOT IN ?", []TaskStatus{TaskStatusFailure, TaskStatusSuccess})
+	if err := query.Limit(limit).Count(&count).Error; err != nil {
+		return 0
+	}
+	if count > int64(limit) {
+		return limit
+	}
+	return int(count)
+}
+
+func GetRunnableInternalAsyncImageTasks(limit int, staleBefore int64) []*Task {
+	if limit <= 0 {
+		limit = 10
+	}
+	candidates := getUnfinishedImageTasksForInternalAsync(limit * 20)
+	tasks := make([]*Task, 0, limit)
+	for _, task := range candidates {
+		if task == nil || !task.PrivateData.InternalAsync {
+			continue
+		}
+		if task.Status == TaskStatusInProgress && task.PrivateData.WorkerHeartbeatAt > staleBefore {
+			continue
+		}
+		tasks = append(tasks, task)
+		if len(tasks) >= limit {
+			break
+		}
+	}
+	return tasks
+}
+
+func getUnfinishedImageTasksForInternalAsync(limit int) []*Task {
+	var tasks []*Task
+	if limit <= 0 {
+		limit = 1000
+	}
+	err := DB.Where("action IN ?", []string{constant.TaskActionImageGenerate, constant.TaskActionImageEdit}).
+		Where("platform = ?", constant.TaskPlatformInternalImage).
+		Where("status NOT IN ?", []TaskStatus{TaskStatusFailure, TaskStatusSuccess}).
+		Order("id asc").
+		Limit(limit).
+		Find(&tasks).Error
+	if err != nil {
+		return nil
+	}
+	return tasks
+}
+
+func GetSuccessfulImageTasksForCleanup(startIdx int, num int) []*Task {
+	if num <= 0 {
+		num = 500
+	}
+	var tasks []*Task
+	err := DB.Where("status = ?", TaskStatusSuccess).
+		Where("action IN ?", []string{constant.TaskActionImageGenerate, constant.TaskActionImageEdit}).
+		Order("finish_time asc, id asc").
+		Limit(num).
+		Offset(startIdx).
+		Find(&tasks).Error
 	if err != nil {
 		return nil
 	}

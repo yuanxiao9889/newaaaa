@@ -203,3 +203,12 @@ func SearchRateLimit() func(c *gin.Context) {
 	}
 	return userRateLimitFactory(common.SearchRateLimitNum, common.SearchRateLimitDuration, "SR")
 }
+
+// AsyncImageTaskStatusRateLimit returns a per-user limiter for image task
+// polling endpoints. Configurable via ASYNC_IMAGE_TASK_STATUS_RATE_LIMIT_*.
+func AsyncImageTaskStatusRateLimit() func(c *gin.Context) {
+	if !common.AsyncImageTaskStatusRateLimitEnable {
+		return defNext
+	}
+	return userRateLimitFactory(common.AsyncImageTaskStatusRateLimitNum, common.AsyncImageTaskStatusRateLimitDuration, "AIT")
+}

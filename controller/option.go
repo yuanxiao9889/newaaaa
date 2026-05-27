@@ -241,6 +241,33 @@ func UpdateOption(c *gin.Context) {
 			})
 			return
 		}
+	case common.AsyncImageRetentionHoursOptionKey:
+		_, err = common.ParseAsyncImageRetentionHours(option.Value.(string))
+		if err != nil {
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": err.Error(),
+			})
+			return
+		}
+	case common.AsyncImageWorkerConcurrencyOptionKey:
+		_, err = common.ParseAsyncImageWorkerConcurrency(option.Value.(string))
+		if err != nil {
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": err.Error(),
+			})
+			return
+		}
+	case common.AsyncImageMaxUnfinishedTasksOptionKey:
+		_, err = common.ParseAsyncImageMaxUnfinishedTasks(option.Value.(string))
+		if err != nil {
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": err.Error(),
+			})
+			return
+		}
 	case "AudioRatio":
 		err = ratio_setting.UpdateAudioRatioByJSONString(option.Value.(string))
 		if err != nil {

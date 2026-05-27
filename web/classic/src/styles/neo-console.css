@@ -1,0 +1,956 @@
+/*
+Copyright (C) 2025 QuantumNous
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU Affero General Public License as
+published by the Free Software Foundation, either version 3 of the
+License, or (at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+GNU Affero General Public License for more details.
+
+You should have received a copy of the GNU Affero General Public License
+along with this program. If not, see <https://www.gnu.org/licenses/>.
+
+For commercial licensing, please contact support@quantumnous.com
+*/
+
+body.neo-console-page,
+.neo-console-shell {
+  --neo-bg: #050910;
+  --neo-bg-soft: #07101c;
+  --neo-panel: rgba(9, 17, 31, 0.72);
+  --neo-panel-strong: rgba(11, 20, 36, 0.9);
+  --neo-panel-soft: rgba(255, 255, 255, 0.045);
+  --neo-border: rgba(173, 207, 255, 0.16);
+  --neo-border-strong: rgba(103, 220, 255, 0.28);
+  --neo-text: #f7f9ff;
+  --neo-muted: rgba(205, 214, 232, 0.72);
+  --neo-faint: rgba(205, 214, 232, 0.52);
+  --neo-cyan: #67dcff;
+  --neo-blue: #4f9dff;
+  --neo-violet: #c777ff;
+  --neo-gold: #f4c46f;
+  --neo-green: #63f3be;
+  --neo-danger: #ff718d;
+  --neo-radius: 20px;
+  --neo-radius-sm: 12px;
+  --neo-shadow: 0 24px 90px rgba(0, 0, 0, 0.38);
+  --neo-glow: 0 0 34px rgba(103, 220, 255, 0.16);
+  --neo-speed: 180ms;
+  --semi-color-bg-0: rgba(9, 17, 31, 0.82);
+  --semi-color-bg-1: rgba(11, 20, 36, 0.88);
+  --semi-color-bg-2: rgba(13, 24, 42, 0.94);
+  --semi-color-fill-0: rgba(255, 255, 255, 0.05);
+  --semi-color-fill-1: rgba(103, 220, 255, 0.1);
+  --semi-color-fill-2: rgba(103, 220, 255, 0.16);
+  --semi-color-border: rgba(173, 207, 255, 0.16);
+  --semi-color-text-0: var(--neo-text);
+  --semi-color-text-1: var(--neo-muted);
+  --semi-color-text-2: var(--neo-faint);
+  --semi-color-primary: #67dcff;
+  --semi-color-primary-light-default: rgba(103, 220, 255, 0.12);
+  --semi-color-primary-light-hover: rgba(103, 220, 255, 0.18);
+  --semi-color-primary-light-active: rgba(103, 220, 255, 0.24);
+  margin: 0;
+  color: var(--neo-text);
+  background: var(--neo-bg);
+}
+
+body.neo-console-page::before,
+body.neo-console-page::after {
+  content: '';
+  pointer-events: none;
+  position: fixed;
+  inset: 0;
+  z-index: -2;
+}
+
+body.neo-console-page::before {
+  background:
+    radial-gradient(circle at 84% 8%, rgba(244, 196, 111, 0.2), transparent 22rem),
+    radial-gradient(circle at 12% 22%, rgba(28, 178, 235, 0.2), transparent 28rem),
+    radial-gradient(circle at 76% 70%, rgba(141, 76, 255, 0.18), transparent 32rem),
+    linear-gradient(180deg, #050910 0%, #07101c 44%, #04070c 100%);
+}
+
+body.neo-console-page::after {
+  z-index: -1;
+  opacity: 0.26;
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.035) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.025) 1px, transparent 1px);
+  background-size: 72px 72px;
+  mask-image: radial-gradient(circle at center, #000 0%, transparent 78%);
+}
+
+body.neo-console-page,
+body.neo-console-page button,
+body.neo-console-page input,
+body.neo-console-page textarea,
+body.neo-console-page .semi-typography {
+  letter-spacing: 0;
+}
+
+body.neo-console-page a {
+  color: var(--neo-cyan);
+}
+
+body.neo-console-page .neo-console-shell {
+  min-height: 100vh;
+  color: var(--neo-text);
+  background: transparent !important;
+}
+
+.neo-console-shell .semi-layout,
+.neo-console-shell .semi-layout-content,
+.neo-console-shell .semi-layout-sider,
+.neo-console-shell .semi-layout-footer {
+  color: var(--neo-text);
+  background: transparent !important;
+}
+
+.neo-console-main-layout,
+.neo-console-workspace {
+  min-height: 100vh;
+}
+
+.neo-console-content {
+  min-height: calc(100vh - 64px);
+  isolation: isolate;
+}
+
+.neo-console-content::before {
+  content: '';
+  pointer-events: none;
+  position: absolute;
+  inset: 64px 0 auto;
+  height: 220px;
+  z-index: -1;
+  background:
+    radial-gradient(ellipse 55% 44% at 22% 12%, rgba(103, 220, 255, 0.12), transparent 76%),
+    radial-gradient(ellipse 48% 42% at 82% 10%, rgba(199, 119, 255, 0.12), transparent 78%);
+}
+
+.neo-header {
+  border-bottom: 0;
+  background:
+    linear-gradient(180deg, rgba(9, 17, 31, 0.9), rgba(7, 13, 24, 0.72)) !important;
+  box-shadow: 0 18px 46px rgba(0, 0, 0, 0.22);
+  backdrop-filter: blur(22px) saturate(1.2);
+}
+
+.neo-header::before {
+  content: '';
+  pointer-events: none;
+  position: absolute;
+  inset: 0;
+  opacity: 0.58;
+  background:
+    radial-gradient(ellipse 28% 80% at 16% 0%, rgba(103, 220, 255, 0.14), transparent 72%),
+    radial-gradient(ellipse 24% 80% at 84% 0%, rgba(244, 196, 111, 0.12), transparent 70%);
+}
+
+.neo-header-inner {
+  position: relative;
+  z-index: 1;
+  padding-inline: 18px !important;
+}
+
+.neo-header-row {
+  width: 100%;
+  max-width: none;
+  margin: 0;
+}
+
+.neo-header-logo {
+  min-width: 0;
+  gap: 0.18rem;
+  color: var(--neo-text);
+  text-decoration: none;
+  filter: drop-shadow(0 0 13px rgba(255, 255, 255, 0.38));
+}
+
+.neo-header-logo-mark {
+  width: 42px;
+  height: 42px;
+  flex: 0 0 42px;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.neo-header-logo-mark .semi-skeleton-image {
+  width: 100% !important;
+  height: 100% !important;
+  border-radius: 14px !important;
+  background: rgba(255, 255, 255, 0.08) !important;
+}
+
+.neo-header-logo .semi-typography {
+  color: #f8fbff !important;
+  text-shadow:
+    0 0 12px rgba(255, 255, 255, 0.58),
+    0 0 24px rgba(103, 220, 255, 0.18);
+}
+
+.neo-header-brand-word {
+  font-size: 1.42rem !important;
+  font-weight: 860 !important;
+  line-height: 1 !important;
+  letter-spacing: 0.08em !important;
+}
+
+.neo-header-nav {
+  scrollbar-width: none;
+}
+
+.neo-nav-link {
+  min-height: 38px;
+  padding-inline: 0.85rem !important;
+  color: rgba(232, 238, 250, 0.72);
+  border: 1px solid transparent;
+  border-radius: 999px !important;
+  text-decoration: none;
+}
+
+.neo-nav-link:hover {
+  color: var(--neo-text) !important;
+  border-color: rgba(103, 220, 255, 0.22);
+  background: rgba(103, 220, 255, 0.08);
+  box-shadow: inset 0 1px 16px rgba(255, 255, 255, 0.04);
+}
+
+.neo-header-actions .semi-button,
+.neo-mobile-menu-button {
+  color: var(--neo-text) !important;
+  background: rgba(255, 255, 255, 0.06) !important;
+  border: 1px solid rgba(173, 207, 255, 0.14) !important;
+  border-radius: 999px !important;
+  box-shadow: inset 0 1px 14px rgba(255, 255, 255, 0.04);
+}
+
+.neo-header-actions .semi-button:hover,
+.neo-mobile-menu-button:hover {
+  background: rgba(103, 220, 255, 0.12) !important;
+  border-color: rgba(103, 220, 255, 0.28) !important;
+}
+
+.neo-console-sider {
+  box-sizing: border-box;
+  height: calc(100vh - 64px);
+  padding: 10px 8px;
+  overflow: visible;
+}
+
+.neo-console-sider .sidebar-container {
+  box-sizing: border-box;
+  width: 100%;
+  height: 100%;
+  padding: 10px 8px;
+  overflow: hidden auto;
+  background:
+    linear-gradient(145deg, rgba(255, 255, 255, 0.08), transparent 42%),
+    rgba(9, 17, 31, 0.74);
+  border: 1px solid rgba(173, 207, 255, 0.16);
+  border-radius: 22px;
+  box-shadow: var(--neo-shadow), var(--neo-glow);
+  backdrop-filter: blur(22px) saturate(1.18);
+}
+
+.neo-console-sider .semi-navigation {
+  color: var(--neo-text);
+  background: transparent;
+}
+
+.neo-console-sider .semi-navigation-list-wrapper {
+  background: transparent;
+}
+
+.neo-console-sider .sidebar-nav {
+  width: 100%;
+}
+
+.neo-console-sider .sidebar-group-label {
+  margin: 12px 10px 8px;
+  color: rgba(205, 214, 232, 0.46);
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.neo-console-sider .sidebar-divider {
+  margin: 12px 8px;
+  border-color: rgba(173, 207, 255, 0.1) !important;
+}
+
+.neo-console-sider .sidebar-section,
+.neo-console-sider .semi-navigation-list,
+.neo-console-sider .semi-navigation-list > div {
+  position: relative;
+  z-index: 0;
+  min-height: 0;
+}
+
+.neo-console-sider .semi-navigation-list > a,
+.neo-console-sider .semi-navigation-sub > a {
+  display: block;
+  width: 100%;
+  color: inherit;
+}
+
+.neo-console-sider .semi-navigation-item,
+.neo-console-sider .semi-navigation-sub-title {
+  box-sizing: border-box;
+  height: 42px !important;
+  min-height: 42px;
+  width: calc(100% - 4px);
+  margin: 4px auto !important;
+  padding: 6px 10px !important;
+  color: rgba(232, 238, 250, 0.72);
+  border: 1px solid transparent;
+  border-radius: 14px;
+  transition:
+    background var(--neo-speed) ease,
+    border-color var(--neo-speed) ease,
+    color var(--neo-speed) ease,
+    transform var(--neo-speed) ease;
+}
+
+.neo-console-sider .semi-navigation-sub-wrap {
+  position: relative !important;
+  z-index: 0;
+  display: block !important;
+  width: 100%;
+  height: auto !important;
+  min-height: 42px;
+  margin: 0 auto 6px !important;
+  padding: 0 !important;
+  overflow: visible !important;
+  background: transparent !important;
+  border: 0 !important;
+  box-shadow: none !important;
+}
+
+.neo-console-sider .semi-navigation-sub-wrap > .semi-navigation-sub-title {
+  margin: 4px auto !important;
+}
+
+.neo-console-sider .semi-navigation-sub {
+  position: relative !important;
+  z-index: 0;
+  display: block !important;
+  box-sizing: border-box;
+  width: 100%;
+  max-height: min(34vh, 300px);
+  margin: 0 0 8px !important;
+  padding: 2px 0 4px 16px !important;
+  overflow-x: hidden !important;
+  overflow-y: auto !important;
+  list-style: none;
+  background: rgba(4, 10, 18, 0.18);
+  border-left: 1px solid rgba(103, 220, 255, 0.16);
+  border-radius: 0 0 14px 14px;
+  scrollbar-width: none;
+}
+
+.neo-console-sider .semi-navigation-sub::-webkit-scrollbar {
+  display: none;
+}
+
+.neo-console-sider .semi-navigation-sub .semi-navigation-item {
+  position: relative !important;
+  display: flex !important;
+  align-items: center !important;
+  width: calc(100% - 8px);
+  height: 36px !important;
+  min-height: 36px;
+  margin: 3px 0 3px auto !important;
+  padding: 5px 10px !important;
+  color: rgba(232, 238, 250, 0.64);
+  border-radius: 12px;
+  transform: none !important;
+}
+
+.neo-console-sider .semi-navigation-sub .semi-navigation-item-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.neo-console-sider .semi-navigation-item:hover,
+.neo-console-sider .semi-navigation-sub-title:hover {
+  color: var(--neo-text);
+  background: rgba(103, 220, 255, 0.08);
+  border-color: rgba(103, 220, 255, 0.18);
+  transform: none;
+}
+
+.neo-console-sider .semi-navigation-item-selected,
+.neo-console-sider .semi-navigation-item-selected:hover {
+  color: var(--neo-text) !important;
+  background:
+    linear-gradient(135deg, rgba(103, 220, 255, 0.18), rgba(199, 119, 255, 0.1)),
+    rgba(255, 255, 255, 0.06) !important;
+  border-color: rgba(103, 220, 255, 0.34) !important;
+  box-shadow:
+    inset 0 1px 18px rgba(255, 255, 255, 0.06),
+    0 0 24px rgba(103, 220, 255, 0.12);
+}
+
+.neo-console-sider .sidebar-icon-container {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 28px;
+  height: 28px;
+  margin-right: 10px;
+  color: var(--neo-cyan);
+  border-radius: 10px;
+  background: rgba(103, 220, 255, 0.08);
+}
+
+.neo-console-sider .sidebar-sub-icon-container {
+  margin-right: 10px;
+}
+
+body.sidebar-collapsed.neo-console-page .neo-console-sider {
+  padding: 10px 6px;
+}
+
+body.sidebar-collapsed.neo-console-page .neo-console-sider .sidebar-container {
+  padding: 10px 5px;
+  border-radius: 20px;
+}
+
+body.sidebar-collapsed.neo-console-page .neo-console-sider .semi-navigation-item,
+body.sidebar-collapsed.neo-console-page .neo-console-sider .semi-navigation-sub-title {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  width: 38px !important;
+  min-width: 38px !important;
+  height: 42px !important;
+  min-height: 42px !important;
+  margin: 4px auto !important;
+  padding: 0 !important;
+  transform: none !important;
+}
+
+body.sidebar-collapsed.neo-console-page .neo-console-sider .semi-navigation-sub-wrap {
+  width: 38px !important;
+  height: 42px !important;
+  min-height: 42px !important;
+  margin: 4px auto !important;
+  overflow: visible !important;
+}
+
+body.sidebar-collapsed.neo-console-page .neo-console-sider .semi-navigation-sub,
+body.sidebar-collapsed.neo-console-page .neo-console-sider .semi-collapsible-wrapper {
+  display: none !important;
+  height: 0 !important;
+  max-height: 0 !important;
+  overflow: hidden !important;
+}
+
+body.sidebar-collapsed.neo-console-page .neo-console-sider .semi-navigation-item-icon,
+body.sidebar-collapsed.neo-console-page .neo-console-sider .semi-navigation-item-icon-info {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  margin: 0 !important;
+}
+
+body.sidebar-collapsed.neo-console-page .neo-console-sider .semi-navigation-item-text,
+body.sidebar-collapsed.neo-console-page .neo-console-sider .sidebar-group-label,
+body.sidebar-collapsed.neo-console-page .neo-console-sider .sidebar-divider {
+  display: none !important;
+}
+
+body.sidebar-collapsed.neo-console-page .neo-console-sider .sidebar-icon-container,
+body.sidebar-collapsed.neo-console-page .neo-console-sider .sidebar-sub-icon-container {
+  width: 30px;
+  height: 30px;
+  margin: 0 !important;
+}
+
+.neo-card-pro,
+body.neo-console-page .semi-card {
+  color: var(--neo-text);
+  background:
+    linear-gradient(145deg, rgba(255, 255, 255, 0.075), transparent 40%),
+    var(--neo-panel) !important;
+  border: 1px solid var(--neo-border) !important;
+  box-shadow: var(--neo-shadow), inset 0 1px 20px rgba(255, 255, 255, 0.035) !important;
+  backdrop-filter: blur(18px) saturate(1.15);
+}
+
+body.neo-console-page .semi-card:hover {
+  border-color: rgba(103, 220, 255, 0.22) !important;
+}
+
+body.neo-console-page .semi-card-header {
+  border-color: rgba(173, 207, 255, 0.12) !important;
+}
+
+body.neo-console-page .semi-card-body,
+body.neo-console-page .semi-card-header,
+body.neo-console-page .semi-card-footer {
+  color: var(--neo-text);
+  background: transparent !important;
+}
+
+body.neo-console-page .semi-divider-horizontal {
+  border-color: rgba(173, 207, 255, 0.12) !important;
+}
+
+body.neo-console-page .semi-table,
+body.neo-console-page .semi-table-container {
+  color: var(--neo-text);
+  background: transparent !important;
+}
+
+body.neo-console-page .semi-table-thead > .semi-table-row > .semi-table-row-head {
+  color: rgba(232, 238, 250, 0.68);
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  background: rgba(103, 220, 255, 0.07) !important;
+  border-color: rgba(173, 207, 255, 0.12) !important;
+}
+
+body.neo-console-page .semi-table-tbody > .semi-table-row > .semi-table-row-cell {
+  color: rgba(239, 244, 255, 0.86);
+  background: rgba(255, 255, 255, 0.01) !important;
+  border-color: rgba(173, 207, 255, 0.09) !important;
+}
+
+body.neo-console-page .semi-table-tbody > .semi-table-row:hover > .semi-table-row-cell {
+  background: rgba(103, 220, 255, 0.065) !important;
+}
+
+body.neo-console-page .semi-table-tbody > .semi-table-row.neo-channel-row-disabled > .semi-table-row-cell,
+body.neo-console-page .semi-table-tbody > .semi-table-row.neo-channel-row-disabled:hover > .semi-table-row-cell {
+  color: rgba(255, 232, 232, 0.92);
+  background:
+    linear-gradient(90deg, rgba(255, 91, 111, 0.18), rgba(255, 91, 111, 0.09)),
+    rgba(92, 23, 31, 0.28) !important;
+  border-color: rgba(255, 111, 128, 0.22) !important;
+}
+
+body.neo-console-page .semi-table-tbody > .semi-table-row.neo-channel-row-disabled > .semi-table-row-cell:first-child {
+  box-shadow: inset 3px 0 0 rgba(255, 91, 111, 0.72);
+}
+
+body.neo-console-page .semi-table-tbody > .semi-table-row.neo-channel-row-auto-disabled > .semi-table-row-cell,
+body.neo-console-page .semi-table-tbody > .semi-table-row.neo-channel-row-auto-disabled:hover > .semi-table-row-cell {
+  background:
+    linear-gradient(90deg, rgba(244, 196, 111, 0.14), rgba(244, 196, 111, 0.06)),
+    rgba(67, 47, 18, 0.2) !important;
+  border-color: rgba(244, 196, 111, 0.18) !important;
+}
+
+.neo-mobile-row-card {
+  border-radius: 18px !important;
+}
+
+.neo-mobile-row-card.neo-channel-row-disabled {
+  background:
+    linear-gradient(135deg, rgba(255, 91, 111, 0.18), rgba(255, 91, 111, 0.08)),
+    rgba(92, 23, 31, 0.28) !important;
+  border-color: rgba(255, 111, 128, 0.26) !important;
+}
+
+.neo-mobile-row-card.neo-channel-row-auto-disabled {
+  background:
+    linear-gradient(135deg, rgba(244, 196, 111, 0.14), rgba(244, 196, 111, 0.06)),
+    rgba(67, 47, 18, 0.2) !important;
+  border-color: rgba(244, 196, 111, 0.2) !important;
+}
+
+.neo-mobile-row-card span {
+  color: rgba(205, 214, 232, 0.74) !important;
+}
+
+body.neo-console-page .semi-button {
+  border-radius: 12px;
+  transition:
+    transform var(--neo-speed) ease,
+    background var(--neo-speed) ease,
+    border-color var(--neo-speed) ease,
+    box-shadow var(--neo-speed) ease;
+}
+
+body.neo-console-page .semi-button:not(.semi-button-disabled):hover {
+  transform: translateY(-1px);
+}
+
+body.neo-console-page .semi-button-primary,
+body.neo-console-page .semi-button-primary.semi-button-solid {
+  color: #041018 !important;
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.58), transparent 26%),
+    linear-gradient(135deg, var(--neo-cyan), #8a7bff) !important;
+  border-color: rgba(103, 220, 255, 0.5) !important;
+  box-shadow: 0 14px 34px rgba(66, 166, 255, 0.22);
+}
+
+body.neo-console-page .semi-button-tertiary,
+body.neo-console-page .semi-button-light,
+body.neo-console-page .semi-button-borderless {
+  color: var(--neo-text) !important;
+  background: rgba(255, 255, 255, 0.055) !important;
+  border-color: rgba(173, 207, 255, 0.13) !important;
+}
+
+body.neo-console-page .semi-input-wrapper,
+body.neo-console-page .semi-select,
+body.neo-console-page .semi-datepicker,
+body.neo-console-page .semi-input-textarea-wrapper,
+body.neo-console-page .semi-input-number {
+  color: var(--neo-text);
+  background: rgba(4, 9, 17, 0.52) !important;
+  border: 1px solid rgba(173, 207, 255, 0.15) !important;
+  border-radius: 12px !important;
+  box-shadow: inset 0 1px 16px rgba(255, 255, 255, 0.025);
+}
+
+body.neo-console-page .semi-input-wrapper:hover,
+body.neo-console-page .semi-select:hover,
+body.neo-console-page .semi-input-textarea-wrapper:hover {
+  border-color: rgba(103, 220, 255, 0.32) !important;
+}
+
+body.neo-console-page .semi-input-wrapper-focus,
+body.neo-console-page .semi-select-focus,
+body.neo-console-page .semi-input-textarea-wrapper-focus {
+  border-color: rgba(103, 220, 255, 0.48) !important;
+  box-shadow: 0 0 0 3px rgba(103, 220, 255, 0.1) !important;
+}
+
+body.neo-console-page .semi-form-field-label,
+body.neo-console-page .semi-form-field-label-text {
+  color: rgba(232, 238, 250, 0.74) !important;
+  font-weight: 700;
+}
+
+body.neo-console-page .semi-tabs-bar {
+  border-color: rgba(173, 207, 255, 0.12) !important;
+}
+
+body.neo-console-page .semi-tabs-tab {
+  color: rgba(232, 238, 250, 0.68);
+  border-radius: 12px 12px 0 0;
+}
+
+body.neo-console-page .semi-tabs-tab-active {
+  color: var(--neo-text) !important;
+  background: rgba(103, 220, 255, 0.1) !important;
+}
+
+body.neo-console-page .semi-tabs-tab-line.semi-tabs-tab-active::before {
+  background: var(--neo-cyan) !important;
+}
+
+body.neo-console-page .semi-tag {
+  color: rgba(239, 244, 255, 0.86);
+  border-color: rgba(173, 207, 255, 0.14);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+body.neo-console-page .usage-log-type-tag {
+  font-weight: 750;
+  letter-spacing: 0;
+}
+
+body.neo-console-page .usage-log-type-consume {
+  color: #b9ffe4 !important;
+  border-color: rgba(52, 236, 166, 0.34) !important;
+  background:
+    linear-gradient(135deg, rgba(52, 236, 166, 0.22), rgba(54, 180, 255, 0.1)),
+    rgba(22, 92, 72, 0.18) !important;
+  box-shadow: inset 0 1px 12px rgba(255, 255, 255, 0.04), 0 0 18px rgba(52, 236, 166, 0.12);
+}
+
+body.neo-console-page .usage-log-type-error {
+  color: #ffd0d0 !important;
+  border-color: rgba(255, 104, 104, 0.36) !important;
+  background:
+    linear-gradient(135deg, rgba(255, 104, 104, 0.24), rgba(255, 177, 92, 0.1)),
+    rgba(110, 31, 44, 0.2) !important;
+  box-shadow: inset 0 1px 12px rgba(255, 255, 255, 0.04), 0 0 18px rgba(255, 104, 104, 0.13);
+}
+
+body.neo-console-page .semi-pagination {
+  color: var(--neo-muted);
+}
+
+body.neo-console-page .semi-page-item {
+  color: var(--neo-muted);
+  background: rgba(255, 255, 255, 0.045);
+  border-color: rgba(173, 207, 255, 0.12);
+  border-radius: 10px;
+}
+
+body.neo-console-page .semi-page-item-active {
+  color: #041018;
+  background: var(--neo-cyan);
+  border-color: var(--neo-cyan);
+}
+
+body.neo-console-page .semi-modal-content,
+body.neo-console-page .semi-modal-confirm {
+  color: var(--neo-text);
+  background:
+    linear-gradient(145deg, rgba(255, 255, 255, 0.08), transparent 38%),
+    rgba(9, 17, 31, 0.94) !important;
+  border: 1px solid rgba(173, 207, 255, 0.18);
+  border-radius: 22px;
+  box-shadow: 0 34px 120px rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(22px) saturate(1.16);
+}
+
+body.neo-console-page .semi-modal-header,
+body.neo-console-page .semi-modal-footer {
+  border-color: rgba(173, 207, 255, 0.12) !important;
+}
+
+body.neo-console-page .semi-modal-mask {
+  background: rgba(1, 4, 10, 0.72) !important;
+  backdrop-filter: blur(8px);
+}
+
+body.neo-console-page .semi-popover-wrapper,
+body.neo-console-page .semi-dropdown,
+body.neo-console-page .semi-select-option-list {
+  color: var(--neo-text);
+  background: rgba(9, 17, 31, 0.96) !important;
+  border: 1px solid rgba(173, 207, 255, 0.16);
+  border-radius: 14px;
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.42);
+  backdrop-filter: blur(18px);
+}
+
+body.neo-console-page .semi-empty-description {
+  color: var(--neo-muted) !important;
+}
+
+body.neo-console-page .semi-spin-wrapper {
+  color: var(--neo-cyan);
+}
+
+.neo-loading {
+  z-index: 9999;
+  background:
+    radial-gradient(circle at 50% 42%, rgba(103, 220, 255, 0.12), transparent 18rem),
+    rgba(5, 9, 16, 0.74);
+  backdrop-filter: blur(8px);
+}
+
+.neo-console-shell .table-scroll-card {
+  overflow: hidden;
+}
+
+.neo-console-shell .vchart,
+.neo-console-shell canvas {
+  border-radius: 14px;
+}
+
+.neo-console-shell .mt-\[60px\],
+.neo-console-shell .relative.overflow-hidden.bg-gray-100 {
+  background: transparent !important;
+}
+
+.neo-console-shell .relative.overflow-hidden.bg-gray-100 {
+  min-height: calc(100vh - 64px);
+}
+
+.neo-console-shell .relative.overflow-hidden.bg-gray-100::before {
+  content: '';
+  pointer-events: none;
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(circle at 50% 18%, rgba(103, 220, 255, 0.12), transparent 20rem),
+    radial-gradient(circle at 80% 62%, rgba(199, 119, 255, 0.1), transparent 24rem);
+}
+
+.neo-console-shell .blur-ball {
+  opacity: 0.18;
+}
+
+.neo-console-shell .text-gray-800,
+.neo-console-shell .text-gray-700,
+.neo-console-shell .text-gray-600,
+.neo-console-shell .text-gray-500,
+.neo-console-shell .dark\:text-gray-200 {
+  color: var(--neo-text) !important;
+}
+
+.neo-console-shell .text-blue-600,
+.neo-console-shell .hover\:text-blue-800:hover {
+  color: var(--neo-cyan) !important;
+}
+
+.neo-console-shell .border-gray-200 {
+  border-color: rgba(173, 207, 255, 0.16) !important;
+}
+
+.neo-console-shell .hover\:bg-gray-50:hover,
+.neo-console-shell .hover\:bg-gray-800:hover {
+  background: rgba(103, 220, 255, 0.1) !important;
+}
+
+.neo-console-shell .bg-black {
+  color: #041018 !important;
+  background: linear-gradient(135deg, var(--neo-cyan), #8a7bff) !important;
+}
+
+.neo-console-shell .bg-white,
+.neo-console-shell .bg-gray-50,
+.neo-console-shell .dark\:bg-gray-900,
+.neo-console-shell .dark\:bg-zinc-900 {
+  background: rgba(9, 17, 31, 0.78) !important;
+}
+
+.neo-console-shell .semi-typography h1,
+.neo-console-shell .semi-typography h2,
+.neo-console-shell .semi-typography h3,
+.neo-console-shell .semi-typography h4,
+.neo-console-shell h1,
+.neo-console-shell h2,
+.neo-console-shell h3,
+.neo-console-shell h4 {
+  color: var(--neo-text);
+}
+
+.neo-console-shell .semi-typography,
+.neo-console-shell p,
+.neo-console-shell span {
+  color: inherit;
+}
+
+.neo-console-shell .semi-descriptions-item-key {
+  color: var(--neo-faint) !important;
+}
+
+.neo-console-shell .semi-descriptions-item-value {
+  color: var(--neo-text) !important;
+}
+
+.neo-console-shell .semi-collapse-header {
+  color: var(--neo-text);
+  background: rgba(255, 255, 255, 0.04);
+  border-color: rgba(173, 207, 255, 0.12);
+  border-radius: 12px;
+}
+
+.neo-console-shell .semi-collapse-content {
+  color: var(--neo-muted);
+  background: transparent;
+}
+
+.neo-console-shell .semi-banner {
+  color: var(--neo-text);
+  background: rgba(103, 220, 255, 0.08);
+  border-color: rgba(103, 220, 255, 0.18);
+  border-radius: 16px;
+}
+
+.neo-console-shell .semi-steps-item-title,
+.neo-console-shell .semi-steps-item-description {
+  color: var(--neo-muted) !important;
+}
+
+.neo-console-shell .semi-steps-item-active .semi-steps-item-title {
+  color: var(--neo-text) !important;
+}
+
+.neo-console-shell .semi-switch-checked {
+  background: linear-gradient(135deg, var(--neo-cyan), #8a7bff) !important;
+}
+
+.neo-console-shell .react-toastify,
+.neo-console-shell .Toastify__toast {
+  color: var(--neo-text);
+}
+
+body.neo-console-page .Toastify__toast {
+  color: var(--neo-text);
+  background: rgba(9, 17, 31, 0.94);
+  border: 1px solid rgba(173, 207, 255, 0.18);
+  border-radius: 16px;
+  box-shadow: 0 20px 70px rgba(0, 0, 0, 0.4);
+  backdrop-filter: blur(18px);
+}
+
+body.neo-console-page .semi-layout-footer footer {
+  color: var(--neo-muted);
+  background:
+    linear-gradient(180deg, rgba(7, 13, 24, 0.42), rgba(5, 9, 16, 0.92)) !important;
+  border-top: 1px solid rgba(173, 207, 255, 0.12);
+}
+
+body.neo-console-page .semi-layout-footer footer::before,
+body.neo-console-page .semi-layout-footer footer::after,
+body.neo-console-page .semi-layout-footer footer > .absolute {
+  display: none !important;
+}
+
+@media (max-width: 768px) {
+  body.neo-console-page {
+    --neo-radius: 16px;
+  }
+
+  .neo-header-row {
+    gap: 0.5rem;
+  }
+
+  .neo-header-nav {
+    display: none;
+  }
+
+  .neo-console-sider {
+    inset: 64px 0 auto 0;
+    width: min(88vw, 360px) !important;
+    height: calc(100vh - 64px);
+    padding: 10px;
+  }
+
+  .neo-console-sider .sidebar-container {
+    border: 1px solid rgba(173, 207, 255, 0.16);
+    border-radius: 22px;
+  }
+
+  .neo-console-content {
+    min-height: calc(100vh - 64px);
+  }
+
+  body.neo-console-page .semi-card {
+    border-radius: 16px !important;
+  }
+
+  body.neo-console-page .semi-modal {
+    width: calc(100vw - 24px) !important;
+    max-width: calc(100vw - 24px) !important;
+  }
+
+  body.neo-console-page .semi-table-wrapper {
+    overflow-x: auto;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  body.neo-console-page *,
+  body.neo-console-page *::before,
+  body.neo-console-page *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+  }
+}

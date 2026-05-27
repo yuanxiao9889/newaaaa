@@ -177,6 +177,33 @@ type ImageResponse struct {
 	Created  int64           `json:"created"`
 	Metadata json.RawMessage `json:"metadata,omitempty"`
 }
+
+const (
+	ImageAsyncStatusSubmitted  = "submitted"
+	ImageAsyncStatusQueued     = "queued"
+	ImageAsyncStatusProcessing = "processing"
+	ImageAsyncStatusSucceeded  = "succeeded"
+	ImageAsyncStatusFailed     = "failed"
+	ImageAsyncStatusExpired    = "expired"
+)
+
+type ImageAsyncSubmitResponse struct {
+	TaskID     string `json:"task_id"`
+	Status     string `json:"status"`
+	StatusURL  string `json:"status_url"`
+	ContentURL string `json:"content_url"`
+	ExpiresAt  int64  `json:"expires_at"`
+}
+
+type ImageAsyncTaskResponse struct {
+	TaskID     string `json:"task_id"`
+	Status     string `json:"status"`
+	StatusURL  string `json:"status_url"`
+	ContentURL string `json:"content_url"`
+	ExpiresAt  int64  `json:"expires_at"`
+	Error      string `json:"error,omitempty"`
+}
+
 type ImageData struct {
 	Url           string `json:"url"`
 	B64Json       string `json:"b64_json"`

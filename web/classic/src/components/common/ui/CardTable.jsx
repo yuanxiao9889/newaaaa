@@ -61,6 +61,7 @@ const CardTable = ({
     const finalTableProps = hidePagination
       ? { ...tableProps, pagination: false }
       : tableProps;
+    const tableClassName = `neo-card-table ${finalTableProps.className || ''}`;
 
     return (
       <Table
@@ -69,6 +70,7 @@ const CardTable = ({
         loading={loading}
         rowKey={rowKey}
         {...finalTableProps}
+        className={tableClassName}
       />
     );
   }
@@ -115,7 +117,7 @@ const CardTable = ({
       );
 
       return (
-        <Card key={key} className='!rounded-2xl shadow-sm'>
+        <Card key={key} className='neo-mobile-row-card !rounded-2xl shadow-sm'>
           <Skeleton loading={true} active placeholder={placeholder}></Skeleton>
         </Card>
       );
@@ -133,13 +135,23 @@ const CardTable = ({
   const MobileRowCard = ({ record, index }) => {
     const [showDetails, setShowDetails] = useState(false);
     const rowKeyVal = getRowKey(record, index);
+    const rowProps =
+      typeof tableProps.onRow === 'function'
+        ? tableProps.onRow(record, index) || {}
+        : {};
 
     const hasDetails =
       tableProps.expandedRowRender &&
       (!tableProps.rowExpandable || tableProps.rowExpandable(record));
 
     return (
-      <Card key={rowKeyVal} className='!rounded-2xl shadow-sm'>
+      <Card
+        key={rowKeyVal}
+        className={`neo-mobile-row-card !rounded-2xl shadow-sm ${
+          rowProps.className || ''
+        }`}
+        style={rowProps.style}
+      >
         {columns.map((col, colIdx) => {
           if (
             tableProps?.visibleColumns &&

@@ -1,0 +1,245 @@
+import { createHotContext as __vite__createHotContext } from "/@vite/client";import.meta.hot = __vite__createHotContext("/src/components/table/models/modals/SyncWizardModal.jsx");import __vite__cjsImport0_react_jsxDevRuntime from "/node_modules/.vite/deps/react_jsx-dev-runtime.js?v=1c6fcc49"; const jsxDEV = __vite__cjsImport0_react_jsxDevRuntime["jsxDEV"];
+import RefreshRuntime from "/@react-refresh";
+const inWebWorker = typeof WorkerGlobalScope !== "undefined" && self instanceof WorkerGlobalScope;
+let prevRefreshReg;
+let prevRefreshSig;
+if (import.meta.hot && !inWebWorker) {
+  if (!window.__vite_plugin_react_preamble_installed__) {
+    throw new Error("@vitejs/plugin-react can't detect preamble. Something is wrong. See https://github.com/vitejs/vite-plugin-react/pull/11#discussion_r430879201");
+  }
+  prevRefreshReg = window.$RefreshReg$;
+  prevRefreshSig = window.$RefreshSig$;
+  window.$RefreshReg$ = (type, id) => {
+    RefreshRuntime.register(type, "E:/new-api/web/classic/src/components/table/models/modals/SyncWizardModal.jsx " + id);
+  };
+  window.$RefreshSig$ = RefreshRuntime.createSignatureFunctionForTransform;
+}
+var _s = $RefreshSig$();
+import __vite__cjsImport3_react from "/node_modules/.vite/deps/react.js?v=1c6fcc49"; const React = __vite__cjsImport3_react.__esModule ? __vite__cjsImport3_react.default : __vite__cjsImport3_react; const useEffect = __vite__cjsImport3_react["useEffect"]; const useState = __vite__cjsImport3_react["useState"];
+import { Modal, RadioGroup, Radio, Steps, Button } from "/node_modules/.vite/deps/@douyinfe_semi-ui.js?v=0f3c8be3";
+import { useIsMobile } from "/src/hooks/common/useIsMobile.js";
+const SyncWizardModal = ({ visible, onClose, onConfirm, loading, t }) => {
+  _s();
+  const [step, setStep] = useState(0);
+  const [option, setOption] = useState("official");
+  const [locale, setLocale] = useState("zh-CN");
+  const isMobile = useIsMobile();
+  useEffect(() => {
+    if (visible) {
+      setStep(0);
+      setOption("official");
+      setLocale("zh-CN");
+    }
+  }, [visible]);
+  return /* @__PURE__ */ jsxDEV(
+    Modal,
+    {
+      title: t("同步向导"),
+      visible,
+      onCancel: onClose,
+      footer: /* @__PURE__ */ jsxDEV("div", { className: "flex justify-end", "data-insp-path": "web/classic/src/components/table/models/modals/SyncWizardModal.jsx:44:9:div", children: [
+        step === 1 && /* @__PURE__ */ jsxDEV(Button, { onClick: () => setStep(0), "data-insp-path": "web/classic/src/components/table/models/modals/SyncWizardModal.jsx:46:13:Button", children: t("上一步") }, void 0, false, {
+          fileName: "E:/new-api/web/classic/src/components/table/models/modals/SyncWizardModal.jsx",
+          lineNumber: 46,
+          columnNumber: 9
+        }, this),
+        /* @__PURE__ */ jsxDEV(Button, { onClick: onClose, "data-insp-path": "web/classic/src/components/table/models/modals/SyncWizardModal.jsx:48:11:Button", children: t("取消") }, void 0, false, {
+          fileName: "E:/new-api/web/classic/src/components/table/models/modals/SyncWizardModal.jsx",
+          lineNumber: 48,
+          columnNumber: 11
+        }, this),
+        step === 0 && /* @__PURE__ */ jsxDEV(
+          Button,
+          {
+            type: "primary",
+            onClick: () => setStep(1),
+            disabled: option !== "official",
+            "data-insp-path": "web/classic/src/components/table/models/modals/SyncWizardModal.jsx:50:13:Button",
+            children: t("下一步")
+          },
+          void 0,
+          false,
+          {
+            fileName: "E:/new-api/web/classic/src/components/table/models/modals/SyncWizardModal.jsx",
+            lineNumber: 50,
+            columnNumber: 9
+          },
+          this
+        ),
+        step === 1 && /* @__PURE__ */ jsxDEV(
+          Button,
+          {
+            type: "primary",
+            theme: "solid",
+            loading,
+            onClick: async () => {
+              await onConfirm?.({ option, locale });
+            },
+            "data-insp-path": "web/classic/src/components/table/models/modals/SyncWizardModal.jsx:59:13:Button",
+            children: t("开始同步")
+          },
+          void 0,
+          false,
+          {
+            fileName: "E:/new-api/web/classic/src/components/table/models/modals/SyncWizardModal.jsx",
+            lineNumber: 59,
+            columnNumber: 9
+          },
+          this
+        )
+      ] }, void 0, true, {
+        fileName: "E:/new-api/web/classic/src/components/table/models/modals/SyncWizardModal.jsx",
+        lineNumber: 44,
+        columnNumber: 7
+      }, this),
+      width: isMobile ? "100%" : "small",
+      "data-insp-path": "web/classic/src/components/table/models/modals/SyncWizardModal.jsx:39:5:Modal",
+      children: [
+        /* @__PURE__ */ jsxDEV("div", { className: "mb-3", "data-insp-path": "web/classic/src/components/table/models/modals/SyncWizardModal.jsx:74:7:div", children: /* @__PURE__ */ jsxDEV(Steps, { type: "basic", current: step, size: "small", "data-insp-path": "web/classic/src/components/table/models/modals/SyncWizardModal.jsx:75:9:Steps", children: [
+          /* @__PURE__ */ jsxDEV(Steps.Step, { title: t("选择方式"), description: t("选择同步来源") }, void 0, false, {
+            fileName: "E:/new-api/web/classic/src/components/table/models/modals/SyncWizardModal.jsx",
+            lineNumber: 76,
+            columnNumber: 11
+          }, this),
+          /* @__PURE__ */ jsxDEV(Steps.Step, { title: t("选择语言"), description: t("选择同步语言") }, void 0, false, {
+            fileName: "E:/new-api/web/classic/src/components/table/models/modals/SyncWizardModal.jsx",
+            lineNumber: 77,
+            columnNumber: 11
+          }, this)
+        ] }, void 0, true, {
+          fileName: "E:/new-api/web/classic/src/components/table/models/modals/SyncWizardModal.jsx",
+          lineNumber: 75,
+          columnNumber: 9
+        }, this) }, void 0, false, {
+          fileName: "E:/new-api/web/classic/src/components/table/models/modals/SyncWizardModal.jsx",
+          lineNumber: 74,
+          columnNumber: 7
+        }, this),
+        step === 0 && /* @__PURE__ */ jsxDEV("div", { className: "mt-2 flex justify-center", "data-insp-path": "web/classic/src/components/table/models/modals/SyncWizardModal.jsx:82:9:div", children: /* @__PURE__ */ jsxDEV(
+          RadioGroup,
+          {
+            value: option,
+            onChange: (e) => setOption(e?.target?.value ?? e),
+            type: "card",
+            direction: "horizontal",
+            "aria-label": "同步方式选择",
+            name: "sync-mode-selection",
+            "data-insp-path": "web/classic/src/components/table/models/modals/SyncWizardModal.jsx:83:11:RadioGroup",
+            children: [
+              /* @__PURE__ */ jsxDEV(Radio, { value: "official", extra: t("从官方模型库同步"), "data-insp-path": "web/classic/src/components/table/models/modals/SyncWizardModal.jsx:91:13:Radio", children: t("官方模型同步") }, void 0, false, {
+                fileName: "E:/new-api/web/classic/src/components/table/models/modals/SyncWizardModal.jsx",
+                lineNumber: 91,
+                columnNumber: 13
+              }, this),
+              /* @__PURE__ */ jsxDEV(Radio, { value: "config", extra: t("从配置文件同步"), disabled: true, "data-insp-path": "web/classic/src/components/table/models/modals/SyncWizardModal.jsx:94:13:Radio", children: t("配置文件同步") }, void 0, false, {
+                fileName: "E:/new-api/web/classic/src/components/table/models/modals/SyncWizardModal.jsx",
+                lineNumber: 94,
+                columnNumber: 13
+              }, this)
+            ]
+          },
+          void 0,
+          true,
+          {
+            fileName: "E:/new-api/web/classic/src/components/table/models/modals/SyncWizardModal.jsx",
+            lineNumber: 83,
+            columnNumber: 11
+          },
+          this
+        ) }, void 0, false, {
+          fileName: "E:/new-api/web/classic/src/components/table/models/modals/SyncWizardModal.jsx",
+          lineNumber: 82,
+          columnNumber: 7
+        }, this),
+        step === 1 && /* @__PURE__ */ jsxDEV("div", { className: "mt-2", "data-insp-path": "web/classic/src/components/table/models/modals/SyncWizardModal.jsx:102:9:div", children: [
+          /* @__PURE__ */ jsxDEV("div", { className: "mb-2 text-[var(--semi-color-text-2)]", "data-insp-path": "web/classic/src/components/table/models/modals/SyncWizardModal.jsx:103:11:div", children: t("请选择同步语言") }, void 0, false, {
+            fileName: "E:/new-api/web/classic/src/components/table/models/modals/SyncWizardModal.jsx",
+            lineNumber: 103,
+            columnNumber: 11
+          }, this),
+          /* @__PURE__ */ jsxDEV("div", { className: "flex justify-center", "data-insp-path": "web/classic/src/components/table/models/modals/SyncWizardModal.jsx:106:11:div", children: /* @__PURE__ */ jsxDEV(
+            RadioGroup,
+            {
+              value: locale,
+              onChange: (e) => setLocale(e?.target?.value ?? e),
+              type: "card",
+              direction: "horizontal",
+              "aria-label": "语言选择",
+              name: "sync-locale-selection",
+              "data-insp-path": "web/classic/src/components/table/models/modals/SyncWizardModal.jsx:107:13:RadioGroup",
+              children: [
+                /* @__PURE__ */ jsxDEV(Radio, { value: "en", extra: "English", "data-insp-path": "web/classic/src/components/table/models/modals/SyncWizardModal.jsx:115:15:Radio", children: "en" }, void 0, false, {
+                  fileName: "E:/new-api/web/classic/src/components/table/models/modals/SyncWizardModal.jsx",
+                  lineNumber: 115,
+                  columnNumber: 15
+                }, this),
+                /* @__PURE__ */ jsxDEV(Radio, { value: "zh-CN", extra: "简体中文", "data-insp-path": "web/classic/src/components/table/models/modals/SyncWizardModal.jsx:118:15:Radio", children: "zh-CN" }, void 0, false, {
+                  fileName: "E:/new-api/web/classic/src/components/table/models/modals/SyncWizardModal.jsx",
+                  lineNumber: 118,
+                  columnNumber: 15
+                }, this),
+                /* @__PURE__ */ jsxDEV(Radio, { value: "zh-TW", extra: "繁體中文", "data-insp-path": "web/classic/src/components/table/models/modals/SyncWizardModal.jsx:121:15:Radio", children: "zh-TW" }, void 0, false, {
+                  fileName: "E:/new-api/web/classic/src/components/table/models/modals/SyncWizardModal.jsx",
+                  lineNumber: 121,
+                  columnNumber: 15
+                }, this),
+                /* @__PURE__ */ jsxDEV(Radio, { value: "ja", extra: "日本語", "data-insp-path": "web/classic/src/components/table/models/modals/SyncWizardModal.jsx:124:15:Radio", children: "ja" }, void 0, false, {
+                  fileName: "E:/new-api/web/classic/src/components/table/models/modals/SyncWizardModal.jsx",
+                  lineNumber: 124,
+                  columnNumber: 15
+                }, this)
+              ]
+            },
+            void 0,
+            true,
+            {
+              fileName: "E:/new-api/web/classic/src/components/table/models/modals/SyncWizardModal.jsx",
+              lineNumber: 107,
+              columnNumber: 13
+            },
+            this
+          ) }, void 0, false, {
+            fileName: "E:/new-api/web/classic/src/components/table/models/modals/SyncWizardModal.jsx",
+            lineNumber: 106,
+            columnNumber: 11
+          }, this)
+        ] }, void 0, true, {
+          fileName: "E:/new-api/web/classic/src/components/table/models/modals/SyncWizardModal.jsx",
+          lineNumber: 102,
+          columnNumber: 7
+        }, this)
+      ]
+    },
+    void 0,
+    true,
+    {
+      fileName: "E:/new-api/web/classic/src/components/table/models/modals/SyncWizardModal.jsx",
+      lineNumber: 39,
+      columnNumber: 5
+    },
+    this
+  );
+};
+_s(SyncWizardModal, "5i0H3ua4vUzpPCE8HDqj5mqa1mw=", false, function() {
+  return [useIsMobile];
+});
+_c = SyncWizardModal;
+export default SyncWizardModal;
+var _c;
+$RefreshReg$(_c, "SyncWizardModal");
+if (import.meta.hot && !inWebWorker) {
+  window.$RefreshReg$ = prevRefreshReg;
+  window.$RefreshSig$ = prevRefreshSig;
+}
+if (import.meta.hot && !inWebWorker) {
+  RefreshRuntime.__hmr_import(import.meta.url).then((currentExports) => {
+    RefreshRuntime.registerExportsForReactRefresh("E:/new-api/web/classic/src/components/table/models/modals/SyncWizardModal.jsx", currentExports);
+    import.meta.hot.accept((nextExports) => {
+      if (!nextExports) return;
+      const invalidateMessage = RefreshRuntime.validateRefreshBoundaryAndEnqueueUpdate("E:/new-api/web/classic/src/components/table/models/modals/SyncWizardModal.jsx", currentExports, nextExports);
+      if (invalidateMessage) import.meta.hot.invalidate(invalidateMessage);
+    });
+  });
+}
+
+//# sourceMappingURL=data:application/json;base64,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LHVDQUFDLFNBQU0sT0FBTSxNQUFLLE9BQU0sV0FBVSxrQkFBZSxtRkFBaUYsa0JBQWxJO0FBQUE7QUFBQTtBQUFBO0FBQUEsdUJBRUE7QUFBQSxnQkFDQSx1QkFBQyxTQUFNLE9BQU0sU0FBUSxPQUFNLFFBQU8sa0JBQWUsbUZBQWlGLHFCQUFsSTtBQUFBO0FBQUE7QUFBQTtBQUFBLHVCQUVBO0FBQUEsZ0JBQ0EsdUJBQUMsU0FBTSxPQUFNLFNBQVEsT0FBTSxRQUFPLGtCQUFlLG1GQUFpRixxQkFBbEk7QUFBQTtBQUFBO0FBQUE7QUFBQSx1QkFFQTtBQUFBLGdCQUNBLHVCQUFDLFNBQU0sT0FBTSxNQUFLLE9BQU0sT0FBTSxrQkFBZSxtRkFBaUYsa0JBQTlIO0FBQUE7QUFBQTtBQUFBO0FBQUEsdUJBRUE7QUFBQTtBQUFBO0FBQUEsWUFuQkY7QUFBQTtBQUFBO0FBQUE7QUFBQTtBQUFBO0FBQUE7QUFBQTtBQUFBLFVBb0JBLEtBckJGO0FBQUE7QUFBQTtBQUFBO0FBQUEsaUJBc0JBO0FBQUEsYUExQkY7QUFBQTtBQUFBO0FBQUE7QUFBQSxlQTJCQTtBQUFBO0FBQUE7QUFBQSxJQTFGSjtBQUFBO0FBQUE7QUFBQTtBQUFBO0FBQUE7QUFBQTtBQUFBO0FBQUEsRUE0RkE7QUFFSjtBQUFFUixHQTdHSU4saUJBQWU7QUFBQSxVQUlGRCxXQUFXO0FBQUE7QUFBQWtCLEtBSnhCakI7QUErR04sZUFBZUE7QUFBZ0IsSUFBQWlCO0FBQUFDLGFBQUFELElBQUEiLCJuYW1lcyI6WyJSZWFjdCIsInVzZUVmZmVjdCIsInVzZVN0YXRlIiwiTW9kYWwiLCJSYWRpb0dyb3VwIiwiUmFkaW8iLCJTdGVwcyIsIkJ1dHRvbiIsInVzZUlzTW9iaWxlIiwiU3luY1dpemFyZE1vZGFsIiwidmlzaWJsZSIsIm9uQ2xvc2UiLCJvbkNvbmZpcm0iLCJsb2FkaW5nIiwidCIsIl9zIiwic3RlcCIsInNldFN0ZXAiLCJvcHRpb24iLCJzZXRPcHRpb24iLCJsb2NhbGUiLCJzZXRMb2NhbGUiLCJpc01vYmlsZSIsImUiLCJ0YXJnZXQiLCJ2YWx1ZSIsIl9jIiwiJFJlZnJlc2hSZWckIl0sImlnbm9yZUxpc3QiOltdLCJzb3VyY2VzIjpbIlN5bmNXaXphcmRNb2RhbC5qc3giXSwic291cmNlc0NvbnRlbnQiOlsiLypcbkNvcHlyaWdodCAoQykgMjAyNSBRdWFudHVtTm91c1xuXG5UaGlzIHByb2dyYW0gaXMgZnJlZSBzb2Z0d2FyZTogeW91IGNhbiByZWRpc3RyaWJ1dGUgaXQgYW5kL29yIG1vZGlmeVxuaXQgdW5kZXIgdGhlIHRlcm1zIG9mIHRoZSBHTlUgQWZmZXJvIEdlbmVyYWwgUHVibGljIExpY2Vuc2UgYXNcbnB1Ymxpc2hlZCBieSB0aGUgRnJlZSBTb2Z0d2FyZSBGb3VuZGF0aW9uLCBlaXRoZXIgdmVyc2lvbiAzIG9mIHRoZVxuTGljZW5zZSwgb3IgKGF0IHlvdXIgb3B0aW9uKSBhbnkgbGF0ZXIgdmVyc2lvbi5cblxuVGhpcyBwcm9ncmFtIGlzIGRpc3RyaWJ1dGVkIGluIHRoZSBob3BlIHRoYXQgaXQgd2lsbCBiZSB1c2VmdWwsXG5idXQgV0lUSE9VVCBBTlkgV0FSUkFOVFk7IHdpdGhvdXQgZXZlbiB0aGUgaW1wbGllZCB3YXJyYW50eSBvZlxuTUVSQ0hBTlRBQklMSVRZIG9yIEZJVE5FU1MgRk9SIEEgUEFSVElDVUxBUiBQVVJQT1NFLiBTZWUgdGhlXG5HTlUgQWZmZXJvIEdlbmVyYWwgUHVibGljIExpY2Vuc2UgZm9yIG1vcmUgZGV0YWlscy5cblxuWW91IHNob3VsZCBoYXZlIHJlY2VpdmVkIGEgY29weSBvZiB0aGUgR05VIEFmZmVybyBHZW5lcmFsIFB1YmxpYyBMaWNlbnNlXG5hbG9uZyB3aXRoIHRoaXMgcHJvZ3JhbS4gSWYgbm90LCBzZWUgPGh0dHBzOi8vd3d3LmdudS5vcmcvbGljZW5zZXMvPi5cblxuRm9yIGNvbW1lcmNpYWwgbGljZW5zaW5nLCBwbGVhc2UgY29udGFjdCBzdXBwb3J0QHF1YW50dW1ub3VzLmNvbVxuKi9cblxuaW1wb3J0IFJlYWN0LCB7IHVzZUVmZmVjdCwgdXNlU3RhdGUgfSBmcm9tICdyZWFjdCc7XG5pbXBvcnQgeyBNb2RhbCwgUmFkaW9Hcm91cCwgUmFkaW8sIFN0ZXBzLCBCdXR0b24gfSBmcm9tICdAZG91eWluZmUvc2VtaS11aSc7XG5pbXBvcnQgeyB1c2VJc01vYmlsZSB9IGZyb20gJy4uLy4uLy4uLy4uL2hvb2tzL2NvbW1vbi91c2VJc01vYmlsZSc7XG5cbmNvbnN0IFN5bmNXaXphcmRNb2RhbCA9ICh7IHZpc2libGUsIG9uQ2xvc2UsIG9uQ29uZmlybSwgbG9hZGluZywgdCB9KSA9PiB7XG4gIGNvbnN0IFtzdGVwLCBzZXRTdGVwXSA9IHVzZVN0YXRlKDApO1xuICBjb25zdCBbb3B0aW9uLCBzZXRPcHRpb25dID0gdXNlU3RhdGUoJ29mZmljaWFsJyk7XG4gIGNvbnN0IFtsb2NhbGUsIHNldExvY2FsZV0gPSB1c2VTdGF0ZSgnemgtQ04nKTtcbiAgY29uc3QgaXNNb2JpbGUgPSB1c2VJc01vYmlsZSgpO1xuXG4gIHVzZUVmZmVjdCgoKSA9PiB7XG4gICAgaWYgKHZpc2libGUpIHtcbiAgICAgIHNldFN0ZXAoMCk7XG4gICAgICBzZXRPcHRpb24oJ29mZmljaWFsJyk7XG4gICAgICBzZXRMb2NhbGUoJ3poLUNOJyk7XG4gICAgfVxuICB9LCBbdmlzaWJsZV0pO1xuXG4gIHJldHVybiAoXG4gICAgPE1vZGFsXG4gICAgICB0aXRsZT17dCgn5ZCM5q2l5ZCR5a+8Jyl9XG4gICAgICB2aXNpYmxlPXt2aXNpYmxlfVxuICAgICAgb25DYW5jZWw9e29uQ2xvc2V9XG4gICAgICBmb290ZXI9e1xuICAgICAgICA8ZGl2IGNsYXNzTmFtZT0nZmxleCBqdXN0aWZ5LWVuZCcgZGF0YS1pbnNwLXBhdGg9XCJ3ZWIvY2xhc3NpYy9zcmMvY29tcG9uZW50cy90YWJsZS9tb2RlbHMvbW9kYWxzL1N5bmNXaXphcmRNb2RhbC5qc3g6NDQ6OTpkaXZcIiA+XG4gICAgICAgICAge3N0ZXAgPT09IDEgJiYgKFxuICAgICAgICAgICAgPEJ1dHRvbiBvbkNsaWNrPXsoKSA9PiBzZXRTdGVwKDApfSBkYXRhLWluc3AtcGF0aD1cIndlYi9jbGFzc2ljL3NyYy9jb21wb25lbnRzL3RhYmxlL21vZGVscy9tb2RhbHMvU3luY1dpemFyZE1vZGFsLmpzeDo0NjoxMzpCdXR0b25cIiA+e3QoJ+S4iuS4gOatpScpfTwvQnV0dG9uPlxuICAgICAgICAgICl9XG4gICAgICAgICAgPEJ1dHRvbiBvbkNsaWNrPXtvbkNsb3NlfSBkYXRhLWluc3AtcGF0aD1cIndlYi9jbGFzc2ljL3NyYy9jb21wb25lbnRzL3RhYmxlL21vZGVscy9tb2RhbHMvU3luY1dpemFyZE1vZGFsLmpzeDo0ODoxMTpCdXR0b25cIiA+e3QoJ+WPlua2iCcpfTwvQnV0dG9uPlxuICAgICAgICAgIHtzdGVwID09PSAwICYmIChcbiAgICAgICAgICAgIDxCdXR0b25cbiAgICAgICAgICAgICAgdHlwZT0ncHJpbWFyeSdcbiAgICAgICAgICAgICAgb25DbGljaz17KCkgPT4gc2V0U3RlcCgxKX1cbiAgICAgICAgICAgICAgZGlzYWJsZWQ9e29wdGlvbiAhPT0gJ29mZmljaWFsJ31cbiAgICAgICAgICAgICBkYXRhLWluc3AtcGF0aD1cIndlYi9jbGFzc2ljL3NyYy9jb21wb25lbnRzL3RhYmxlL21vZGVscy9tb2RhbHMvU3luY1dpemFyZE1vZGFsLmpzeDo1MDoxMzpCdXR0b25cIiA+XG4gICAgICAgICAgICAgIHt0KCfkuIvkuIDmraUnKX1cbiAgICAgICAgICAgIDwvQnV0dG9uPlxuICAgICAgICAgICl9XG4gICAgICAgICAge3N0ZXAgPT09IDEgJiYgKFxuICAgICAgICAgICAgPEJ1dHRvblxuICAgICAgICAgICAgICB0eXBlPSdwcmltYXJ5J1xuICAgICAgICAgICAgICB0aGVtZT0nc29saWQnXG4gICAgICAgICAgICAgIGxvYWRpbmc9e2xvYWRpbmd9XG4gICAgICAgICAgICAgIG9uQ2xpY2s9e2FzeW5jICgpID0+IHtcbiAgICAgICAgICAgICAgICBhd2FpdCBvbkNvbmZpcm0/Lih7IG9wdGlvbiwgbG9jYWxlIH0pO1xuICAgICAgICAgICAgICB9fVxuICAgICAgICAgICAgIGRhdGEtaW5zcC1wYXRoPVwid2ViL2NsYXNzaWMvc3JjL2NvbXBvbmVudHMvdGFibGUvbW9kZWxzL21vZGFscy9TeW5jV2l6YXJkTW9kYWwuanN4OjU5OjEzOkJ1dHRvblwiID5cbiAgICAgICAgICAgICAge3QoJ+W8gOWni+WQjOatpScpfVxuICAgICAgICAgICAgPC9CdXR0b24+XG4gICAgICAgICAgKX1cbiAgICAgICAgPC9kaXY+XG4gICAgICB9XG4gICAgICB3aWR0aD17aXNNb2JpbGUgPyAnMTAwJScgOiAnc21hbGwnfVxuICAgICBkYXRhLWluc3AtcGF0aD1cIndlYi9jbGFzc2ljL3NyYy9jb21wb25lbnRzL3RhYmxlL21vZGVscy9tb2RhbHMvU3luY1dpemFyZE1vZGFsLmpzeDozOTo1Ok1vZGFsXCIgPlxuICAgICAgPGRpdiBjbGFzc05hbWU9J21iLTMnIGRhdGEtaW5zcC1wYXRoPVwid2ViL2NsYXNzaWMvc3JjL2NvbXBvbmVudHMvdGFibGUvbW9kZWxzL21vZGFscy9TeW5jV2l6YXJkTW9kYWwuanN4Ojc0Ojc6ZGl2XCIgPlxuICAgICAgICA8U3RlcHMgdHlwZT0nYmFzaWMnIGN1cnJlbnQ9e3N0ZXB9IHNpemU9J3NtYWxsJyBkYXRhLWluc3AtcGF0aD1cIndlYi9jbGFzc2ljL3NyYy9jb21wb25lbnRzL3RhYmxlL21vZGVscy9tb2RhbHMvU3luY1dpemFyZE1vZGFsLmpzeDo3NTo5OlN0ZXBzXCIgPlxuICAgICAgICAgIDxTdGVwcy5TdGVwIHRpdGxlPXt0KCfpgInmi6nmlrnlvI8nKX0gZGVzY3JpcHRpb249e3QoJ+mAieaLqeWQjOatpeadpea6kCcpfSAvPlxuICAgICAgICAgIDxTdGVwcy5TdGVwIHRpdGxlPXt0KCfpgInmi6nor63oqIAnKX0gZGVzY3JpcHRpb249e3QoJ+mAieaLqeWQjOatpeivreiogCcpfSAvPlxuICAgICAgICA8L1N0ZXBzPlxuICAgICAgPC9kaXY+XG5cbiAgICAgIHtzdGVwID09PSAwICYmIChcbiAgICAgICAgPGRpdiBjbGFzc05hbWU9J210LTIgZmxleCBqdXN0aWZ5LWNlbnRlcicgZGF0YS1pbnNwLXBhdGg9XCJ3ZWIvY2xhc3NpYy9zcmMvY29tcG9uZW50cy90YWJsZS9tb2RlbHMvbW9kYWxzL1N5bmNXaXphcmRNb2RhbC5qc3g6ODI6OTpkaXZcIiA+XG4gICAgICAgICAgPFJhZGlvR3JvdXBcbiAgICAgICAgICAgIHZhbHVlPXtvcHRpb259XG4gICAgICAgICAgICBvbkNoYW5nZT17KGUpID0+IHNldE9wdGlvbihlPy50YXJnZXQ/LnZhbHVlID8/IGUpfVxuICAgICAgICAgICAgdHlwZT0nY2FyZCdcbiAgICAgICAgICAgIGRpcmVjdGlvbj0naG9yaXpvbnRhbCdcbiAgICAgICAgICAgIGFyaWEtbGFiZWw9J+WQjOatpeaWueW8j+mAieaLqSdcbiAgICAgICAgICAgIG5hbWU9J3N5bmMtbW9kZS1zZWxlY3Rpb24nXG4gICAgICAgICAgIGRhdGEtaW5zcC1wYXRoPVwid2ViL2NsYXNzaWMvc3JjL2NvbXBvbmVudHMvdGFibGUvbW9kZWxzL21vZGFscy9TeW5jV2l6YXJkTW9kYWwuanN4OjgzOjExOlJhZGlvR3JvdXBcIiA+XG4gICAgICAgICAgICA8UmFkaW8gdmFsdWU9J29mZmljaWFsJyBleHRyYT17dCgn5LuO5a6Y5pa55qih5Z6L5bqT5ZCM5q2lJyl9IGRhdGEtaW5zcC1wYXRoPVwid2ViL2NsYXNzaWMvc3JjL2NvbXBvbmVudHMvdGFibGUvbW9kZWxzL21vZGFscy9TeW5jV2l6YXJkTW9kYWwuanN4OjkxOjEzOlJhZGlvXCIgPlxuICAgICAgICAgICAgICB7dCgn5a6Y5pa55qih5Z6L5ZCM5q2lJyl9XG4gICAgICAgICAgICA8L1JhZGlvPlxuICAgICAgICAgICAgPFJhZGlvIHZhbHVlPSdjb25maWcnIGV4dHJhPXt0KCfku47phY3nva7mlofku7blkIzmraUnKX0gZGlzYWJsZWQgZGF0YS1pbnNwLXBhdGg9XCJ3ZWIvY2xhc3NpYy9zcmMvY29tcG9uZW50cy90YWJsZS9tb2RlbHMvbW9kYWxzL1N5bmNXaXphcmRNb2RhbC5qc3g6OTQ6MTM6UmFkaW9cIiA+XG4gICAgICAgICAgICAgIHt0KCfphY3nva7mlofku7blkIzmraUnKX1cbiAgICAgICAgICAgIDwvUmFkaW8+XG4gICAgICAgICAgPC9SYWRpb0dyb3VwPlxuICAgICAgICA8L2Rpdj5cbiAgICAgICl9XG5cbiAgICAgIHtzdGVwID09PSAxICYmIChcbiAgICAgICAgPGRpdiBjbGFzc05hbWU9J210LTInIGRhdGEtaW5zcC1wYXRoPVwid2ViL2NsYXNzaWMvc3JjL2NvbXBvbmVudHMvdGFibGUvbW9kZWxzL21vZGFscy9TeW5jV2l6YXJkTW9kYWwuanN4OjEwMjo5OmRpdlwiID5cbiAgICAgICAgICA8ZGl2IGNsYXNzTmFtZT0nbWItMiB0ZXh0LVt2YXIoLS1zZW1pLWNvbG9yLXRleHQtMildJyBkYXRhLWluc3AtcGF0aD1cIndlYi9jbGFzc2ljL3NyYy9jb21wb25lbnRzL3RhYmxlL21vZGVscy9tb2RhbHMvU3luY1dpemFyZE1vZGFsLmpzeDoxMDM6MTE6ZGl2XCIgPlxuICAgICAgICAgICAge3QoJ+ivt+mAieaLqeWQjOatpeivreiogCcpfVxuICAgICAgICAgIDwvZGl2PlxuICAgICAgICAgIDxkaXYgY2xhc3NOYW1lPSdmbGV4IGp1c3RpZnktY2VudGVyJyBkYXRhLWluc3AtcGF0aD1cIndlYi9jbGFzc2ljL3NyYy9jb21wb25lbnRzL3RhYmxlL21vZGVscy9tb2RhbHMvU3luY1dpemFyZE1vZGFsLmpzeDoxMDY6MTE6ZGl2XCIgPlxuICAgICAgICAgICAgPFJhZGlvR3JvdXBcbiAgICAgICAgICAgICAgdmFsdWU9e2xvY2FsZX1cbiAgICAgICAgICAgICAgb25DaGFuZ2U9eyhlKSA9PiBzZXRMb2NhbGUoZT8udGFyZ2V0Py52YWx1ZSA/PyBlKX1cbiAgICAgICAgICAgICAgdHlwZT0nY2FyZCdcbiAgICAgICAgICAgICAgZGlyZWN0aW9uPSdob3Jpem9udGFsJ1xuICAgICAgICAgICAgICBhcmlhLWxhYmVsPSfor63oqIDpgInmi6knXG4gICAgICAgICAgICAgIG5hbWU9J3N5bmMtbG9jYWxlLXNlbGVjdGlvbidcbiAgICAgICAgICAgICBkYXRhLWluc3AtcGF0aD1cIndlYi9jbGFzc2ljL3NyYy9jb21wb25lbnRzL3RhYmxlL21vZGVscy9tb2RhbHMvU3luY1dpemFyZE1vZGFsLmpzeDoxMDc6MTM6UmFkaW9Hcm91cFwiID5cbiAgICAgICAgICAgICAgPFJhZGlvIHZhbHVlPSdlbicgZXh0cmE9J0VuZ2xpc2gnIGRhdGEtaW5zcC1wYXRoPVwid2ViL2NsYXNzaWMvc3JjL2NvbXBvbmVudHMvdGFibGUvbW9kZWxzL21vZGFscy9TeW5jV2l6YXJkTW9kYWwuanN4OjExNToxNTpSYWRpb1wiID5cbiAgICAgICAgICAgICAgICBlblxuICAgICAgICAgICAgICA8L1JhZGlvPlxuICAgICAgICAgICAgICA8UmFkaW8gdmFsdWU9J3poLUNOJyBleHRyYT0n566A5L2T5Lit5paHJyBkYXRhLWluc3AtcGF0aD1cIndlYi9jbGFzc2ljL3NyYy9jb21wb25lbnRzL3RhYmxlL21vZGVscy9tb2RhbHMvU3luY1dpemFyZE1vZGFsLmpzeDoxMTg6MTU6UmFkaW9cIiA+XG4gICAgICAgICAgICAgICAgemgtQ05cbiAgICAgICAgICAgICAgPC9SYWRpbz5cbiAgICAgICAgICAgICAgPFJhZGlvIHZhbHVlPSd6aC1UVycgZXh0cmE9J+e5gemrlOS4reaWhycgZGF0YS1pbnNwLXBhdGg9XCJ3ZWIvY2xhc3NpYy9zcmMvY29tcG9uZW50cy90YWJsZS9tb2RlbHMvbW9kYWxzL1N5bmNXaXphcmRNb2RhbC5qc3g6MTIxOjE1OlJhZGlvXCIgPlxuICAgICAgICAgICAgICAgIHpoLVRXXG4gICAgICAgICAgICAgIDwvUmFkaW8+XG4gICAgICAgICAgICAgIDxSYWRpbyB2YWx1ZT0namEnIGV4dHJhPSfml6XmnKzoqp4nIGRhdGEtaW5zcC1wYXRoPVwid2ViL2NsYXNzaWMvc3JjL2NvbXBvbmVudHMvdGFibGUvbW9kZWxzL21vZGFscy9TeW5jV2l6YXJkTW9kYWwuanN4OjEyNDoxNTpSYWRpb1wiID5cbiAgICAgICAgICAgICAgICBqYVxuICAgICAgICAgICAgICA8L1JhZGlvPlxuICAgICAgICAgICAgPC9SYWRpb0dyb3VwPlxuICAgICAgICAgIDwvZGl2PlxuICAgICAgICA8L2Rpdj5cbiAgICAgICl9XG4gICAgPC9Nb2RhbD5cbiAgKTtcbn07XG5cbmV4cG9ydCBkZWZhdWx0IFN5bmNXaXphcmRNb2RhbDtcbiJdLCJmaWxlIjoiRTovbmV3LWFwaS93ZWIvY2xhc3NpYy9zcmMvY29tcG9uZW50cy90YWJsZS9tb2RlbHMvbW9kYWxzL1N5bmNXaXphcmRNb2RhbC5qc3gifQ==
