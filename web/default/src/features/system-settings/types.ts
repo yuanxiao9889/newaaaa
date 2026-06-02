@@ -134,6 +134,10 @@ export type ContentSettings = {
   MjForwardUrlEnabled: boolean
   MjModeClearEnabled: boolean
   MjActionCheckSuccessEnabled: boolean
+  AsyncImageInternalTaskEnabled: boolean
+  AsyncImageRetentionHours: string
+  AsyncImageWorkerConcurrency: number
+  AsyncImageMaxUnfinishedTasks: number
 }
 
 export type ModelSettings = {

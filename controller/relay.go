@@ -158,6 +158,27 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 
 	// common.SetContextKey(c, constant.ContextKeyTokenCountMeta, meta)
 
+	if relayFormat == types.RelayFormatOpenAIImage && relay.IsAsyncImageRequest(c) && common.GetAsyncImageInternalTaskEnabled() {
+		imageReq, ok := request.(*dto.ImageRequest)
+		if !ok {
+			newAPIError = types.NewErrorWithStatusCode(fmt.Errorf("invalid request type, expected dto.ImageRequest, got %T", request), types.ErrorCodeInvalidRequest, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
+			return
+		}
+		newAPIError = relay.SubmitInternalAsyncImageTask(c, relayInfo, imageReq)
+		return
+	}
+	if relayFormat == types.RelayFormatGemini && common.GetAsyncImageInternalTaskEnabled() {
+		geminiReq, ok := request.(*dto.GeminiChatRequest)
+		if !ok {
+			newAPIError = types.NewErrorWithStatusCode(fmt.Errorf("invalid request type, expected dto.GeminiChatRequest, got %T", request), types.ErrorCodeInvalidRequest, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
+			return
+		}
+		if relay.IsAsyncGeminiImageRequest(c, geminiReq) {
+			newAPIError = relay.SubmitInternalAsyncGeminiImageTask(c, relayInfo, geminiReq)
+			return
+		}
+	}
+
 	if priceData.FreeModel {
 		logger.LogInfo(c, fmt.Sprintf("模型 %s 免费，跳过预扣费", relayInfo.OriginModelName))
 	} else {
@@ -383,6 +404,16 @@ func processChannelError(c *gin.Context, channelError types.ChannelError, err *t
 		other["channel_type"] = c.GetInt("channel_type")
 		adminInfo := make(map[string]interface{})
 		adminInfo["use_channel"] = c.GetStringSlice("use_channel")
+		if c.GetBool(asyncImageWorkerContextKey) {
+			retryPath := c.GetStringSlice("async_channel_retry_path")
+			if len(retryPath) == 0 {
+				retryPath = c.GetStringSlice("use_channel")
+			}
+			other["is_task"] = true
+			other["async_task"] = true
+			other["task_id"] = c.GetString(common.RequestIdKey)
+			other["async_channel_retry_path"] = retryPath
+		}
 		isMultiKey := common.GetContextKeyBool(c, constant.ContextKeyChannelIsMultiKey)
 		if isMultiKey {
 			adminInfo["is_multi_key"] = true

@@ -25,6 +25,7 @@ import type {
   GetLogStatsResponse,
   GetMidjourneyLogsParams,
   GetTaskLogsParams,
+  TaskLog,
   UserInfo,
 } from './types'
 
@@ -109,3 +110,12 @@ export const getAllTaskLogs = (params: GetTaskLogsParams) =>
 
 export const getUserTaskLogs = (params: GetTaskLogsParams) =>
   fetchLogs('/api/task', params, false)
+
+export async function getTaskLogDetail(
+  taskId: string,
+  isAdmin: boolean
+): Promise<{ success: boolean; message?: string; data?: TaskLog }> {
+  const endpoint = isAdmin ? `/api/task/${taskId}` : `/api/task/self/${taskId}`
+  const res = await api.get(endpoint)
+  return res.data
+}

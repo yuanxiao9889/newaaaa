@@ -43,6 +43,10 @@ const defaultContentSettings: ContentSettings = {
   MjForwardUrlEnabled: false,
   MjModeClearEnabled: false,
   MjActionCheckSuccessEnabled: false,
+  AsyncImageInternalTaskEnabled: false,
+  AsyncImageRetentionHours: '24',
+  AsyncImageWorkerConcurrency: 4,
+  AsyncImageMaxUnfinishedTasks: 500,
 }
 
 function resolveContentSettings(

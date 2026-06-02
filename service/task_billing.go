@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
@@ -12,6 +13,12 @@ import (
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/gin-gonic/gin"
+)
+
+const (
+	TaskBillingStatePending  = "pending"
+	TaskBillingStateSettled  = "settled"
+	TaskBillingStateRefunded = "refunded"
 )
 
 // LogTaskConsumption 记录任务消费日志和统计信息（仅记录，不涉及实际扣费）。
@@ -136,6 +143,9 @@ func taskBillingOther(task *model.Task) map[string]interface{} {
 		other["is_model_mapped"] = true
 		other["upstream_model_name"] = props.UpstreamModelName
 	}
+	if len(task.PrivateData.ChannelRetryPath) > 0 {
+		other["async_channel_retry_path"] = task.PrivateData.ChannelRetryPath
+	}
 	return other
 }
 
@@ -147,17 +157,127 @@ func taskModelName(task *model.Task) string {
 	return task.Properties.OriginModelName
 }
 
+func ensureTaskBillingSnapshot(task *model.Task) {
+	if task == nil {
+		return
+	}
+	if task.PrivateData.PreConsumedQuota == 0 && task.Quota != 0 {
+		task.PrivateData.PreConsumedQuota = task.Quota
+	}
+	if task.PrivateData.BillingUpdatedAt == 0 {
+		task.PrivateData.BillingUpdatedAt = time.Now().Unix()
+	}
+}
+
+func persistTaskBillingSnapshot(ctx context.Context, task *model.Task) {
+	if task == nil || task.ID <= 0 {
+		return
+	}
+	if err := model.DB.Model(&model.Task{}).
+		Where("id = ?", task.ID).
+		Update("private_data", task.PrivateData).Error; err != nil {
+		logger.LogWarn(ctx, fmt.Sprintf("更新任务计费快照失败 task %s: %s", task.TaskID, err.Error()))
+	}
+}
+
+func markTaskBillingError(ctx context.Context, task *model.Task, reason string) {
+	if task == nil {
+		return
+	}
+	ensureTaskBillingSnapshot(task)
+	task.PrivateData.BillingError = reason
+	task.PrivateData.BillingUpdatedAt = time.Now().Unix()
+	persistTaskBillingSnapshot(ctx, task)
+}
+
+func markTaskBillingRefunded(ctx context.Context, task *model.Task, reason string) {
+	if task == nil {
+		return
+	}
+	ensureTaskBillingSnapshot(task)
+	task.PrivateData.BillingState = TaskBillingStateRefunded
+	task.PrivateData.ActualQuota = 0
+	task.PrivateData.BillingError = reason
+	task.PrivateData.BillingUpdatedAt = time.Now().Unix()
+	persistTaskBillingSnapshot(ctx, task)
+}
+
+// ConfirmTaskBillingSettled records the final successful billing point for
+// async tasks whose quota was already pre-consumed at submit time.
+func ConfirmTaskBillingSettled(ctx context.Context, task *model.Task, actualQuota int, content string) {
+	if task == nil {
+		return
+	}
+	if task.PrivateData.BillingState == TaskBillingStateSettled {
+		return
+	}
+	if task.PrivateData.BillingState == TaskBillingStateRefunded {
+		logger.LogWarn(ctx, fmt.Sprintf("任务 %s 已退款，跳过成功结算确认", task.TaskID))
+		return
+	}
+	if actualQuota < 0 {
+		actualQuota = 0
+	}
+	if content == "" {
+		content = "异步任务完成"
+	}
+
+	ensureTaskBillingSnapshot(task)
+	task.PrivateData.BillingState = TaskBillingStateSettled
+	task.PrivateData.ActualQuota = actualQuota
+	task.PrivateData.BillingError = ""
+	task.PrivateData.BillingUpdatedAt = time.Now().Unix()
+	persistTaskBillingSnapshot(ctx, task)
+
+	other := taskBillingOther(task)
+	other["is_task"] = true
+	other["task_id"] = task.TaskID
+	other["billing_state"] = TaskBillingStateSettled
+	other["pre_consumed_quota"] = task.PrivateData.PreConsumedQuota
+	other["actual_quota"] = actualQuota
+	model.RecordTaskBillingLog(model.RecordTaskBillingLogParams{
+		UserId:    task.UserId,
+		LogType:   model.LogTypeConsume,
+		Content:   content,
+		ChannelId: task.ChannelId,
+		ModelName: taskModelName(task),
+		Quota:     actualQuota,
+		TokenId:   task.PrivateData.TokenId,
+		Group:     task.Group,
+		Other:     other,
+	})
+	model.UpdateUserUsedQuotaAndRequestCount(task.UserId, actualQuota)
+	model.UpdateChannelUsedQuota(task.ChannelId, actualQuota)
+}
+
 // RefundTaskQuota 统一的任务失败退款逻辑。
 // 当异步任务失败时，将预扣的 quota 退还给用户（支持钱包和订阅），并退还令牌额度。
 func RefundTaskQuota(ctx context.Context, task *model.Task, reason string) {
-	quota := task.Quota
+	if task == nil {
+		return
+	}
+	if task.PrivateData.BillingState == TaskBillingStateRefunded {
+		return
+	}
+	if task.PrivateData.BillingState == TaskBillingStateSettled {
+		logger.LogWarn(ctx, fmt.Sprintf("任务 %s 已完成结算，跳过退款: %s", task.TaskID, reason))
+		return
+	}
+
+	ensureTaskBillingSnapshot(task)
+	quota := task.PrivateData.PreConsumedQuota
 	if quota == 0 {
+		quota = task.Quota
+	}
+	if quota == 0 {
+		markTaskBillingRefunded(ctx, task, reason)
 		return
 	}
 
 	// 1. 退还资金来源（钱包或订阅）
 	if err := taskAdjustFunding(task, -quota); err != nil {
 		logger.LogWarn(ctx, fmt.Sprintf("退还资金来源失败 task %s: %s", task.TaskID, err.Error()))
+		markTaskBillingError(ctx, task, err.Error())
 		return
 	}
 
@@ -179,6 +299,7 @@ func RefundTaskQuota(ctx context.Context, task *model.Task, reason string) {
 		Group:     task.Group,
 		Other:     other,
 	})
+	markTaskBillingRefunded(ctx, task, reason)
 }
 
 // RecalculateTaskQuota 通用的异步差额结算。
