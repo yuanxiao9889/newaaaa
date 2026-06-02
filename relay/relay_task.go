@@ -539,7 +539,15 @@ func mapTaskStatusToSimple(status model.TaskStatus) string {
 }
 
 func TaskModel2Dto(task *model.Task) *dto.TaskDto {
-	return &dto.TaskDto{
+	return taskModel2Dto(task, true)
+}
+
+func TaskModel2ListDto(task *model.Task) *dto.TaskDto {
+	return taskModel2Dto(task, false)
+}
+
+func taskModel2Dto(task *model.Task, includeData bool) *dto.TaskDto {
+	taskDto := &dto.TaskDto{
 		ID:         task.ID,
 		CreatedAt:  task.CreatedAt,
 		UpdatedAt:  task.UpdatedAt,
@@ -559,6 +567,19 @@ func TaskModel2Dto(task *model.Task) *dto.TaskDto {
 		Progress:   task.Progress,
 		Properties: task.Properties,
 		Username:   task.Username,
-		Data:       task.Data,
 	}
+	if includeData {
+		taskDto.Data = task.Data
+	}
+	if task.PrivateData.InternalAsync {
+		taskDto.InternalAsync = true
+		taskDto.RequestPath = task.PrivateData.RequestPath
+		taskDto.WorkerAttempts = task.PrivateData.WorkerAttempts
+		taskDto.ChannelRetryPath = append([]string(nil), task.PrivateData.ChannelRetryPath...)
+		taskDto.BillingState = task.PrivateData.BillingState
+		taskDto.PreConsumedQuota = task.PrivateData.PreConsumedQuota
+		taskDto.ActualQuota = task.PrivateData.ActualQuota
+		taskDto.BillingError = task.PrivateData.BillingError
+	}
+	return taskDto
 }

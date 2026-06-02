@@ -47,6 +47,8 @@ import {
   hasAnyCacheTokens,
   parseLogOther,
   isViolationFeeLog,
+  isAsyncTaskBillingLog,
+  getAsyncTaskBillingStateLabel,
 } from '../../lib/format'
 import {
   isDisplayableLogType,
@@ -102,7 +104,10 @@ function buildDetailSegments(
   t: (key: string, opts?: Record<string, unknown>) => string
 ): DetailSegment[] {
   if (log.type === 6) {
-    return [{ text: t('Async task refund') }]
+    if (isAsyncTaskBillingLog(log, other)) {
+      return [{ text: t('Async task refund') }]
+    }
+    return [{ text: t('Refund') }]
   }
 
   if (log.type !== 2) return []
@@ -127,6 +132,22 @@ function buildDetailSegments(
   if (!other) return []
 
   const segments: DetailSegment[] = []
+
+  if (isAsyncTaskBillingLog(log, other)) {
+    const stateLabel = getAsyncTaskBillingStateLabel(
+      other.billing_state,
+      log.type
+    )
+    segments.push({
+      text: `${t('Async task billing')} · ${t(stateLabel)}`,
+    })
+    segments.push({
+      text: t(
+        'Pre-charged at submission; settled or refunded after completion.'
+      ),
+      muted: true,
+    })
+  }
 
   const priceOpts = { digitsLarge: 4, digitsSmall: 6, abbreviate: false }
   const formatPrice = (price: number) =>
@@ -407,7 +428,7 @@ export function useCommonLogsColumns(isAdmin: boolean): ColumnDef<UsageLog>[] {
       },
       {
         id: 'user',
-        accessorFn: (row) => row.username,
+        accessorFn: (row) => row.username || row.user_id,
         header: ({ column }) => (
           <DataTableColumnHeader column={column} title={t('User')} />
         ),
@@ -416,7 +437,8 @@ export function useCommonLogsColumns(isAdmin: boolean): ColumnDef<UsageLog>[] {
             useUsageLogsContext()
           const log = row.original
 
-          if (!log.username) return null
+          const displayName = log.username || `#${log.user_id || '?'}`
+          if (!log.username && !log.user_id) return null
 
           return (
             <button
@@ -436,11 +458,11 @@ export function useCommonLogsColumns(isAdmin: boolean): ColumnDef<UsageLog>[] {
                   )}
                   style={
                     sensitiveVisible
-                      ? getUserAvatarStyle(log.username)
+                      ? getUserAvatarStyle(displayName)
                       : undefined
                   }
                 >
-                  {sensitiveVisible ? getUserAvatarFallback(log.username) : '•'}
+                  {sensitiveVisible ? getUserAvatarFallback(displayName) : '•'}
                 </AvatarFallback>
               </Avatar>
               <TooltipProvider delay={300}>
@@ -450,10 +472,10 @@ export function useCommonLogsColumns(isAdmin: boolean): ColumnDef<UsageLog>[] {
                       <span className='text-muted-foreground max-w-[100px] truncate text-sm hover:underline' />
                     }
                   >
-                    {sensitiveVisible ? log.username : '••••'}
+                    {sensitiveVisible ? displayName : '••••'}
                   </TooltipTrigger>
-                  {sensitiveVisible && log.username.length > 12 && (
-                    <TooltipContent side='top'>{log.username}</TooltipContent>
+                  {sensitiveVisible && displayName.length > 12 && (
+                    <TooltipContent side='top'>{displayName}</TooltipContent>
                   )}
                 </Tooltip>
               </TooltipProvider>
@@ -475,7 +497,7 @@ export function useCommonLogsColumns(isAdmin: boolean): ColumnDef<UsageLog>[] {
       const log = row.original
       if (!isDisplayableLogType(log.type)) return null
 
-      const tokenName = log.token_name
+      const tokenName = log.token_name || (log.token_id ? `#${log.token_id}` : '')
       if (!tokenName) return null
 
       const other = parseLogOther(log.other)
@@ -668,10 +690,22 @@ export function useCommonLogsColumns(isAdmin: boolean): ColumnDef<UsageLog>[] {
         if (!isDisplayableLogType(log.type)) return null
 
         const other = parseLogOther(log.other)
+        const isAsyncTask = isAsyncTaskBillingLog(log, other)
 
         const promptTokens = log.prompt_tokens || 0
         const completionTokens = log.completion_tokens || 0
         if (promptTokens === 0 && completionTokens === 0) {
+          if (isAsyncTask) {
+            return (
+              <StatusBadge
+                label={t('Async task')}
+                variant='blue'
+                size='sm'
+                copyable={false}
+                showDot={false}
+              />
+            )
+          }
           return <span className='text-muted-foreground text-xs'>-</span>
         }
 
@@ -752,7 +786,7 @@ export function useCommonLogsColumns(isAdmin: boolean): ColumnDef<UsageLog>[] {
 
         return (
           <div className='flex flex-col gap-0.5'>
-            <span className='border-border/80 bg-muted/60 inline-flex h-6 w-fit items-center rounded-md border px-2 text-sm leading-none [font-family:var(--font-body)] font-semibold tabular-nums'>
+            <span className='border-border/80 bg-muted/60 inline-flex h-6 w-fit items-center rounded-md border px-2 [font-family:var(--font-body)] text-sm leading-none font-semibold tabular-nums'>
               {quotaDisplay.prefix && (
                 <span className='mr-1'>{quotaDisplay.prefix}</span>
               )}

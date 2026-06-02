@@ -233,6 +233,41 @@ const renderStatus = (type, t) => {
   }
 };
 
+const formatAsyncTaskDetails = (record, t) => {
+  const lines = [
+    `${t('Task ID')}: ${record.task_id || '-'}`,
+    `${t('Task Status')}: ${record.status || '-'}`,
+    `${t('Channel')}: ${record.channel_id || '-'}`,
+  ];
+  if (record.request_path) {
+    lines.push(`${t('Request Path')}: ${record.request_path}`);
+  }
+  if (record.worker_attempts) {
+    lines.push(`${t('Worker Attempts')}: ${record.worker_attempts}`);
+  }
+  if (Array.isArray(record.channel_retry_path) && record.channel_retry_path.length > 0) {
+    lines.push(
+      `${t('Async Channel Retry Path')}: ${record.channel_retry_path.join(' -> ')}`,
+    );
+  }
+  if (record.billing_state) {
+    lines.push(`${t('Billing State')}: ${record.billing_state}`);
+  }
+  if (record.pre_consumed_quota !== undefined && record.pre_consumed_quota !== 0) {
+    lines.push(`${t('Pre-consumed Quota')}: ${record.pre_consumed_quota}`);
+  }
+  if (record.actual_quota !== undefined && record.actual_quota !== 0) {
+    lines.push(`${t('Actual Quota')}: ${record.actual_quota}`);
+  }
+  if (record.billing_error) {
+    lines.push(`${t('Billing Error')}: ${record.billing_error}`);
+  }
+  if (record.fail_reason) {
+    lines.push(`${t('Failure Reason')}: ${record.fail_reason}`);
+  }
+  return lines.join('\n');
+};
+
 export const getTaskLogsColumns = ({
   t,
   COLUMN_KEYS,
@@ -339,7 +374,11 @@ export const getTaskLogsColumns = ({
           <Typography.Text
             ellipsis={{ showTooltip: true }}
             onClick={() => {
-              openContentModal(JSON.stringify(record, null, 2));
+              openContentModal(
+                record.internal_async
+                  ? formatAsyncTaskDetails(record, t)
+                  : JSON.stringify(record, null, 2),
+              );
             }}
           >
             <div>{text}</div>
@@ -438,7 +477,11 @@ export const getTaskLogsColumns = ({
             ellipsis={{ showTooltip: true }}
             style={{ width: 100 }}
             onClick={() => {
-              openContentModal(text);
+              openContentModal(
+                record.internal_async
+                  ? formatAsyncTaskDetails(record, t)
+                  : text,
+              );
             }}
           >
             {text}

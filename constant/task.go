@@ -19,6 +19,7 @@ const (
 	TaskActionRemix             = "remixGenerate"
 	TaskActionImageGenerate     = "image_generate"
 	TaskActionImageEdit         = "image_edit"
+	TaskActionGeminiImage       = "gemini_image"
 )
 
 var SunoModel2Action = map[string]string{

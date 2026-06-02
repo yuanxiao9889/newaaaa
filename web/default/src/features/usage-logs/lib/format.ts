@@ -92,6 +92,34 @@ export function isViolationFeeLog(other: LogOtherData | null): boolean {
 }
 
 /**
+ * Async task billing logs are recorded without token usage because the task is
+ * billed by a pre-consumed quota and later settled or refunded.
+ */
+export function isAsyncTaskBillingLog(
+  log: UsageLog,
+  other: LogOtherData | null
+): boolean {
+  if (!other?.is_task || !other.task_id) return false
+  if (log.type === 6) return true
+  return (
+    log.type === 2 &&
+    (other.billing_state != null ||
+      other.pre_consumed_quota != null ||
+      other.actual_quota != null)
+  )
+}
+
+export function getAsyncTaskBillingStateLabel(
+  state: string | undefined,
+  logType: number
+): string {
+  if (logType === 6 || state === 'refunded') return 'Refunded'
+  if (state === 'settled') return 'Settled'
+  if (state === 'pending') return 'Pre-charged'
+  return 'Pre-charged'
+}
+
+/**
  * Parse the 'other' field from JSON string to object
  */
 export function parseLogOther(other: string): LogOtherData | null {

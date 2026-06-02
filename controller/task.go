@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"errors"
 	"strconv"
 
 	"github.com/QuantumNous/new-api/common"
@@ -38,8 +39,22 @@ func GetAllTask(c *gin.Context) {
 	items := model.TaskGetAllTasks(pageInfo.GetStartIdx(), pageInfo.GetPageSize(), queryParams)
 	total := model.TaskCountAllTasks(queryParams)
 	pageInfo.SetTotal(int(total))
-	pageInfo.SetItems(tasksToDto(items, true))
+	pageInfo.SetItems(tasksToDto(items, true, false))
 	common.ApiSuccess(c, pageInfo)
+}
+
+func GetTask(c *gin.Context) {
+	taskId := c.Param("id")
+	task, exists, err := model.GetByOnlyTaskId(taskId)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	if !exists {
+		common.ApiError(c, errors.New("task not found"))
+		return
+	}
+	common.ApiSuccess(c, relay.TaskModel2Dto(task))
 }
 
 func GetUserTask(c *gin.Context) {
@@ -62,11 +77,26 @@ func GetUserTask(c *gin.Context) {
 	items := model.TaskGetAllUserTask(userId, pageInfo.GetStartIdx(), pageInfo.GetPageSize(), queryParams)
 	total := model.TaskCountAllUserTask(userId, queryParams)
 	pageInfo.SetTotal(int(total))
-	pageInfo.SetItems(tasksToDto(items, false))
+	pageInfo.SetItems(tasksToDto(items, false, false))
 	common.ApiSuccess(c, pageInfo)
 }
 
-func tasksToDto(tasks []*model.Task, fillUser bool) []*dto.TaskDto {
+func GetUserTaskDetail(c *gin.Context) {
+	taskId := c.Param("id")
+	userId := c.GetInt("id")
+	task, exists, err := model.GetByTaskId(userId, taskId)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	if !exists {
+		common.ApiError(c, errors.New("task not found"))
+		return
+	}
+	common.ApiSuccess(c, relay.TaskModel2Dto(task))
+}
+
+func tasksToDto(tasks []*model.Task, fillUser bool, includeData bool) []*dto.TaskDto {
 	var userIdMap map[int]*model.UserBase
 	if fillUser {
 		userIdMap = make(map[int]*model.UserBase)
@@ -88,7 +118,11 @@ func tasksToDto(tasks []*model.Task, fillUser bool) []*dto.TaskDto {
 				task.Username = user.Username
 			}
 		}
-		result[i] = relay.TaskModel2Dto(task)
+		if includeData {
+			result[i] = relay.TaskModel2Dto(task)
+		} else {
+			result[i] = relay.TaskModel2ListDto(task)
+		}
 	}
 	return result
 }

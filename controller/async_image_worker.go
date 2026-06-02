@@ -3,6 +3,7 @@ package controller
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -30,6 +31,7 @@ const asyncImageWorkerContextKey = "async_image_worker"
 
 var internalAsyncImageWorkerSerial atomic.Int64
 var internalAsyncImageWorkerGeneration atomic.Int64
+var internalAsyncImageTimeoutSweepAt atomic.Int64
 
 func StartInternalAsyncImageWorkerLoop() {
 	common.SysLog(fmt.Sprintf("internal async image worker supervisor started: workers=%d max_unfinished=%d", common.GetAsyncImageWorkerConcurrency(), common.GetAsyncImageMaxUnfinishedTasks()))
@@ -69,6 +71,7 @@ func runInternalAsyncImageWorker(workerID int, slot int, generation int64) {
 }
 
 func runInternalAsyncImageWorkerOnce(workerID int) {
+	sweepTimedOutInternalAsyncImageTasks(context.Background())
 	staleBefore := time.Now().Unix() - int64(common.GetAsyncImageWorkerStaleMinutes()*60)
 	tasks := model.GetRunnableInternalAsyncImageTasks(1, staleBefore)
 	if len(tasks) == 0 {
@@ -81,9 +84,42 @@ func runInternalAsyncImageWorkerOnce(workerID int) {
 		if !claimInternalAsyncImageTask(task) {
 			continue
 		}
-		if err := executeInternalAsyncImageTask(context.Background(), task); err != nil {
+		ctx := context.Background()
+		cancel := func() {}
+		if timeoutSeconds := common.GetAsyncImageTaskTimeoutSeconds(); timeoutSeconds > 0 {
+			ctx, cancel = context.WithTimeout(ctx, time.Duration(timeoutSeconds)*time.Second)
+		}
+		if err := executeInternalAsyncImageTask(ctx, task); err != nil {
 			logger.LogError(context.Background(), fmt.Sprintf("internal async image worker %d task %s failed: %s", workerID, task.TaskID, err.Error()))
 		}
+		cancel()
+	}
+}
+
+func sweepTimedOutInternalAsyncImageTasks(ctx context.Context) {
+	now := time.Now().Unix()
+	lastSweepAt := internalAsyncImageTimeoutSweepAt.Load()
+	if now-lastSweepAt < 15 {
+		return
+	}
+	if !internalAsyncImageTimeoutSweepAt.CompareAndSwap(lastSweepAt, now) {
+		return
+	}
+	timeoutSeconds := common.GetAsyncImageTaskTimeoutSeconds()
+	if timeoutSeconds <= 0 {
+		return
+	}
+	cutoff := now - int64(timeoutSeconds)
+	tasks := model.GetTimedOutInternalAsyncImageTasks(cutoff, 100)
+	if len(tasks) == 0 {
+		return
+	}
+	reason := fmt.Sprintf("async image task timed out after %d seconds", timeoutSeconds)
+	for _, task := range tasks {
+		if task == nil || !task.PrivateData.InternalAsync {
+			continue
+		}
+		failInternalAsyncImageTask(ctx, task, reason)
 	}
 }
 
@@ -106,14 +142,17 @@ func claimInternalAsyncImageTask(task *model.Task) bool {
 }
 
 func executeInternalAsyncImageTask(ctx context.Context, task *model.Task) error {
-	imageResponseBody, channelID, proxy, err := runInternalAsyncImageRelay(task)
+	imageResponseBody, channelID, proxy, err := runInternalAsyncImageRelay(ctx, task)
 	if err != nil {
+		if errors.Is(err, context.DeadlineExceeded) {
+			err = fmt.Errorf("async image task timed out after %d seconds", common.GetAsyncImageTaskTimeoutSeconds())
+		}
 		failInternalAsyncImageTask(ctx, task, err.Error())
 		return err
 	}
 
-	var imageResp dto.ImageResponse
-	if err = common.Unmarshal(imageResponseBody, &imageResp); err != nil {
+	imageResp, err := parseInternalAsyncImageResponse(task, imageResponseBody)
+	if err != nil {
 		failInternalAsyncImageTask(ctx, task, "parse image response failed: "+err.Error())
 		return err
 	}
@@ -152,7 +191,7 @@ func executeInternalAsyncImageTask(ctx context.Context, task *model.Task) error 
 	return nil
 }
 
-func runInternalAsyncImageRelay(task *model.Task) ([]byte, int, string, error) {
+func runInternalAsyncImageRelay(ctx context.Context, task *model.Task) ([]byte, int, string, error) {
 	body, err := os.ReadFile(task.PrivateData.RequestBodyPath)
 	if err != nil {
 		return nil, 0, "", fmt.Errorf("read request snapshot failed: %w", err)
@@ -161,6 +200,7 @@ func runInternalAsyncImageRelay(task *model.Task) ([]byte, int, string, error) {
 	var lastErr *types.NewAPIError
 	var lastChannel *model.Channel
 	var lastProxy string
+	retryPath := make([]string, 0, common.RetryTimes+1)
 	retryParam := &service.RetryParam{
 		Ctx:        nil,
 		TokenGroup: task.Group,
@@ -169,30 +209,33 @@ func runInternalAsyncImageRelay(task *model.Task) ([]byte, int, string, error) {
 	}
 
 	for ; retryParam.GetRetry() <= common.RetryTimes; retryParam.IncreaseRetry() {
-		c, recorder, imageReq, relayInfo, err := buildInternalAsyncImageContext(task, body)
+		c, recorder, channel, newAPIError, err := runInternalAsyncImageRelayOnce(ctx, task, body, retryParam)
 		if err != nil {
 			return nil, 0, "", err
 		}
-		retryParam.Ctx = c
-		channel, channelErr := getChannel(c, relayInfo, retryParam)
-		if channelErr != nil {
-			lastErr = channelErr
-			break
+		if channel != nil {
+			lastChannel = channel
+			lastProxy = channel.GetSetting().Proxy
+			retryPath = append(retryPath, fmt.Sprintf("%d", channel.Id))
+			persistInternalAsyncChannelRetryPath(task, retryPath)
 		}
-		lastChannel = channel
-		lastProxy = channel.GetSetting().Proxy
-		addUsedChannel(c, channel.Id)
-		relayInfo.Request = imageReq
-		newAPIError := relay.ImageHelper(c, relayInfo)
 		if newAPIError == nil {
+			if channel == nil {
+				return nil, 0, "", fmt.Errorf("internal async image relay selected no channel")
+			}
+			setInternalAsyncChannelRetryPath(task, retryPath)
 			return recorder.Body.Bytes(), channel.Id, lastProxy, nil
 		}
 		lastErr = service.NormalizeViolationFeeError(newAPIError)
-		processChannelError(c, *types.NewChannelError(channel.Id, channel.Type, channel.Name, channel.ChannelInfo.IsMultiKey, common.GetContextKeyString(c, constant.ContextKeyChannelKey), channel.GetAutoBan()), lastErr)
+		if channel != nil {
+			c.Set("async_channel_retry_path", append([]string(nil), retryPath...))
+			processChannelError(c, *types.NewChannelError(channel.Id, channel.Type, channel.Name, channel.ChannelInfo.IsMultiKey, common.GetContextKeyString(c, constant.ContextKeyChannelKey), channel.GetAutoBan()), lastErr)
+		}
 		if !shouldRetry(c, lastErr, common.RetryTimes-retryParam.GetRetry()) {
 			break
 		}
 	}
+	setInternalAsyncChannelRetryPath(task, retryPath)
 
 	if lastErr != nil {
 		if lastChannel != nil {
@@ -203,7 +246,88 @@ func runInternalAsyncImageRelay(task *model.Task) ([]byte, int, string, error) {
 	return nil, 0, "", fmt.Errorf("internal async image relay failed")
 }
 
-func buildInternalAsyncImageContext(task *model.Task, body []byte) (*gin.Context, *httptest.ResponseRecorder, *dto.ImageRequest, *relaycommon.RelayInfo, error) {
+func runInternalAsyncImageRelayOnce(ctx context.Context, task *model.Task, body []byte, retryParam *service.RetryParam) (*gin.Context, *httptest.ResponseRecorder, *model.Channel, *types.NewAPIError, error) {
+	if task.PrivateData.RequestRelayFormat == string(types.RelayFormatGemini) || task.Action == constant.TaskActionGeminiImage {
+		return runInternalAsyncGeminiImageRelayOnce(ctx, task, body, retryParam)
+	}
+	return runInternalAsyncOpenAIImageRelayOnce(ctx, task, body, retryParam)
+}
+
+func runInternalAsyncOpenAIImageRelayOnce(ctx context.Context, task *model.Task, body []byte, retryParam *service.RetryParam) (*gin.Context, *httptest.ResponseRecorder, *model.Channel, *types.NewAPIError, error) {
+	c, recorder, imageReq, relayInfo, err := buildInternalAsyncImageContext(ctx, task, body)
+	if err != nil {
+		return nil, nil, nil, nil, err
+	}
+	retryParam.Ctx = c
+	channel, channelErr := getChannel(c, relayInfo, retryParam)
+	if channelErr != nil {
+		return c, recorder, channel, channelErr, nil
+	}
+	addUsedChannel(c, channel.Id)
+	relayInfo.Request = imageReq
+	return c, recorder, channel, relay.ImageHelper(c, relayInfo), nil
+}
+
+func runInternalAsyncGeminiImageRelayOnce(ctx context.Context, task *model.Task, body []byte, retryParam *service.RetryParam) (*gin.Context, *httptest.ResponseRecorder, *model.Channel, *types.NewAPIError, error) {
+	c, recorder, geminiReq, relayInfo, err := buildInternalAsyncGeminiImageContext(ctx, task, body)
+	if err != nil {
+		return nil, nil, nil, nil, err
+	}
+	retryParam.Ctx = c
+	channel, channelErr := getChannel(c, relayInfo, retryParam)
+	if channelErr != nil {
+		return c, recorder, channel, channelErr, nil
+	}
+	addUsedChannel(c, channel.Id)
+	relayInfo.Request = geminiReq
+	return c, recorder, channel, geminiRelayHandler(c, relayInfo), nil
+}
+
+func buildInternalAsyncImageContext(ctx context.Context, task *model.Task, body []byte) (*gin.Context, *httptest.ResponseRecorder, *dto.ImageRequest, *relaycommon.RelayInfo, error) {
+	c, recorder, err := buildInternalAsyncBaseContext(ctx, task, body)
+	if err != nil {
+		return nil, nil, nil, nil, err
+	}
+	relayMode := relayconstant.RelayModeImagesGenerations
+	if task.Action == constant.TaskActionImageEdit {
+		relayMode = relayconstant.RelayModeImagesEdits
+	}
+	c.Set("relay_mode", relayMode)
+	imageReq, err := helper.GetAndValidOpenAIImageRequest(c, relayMode)
+	if err != nil {
+		return nil, nil, nil, nil, err
+	}
+	if task.Properties.OriginModelName == "" {
+		task.Properties.OriginModelName = imageReq.Model
+		common.SetContextKey(c, constant.ContextKeyOriginalModel, imageReq.Model)
+	}
+	relayInfo, err := relaycommon.GenRelayInfo(c, types.RelayFormatOpenAIImage, imageReq, nil)
+	if err != nil {
+		return nil, nil, nil, nil, err
+	}
+	prepareInternalAsyncRelayInfo(task, relayInfo)
+	return c, recorder, imageReq, relayInfo, nil
+}
+
+func buildInternalAsyncGeminiImageContext(ctx context.Context, task *model.Task, body []byte) (*gin.Context, *httptest.ResponseRecorder, *dto.GeminiChatRequest, *relaycommon.RelayInfo, error) {
+	c, recorder, err := buildInternalAsyncBaseContext(ctx, task, body)
+	if err != nil {
+		return nil, nil, nil, nil, err
+	}
+	c.Set("relay_mode", relayconstant.RelayModeGemini)
+	geminiReq, err := helper.GetAndValidateGeminiRequest(c)
+	if err != nil {
+		return nil, nil, nil, nil, err
+	}
+	relayInfo, err := relaycommon.GenRelayInfo(c, types.RelayFormatGemini, geminiReq, nil)
+	if err != nil {
+		return nil, nil, nil, nil, err
+	}
+	prepareInternalAsyncRelayInfo(task, relayInfo)
+	return c, recorder, geminiReq, relayInfo, nil
+}
+
+func buildInternalAsyncBaseContext(ctx context.Context, task *model.Task, body []byte) (*gin.Context, *httptest.ResponseRecorder, error) {
 	recorder := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(recorder)
 	method := task.PrivateData.RequestMethod
@@ -222,9 +346,9 @@ func buildInternalAsyncImageContext(task *model.Task, body []byte) (*gin.Context
 	if task.PrivateData.RequestQuery != "" {
 		target += "?" + task.PrivateData.RequestQuery
 	}
-	req, err := http.NewRequest(method, target, bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, method, target, bytes.NewReader(body))
 	if err != nil {
-		return nil, nil, nil, nil, err
+		return nil, nil, err
 	}
 	if task.PrivateData.RequestContentType != "" {
 		req.Header.Set("Content-Type", task.PrivateData.RequestContentType)
@@ -247,24 +371,44 @@ func buildInternalAsyncImageContext(task *model.Task, body []byte) (*gin.Context
 	common.SetContextKey(c, constant.ContextKeyOriginalModel, task.Properties.OriginModelName)
 	common.SetContextKey(c, constant.ContextKeyRequestStartTime, time.Now())
 	c.Set(common.RequestIdKey, task.TaskID)
+	setInternalAsyncIdentity(c, task)
+	return c, recorder, nil
+}
 
-	relayMode := relayconstant.RelayModeImagesGenerations
-	if task.Action == constant.TaskActionImageEdit {
-		relayMode = relayconstant.RelayModeImagesEdits
+func setInternalAsyncIdentity(c *gin.Context, task *model.Task) {
+	if c == nil || task == nil {
+		return
 	}
-	c.Set("relay_mode", relayMode)
-	imageReq, err := helper.GetAndValidOpenAIImageRequest(c, relayMode)
-	if err != nil {
-		return nil, nil, nil, nil, err
+	if task.UserId > 0 {
+		if username, err := model.GetUsernameById(task.UserId, false); err == nil && username != "" {
+			c.Set("username", username)
+		}
 	}
-	if task.Properties.OriginModelName == "" {
-		task.Properties.OriginModelName = imageReq.Model
-		common.SetContextKey(c, constant.ContextKeyOriginalModel, imageReq.Model)
+	if task.PrivateData.TokenId > 0 {
+		if token, err := model.GetTokenById(task.PrivateData.TokenId); err == nil && token != nil && token.Name != "" {
+			c.Set("token_name", token.Name)
+		}
 	}
-	relayInfo, err := relaycommon.GenRelayInfo(c, types.RelayFormatOpenAIImage, imageReq, nil)
-	if err != nil {
-		return nil, nil, nil, nil, err
+}
+
+func setInternalAsyncChannelRetryPath(task *model.Task, retryPath []string) {
+	if task == nil || len(retryPath) == 0 {
+		return
 	}
+	task.PrivateData.ChannelRetryPath = append([]string(nil), retryPath...)
+}
+
+func persistInternalAsyncChannelRetryPath(task *model.Task, retryPath []string) {
+	setInternalAsyncChannelRetryPath(task, retryPath)
+	if task == nil || task.ID == 0 || len(retryPath) == 0 {
+		return
+	}
+	if err := model.UpdateTaskPrivateData(task.ID, task.PrivateData); err != nil {
+		logger.LogError(context.Background(), fmt.Sprintf("persist internal async image task %s retry path failed: %s", task.TaskID, err.Error()))
+	}
+}
+
+func prepareInternalAsyncRelayInfo(task *model.Task, relayInfo *relaycommon.RelayInfo) {
 	relayInfo.ChannelMeta = &relaycommon.ChannelMeta{}
 	relayInfo.PriceData.OtherRatios = map[string]float64{}
 	if bc := task.PrivateData.BillingContext; bc != nil {
@@ -278,7 +422,38 @@ func buildInternalAsyncImageContext(task *model.Task, body []byte) (*gin.Context
 	}
 	relayInfo.PriceData.Quota = task.Quota
 	relayInfo.PriceData.QuotaToPreConsume = task.Quota
-	return c, recorder, imageReq, relayInfo, nil
+}
+
+func parseInternalAsyncImageResponse(task *model.Task, body []byte) (dto.ImageResponse, error) {
+	if task != nil && (task.PrivateData.RequestRelayFormat == string(types.RelayFormatGemini) || task.Action == constant.TaskActionGeminiImage) {
+		return geminiImageResponseToOpenAIImageResponse(body)
+	}
+	var imageResp dto.ImageResponse
+	err := common.Unmarshal(body, &imageResp)
+	return imageResp, err
+}
+
+func geminiImageResponseToOpenAIImageResponse(body []byte) (dto.ImageResponse, error) {
+	var geminiResp dto.GeminiChatResponse
+	if err := common.Unmarshal(body, &geminiResp); err != nil {
+		return dto.ImageResponse{}, err
+	}
+	imageResp := dto.ImageResponse{
+		Created: common.GetTimestamp(),
+		Data:    make([]dto.ImageData, 0, 1),
+	}
+	for _, candidate := range geminiResp.Candidates {
+		for _, part := range candidate.Content.Parts {
+			if part.InlineData == nil || !strings.HasPrefix(strings.ToLower(part.InlineData.MimeType), "image/") || strings.TrimSpace(part.InlineData.Data) == "" {
+				continue
+			}
+			imageResp.Data = append(imageResp.Data, dto.ImageData{
+				B64Json: fmt.Sprintf("data:%s;base64,%s", part.InlineData.MimeType, part.InlineData.Data),
+			})
+			return imageResp, nil
+		}
+	}
+	return imageResp, fmt.Errorf("gemini response returned no image inlineData")
 }
 
 func firstImageAssetRef(resp dto.ImageResponse) string {
@@ -314,7 +489,7 @@ func failInternalAsyncImageTask(ctx context.Context, task *model.Task, reason st
 	now := time.Now().Unix()
 	task.Status = model.TaskStatusFailure
 	task.Progress = "100%"
-	task.FailReason = reason
+	task.FailReason = formatInternalAsyncFailureReason(task, reason)
 	if task.StartTime == 0 {
 		task.StartTime = now
 	}
@@ -333,6 +508,16 @@ func failInternalAsyncImageTask(ctx context.Context, task *model.Task, reason st
 	service.RefundTaskQuota(ctx, task, reason)
 }
 
+func formatInternalAsyncFailureReason(task *model.Task, reason string) string {
+	if task == nil || len(task.PrivateData.ChannelRetryPath) == 0 {
+		return reason
+	}
+	if strings.Contains(reason, "Async Channel Retry Path:") {
+		return reason
+	}
+	return fmt.Sprintf("%s\nAsync Channel Retry Path: %s", reason, strings.Join(task.PrivateData.ChannelRetryPath, " -> "))
+}
+
 func clearInternalAsyncImageRequestSnapshotFields(task *model.Task) string {
 	if task == nil {
 		return ""
@@ -344,6 +529,7 @@ func clearInternalAsyncImageRequestSnapshotFields(task *model.Task) string {
 	task.PrivateData.RequestMethod = ""
 	task.PrivateData.RequestPath = ""
 	task.PrivateData.RequestQuery = ""
+	task.PrivateData.RequestRelayFormat = ""
 	return snapshotPath
 }
 

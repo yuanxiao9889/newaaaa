@@ -18,15 +18,19 @@ For commercial licensing, please contact support@quantumnous.com
 */
 /* eslint-disable react-refresh/only-export-components */
 import { useState, useMemo } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import type { ColumnDef } from '@tanstack/react-table'
 import { Music } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
+import { toast } from 'sonner'
 import { getUserAvatarFallback, getUserAvatarStyle } from '@/lib/avatar'
 import { formatTimestampToDate } from '@/lib/format'
 import { cn } from '@/lib/utils'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
+import { Button } from '@/components/ui/button'
 import { DataTableColumnHeader } from '@/components/data-table'
 import { StatusBadge } from '@/components/status-badge'
+import { getTaskLogDetail } from '../../api'
 import { TASK_ACTIONS, TASK_STATUS } from '../../constants'
 import { taskActionMapper, taskStatusMapper } from '../../lib/mappers'
 import type { TaskLog } from '../../types'
@@ -55,31 +59,69 @@ function parseTaskData(data: unknown): unknown[] {
   return []
 }
 
-function AudioPreviewCell({ log }: { log: TaskLog }) {
+function AudioPreviewCell({
+  log,
+  isAdmin,
+}: {
+  log: TaskLog
+  isAdmin: boolean
+}) {
   const { t } = useTranslation()
   const [open, setOpen] = useState(false)
+  const [enabled, setEnabled] = useState(false)
+  const shouldFetch = enabled && !!log.task_id && !log.data
+  const detailQuery = useQuery({
+    queryKey: ['task-log-detail', log.task_id],
+    queryFn: async () => {
+      const result = await getTaskLogDetail(log.task_id, isAdmin)
+      if (!result.success || !result.data) {
+        throw new Error(result.message || t('Failed to load task details'))
+      }
+      return result.data
+    },
+    enabled: shouldFetch,
+  })
+  const detailLog = detailQuery.data || log
   const clips = useMemo(() => {
-    const data = parseTaskData(log.data)
+    const data = parseTaskData(detailLog.data)
     return data.filter(
       (c) =>
         c && typeof c === 'object' && (c as Record<string, unknown>).audio_url
     )
-  }, [log.data])
+  }, [detailLog.data])
 
-  if (clips.length === 0) return null
+  const handleOpen = () => {
+    setEnabled(true)
+    if (log.data || clips.length > 0) {
+      setOpen(true)
+      return
+    }
+    detailQuery.refetch().then((result) => {
+      if (result.error) {
+        toast.error(result.error.message || t('Failed to load task details'))
+        return
+      }
+      setOpen(true)
+    })
+  }
 
   return (
     <>
-      <button
+      <Button
         type='button'
-        className='group flex items-center gap-1 text-left text-xs'
-        onClick={() => setOpen(true)}
+        variant='ghost'
+        size='sm'
+        className='group h-auto max-w-[200px] justify-start gap-1 px-0 py-0 text-left text-xs'
+        disabled={detailQuery.isFetching}
+        onClick={handleOpen}
       >
         <Music className='text-muted-foreground size-3' />
         <span className='text-foreground leading-snug group-hover:underline'>
-          {t('Click to preview audio')}
+          {detailQuery.isFetching
+            ? t('Loading...')
+            : t('Click to preview audio')}
         </span>
-      </button>
+      </Button>
       <AudioPreviewDialog
         open={open}
         onOpenChange={setOpen}
@@ -234,17 +276,7 @@ export function useTaskLogsColumns(isAdmin: boolean): ColumnDef<TaskLog>[] {
         const isSunoSuccess =
           log.platform === 'suno' && status === TASK_STATUS.SUCCESS
         if (isSunoSuccess) {
-          const data = parseTaskData(log.data)
-          if (
-            data.some(
-              (c) =>
-                c &&
-                typeof c === 'object' &&
-                (c as Record<string, unknown>).audio_url
-            )
-          ) {
-            return <AudioPreviewCell log={log} />
-          }
+          return <AudioPreviewCell log={log} isAdmin={isAdmin} />
         }
 
         const isVideoTask =

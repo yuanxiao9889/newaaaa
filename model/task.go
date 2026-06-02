@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"database/sql/driver"
 	"encoding/json"
+	"reflect"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
@@ -114,15 +115,17 @@ type TaskPrivateData struct {
 	ExpiresAt int64  `json:"expires_at,omitempty"`
 	SourceURL string `json:"source_url,omitempty"`
 
-	InternalAsync      bool   `json:"internal_async,omitempty"`
-	RequestBodyPath    string `json:"request_body_path,omitempty"`
-	RequestContentType string `json:"request_content_type,omitempty"`
-	RequestBodySize    int64  `json:"request_body_size,omitempty"`
-	RequestMethod      string `json:"request_method,omitempty"`
-	RequestPath        string `json:"request_path,omitempty"`
-	RequestQuery       string `json:"request_query,omitempty"`
-	WorkerAttempts    int    `json:"worker_attempts,omitempty"`
-	WorkerHeartbeatAt int64  `json:"worker_heartbeat_at,omitempty"`
+	InternalAsync      bool     `json:"internal_async,omitempty"`
+	RequestBodyPath    string   `json:"request_body_path,omitempty"`
+	RequestContentType string   `json:"request_content_type,omitempty"`
+	RequestBodySize    int64    `json:"request_body_size,omitempty"`
+	RequestMethod      string   `json:"request_method,omitempty"`
+	RequestPath        string   `json:"request_path,omitempty"`
+	RequestQuery       string   `json:"request_query,omitempty"`
+	RequestRelayFormat string   `json:"request_relay_format,omitempty"`
+	WorkerAttempts     int      `json:"worker_attempts,omitempty"`
+	WorkerHeartbeatAt  int64    `json:"worker_heartbeat_at,omitempty"`
+	ChannelRetryPath   []string `json:"channel_retry_path,omitempty"`
 
 	BillingState     string `json:"billing_state,omitempty"`
 	PreConsumedQuota int    `json:"pre_consumed_quota,omitempty"`
@@ -174,7 +177,7 @@ func (p *TaskPrivateData) Scan(val interface{}) error {
 }
 
 func (p TaskPrivateData) Value() (driver.Value, error) {
-	if (p == TaskPrivateData{}) {
+	if reflect.DeepEqual(p, TaskPrivateData{}) {
 		return nil, nil
 	}
 	return common.Marshal(p)
@@ -196,13 +199,21 @@ type SyncTaskQueryParams struct {
 func InitTask(platform constant.TaskPlatform, relayInfo *commonRelay.RelayInfo) *Task {
 	properties := Properties{}
 	privateData := TaskPrivateData{}
-	if relayInfo != nil && relayInfo.ChannelMeta != nil {
-		if relayInfo.ChannelMeta.ChannelType == constant.ChannelTypeGemini ||
-			relayInfo.ChannelMeta.ChannelType == constant.ChannelTypeVertexAi {
-			privateData.Key = relayInfo.ChannelMeta.ApiKey
-		}
-		if relayInfo.UpstreamModelName != "" {
-			properties.UpstreamModelName = relayInfo.UpstreamModelName
+	userID := 0
+	usingGroup := ""
+	channelID := 0
+	if relayInfo != nil {
+		userID = relayInfo.UserId
+		usingGroup = relayInfo.UsingGroup
+		if relayInfo.ChannelMeta != nil {
+			channelID = relayInfo.ChannelId
+			if relayInfo.ChannelMeta.ChannelType == constant.ChannelTypeGemini ||
+				relayInfo.ChannelMeta.ChannelType == constant.ChannelTypeVertexAi {
+				privateData.Key = relayInfo.ChannelMeta.ApiKey
+			}
+			if relayInfo.UpstreamModelName != "" {
+				properties.UpstreamModelName = relayInfo.UpstreamModelName
+			}
 		}
 		if relayInfo.OriginModelName != "" {
 			properties.OriginModelName = relayInfo.OriginModelName
@@ -211,7 +222,7 @@ func InitTask(platform constant.TaskPlatform, relayInfo *commonRelay.RelayInfo) 
 
 	// 使用预生成的公开 ID（如果有），否则新生成
 	taskID := ""
-	if relayInfo.TaskRelayInfo != nil && relayInfo.TaskRelayInfo.PublicTaskID != "" {
+	if relayInfo != nil && relayInfo.TaskRelayInfo != nil && relayInfo.TaskRelayInfo.PublicTaskID != "" {
 		taskID = relayInfo.TaskRelayInfo.PublicTaskID
 	} else {
 		taskID = GenerateTaskID()
@@ -219,12 +230,12 @@ func InitTask(platform constant.TaskPlatform, relayInfo *commonRelay.RelayInfo) 
 
 	t := &Task{
 		TaskID:      taskID,
-		UserId:      relayInfo.UserId,
-		Group:       relayInfo.UsingGroup,
+		UserId:      userID,
+		Group:       usingGroup,
 		SubmitTime:  time.Now().Unix(),
 		Status:      TaskStatusNotStart,
 		Progress:    "0%",
-		ChannelId:   relayInfo.ChannelId,
+		ChannelId:   channelID,
 		Platform:    platform,
 		Properties:  properties,
 		PrivateData: privateData,
@@ -237,7 +248,7 @@ func TaskGetAllUserTask(userId int, startIdx int, num int, queryParams SyncTaskQ
 	var err error
 
 	// 初始化查询构建器
-	query := DB.Where("user_id = ?", userId)
+	query := DB.Omit("data", "channel_id").Where("user_id = ?", userId)
 
 	if queryParams.TaskID != "" {
 		query = query.Where("task_id = ?", queryParams.TaskID)
@@ -260,7 +271,7 @@ func TaskGetAllUserTask(userId int, startIdx int, num int, queryParams SyncTaskQ
 	}
 
 	// 获取数据
-	err = query.Omit("channel_id").Order("id desc").Limit(num).Offset(startIdx).Find(&tasks).Error
+	err = query.Order("id desc").Limit(num).Offset(startIdx).Find(&tasks).Error
 	if err != nil {
 		return nil
 	}
@@ -273,7 +284,7 @@ func TaskGetAllTasks(startIdx int, num int, queryParams SyncTaskQueryParams) []*
 	var err error
 
 	// 初始化查询构建器
-	query := DB
+	query := DB.Omit("data")
 
 	// 添加过滤条件
 	if queryParams.ChannelID != "" {
@@ -345,7 +356,7 @@ func CountUnfinishedInternalAsyncImageTasks(limit int) int {
 	var count int64
 	query := DB.Model(&Task{}).
 		Where("platform = ?", constant.TaskPlatformInternalImage).
-		Where("action IN ?", []string{constant.TaskActionImageGenerate, constant.TaskActionImageEdit}).
+		Where("action IN ?", internalAsyncImageTaskActions()).
 		Where("status NOT IN ?", []TaskStatus{TaskStatusFailure, TaskStatusSuccess})
 	if err := query.Limit(limit).Count(&count).Error; err != nil {
 		return 0
@@ -356,11 +367,23 @@ func CountUnfinishedInternalAsyncImageTasks(limit int) int {
 	return int(count)
 }
 
+func internalAsyncImageTaskActions() []string {
+	return []string{
+		constant.TaskActionImageGenerate,
+		constant.TaskActionImageEdit,
+		constant.TaskActionGeminiImage,
+	}
+}
+
 func GetRunnableInternalAsyncImageTasks(limit int, staleBefore int64) []*Task {
 	if limit <= 0 {
 		limit = 10
 	}
-	candidates := getUnfinishedImageTasksForInternalAsync(limit * 20)
+	scanLimit := limit * 20
+	if scanLimit < 1024 {
+		scanLimit = 1024
+	}
+	candidates := getUnfinishedImageTasksForInternalAsync(scanLimit)
 	tasks := make([]*Task, 0, limit)
 	for _, task := range candidates {
 		if task == nil || !task.PrivateData.InternalAsync {
@@ -382,9 +405,28 @@ func getUnfinishedImageTasksForInternalAsync(limit int) []*Task {
 	if limit <= 0 {
 		limit = 1000
 	}
-	err := DB.Where("action IN ?", []string{constant.TaskActionImageGenerate, constant.TaskActionImageEdit}).
+	err := DB.Where("action IN ?", internalAsyncImageTaskActions()).
 		Where("platform = ?", constant.TaskPlatformInternalImage).
 		Where("status NOT IN ?", []TaskStatus{TaskStatusFailure, TaskStatusSuccess}).
+		Order("id asc").
+		Limit(limit).
+		Find(&tasks).Error
+	if err != nil {
+		return nil
+	}
+	return tasks
+}
+
+func GetTimedOutInternalAsyncImageTasks(cutoff int64, limit int) []*Task {
+	var tasks []*Task
+	if limit <= 0 {
+		limit = 100
+	}
+	err := DB.Where("action IN ?", internalAsyncImageTaskActions()).
+		Where("platform = ?", constant.TaskPlatformInternalImage).
+		Where("status = ?", TaskStatusInProgress).
+		Where("start_time > 0").
+		Where("start_time < ?", cutoff).
 		Order("id asc").
 		Limit(limit).
 		Find(&tasks).Error
@@ -400,7 +442,7 @@ func GetSuccessfulImageTasksForCleanup(startIdx int, num int) []*Task {
 	}
 	var tasks []*Task
 	err := DB.Where("status = ?", TaskStatusSuccess).
-		Where("action IN ?", []string{constant.TaskActionImageGenerate, constant.TaskActionImageEdit}).
+		Where("action IN ?", internalAsyncImageTaskActions()).
 		Order("finish_time asc, id asc").
 		Limit(num).
 		Offset(startIdx).
@@ -496,6 +538,13 @@ func (Task *Task) Update() error {
 	var err error
 	err = DB.Save(Task).Error
 	return err
+}
+
+func UpdateTaskPrivateData(id int64, privateData TaskPrivateData) error {
+	if id == 0 {
+		return nil
+	}
+	return DB.Model(&Task{}).Where("id = ?", id).Update("private_data", privateData).Error
 }
 
 // UpdateWithStatus performs a conditional UPDATE guarded by fromStatus (CAS).

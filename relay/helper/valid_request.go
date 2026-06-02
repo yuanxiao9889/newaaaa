@@ -144,17 +144,17 @@ func GetAndValidOpenAIImageRequest(c *gin.Context, relayMode int) (*dto.ImageReq
 	switch relayMode {
 	case relayconstant.RelayModeImagesEdits:
 		if strings.Contains(c.Request.Header.Get("Content-Type"), "multipart/form-data") {
-			_, err := c.MultipartForm()
+			formData, err := common.ParseMultipartFormReusable(c)
 			if err != nil {
 				return nil, fmt.Errorf("failed to parse image edit form request: %w", err)
 			}
-			formData := c.Request.PostForm
-			imageRequest.Prompt = formData.Get("prompt")
-			imageRequest.Model = formData.Get("model")
-			imageRequest.N = common.GetPointer(uint(common.String2Int(formData.Get("n"))))
-			imageRequest.Quality = formData.Get("quality")
-			imageRequest.Size = formData.Get("size")
-			if imageValue := formData.Get("image"); imageValue != "" {
+			values := formData.Value
+			imageRequest.Prompt = firstFormValue(values, "prompt")
+			imageRequest.Model = firstFormValue(values, "model")
+			imageRequest.N = common.GetPointer(uint(common.String2Int(firstFormValue(values, "n"))))
+			imageRequest.Quality = firstFormValue(values, "quality")
+			imageRequest.Size = firstFormValue(values, "size")
+			if imageValue := firstFormValue(values, "image"); imageValue != "" {
 				imageRequest.Image, _ = common.Marshal(imageValue)
 			}
 
@@ -167,9 +167,9 @@ func GetAndValidOpenAIImageRequest(c *gin.Context, relayMode int) (*dto.ImageReq
 				imageRequest.N = common.GetPointer(uint(1))
 			}
 
-			hasWatermark := formData.Has("watermark")
+			_, hasWatermark := values["watermark"]
 			if hasWatermark {
-				watermark := formData.Get("watermark") == "true"
+				watermark := firstFormValue(values, "watermark") == "true"
 				imageRequest.Watermark = &watermark
 			}
 			break
@@ -224,6 +224,13 @@ func GetAndValidOpenAIImageRequest(c *gin.Context, relayMode int) (*dto.ImageReq
 	}
 
 	return imageRequest, nil
+}
+
+func firstFormValue(values map[string][]string, key string) string {
+	if len(values[key]) == 0 {
+		return ""
+	}
+	return values[key][0]
 }
 
 func GetAndValidateClaudeRequest(c *gin.Context) (textRequest *dto.ClaudeRequest, err error) {

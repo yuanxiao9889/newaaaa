@@ -50,6 +50,15 @@ type TaskDto struct {
 	Properties any             `json:"properties"`
 	Username   string          `json:"username,omitempty"`
 	Data       json.RawMessage `json:"data"`
+
+	InternalAsync    bool     `json:"internal_async,omitempty"`
+	RequestPath      string   `json:"request_path,omitempty"`
+	WorkerAttempts   int      `json:"worker_attempts,omitempty"`
+	ChannelRetryPath []string `json:"channel_retry_path,omitempty"`
+	BillingState     string   `json:"billing_state,omitempty"`
+	PreConsumedQuota int      `json:"pre_consumed_quota,omitempty"`
+	ActualQuota      int      `json:"actual_quota,omitempty"`
+	BillingError     string   `json:"billing_error,omitempty"`
 }
 
 type FetchReq struct {

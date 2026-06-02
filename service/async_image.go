@@ -21,7 +21,9 @@ import (
 const AsyncImageAssetType = "image"
 
 func IsImageTaskAction(action string) bool {
-	return action == constant.TaskActionImageGenerate || action == constant.TaskActionImageEdit
+	return action == constant.TaskActionImageGenerate ||
+		action == constant.TaskActionImageEdit ||
+		action == constant.TaskActionGeminiImage
 }
 
 func BuildAsyncImageStatusURL(taskID string) string {

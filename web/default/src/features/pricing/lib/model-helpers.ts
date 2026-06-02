@@ -52,3 +52,18 @@ export function replaceModelInPath(path: string, modelName: string): string {
 export function isTokenBasedModel(model: PricingModel): boolean {
   return model.quota_type === QUOTA_TYPE_VALUES.TOKEN
 }
+
+/**
+ * Check if a fixed-price model should present its unit as seconds.
+ */
+export function isSecondBasedFixedPriceModel(model: PricingModel): boolean {
+  if (isTokenBasedModel(model)) return false
+
+  const outputs = model.output_modalities || []
+  if (outputs.includes('video')) return true
+
+  const endpoints = model.supported_endpoint_types || []
+  if (endpoints.includes('openai-video')) return true
+
+  return /video|sora|veo|kling|pika/i.test(model.model_name || '')
+}

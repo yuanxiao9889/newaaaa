@@ -1,6 +1,7 @@
 package common
 
 import (
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -18,11 +19,24 @@ func DefaultAsyncImageRetentionHours() int {
 }
 
 func DefaultAsyncImageWorkerConcurrency() int {
-	return NormalizeAsyncImagePositiveInt(GetEnvOrDefault("ASYNC_IMAGE_WORKER_CONCURRENCY", 4), 4, 64, 4)
+	return NormalizeAsyncImagePositiveInt(GetEnvOrDefault("ASYNC_IMAGE_WORKER_CONCURRENCY", 4), 1, 256, 4)
 }
 
 func DefaultAsyncImageMaxUnfinishedTasks() int {
 	return NormalizeAsyncImagePositiveInt(GetEnvOrDefault("ASYNC_IMAGE_MAX_UNFINISHED_TASKS", 500), 1, 100000, 500)
+}
+
+func DefaultAsyncImageTaskTimeoutSeconds() int {
+	value := strings.TrimSpace(GetEnvOrDefaultString("ASYNC_IMAGE_TASK_TIMEOUT_SECONDS", "1600"))
+	seconds, err := strconv.Atoi(value)
+	if err != nil {
+		SysError(fmt.Sprintf("invalid ASYNC_IMAGE_TASK_TIMEOUT_SECONDS=%q, using default value 1600", value))
+		return 1600
+	}
+	if seconds == 0 {
+		return 0
+	}
+	return NormalizeAsyncImagePositiveInt(seconds, 1, 86400, 1600)
 }
 
 func NormalizeAsyncImageRetentionHours(hours int) int {
@@ -55,7 +69,7 @@ func ParseAsyncImageRetentionHours(value string) (int, error) {
 }
 
 func ParseAsyncImageWorkerConcurrency(value string) (int, error) {
-	return parseAsyncImagePositiveInt(value, 1, 64, "async image worker concurrency must be between 1 and 64")
+	return parseAsyncImagePositiveInt(value, 1, 256, "async image worker concurrency must be between 1 and 256")
 }
 
 func ParseAsyncImageMaxUnfinishedTasks(value string) (int, error) {
@@ -65,7 +79,7 @@ func ParseAsyncImageMaxUnfinishedTasks(value string) (int, error) {
 func parseAsyncImagePositiveInt(value string, min int, max int, message string) (int, error) {
 	num, err := strconv.Atoi(strings.TrimSpace(value))
 	if err != nil || num < min || num > max {
-		return 0, fmt.Errorf(message)
+		return 0, errors.New(message)
 	}
 	return num, nil
 }
@@ -139,4 +153,8 @@ func GetAsyncImageWorkerStaleMinutes() int {
 		return 30
 	}
 	return value
+}
+
+func GetAsyncImageTaskTimeoutSeconds() int {
+	return DefaultAsyncImageTaskTimeoutSeconds()
 }
