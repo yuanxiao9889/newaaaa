@@ -37,12 +37,37 @@ func IsAsyncImageRequest(c *gin.Context) bool {
 	return err == nil && enabled
 }
 
+func IsAsyncGeminiImageRequest(c *gin.Context, request *dto.GeminiChatRequest) bool {
+	if !IsAsyncImageRequest(c) || request == nil || request.IsStream(c) {
+		return false
+	}
+	if !strings.Contains(c.Request.URL.Path, "generateContent") {
+		return false
+	}
+	for _, modality := range request.GenerationConfig.ResponseModalities {
+		if strings.EqualFold(strings.TrimSpace(modality), "IMAGE") {
+			return true
+		}
+	}
+	return false
+}
+
 func validateAsyncImageTaskRequest(info *relaycommon.RelayInfo, request *dto.ImageRequest) *types.NewAPIError {
 	if request == nil {
 		return types.NewErrorWithStatusCode(fmt.Errorf("image request is required"), types.ErrorCodeInvalidRequest, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
 	}
 	if request.N != nil && *request.N > 1 {
 		return types.NewErrorWithStatusCode(fmt.Errorf("async image tasks only support n=1"), types.ErrorCodeInvalidRequest, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
+	}
+	return nil
+}
+
+func validateAsyncGeminiImageTaskRequest(request *dto.GeminiChatRequest) *types.NewAPIError {
+	if request == nil {
+		return types.NewErrorWithStatusCode(fmt.Errorf("gemini image request is required"), types.ErrorCodeInvalidRequest, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
+	}
+	if request.GenerationConfig.CandidateCount != nil && *request.GenerationConfig.CandidateCount > 1 {
+		return types.NewErrorWithStatusCode(fmt.Errorf("async gemini image tasks only support candidateCount=1"), types.ErrorCodeInvalidRequest, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
 	}
 	return nil
 }
@@ -94,6 +119,88 @@ func SubmitInternalAsyncImageTask(c *gin.Context, info *relaycommon.RelayInfo, r
 	task.PrivateData.RequestPath = c.Request.URL.Path
 	task.PrivateData.RequestQuery = stripAsyncQuery(c.Request.URL.RawQuery)
 	task.PrivateData.RequestContentType = c.Request.Header.Get("Content-Type")
+	task.PrivateData.RequestRelayFormat = string(types.RelayFormatOpenAIImage)
+	task.PrivateData.BillingSource = info.BillingSource
+	task.PrivateData.SubscriptionId = info.SubscriptionId
+	task.PrivateData.TokenId = info.TokenId
+	task.PrivateData.BillingState = service.TaskBillingStatePending
+	task.PrivateData.PreConsumedQuota = preConsumedQuota
+	task.PrivateData.ActualQuota = 0
+	task.PrivateData.BillingError = ""
+	task.PrivateData.BillingUpdatedAt = time.Now().Unix()
+	task.PrivateData.BillingContext = &model.TaskBillingContext{
+		ModelPrice:      info.PriceData.ModelPrice,
+		GroupRatio:      info.PriceData.GroupRatioInfo.GroupRatio,
+		ModelRatio:      info.PriceData.ModelRatio,
+		OtherRatios:     info.PriceData.OtherRatios,
+		OriginModelName: info.OriginModelName,
+		PerCallBilling:  true,
+	}
+	task.SetData(request)
+
+	snapshotPath, snapshotSize, err := saveInternalAsyncImageRequestSnapshot(c, task.TaskID)
+	if err != nil {
+		return types.NewErrorWithStatusCode(err, types.ErrorCodeReadRequestBodyFailed, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
+	}
+	task.PrivateData.RequestBodyPath = snapshotPath
+	task.PrivateData.RequestBodySize = snapshotSize
+
+	if err = task.Insert(); err != nil {
+		_ = os.Remove(snapshotPath)
+		return types.NewErrorWithStatusCode(err, types.ErrorCodeUpdateDataError, http.StatusInternalServerError)
+	}
+
+	c.JSON(http.StatusOK, dto.ImageAsyncSubmitResponse{
+		TaskID:     task.TaskID,
+		Status:     dto.ImageAsyncStatusSubmitted,
+		StatusURL:  service.BuildAsyncImageStatusURL(task.TaskID),
+		ContentURL: service.BuildAsyncImageContentURL(task.TaskID),
+		ExpiresAt:  0,
+	})
+	return nil
+}
+
+func SubmitInternalAsyncGeminiImageTask(c *gin.Context, info *relaycommon.RelayInfo, request *dto.GeminiChatRequest) (ret *types.NewAPIError) {
+	if err := validateAsyncGeminiImageTaskRequest(request); err != nil {
+		return err
+	}
+	maxTasks := common.GetAsyncImageMaxUnfinishedTasks()
+	if model.CountUnfinishedInternalAsyncImageTasks(maxTasks+1) >= maxTasks {
+		return types.NewErrorWithStatusCode(fmt.Errorf("async image task queue is full"), types.ErrorCodeInvalidRequest, http.StatusTooManyRequests, types.ErrOptionWithSkipRetry())
+	}
+	if err := preConsumeAsyncImageBilling(c, info); err != nil {
+		return err
+	}
+	defer func() {
+		if ret != nil && info != nil && info.Billing != nil {
+			info.Billing.Refund(c)
+		}
+	}()
+
+	if info.TaskRelayInfo == nil {
+		info.TaskRelayInfo = &relaycommon.TaskRelayInfo{}
+	}
+	info.TaskRelayInfo.PublicTaskID = model.GenerateTaskID()
+	task := model.InitTask(constant.TaskPlatformInternalImage, info)
+	task.Action = constant.TaskActionGeminiImage
+	task.Status = model.TaskStatusSubmitted
+	task.Progress = taskcommon.ProgressSubmitted
+	preConsumedQuota := info.FinalPreConsumedQuota
+	if info.Billing != nil {
+		preConsumedQuota = info.Billing.GetPreConsumedQuota()
+	}
+	if preConsumedQuota < 0 {
+		preConsumedQuota = 0
+	}
+	task.Quota = preConsumedQuota
+	task.PrivateData.AssetType = service.AsyncImageAssetType
+	task.PrivateData.InternalAsync = true
+	task.PrivateData.ResultURL = service.BuildAsyncImageContentURL(task.TaskID)
+	task.PrivateData.RequestMethod = c.Request.Method
+	task.PrivateData.RequestPath = c.Request.URL.Path
+	task.PrivateData.RequestQuery = stripAsyncQuery(c.Request.URL.RawQuery)
+	task.PrivateData.RequestContentType = c.Request.Header.Get("Content-Type")
+	task.PrivateData.RequestRelayFormat = string(types.RelayFormatGemini)
 	task.PrivateData.BillingSource = info.BillingSource
 	task.PrivateData.SubscriptionId = info.SubscriptionId
 	task.PrivateData.TokenId = info.TokenId

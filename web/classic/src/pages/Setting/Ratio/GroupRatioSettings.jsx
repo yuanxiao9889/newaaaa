@@ -140,7 +140,7 @@ export default function GroupRatioSettings(props) {
   }
 
   useEffect(() => {
-    const currentInputs = {};
+    const currentInputs = { ...inputs };
     for (let key in props.options) {
       if (OPTION_KEYS.includes(key)) {
         currentInputs[key] = props.options[key];

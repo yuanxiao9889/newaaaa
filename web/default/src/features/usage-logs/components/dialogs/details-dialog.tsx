@@ -56,6 +56,8 @@ import {
   getTieredBillingSummary,
   hasAnyCacheTokens,
   isViolationFeeLog,
+  isAsyncTaskBillingLog,
+  getAsyncTaskBillingStateLabel,
   getFirstResponseTimeColor,
   getResponseTimeColor,
 } from '../../lib/format'
@@ -337,7 +339,22 @@ function TokenBreakdown(props: { log: UsageLog; other: LogOtherData }) {
   const cacheWrite1h = other.cache_creation_tokens_1h || 0
   const hasTokens = promptTokens > 0 || completionTokens > 0
 
-  if (!hasTokens) return null
+  if (!hasTokens) {
+    if (!isAsyncTaskBillingLog(log, other)) return null
+
+    return (
+      <DetailSection
+        icon={<Info className='size-3.5' aria-hidden='true' />}
+        label={t('Token Breakdown')}
+      >
+        <p className='text-muted-foreground text-xs leading-relaxed'>
+          {t(
+            'Async image tasks do not show token usage here. The fee is pre-charged when the task is submitted, then settled or refunded after completion.'
+          )}
+        </p>
+      </DetailSection>
+    )
+  }
 
   const rows: Array<{ label: string; value: string }> = []
 
@@ -389,6 +406,73 @@ function TokenBreakdown(props: { log: UsageLog; other: LogOtherData }) {
       ))}
     </DetailSection>
   )
+}
+
+function AsyncTaskBillingSection(props: {
+  log: UsageLog
+  other: LogOtherData
+}) {
+  const { t } = useTranslation()
+  const { log, other } = props
+
+  if (!isAsyncTaskBillingLog(log, other)) return null
+
+  const stateLabel = getAsyncTaskBillingStateLabel(
+    other.billing_state,
+    log.type
+  )
+  const rows: Array<{ label: string; value: React.ReactNode; mono?: boolean }> =
+    [
+      { label: t('Billing Status'), value: t(stateLabel) },
+      { label: t('Task ID'), value: other.task_id || '-', mono: true },
+    ]
+
+  if (other.pre_consumed_quota != null) {
+    rows.push({
+      label: t('Pre-charged Amount'),
+      value: formatLogQuota(other.pre_consumed_quota),
+      mono: true,
+    })
+  }
+
+  if (other.actual_quota != null) {
+    rows.push({
+      label: t('Settled Amount'),
+      value: formatLogQuota(other.actual_quota),
+      mono: true,
+    })
+  }
+
+  return (
+    <DetailSection
+      icon={<Info className='size-3.5' aria-hidden='true' />}
+      label={t('Async Task Billing')}
+    >
+      {rows.map((row, idx) => (
+        <DetailRow
+          key={idx}
+          label={row.label}
+          value={row.value}
+          mono={row.mono}
+        />
+      ))}
+      <p className='text-muted-foreground pt-1 text-xs leading-relaxed'>
+        {t(
+          'The amount was reserved at submission so the async image task can run in the background. Successful tasks are settled with the final amount; failed tasks are refunded.'
+        )}
+      </p>
+    </DetailSection>
+  )
+}
+
+function formatChannelRetryPath(
+  path: Array<number | string> | undefined
+): string | undefined {
+  if (!path || path.length === 0) return undefined
+  return path
+    .map((item) => String(item).trim())
+    .filter(Boolean)
+    .join(' -> ')
 }
 
 interface DetailsDialogProps {
@@ -482,7 +566,16 @@ export function DetailsDialog(props: DetailsDialogProps) {
 
   const useChannel = other?.admin_info?.use_channel
   const channelChain =
-    useChannel && useChannel.length > 0 ? useChannel.join(' → ') : undefined
+    formatChannelRetryPath(other?.async_channel_retry_path) ||
+    formatChannelRetryPath(useChannel)
+  const isAsyncLog = Boolean(
+    other?.async_task ||
+      (other?.is_task && other?.task_id) ||
+      props.log.request_id?.startsWith('task_')
+  )
+  const asyncTaskId =
+    other?.task_id ||
+    (props.log.request_id?.startsWith('task_') ? props.log.request_id : '')
 
   return (
     <Dialog open={props.open} onOpenChange={props.onOpenChange}>
@@ -549,10 +642,30 @@ export function DetailsDialog(props: DetailsDialogProps) {
                 <DetailRow label={t('Retry Chain')} value={channelChain} mono />
               )}
 
+              {isAsyncLog && asyncTaskId && (
+                <DetailRow label={t('Task ID')} value={asyncTaskId} mono />
+              )}
+
               {props.log.token_name && (
                 <DetailRow
                   label={t('Token')}
                   value={props.log.token_name}
+                  mono
+                />
+              )}
+
+              {!props.log.token_name && props.log.token_id > 0 && (
+                <DetailRow
+                  label={t('Token ID')}
+                  value={props.log.token_id}
+                  mono
+                />
+              )}
+
+              {!props.log.username && props.log.user_id > 0 && (
+                <DetailRow
+                  label={t('User ID')}
+                  value={props.log.user_id}
                   mono
                 />
               )}
@@ -668,6 +781,41 @@ export function DetailsDialog(props: DetailsDialogProps) {
                 <p className='text-xs break-words'>{other.reject_reason}</p>
               </DetailSection>
             )}
+
+            {props.isAdmin &&
+              props.log.type === 5 &&
+              other &&
+              (other.status_code || other.error_type || other.error_code) && (
+                <DetailSection
+                  icon={
+                    <AlertTriangle className='size-3.5' aria-hidden='true' />
+                  }
+                  label={t('Error Details')}
+                  variant='danger'
+                >
+                  {other.status_code != null && (
+                    <DetailRow
+                      label={t('Status Code')}
+                      value={other.status_code}
+                      mono
+                    />
+                  )}
+                  {other.error_type && (
+                    <DetailRow
+                      label={t('Error Type')}
+                      value={other.error_type}
+                      mono
+                    />
+                  )}
+                  {other.error_code && (
+                    <DetailRow
+                      label={t('Error Code')}
+                      value={other.error_code}
+                      mono
+                    />
+                  )}
+                </DetailSection>
+              )}
 
             {/* Violation fee info */}
             {isViolation && other && (
@@ -849,6 +997,9 @@ export function DetailsDialog(props: DetailsDialogProps) {
             {isDisplayableType(props.log.type) && other && (
               <TokenBreakdown log={props.log} other={other} />
             )}
+
+            {/* Async task billing explanation */}
+            {other && <AsyncTaskBillingSection log={props.log} other={other} />}
 
             {/* Billing breakdown (consume type) */}
             {isConsume && other && !isViolation && (

@@ -50,8 +50,8 @@ export default function SettingsGeneralPayment(props) {
         CustomCallbackAddress: props.options.CustomCallbackAddress || '',
         TopupGroupRatio: props.options.TopupGroupRatio || '',
         PayMethods: props.options.PayMethods || '',
-        AmountOptions: props.options.AmountOptions || '',
-        AmountDiscount: props.options.AmountDiscount || '',
+        AmountOptions: props.options.AmountOptions || '[]',
+        AmountDiscount: props.options.AmountDiscount || '{}',
       };
       setInputs(currentInputs);
       setOriginInputs({ ...currentInputs });

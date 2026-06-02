@@ -123,7 +123,7 @@ export default function ModelRatioSettings(props) {
   }
 
   useEffect(() => {
-    const currentInputs = {};
+    const currentInputs = { ...inputs };
     for (let key in props.options) {
       if (Object.keys(inputs).includes(key)) {
         currentInputs[key] = props.options[key];

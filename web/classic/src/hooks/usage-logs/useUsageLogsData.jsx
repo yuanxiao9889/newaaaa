@@ -376,6 +376,12 @@ export const useLogsData = () => {
       return `${chain.join(' -> ')}`;
     };
 
+    const formatChannelRetryPath = (retryPath) => {
+      return Array.isArray(retryPath) && retryPath.length > 0
+        ? retryPath.join(' -> ')
+        : '';
+    };
+
     let expandDatesLocal = {};
     for (let i = 0; i < logs.length; i++) {
       logs[i].timestamp2string = timestamp2string(logs[i].created_at);
@@ -523,6 +529,38 @@ export const useLogsData = () => {
               <div style={{ maxWidth: 600, whiteSpace: 'normal', wordBreak: 'break-word', lineHeight: 1.6 }}>
                 {other.reason}
               </div>
+            ),
+          });
+        }
+      }
+      if (other?.async_task || other?.is_task) {
+        if (other?.task_id && logs[i].type !== 6) {
+          expandDataLocal.push({
+            key: t('Task ID'),
+            value: other.task_id,
+          });
+        }
+        const retryPath =
+          formatChannelRetryPath(other?.async_channel_retry_path) ||
+          formatChannelRetryPath(other?.admin_info?.use_channel);
+        if (retryPath) {
+          expandDataLocal.push({
+            key: t('Async Channel Retry Path'),
+            value: retryPath,
+          });
+        }
+        if (other?.status_code || other?.error_type || other?.error_code) {
+          const errorLines = [
+            other.status_code ? `Status: ${other.status_code}` : '',
+            other.error_type ? `Type: ${other.error_type}` : '',
+            other.error_code ? `Code: ${other.error_code}` : '',
+          ]
+            .filter(Boolean)
+            .join('\n');
+          expandDataLocal.push({
+            key: t('Error Details'),
+            value: (
+              <div style={{ whiteSpace: 'pre-line' }}>{errorLines}</div>
             ),
           });
         }

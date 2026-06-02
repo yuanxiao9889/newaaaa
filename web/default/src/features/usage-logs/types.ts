@@ -96,7 +96,7 @@ export interface LogOtherData {
   admin_info?: {
     is_multi_key?: boolean
     multi_key_index?: number
-    use_channel?: number[]
+    use_channel?: Array<number | string>
     local_count_tokens?: boolean
     channel_affinity?: ChannelAffinityInfo
     // Top-up audit fields (type=1, admin only)
@@ -178,8 +178,19 @@ export interface LogOtherData {
   reject_reason?: string
   // Task-related fields (for refund logs, type=6)
   is_task?: boolean
+  async_task?: boolean
   task_id?: string
+  async_channel_retry_path?: Array<number | string>
+  billing_state?: string
+  pre_consumed_quota?: number
+  actual_quota?: number
   reason?: string
+  error_type?: string
+  error_code?: string
+  status_code?: number
+  channel_id?: number
+  channel_name?: string
+  channel_type?: number
   // Subscription billing fields
   subscription_plan_id?: string
   subscription_plan_title?: string

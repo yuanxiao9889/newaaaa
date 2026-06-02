@@ -98,7 +98,7 @@ const OperationSetting = () => {
         }
       });
 
-      setInputs(newInputs);
+      setInputs((prev) => ({ ...prev, ...newInputs }));
     } else {
       showError(message);
     }

@@ -38,6 +38,7 @@ const RatioSetting = () => {
     CacheRatio: '',
     CreateCacheRatio: '',
     CompletionRatio: '',
+    CompletionRatioMeta: '',
     GroupRatio: '',
     GroupGroupRatio: '',
     ImageRatio: '',
@@ -48,6 +49,9 @@ const RatioSetting = () => {
     ExposeRatioEnabled: false,
     UserUsableGroups: '',
     'group_ratio_setting.group_special_usable_group': '',
+    'billing_setting.billing_mode': '{}',
+    'billing_setting.billing_expr': '{}',
+    'tool_price_setting.prices': '{}',
   });
 
   const [loading, setLoading] = useState(false);
@@ -71,7 +75,7 @@ const RatioSetting = () => {
           newInputs[item.key] = item.value;
         }
       });
-      setInputs(newInputs);
+      setInputs((prev) => ({ ...prev, ...newInputs }));
     } else {
       showError(message);
     }

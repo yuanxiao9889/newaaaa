@@ -111,8 +111,8 @@ export function SidebarModulesSection({
         description: t('History of Midjourney-style image tasks.'),
       },
       task: {
-        title: t('Task logs'),
-        description: t('Background job tracker for queued work.'),
+        title: t('Async tasks'),
+        description: t('Background async task tracker for queued work.'),
       },
     },
     personal: {

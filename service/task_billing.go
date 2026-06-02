@@ -143,6 +143,9 @@ func taskBillingOther(task *model.Task) map[string]interface{} {
 		other["is_model_mapped"] = true
 		other["upstream_model_name"] = props.UpstreamModelName
 	}
+	if len(task.PrivateData.ChannelRetryPath) > 0 {
+		other["async_channel_retry_path"] = task.PrivateData.ChannelRetryPath
+	}
 	return other
 }
 

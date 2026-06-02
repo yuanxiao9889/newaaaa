@@ -46,7 +46,7 @@ import { safeNumberFieldProps } from '../utils/numeric-field'
 const asyncImageTaskSchema = z.object({
   AsyncImageInternalTaskEnabled: z.boolean(),
   AsyncImageRetentionHours: z.enum(['2', '6', '12', '18', '24']),
-  AsyncImageWorkerConcurrency: z.number().int().min(1).max(64),
+  AsyncImageWorkerConcurrency: z.number().int().min(1).max(256),
   AsyncImageMaxUnfinishedTasks: z.number().int().min(1).max(100000),
 })
 
@@ -156,7 +156,7 @@ export function AsyncImageTaskSettingsSection({
                     <Input
                       type='number'
                       min='1'
-                      max='64'
+                      max='256'
                       step='1'
                       {...safeNumberFieldProps(field)}
                     />

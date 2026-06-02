@@ -16,13 +16,9 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useCallback, useMemo } from 'react'
-import { getRouteApi, useNavigate } from '@tanstack/react-router'
+import { getRouteApi } from '@tanstack/react-router'
 import { useTranslation } from 'react-i18next'
-import { useSidebarConfig } from '@/hooks/use-sidebar-config'
-import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { SectionPageLayout } from '@/components/layout'
-import type { NavGroup } from '@/components/layout/types'
 import { CacheStatsDialog } from '@/features/system-settings/general/channel-affinity/cache-stats-dialog'
 import { UserInfoDialog } from './components/dialogs/user-info-dialog'
 import {
@@ -37,7 +33,6 @@ import {
 } from './section-registry'
 
 const route = getRouteApi('/_authenticated/usage-logs/$section')
-const TASK_LOG_SECTIONS = ['drawing', 'task'] as const
 
 const SECTION_META: Record<UsageLogsSectionId, { titleKey: string }> = {
   common: {
@@ -47,13 +42,12 @@ const SECTION_META: Record<UsageLogsSectionId, { titleKey: string }> = {
     titleKey: 'Drawing Logs',
   },
   task: {
-    titleKey: 'Task Logs',
+    titleKey: 'Async Tasks',
   },
 }
 
 function UsageLogsContent() {
   const { t } = useTranslation()
-  const navigate = useNavigate()
   const params = route.useParams()
   const activeCategory: UsageLogsSectionId =
     params.section && isUsageLogsSectionId(params.section)
@@ -67,46 +61,8 @@ function UsageLogsContent() {
     affinityDialogOpen,
     setAffinityDialogOpen,
   } = useUsageLogsContext()
-  const tabNavGroups = useMemo<NavGroup[]>(
-    () => [
-      {
-        title: 'Task Logs',
-        items: TASK_LOG_SECTIONS.map((section) => ({
-          title: SECTION_META[section].titleKey,
-          url: `/usage-logs/${section}`,
-        })),
-      },
-    ],
-    []
-  )
-  const filteredTabGroups = useSidebarConfig(tabNavGroups)
-  const visibleSections = useMemo(
-    () =>
-      (filteredTabGroups[0]?.items ?? [])
-        .map((item) => {
-          if (!('url' in item) || typeof item.url !== 'string') return null
-          return item.url.split('/').pop() ?? null
-        })
-        .filter((section): section is UsageLogsSectionId =>
-          Boolean(section && isUsageLogsSectionId(section))
-        ),
-    [filteredTabGroups]
-  )
 
-  const handleSectionChange = useCallback(
-    (section: string) => {
-      void navigate({
-        to: '/usage-logs/$section',
-        params: { section: section as UsageLogsSectionId },
-      })
-    },
-    [navigate]
-  )
-
-  const pageMeta =
-    activeCategory === 'common' ? SECTION_META.common : SECTION_META.task
-  const showTaskSwitcher =
-    activeCategory !== 'common' && visibleSections.length > 1
+  const pageMeta = SECTION_META[activeCategory]
 
   return (
     <>
@@ -115,20 +71,7 @@ function UsageLogsContent() {
           {t(pageMeta.titleKey)}
         </SectionPageLayout.Title>
         <SectionPageLayout.Content>
-          <div className='space-y-4'>
-            {showTaskSwitcher && (
-              <Tabs value={activeCategory} onValueChange={handleSectionChange}>
-                <TabsList className='max-w-full flex-wrap justify-start group-data-horizontal/tabs:h-auto'>
-                  {visibleSections.map((section) => (
-                    <TabsTrigger key={section} value={section}>
-                      {t(SECTION_META[section].titleKey)}
-                    </TabsTrigger>
-                  ))}
-                </TabsList>
-              </Tabs>
-            )}
-            <UsageLogsTable logCategory={activeCategory} />
-          </div>
+          <UsageLogsTable logCategory={activeCategory} />
         </SectionPageLayout.Content>
       </SectionPageLayout>
 
