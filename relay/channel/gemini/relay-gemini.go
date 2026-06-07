@@ -1061,6 +1061,68 @@ func buildUsageFromGeminiMetadata(metadata dto.GeminiUsageMetadata, fallbackProm
 	return usage
 }
 
+func isGeminiImageOutputRequest(info *relaycommon.RelayInfo) bool {
+	if info == nil || info.Request == nil {
+		return false
+	}
+
+	var request *dto.GeminiChatRequest
+	switch v := info.Request.(type) {
+	case *dto.GeminiChatRequest:
+		request = v
+	default:
+		return false
+	}
+
+	for _, modality := range request.GenerationConfig.ResponseModalities {
+		if strings.EqualFold(strings.TrimSpace(modality), "IMAGE") {
+			return true
+		}
+	}
+	return false
+}
+
+func geminiChatResponseHasImageOutput(response *dto.GeminiChatResponse) bool {
+	if response == nil {
+		return false
+	}
+	for _, candidate := range response.Candidates {
+		for _, part := range candidate.Content.Parts {
+			if part.InlineData != nil &&
+				strings.HasPrefix(strings.ToLower(part.InlineData.MimeType), "image/") &&
+				strings.TrimSpace(part.InlineData.Data) != "" {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func validateGeminiImageOutputForBilling(info *relaycommon.RelayInfo, response *dto.GeminiChatResponse) *types.NewAPIError {
+	if !isGeminiImageOutputRequest(info) {
+		return nil
+	}
+
+	if response == nil || !geminiChatResponseHasImageOutput(response) {
+		return types.NewOpenAIError(
+			errors.New("image generation failed: Gemini returned no image result"),
+			types.ErrorCodeEmptyResponse,
+			http.StatusInternalServerError,
+		)
+	}
+
+	metadata := response.UsageMetadata
+	if metadata.TotalTokenCount > 0 && metadata.CandidatesTokenCount+metadata.ThoughtsTokenCount <= 0 {
+		return types.NewOpenAIError(
+			errors.New("image generation failed: Gemini output tokens is 0"),
+			types.ErrorCodeEmptyResponse,
+			http.StatusInternalServerError,
+		)
+	}
+
+	return nil
+}
+
 func responseGeminiChat2OpenAI(c *gin.Context, response *dto.GeminiChatResponse) *dto.OpenAITextResponse {
 	fullTextResponse := dto.OpenAITextResponse{
 		Id:      helper.GetResponseID(c),
@@ -1547,6 +1609,9 @@ func GeminiChatHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.R
 			})
 		}
 		return &usage, nil
+	}
+	if newAPIError := validateGeminiImageOutputForBilling(info, &geminiResponse); newAPIError != nil {
+		return nil, newAPIError
 	}
 	fullTextResponse := responseGeminiChat2OpenAI(c, &geminiResponse)
 	fullTextResponse.Model = info.UpstreamModelName

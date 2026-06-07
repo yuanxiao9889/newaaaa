@@ -5,10 +5,15 @@
 upload
 *.exe
 *.db
+*.db-shm
+*.db-wal
 build
 *.db-journal
+*.log
+*.err.log
 logs
 web/default/dist
+web/default/src/i18n/locales/_reports/
 web/classic/dist
 web/node_modules
 web/dist
@@ -25,6 +30,10 @@ tiktoken_cache
 plans
 .claude
 .cursor
+.codex-*
+.codex-edge-profile/
+backups/
+server-backups/
 
 electron/node_modules
 electron/dist

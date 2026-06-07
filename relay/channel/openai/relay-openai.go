@@ -566,6 +566,10 @@ func OpenaiHandlerWithUsage(c *gin.Context, info *relaycommon.RelayInfo, resp *h
 		return nil, types.NewOpenAIError(err, types.ErrorCodeBadResponseBody, http.StatusInternalServerError)
 	}
 
+	if err = service.ValidateOpenAIImageResponseForBilling(responseBody); err != nil {
+		return nil, types.NewOpenAIError(err, types.ErrorCodeEmptyResponse, http.StatusInternalServerError)
+	}
+
 	// 写入新的 response body
 	service.IOCopyBytesGracefully(c, resp, responseBody)
 
