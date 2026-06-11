@@ -281,6 +281,7 @@ function ModelHeader(props: { model: PricingModel }) {
     model.billing_mode === 'tiered_expr' &&
     Boolean(model.billing_expr) &&
     getDynamicPricingTiers(model).length === 0
+  const isSecondBasedFixedPrice = isSecondBasedFixedPriceModel(model)
 
   return (
     <header className='pb-4'>
@@ -306,7 +307,7 @@ function ModelHeader(props: { model: PricingModel }) {
         <span className='text-muted-foreground/70'>
           {model.quota_type === QUOTA_TYPE_VALUES.TOKEN
             ? t('Token-based')
-            : t('Per Request')}
+            : t(isSecondBasedFixedPrice ? 'Per Second' : 'Per Request')}
         </span>
         {model.billing_mode === 'tiered_expr' && model.billing_expr && (
           <>
@@ -482,8 +483,8 @@ function PriceSection(props: {
 
   if (!isTokenBased) {
     const fixedPriceLabel = isSecondBasedFixedPriceModel(props.model)
-      ? 'seconds'
-      : 'Per request'
+      ? 'Per Second'
+      : 'Per Request'
 
     return (
       <section>

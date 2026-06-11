@@ -131,10 +131,14 @@ export function usePricingColumns(
       meta: { label: t('Type') },
       header: t('Type'),
       cell: ({ row }) => {
-        const isTokenBased = row.original.quota_type === QUOTA_TYPE_VALUES.TOKEN
+        const model = row.original
+        const isTokenBased = model.quota_type === QUOTA_TYPE_VALUES.TOKEN
+        const label = isTokenBased
+          ? t('Token')
+          : t(isSecondBasedFixedPriceModel(model) ? 'Per Second' : 'Request')
         return (
           <StatusBadge
-            label={isTokenBased ? t('Token') : t('Request')}
+            label={label}
             variant={isTokenBased ? 'info' : 'neutral'}
             copyable={false}
           />
@@ -261,7 +265,7 @@ export function usePricingColumns(
           <div className='min-w-[100px]'>
             <span className='font-mono text-sm tabular-nums'>{price}</span>
             <div className='text-muted-foreground/50 text-[10px]'>
-              / {t(isSecondBasedFixedPriceModel(model) ? 'seconds' : 'request')}
+              /{t(isSecondBasedFixedPriceModel(model) ? 'seconds' : 'request')}
             </div>
           </div>
         )

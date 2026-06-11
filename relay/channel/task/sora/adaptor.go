@@ -39,22 +39,41 @@ type ImageURL struct {
 }
 
 type responseTask struct {
-	ID                 string `json:"id"`
-	TaskID             string `json:"task_id,omitempty"` //兼容旧接口
-	Object             string `json:"object"`
-	Model              string `json:"model"`
-	Status             string `json:"status"`
-	Progress           int    `json:"progress"`
-	CreatedAt          int64  `json:"created_at"`
-	CompletedAt        int64  `json:"completed_at,omitempty"`
-	ExpiresAt          int64  `json:"expires_at,omitempty"`
-	Seconds            string `json:"seconds,omitempty"`
-	Size               string `json:"size,omitempty"`
-	RemixedFromVideoID string `json:"remixed_from_video_id,omitempty"`
-	Error              *struct {
-		Message string `json:"message"`
-		Code    string `json:"code"`
-	} `json:"error,omitempty"`
+	ID                 string                `json:"id"`
+	TaskID             string                `json:"task_id,omitempty"` //兼容旧接口
+	Object             string                `json:"object"`
+	Model              string                `json:"model"`
+	Status             string                `json:"status"`
+	Progress           int                   `json:"progress"`
+	CreatedAt          int64                 `json:"created_at"`
+	CompletedAt        int64                 `json:"completed_at,omitempty"`
+	ExpiresAt          int64                 `json:"expires_at,omitempty"`
+	Seconds            string                `json:"seconds,omitempty"`
+	Size               string                `json:"size,omitempty"`
+	RemixedFromVideoID string                `json:"remixed_from_video_id,omitempty"`
+	Error              *dto.OpenAIVideoError `json:"error,omitempty"`
+	URL                string                `json:"url,omitempty"`
+	VideoURL           string                `json:"video_url,omitempty"`
+	FinalURL           string                `json:"final_url,omitempty"`
+	DownloadURL        string                `json:"download_url,omitempty"`
+	DetailURL          string                `json:"detail_url,omitempty"`
+	Result             *responseTaskResult   `json:"result,omitempty"`
+	Data               *responseTaskData     `json:"data,omitempty"`
+}
+
+type responseTaskResult struct {
+	URL         string               `json:"url,omitempty"`
+	VideoURL    string               `json:"video_url,omitempty"`
+	VideoURLs   []string             `json:"video_urls,omitempty"`
+	FinalURL    string               `json:"final_url,omitempty"`
+	DownloadURL string               `json:"download_url,omitempty"`
+	ResultURL   string               `json:"result_url,omitempty"`
+	Data        []responseTaskResult `json:"data,omitempty"`
+}
+
+type responseTaskData struct {
+	VideoURL  string   `json:"video_url,omitempty"`
+	VideoURLs []string `json:"video_urls,omitempty"`
 }
 
 // ============================
@@ -250,6 +269,9 @@ func (a *TaskAdaptor) DoResponse(c *gin.Context, resp *http.Response, info *rela
 	}
 
 	// 使用公开 task_xxxx ID 返回给客户端
+	if dResp.Error != nil && dResp.Error.Message == "" && dResp.Error.Code == "" {
+		dResp.Error = nil
+	}
 	dResp.ID = info.PublicTaskID
 	dResp.TaskID = info.PublicTaskID
 	c.JSON(http.StatusOK, dResp)
@@ -279,6 +301,52 @@ func (a *TaskAdaptor) FetchTask(baseUrl, key string, body map[string]any, proxy 
 	return client.Do(req)
 }
 
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func (r responseTaskResult) videoURL() string {
+	if url := firstNonEmpty(r.VideoURL, r.URL, r.FinalURL, r.DownloadURL, r.ResultURL); url != "" {
+		return url
+	}
+	for _, url := range r.VideoURLs {
+		if strings.TrimSpace(url) != "" {
+			return url
+		}
+	}
+	for _, item := range r.Data {
+		if url := item.videoURL(); url != "" {
+			return url
+		}
+	}
+	return ""
+}
+
+func (r responseTask) videoURL() string {
+	if url := firstNonEmpty(r.VideoURL, r.URL, r.FinalURL, r.DownloadURL, r.DetailURL); url != "" {
+		return url
+	}
+	if r.Data != nil {
+		if url := firstNonEmpty(r.Data.VideoURL); url != "" {
+			return url
+		}
+		for _, url := range r.Data.VideoURLs {
+			if strings.TrimSpace(url) != "" {
+				return url
+			}
+		}
+	}
+	if r.Result != nil {
+		return r.Result.videoURL()
+	}
+	return ""
+}
+
 func (a *TaskAdaptor) GetModelList() []string {
 	return ModelList
 }
@@ -296,14 +364,18 @@ func (a *TaskAdaptor) ParseTaskResult(respBody []byte) (*relaycommon.TaskInfo, e
 	taskResult := relaycommon.TaskInfo{
 		Code: 0,
 	}
+	if resTask.Error != nil && resTask.Error.Message == "" && resTask.Error.Code == "" {
+		resTask.Error = nil
+	}
 
 	switch resTask.Status {
 	case "queued", "pending":
 		taskResult.Status = model.TaskStatusQueued
-	case "processing", "in_progress":
+	case "processing", "in_progress", "running":
 		taskResult.Status = model.TaskStatusInProgress
-	case "completed":
+	case "completed", "succeeded":
 		taskResult.Status = model.TaskStatusSuccess
+		taskResult.Url = resTask.videoURL()
 		// Url intentionally left empty — the caller constructs the proxy URL using the public task ID
 	case "failed", "cancelled":
 		taskResult.Status = model.TaskStatusFailure

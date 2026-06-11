@@ -59,11 +59,15 @@ export function isTokenBasedModel(model: PricingModel): boolean {
 export function isSecondBasedFixedPriceModel(model: PricingModel): boolean {
   if (isTokenBasedModel(model)) return false
 
+  const modelName = model.model_name || ''
+  if (modelName === 'ok-video-1.5-preview') return true
+  if (/^ok-.+video/i.test(modelName)) return true
+
   const outputs = model.output_modalities || []
   if (outputs.includes('video')) return true
 
   const endpoints = model.supported_endpoint_types || []
   if (endpoints.includes('openai-video')) return true
 
-  return /video|sora|veo|kling|pika/i.test(model.model_name || '')
+  return /video|sora|veo|kling|pika|grok/i.test(modelName)
 }
