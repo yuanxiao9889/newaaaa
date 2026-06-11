@@ -27,7 +27,10 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-const asyncImageWorkerContextKey = "async_image_worker"
+const (
+	asyncImageWorkerContextKey      = "async_image_worker"
+	suppressRelayErrorLogContextKey = "suppress_relay_error_log"
+)
 
 var internalAsyncImageWorkerSerial atomic.Int64
 var internalAsyncImageWorkerGeneration atomic.Int64
@@ -199,6 +202,7 @@ func runInternalAsyncImageRelay(ctx context.Context, task *model.Task) ([]byte, 
 
 	var lastErr *types.NewAPIError
 	var lastChannel *model.Channel
+	var lastCtx *gin.Context
 	var lastProxy string
 	retryPath := make([]string, 0, common.RetryTimes+1)
 	retryParam := &service.RetryParam{
@@ -212,6 +216,9 @@ func runInternalAsyncImageRelay(ctx context.Context, task *model.Task) ([]byte, 
 		c, recorder, channel, newAPIError, err := runInternalAsyncImageRelayOnce(ctx, task, body, retryParam)
 		if err != nil {
 			return nil, 0, "", err
+		}
+		if c != nil {
+			lastCtx = c
 		}
 		if channel != nil {
 			lastChannel = channel
@@ -228,6 +235,7 @@ func runInternalAsyncImageRelay(ctx context.Context, task *model.Task) ([]byte, 
 		}
 		lastErr = service.NormalizeViolationFeeError(newAPIError)
 		if channel != nil {
+			c.Set(suppressRelayErrorLogContextKey, true)
 			c.Set("async_channel_retry_path", append([]string(nil), retryPath...))
 			processChannelError(c, *types.NewChannelError(channel.Id, channel.Type, channel.Name, channel.ChannelInfo.IsMultiKey, common.GetContextKeyString(c, constant.ContextKeyChannelKey), channel.GetAutoBan()), lastErr)
 		}
@@ -238,6 +246,7 @@ func runInternalAsyncImageRelay(ctx context.Context, task *model.Task) ([]byte, 
 	setInternalAsyncChannelRetryPath(task, retryPath)
 
 	if lastErr != nil {
+		recordInternalAsyncImageFinalErrorLog(lastCtx, task, lastChannel, lastErr, retryPath)
 		if lastChannel != nil {
 			return nil, lastChannel.Id, lastProxy, lastErr
 		}
@@ -373,6 +382,85 @@ func buildInternalAsyncBaseContext(ctx context.Context, task *model.Task, body [
 	c.Set(common.RequestIdKey, task.TaskID)
 	setInternalAsyncIdentity(c, task)
 	return c, recorder, nil
+}
+
+func recordInternalAsyncImageFinalErrorLog(c *gin.Context, task *model.Task, channel *model.Channel, err *types.NewAPIError, retryPath []string) {
+	if c == nil || task == nil || err == nil || !constant.ErrorLogEnabled || !types.IsRecordErrorLog(err) {
+		return
+	}
+	path := append([]string(nil), retryPath...)
+	content := internalAsyncImageFinalErrorContent(err, path)
+	channelID := 0
+	channelName := ""
+	channelType := 0
+	if channel != nil {
+		channelID = channel.Id
+		channelName = channel.Name
+		channelType = channel.Type
+	}
+	modelName := task.Properties.OriginModelName
+	if modelName == "" && task.PrivateData.BillingContext != nil {
+		modelName = task.PrivateData.BillingContext.OriginModelName
+	}
+	other := map[string]interface{}{
+		"error_type":               err.GetErrorType(),
+		"error_code":               err.GetErrorCode(),
+		"status_code":              err.StatusCode,
+		"channel_id":               channelID,
+		"channel_name":             channelName,
+		"channel_type":             channelType,
+		"is_task":                  true,
+		"async_task":               true,
+		"task_id":                  task.TaskID,
+		"async_channel_retry_path": path,
+		"admin_info": map[string]interface{}{
+			"use_channel": path,
+		},
+	}
+	if c.Request != nil && c.Request.URL != nil {
+		other["request_path"] = c.Request.URL.Path
+	} else if task.PrivateData.RequestPath != "" {
+		other["request_path"] = task.PrivateData.RequestPath
+	}
+	c.Set(common.RequestIdKey, task.TaskID)
+	c.Set("id", task.UserId)
+	c.Set("token_id", task.PrivateData.TokenId)
+	c.Set("group", task.Group)
+	if channelID > 0 {
+		c.Set("channel_id", channelID)
+		c.Set("channel_name", channelName)
+		c.Set("channel_type", channelType)
+	}
+	useTimeSeconds := internalAsyncImageFinalErrorUseTime(task, c)
+	model.RecordErrorLog(c, task.UserId, channelID, modelName, c.GetString("token_name"), content, task.PrivateData.TokenId, useTimeSeconds, common.GetContextKeyBool(c, constant.ContextKeyIsStream), task.Group, other)
+}
+
+func internalAsyncImageFinalErrorContent(err *types.NewAPIError, retryPath []string) string {
+	content := err.MaskSensitiveErrorWithStatusCode()
+	if len(retryPath) == 0 {
+		return content
+	}
+	return fmt.Sprintf("%s; retry: %s", content, strings.Join(retryPath, " -> "))
+}
+
+func internalAsyncImageFinalErrorUseTime(task *model.Task, c *gin.Context) int {
+	now := time.Now()
+	if task != nil && task.StartTime > 0 {
+		elapsed := now.Unix() - task.StartTime
+		if elapsed > 0 {
+			return int(elapsed)
+		}
+		return 0
+	}
+	startTime := common.GetContextKeyTime(c, constant.ContextKeyRequestStartTime)
+	if startTime.IsZero() {
+		return 0
+	}
+	elapsed := int(now.Sub(startTime).Seconds())
+	if elapsed < 0 {
+		return 0
+	}
+	return elapsed
 }
 
 func setInternalAsyncIdentity(c *gin.Context, task *model.Task) {

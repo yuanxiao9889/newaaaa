@@ -1,8 +1,11 @@
 package dto
 
 import (
+	"bytes"
 	"strconv"
 	"strings"
+
+	"github.com/QuantumNous/new-api/common"
 )
 
 const (
@@ -50,4 +53,27 @@ func NewOpenAIVideo() *OpenAIVideo {
 type OpenAIVideoError struct {
 	Message string `json:"message"`
 	Code    string `json:"code"`
+}
+
+func (e *OpenAIVideoError) UnmarshalJSON(data []byte) error {
+	trimmed := bytes.TrimSpace(data)
+	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
+		return nil
+	}
+	if trimmed[0] == '"' {
+		var message string
+		if err := common.Unmarshal(trimmed, &message); err != nil {
+			return err
+		}
+		e.Message = message
+		return nil
+	}
+
+	type alias OpenAIVideoError
+	var parsed alias
+	if err := common.Unmarshal(trimmed, &parsed); err != nil {
+		return err
+	}
+	*e = OpenAIVideoError(parsed)
+	return nil
 }
