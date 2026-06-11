@@ -484,6 +484,24 @@ func sendPingData(c *gin.Context, mutex *sync.Mutex) error {
 func DoRequest(c *gin.Context, req *http.Request, info *common.RelayInfo) (*http.Response, error) {
 	return doRequest(c, req, info)
 }
+
+const statusClientClosedRequest = 499
+
+func newDoRequestError(req *http.Request, err error) *types.NewAPIError {
+	if err == nil {
+		return nil
+	}
+	if errors.Is(err, context.Canceled) || (req != nil && errors.Is(req.Context().Err(), context.Canceled)) {
+		return types.NewErrorWithStatusCode(
+			errors.New("client request canceled before upstream response completed"),
+			types.ErrorCodeClientRequestCanceled,
+			statusClientClosedRequest,
+			types.ErrOptionWithSkipRetry(),
+		)
+	}
+	return types.NewError(err, types.ErrorCodeDoRequestFailed, types.ErrOptionWithHideErrMsg("upstream error: do request failed"))
+}
+
 func doRequest(c *gin.Context, req *http.Request, info *common.RelayInfo) (*http.Response, error) {
 	if c != nil && c.Request != nil {
 		req = req.WithContext(c.Request.Context())
@@ -521,7 +539,7 @@ func doRequest(c *gin.Context, req *http.Request, info *common.RelayInfo) (*http
 	resp, err := client.Do(req)
 	if err != nil {
 		logger.LogError(c, "do request failed: "+err.Error())
-		return nil, types.NewError(err, types.ErrorCodeDoRequestFailed, types.ErrOptionWithHideErrMsg("upstream error: do request failed"))
+		return nil, newDoRequestError(req, err)
 	}
 	if resp == nil {
 		return nil, errors.New("resp is nil")

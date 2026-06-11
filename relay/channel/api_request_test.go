@@ -1,11 +1,14 @@
 package channel
 
 import (
+	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
@@ -31,6 +34,34 @@ func TestProcessHeaderOverride_ChannelTestSkipsPassthroughRules(t *testing.T) {
 	headers, err := processHeaderOverride(info, ctx)
 	require.NoError(t, err)
 	require.Empty(t, headers)
+}
+
+func TestNewDoRequestErrorClientCanceled(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	req := httptest.NewRequest(http.MethodPost, "https://example.com/v1beta/models/test:generateContent", nil).WithContext(ctx)
+	cancel()
+
+	apiErr := newDoRequestError(req, context.Canceled)
+
+	require.Equal(t, 499, apiErr.StatusCode)
+	require.Equal(t, types.ErrorCodeClientRequestCanceled, apiErr.GetErrorCode())
+	require.True(t, types.IsSkipRetryError(apiErr))
+	require.Contains(t, apiErr.Error(), "client request canceled")
+}
+
+func TestNewDoRequestErrorKeepsUpstreamFailureBehavior(t *testing.T) {
+	t.Parallel()
+
+	req := httptest.NewRequest(http.MethodPost, "https://example.com/v1/chat/completions", nil)
+
+	apiErr := newDoRequestError(req, errors.New("dial tcp: i/o timeout"))
+
+	require.Equal(t, http.StatusInternalServerError, apiErr.StatusCode)
+	require.Equal(t, types.ErrorCodeDoRequestFailed, apiErr.GetErrorCode())
+	require.False(t, types.IsSkipRetryError(apiErr))
+	require.Equal(t, "upstream error: do request failed", apiErr.Error())
 }
 
 func TestProcessHeaderOverride_ChannelTestSkipsClientHeaderPlaceholder(t *testing.T) {
