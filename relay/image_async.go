@@ -134,7 +134,7 @@ func SubmitInternalAsyncImageTask(c *gin.Context, info *relaycommon.RelayInfo, r
 		ModelRatio:      info.PriceData.ModelRatio,
 		OtherRatios:     info.PriceData.OtherRatios,
 		OriginModelName: info.OriginModelName,
-		PerCallBilling:  true,
+		PerCallBilling:  info.PriceData.UsePrice,
 	}
 	task.SetData(request)
 
@@ -215,7 +215,7 @@ func SubmitInternalAsyncGeminiImageTask(c *gin.Context, info *relaycommon.RelayI
 		ModelRatio:      info.PriceData.ModelRatio,
 		OtherRatios:     info.PriceData.OtherRatios,
 		OriginModelName: info.OriginModelName,
-		PerCallBilling:  true,
+		PerCallBilling:  info.PriceData.UsePrice,
 	}
 	task.SetData(request)
 

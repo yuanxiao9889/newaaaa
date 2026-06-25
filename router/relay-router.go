@@ -174,6 +174,13 @@ func SetRelayRouter(router *gin.Engine) {
 		imageTaskRouter.GET("/:task_id/content", controller.GetImageTaskContent)
 	}
 
+	signedImageTaskRouter := router.Group("/v1/images/tasks")
+	signedImageTaskRouter.Use(middleware.RouteTag("relay"))
+	signedImageTaskRouter.Use(middleware.SystemPerformanceCheck())
+	{
+		signedImageTaskRouter.GET("/:task_id/signed-content", controller.GetSignedImageTaskContent)
+	}
+
 	relayMjRouter := router.Group("/mj")
 	relayMjRouter.Use(middleware.RouteTag("relay"))
 	relayMjRouter.Use(middleware.SystemPerformanceCheck())

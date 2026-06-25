@@ -145,7 +145,7 @@ func claimInternalAsyncImageTask(task *model.Task) bool {
 }
 
 func executeInternalAsyncImageTask(ctx context.Context, task *model.Task) error {
-	imageResponseBody, channelID, proxy, err := runInternalAsyncImageRelay(ctx, task)
+	imageResponseBody, channelID, proxy, usage, err := runInternalAsyncImageRelay(ctx, task)
 	if err != nil {
 		if errors.Is(err, context.DeadlineExceeded) {
 			err = fmt.Errorf("async image task timed out after %d seconds", common.GetAsyncImageTaskTimeoutSeconds())
@@ -190,20 +190,30 @@ func executeInternalAsyncImageTask(ctx context.Context, task *model.Task) error 
 		return nil
 	}
 	removeInternalAsyncImageRequestSnapshot(snapshotPath)
+	if usage != nil {
+		task.PrivateData.PromptTokens = usage.PromptTokens
+		task.PrivateData.CompletionTokens = usage.CompletionTokens
+		task.PrivateData.TotalTokens = usage.TotalTokens
+		actualQuota := service.CalculateTaskQuotaByUsage(task, usage)
+		if actualQuota > 0 {
+			service.AdjustTaskQuotaForFinalSettlement(ctx, task, actualQuota, "async image usage settlement")
+		}
+	}
 	service.ConfirmTaskBillingSettled(ctx, task, task.Quota, "async image stored")
 	return nil
 }
 
-func runInternalAsyncImageRelay(ctx context.Context, task *model.Task) ([]byte, int, string, error) {
+func runInternalAsyncImageRelay(ctx context.Context, task *model.Task) ([]byte, int, string, *dto.Usage, error) {
 	body, err := os.ReadFile(task.PrivateData.RequestBodyPath)
 	if err != nil {
-		return nil, 0, "", fmt.Errorf("read request snapshot failed: %w", err)
+		return nil, 0, "", nil, fmt.Errorf("read request snapshot failed: %w", err)
 	}
 
 	var lastErr *types.NewAPIError
 	var lastChannel *model.Channel
 	var lastCtx *gin.Context
 	var lastProxy string
+	var lastUsage *dto.Usage
 	retryPath := make([]string, 0, common.RetryTimes+1)
 	retryParam := &service.RetryParam{
 		Ctx:        nil,
@@ -215,10 +225,15 @@ func runInternalAsyncImageRelay(ctx context.Context, task *model.Task) ([]byte, 
 	for ; retryParam.GetRetry() <= common.RetryTimes; retryParam.IncreaseRetry() {
 		c, recorder, channel, newAPIError, err := runInternalAsyncImageRelayOnce(ctx, task, body, retryParam)
 		if err != nil {
-			return nil, 0, "", err
+			return nil, 0, "", nil, err
 		}
 		if c != nil {
 			lastCtx = c
+			if usageValue, ok := c.Get("async_image_usage"); ok {
+				if usage, ok := usageValue.(*dto.Usage); ok {
+					lastUsage = usage
+				}
+			}
 		}
 		if channel != nil {
 			lastChannel = channel
@@ -228,10 +243,10 @@ func runInternalAsyncImageRelay(ctx context.Context, task *model.Task) ([]byte, 
 		}
 		if newAPIError == nil {
 			if channel == nil {
-				return nil, 0, "", fmt.Errorf("internal async image relay selected no channel")
+				return nil, 0, "", nil, fmt.Errorf("internal async image relay selected no channel")
 			}
 			setInternalAsyncChannelRetryPath(task, retryPath)
-			return recorder.Body.Bytes(), channel.Id, lastProxy, nil
+			return recorder.Body.Bytes(), channel.Id, lastProxy, lastUsage, nil
 		}
 		lastErr = service.NormalizeViolationFeeError(newAPIError)
 		if channel != nil {
@@ -248,11 +263,11 @@ func runInternalAsyncImageRelay(ctx context.Context, task *model.Task) ([]byte, 
 	if lastErr != nil {
 		recordInternalAsyncImageFinalErrorLog(lastCtx, task, lastChannel, lastErr, retryPath)
 		if lastChannel != nil {
-			return nil, lastChannel.Id, lastProxy, lastErr
+			return nil, lastChannel.Id, lastProxy, nil, lastErr
 		}
-		return nil, 0, "", lastErr
+		return nil, 0, "", nil, lastErr
 	}
-	return nil, 0, "", fmt.Errorf("internal async image relay failed")
+	return nil, 0, "", nil, fmt.Errorf("internal async image relay failed")
 }
 
 func runInternalAsyncImageRelayOnce(ctx context.Context, task *model.Task, body []byte, retryParam *service.RetryParam) (*gin.Context, *httptest.ResponseRecorder, *model.Channel, *types.NewAPIError, error) {
@@ -367,6 +382,7 @@ func buildInternalAsyncBaseContext(ctx context.Context, task *model.Task, body [
 	c.Set(common.KeyRequestBody, body)
 	c.Set("async_image_worker", true)
 	c.Set(asyncImageWorkerContextKey, true)
+	c.Set(suppressRelayErrorLogContextKey, true)
 	c.Set("id", task.UserId)
 	c.Set("token_id", task.PrivateData.TokenId)
 	c.Set("group", task.Group)

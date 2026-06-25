@@ -200,8 +200,11 @@ func GeminiHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *typ
 		return openaiErr
 	}
 
-	if !c.GetBool("async_image_worker") {
-		service.PostTextConsumeQuota(c, info, usage.(*dto.Usage), nil)
+	usageDto := usage.(*dto.Usage)
+	if c.GetBool("async_image_worker") {
+		c.Set("async_image_usage", usageDto)
+	} else {
+		service.PostTextConsumeQuota(c, info, usageDto, nil)
 	}
 	return nil
 }

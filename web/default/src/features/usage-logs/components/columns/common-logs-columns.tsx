@@ -35,7 +35,6 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from '@/components/ui/tooltip'
-import { DataTableColumnHeader } from '@/components/data-table'
 import { StatusBadge, type StatusBadgeProps } from '@/components/status-badge'
 import { LOG_TYPE_ALL_VALUE } from '../../constants'
 import type { UsageLog } from '../../data/schema'
@@ -49,6 +48,7 @@ import {
   isViolationFeeLog,
   isAsyncTaskBillingLog,
   getAsyncTaskBillingStateLabel,
+  renderAuditContent,
 } from '../../lib/format'
 import {
   isDisplayableLogType,
@@ -103,11 +103,15 @@ function buildDetailSegments(
   other: LogOtherData | null,
   t: (key: string, opts?: Record<string, unknown>) => string
 ): DetailSegment[] {
+  // Audit (type=3) and login (type=7) logs: render localized content from the
+  // structured op descriptor instead of the raw (English-fallback) content.
+  if (log.type === 3 || log.type === 7) {
+    const text = renderAuditContent(other, t)
+    return text ? [{ text }] : []
+  }
+
   if (log.type === 6) {
-    if (isAsyncTaskBillingLog(log, other)) {
-      return [{ text: t('Async task refund') }]
-    }
-    return [{ text: t('Refund') }]
+    return [{ text: t('Async task refund') }]
   }
 
   if (log.type !== 2) return []
@@ -139,7 +143,7 @@ function buildDetailSegments(
       log.type
     )
     segments.push({
-      text: `${t('Async task billing')} · ${t(stateLabel)}`,
+      text: `${t('Async task billing')} 路 ${t(stateLabel)}`,
     })
     segments.push({
       text: t(
@@ -286,17 +290,15 @@ export function useCommonLogsColumns(isAdmin: boolean): ColumnDef<UsageLog>[] {
   const columns: ColumnDef<UsageLog>[] = [
     {
       accessorKey: 'created_at',
-      header: ({ column }) => (
-        <DataTableColumnHeader column={column} title={t('Time')} />
-      ),
+      header: t('Time'),
       cell: ({ row }) => {
         const log = row.original
         const timestamp = row.getValue('created_at') as number
         const config = getLogTypeConfig(log.type)
 
         return (
-          <div className='flex flex-col gap-0.5'>
-            <span className='font-mono text-xs tabular-nums'>
+          <div className='flex min-w-0 flex-col gap-0.5'>
+            <span className='truncate font-mono text-xs tabular-nums'>
               {formatTimestampToDate(timestamp)}
             </span>
             <StatusBadge
@@ -315,7 +317,7 @@ export function useCommonLogsColumns(isAdmin: boolean): ColumnDef<UsageLog>[] {
         return value.includes(String(row.original.type))
       },
       enableHiding: false,
-      meta: { label: t('Time') },
+      size: 180,
     },
   ]
 
@@ -323,10 +325,8 @@ export function useCommonLogsColumns(isAdmin: boolean): ColumnDef<UsageLog>[] {
     columns.push(
       {
         id: 'channel',
+        header: t('Channel'),
         accessorFn: (row) => row.channel,
-        header: ({ column }) => (
-          <DataTableColumnHeader column={column} title={t('Channel')} />
-        ),
         cell: function ChannelCell({ row }) {
           const { sensitiveVisible, setAffinityTarget, setAffinityDialogOpen } =
             useUsageLogsContext()
@@ -337,14 +337,28 @@ export function useCommonLogsColumns(isAdmin: boolean): ColumnDef<UsageLog>[] {
           const other = parseLogOther(log.other)
           const affinity = other?.admin_info?.channel_affinity
           const useChannel = other?.admin_info?.use_channel
-          const channelChain =
+          const asyncRetryPath = other?.async_channel_retry_path
+          const channelPath =
             useChannel && useChannel.length > 0
-              ? useChannel.join(' → ')
+              ? useChannel
+              : asyncRetryPath && asyncRetryPath.length > 0
+                ? asyncRetryPath
+                : undefined
+          const channelChain =
+            channelPath && channelPath.length > 0
+              ? channelPath.map(String).join(' -> ')
               : undefined
+          const fallbackChannelId =
+            channelPath && channelPath.length > 0
+              ? String(channelPath[channelPath.length - 1])
+              : String(log.channel)
           const channelDisplay = log.channel_name
             ? `${log.channel_name} #${log.channel}`
-            : `#${log.channel}`
-          const channelIdDisplay = `#${log.channel}`
+            : channelChain
+              ? `${t('Retry Chain')}: ${channelChain}`
+              : `#${log.channel}`
+          const channelIdDisplay =
+            log.channel > 0 ? `#${log.channel}` : channelChain || `#${log.channel}`
           const channelName = sensitiveVisible ? log.channel_name : '••••'
 
           return (
@@ -358,8 +372,8 @@ export function useCommonLogsColumns(isAdmin: boolean): ColumnDef<UsageLog>[] {
                   <div className='relative inline-flex w-fit'>
                     <StatusBadge
                       label={channelIdDisplay}
-                      autoColor={String(log.channel)}
-                      copyText={String(log.channel)}
+                      autoColor={fallbackChannelId}
+                      copyText={channelChain || String(log.channel)}
                       size='sm'
                       showDot={false}
                       className='font-mono'
@@ -424,21 +438,19 @@ export function useCommonLogsColumns(isAdmin: boolean): ColumnDef<UsageLog>[] {
             </TooltipProvider>
           )
         },
-        meta: { label: t('Channel') },
       },
       {
         id: 'user',
-        accessorFn: (row) => row.username || row.user_id,
-        header: ({ column }) => (
-          <DataTableColumnHeader column={column} title={t('User')} />
-        ),
+        header: t('User'),
+        accessorFn: (row) => row.username,
         cell: function UserCell({ row }) {
           const { sensitiveVisible, setSelectedUserId, setUserInfoDialogOpen } =
             useUsageLogsContext()
           const log = row.original
+          const username =
+            log.username || (log.user_id > 0 ? `#${log.user_id}` : '')
 
-          const displayName = log.username || `#${log.user_id || '?'}`
-          if (!log.username && !log.user_id) return null
+          if (!username) return null
 
           return (
             <button
@@ -458,11 +470,11 @@ export function useCommonLogsColumns(isAdmin: boolean): ColumnDef<UsageLog>[] {
                   )}
                   style={
                     sensitiveVisible
-                      ? getUserAvatarStyle(displayName)
+                      ? getUserAvatarStyle(username)
                       : undefined
                   }
                 >
-                  {sensitiveVisible ? getUserAvatarFallback(displayName) : '•'}
+                  {sensitiveVisible ? getUserAvatarFallback(username) : '•'}
                 </AvatarFallback>
               </Avatar>
               <TooltipProvider delay={300}>
@@ -472,36 +484,35 @@ export function useCommonLogsColumns(isAdmin: boolean): ColumnDef<UsageLog>[] {
                       <span className='text-muted-foreground max-w-[100px] truncate text-sm hover:underline' />
                     }
                   >
-                    {sensitiveVisible ? displayName : '••••'}
+                    {sensitiveVisible ? username : '••••'}
                   </TooltipTrigger>
-                  {sensitiveVisible && displayName.length > 12 && (
-                    <TooltipContent side='top'>{displayName}</TooltipContent>
+                  {sensitiveVisible && username.length > 12 && (
+                    <TooltipContent side='top'>{username}</TooltipContent>
                   )}
                 </Tooltip>
               </TooltipProvider>
             </button>
           )
         },
-        meta: { label: t('User') },
       }
     )
   }
 
   columns.push({
     accessorKey: 'token_name',
-    header: ({ column }) => (
-      <DataTableColumnHeader column={column} title={t('Token')} />
-    ),
+    header: t('Token'),
     cell: function TokenNameCell({ row }) {
       const { sensitiveVisible } = useUsageLogsContext()
       const log = row.original
       if (!isDisplayableLogType(log.type)) return null
 
-      const tokenName = log.token_name || (log.token_id ? `#${log.token_id}` : '')
-      if (!tokenName) return null
+      const tokenName = log.token_name
+      const tokenLabel =
+        tokenName || (log.token_id > 0 ? `#${log.token_id}` : '')
+      if (!tokenLabel) return null
 
       const other = parseLogOther(log.other)
-      const displayName = sensitiveVisible ? tokenName : '••••'
+      const displayName = sensitiveVisible ? tokenLabel : '••••'
       let group = log.group
       if (!group) group = other?.group || ''
 
@@ -520,15 +531,15 @@ export function useCommonLogsColumns(isAdmin: boolean): ColumnDef<UsageLog>[] {
                 <StatusBadge
                   label={displayName}
                   icon={KeyRound}
-                  copyText={sensitiveVisible ? tokenName : undefined}
+                  copyText={sensitiveVisible ? tokenLabel : undefined}
                   size='sm'
                   showDot={false}
                   className='border-border/60 bg-muted/30 text-foreground h-6 max-w-full gap-1.5 overflow-hidden rounded-md border px-2 py-0.5 [font-family:var(--font-body)]'
                 />
               </TooltipTrigger>
-              {sensitiveVisible && tokenName.length > 16 && (
+              {sensitiveVisible && tokenLabel.length > 16 && (
                 <TooltipContent side='top' className='max-w-xs break-all'>
-                  {tokenName}
+                  {tokenLabel}
                 </TooltipContent>
               )}
             </Tooltip>
@@ -541,16 +552,12 @@ export function useCommonLogsColumns(isAdmin: boolean): ColumnDef<UsageLog>[] {
         </div>
       )
     },
-    meta: { label: t('Token') },
     size: 160,
   })
-
   columns.push(
     {
       accessorKey: 'model_name',
-      header: ({ column }) => (
-        <DataTableColumnHeader column={column} title={t('Model')} />
-      ),
+      header: t('Model'),
       cell: function ModelCell({ row }) {
         const log = row.original
         if (!isDisplayableLogType(log.type)) return null
@@ -566,14 +573,11 @@ export function useCommonLogsColumns(isAdmin: boolean): ColumnDef<UsageLog>[] {
           </div>
         )
       },
-      meta: { label: t('Model'), mobileTitle: true },
+      meta: { mobileTitle: true },
     },
-
     {
       accessorKey: 'use_time',
-      header: ({ column }) => (
-        <DataTableColumnHeader column={column} title={t('Timing')} />
-      ),
+      header: t('Timing'),
       cell: ({ row }) => {
         const log = row.original
         if (!isTimingLogType(log.type)) return null
@@ -677,14 +681,11 @@ export function useCommonLogsColumns(isAdmin: boolean): ColumnDef<UsageLog>[] {
           </div>
         )
       },
-      meta: { label: t('Timing') },
     },
 
     {
       accessorKey: 'prompt_tokens',
-      header: ({ column }) => (
-        <DataTableColumnHeader column={column} title='Tokens' />
-      ),
+      header: 'Tokens',
       cell: ({ row }) => {
         const log = row.original
         if (!isDisplayableLogType(log.type)) return null
@@ -740,14 +741,11 @@ export function useCommonLogsColumns(isAdmin: boolean): ColumnDef<UsageLog>[] {
           </div>
         )
       },
-      meta: { label: 'Tokens' },
     },
 
     {
       accessorKey: 'quota',
-      header: ({ column }) => (
-        <DataTableColumnHeader column={column} title={t('Cost')} />
-      ),
+      header: t('Cost'),
       cell: ({ row }) => {
         const log = row.original
         if (!isDisplayableLogType(log.type)) return null
@@ -795,7 +793,6 @@ export function useCommonLogsColumns(isAdmin: boolean): ColumnDef<UsageLog>[] {
           </div>
         )
       },
-      meta: { label: t('Cost') },
     },
 
     {
@@ -853,7 +850,6 @@ export function useCommonLogsColumns(isAdmin: boolean): ColumnDef<UsageLog>[] {
           </>
         )
       },
-      meta: { label: t('Details') },
       size: 180,
       maxSize: 200,
     }

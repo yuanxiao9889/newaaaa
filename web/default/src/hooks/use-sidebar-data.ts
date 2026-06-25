@@ -27,6 +27,7 @@ import {
   LayoutDashboard,
   ListTodo,
   MessageSquare,
+  Percent,
   Radio,
   Settings,
   Ticket,
@@ -129,6 +130,11 @@ export function useSidebarData(): SidebarData {
             title: t('Models'),
             url: '/models/metadata',
             icon: Box,
+          },
+          {
+            title: t('Profit'),
+            url: '/profit',
+            icon: Percent,
           },
           {
             title: t('Users'),

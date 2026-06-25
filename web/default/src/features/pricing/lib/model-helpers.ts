@@ -60,7 +60,9 @@ export function isSecondBasedFixedPriceModel(model: PricingModel): boolean {
   if (isTokenBasedModel(model)) return false
 
   const modelName = model.model_name || ''
-  if (modelName === 'ok-video-1.5-preview') return true
+  const normalizedModelName = modelName.toLowerCase()
+  if (normalizedModelName === 'ok-video') return false
+  if (normalizedModelName === 'ok-video-1.5-preview') return true
   if (/^ok-.+video/i.test(modelName)) return true
 
   const outputs = model.output_modalities || []

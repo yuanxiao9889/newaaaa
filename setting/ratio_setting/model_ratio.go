@@ -59,6 +59,7 @@ var defaultModelRatio = map[string]float64{
 	"gpt-4.1-nano":                     0.05, // $0.1 / 1M tokens
 	"gpt-4.1-nano-2025-04-14":          0.05, // $0.1 / 1M tokens
 	"gpt-image-1":                      2.5,  // $5 / 1M tokens
+	"gpt-image-2-OF":                   13.0 / 1000 * RMB,
 	"o1":                               7.5,  // $15 / 1M tokens
 	"o1-2024-12-17":                    7.5,  // $15 / 1M tokens
 	"o1-preview":                       7.5,  // $15 / 1M tokens
@@ -152,6 +153,12 @@ var defaultModelRatio = map[string]float64{
 	"claude-opus-4-7-high":                      2.5,
 	"claude-opus-4-7-medium":                    2.5,
 	"claude-opus-4-7-low":                       2.5,
+	"claude-opus-4-8":                           2.5,
+	"claude-opus-4-8-max":                       2.5,
+	"claude-opus-4-8-xhigh":                     2.5,
+	"claude-opus-4-8-high":                      2.5,
+	"claude-opus-4-8-medium":                    2.5,
+	"claude-opus-4-8-low":                       2.5,
 	"claude-3-opus-20240229":                    7.5, // $15 / 1M tokens
 	"claude-opus-4-20250514":                    7.5,
 	"claude-opus-4-1-20250805":                  7.5,
@@ -337,6 +344,7 @@ var defaultCompletionRatio = map[string]float64{
 	"gpt-4o-gizmo-*": 3,
 	"gpt-4-all":      2,
 	"gpt-image-1":    8,
+	"gpt-image-2-OF": 6,
 }
 
 // InitRatioSettings initializes all model related settings maps
@@ -448,12 +456,12 @@ func GetCompletionRatio(name string) float64 {
 			return ratio
 		}
 	}
+	if ratio, ok := completionRatioMap.Get(name); ok {
+		return ratio
+	}
 	hardCodedRatio, contain := getHardcodedCompletionModelRatio(name)
 	if contain {
 		return hardCodedRatio
-	}
-	if ratio, ok := completionRatioMap.Get(name); ok {
-		return ratio
 	}
 	return hardCodedRatio
 }

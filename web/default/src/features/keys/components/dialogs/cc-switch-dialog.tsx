@@ -23,17 +23,40 @@ import { toast } from 'sonner'
 import { getUserModels } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { ComboboxInput } from '@/components/ui/combobox-input'
-import {
-  Dialog,
-  DialogContent,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog'
 import { Label } from '@/components/ui/label'
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
+import { Dialog } from '@/components/dialog'
 
-const APP_CONFIGS = {
+const CODEX_MODEL_SUGGESTIONS = [
+  'gpt-5-codex',
+  'gpt-5-codex-mini',
+  'gpt-5.1-codex',
+  'gpt-5.1-codex-mini',
+  'gpt-5.1-codex-max',
+  'gpt-5.2-codex',
+  'gpt-5.3-codex',
+  'gpt-5.3-codex-spark',
+  'gpt-5.4',
+  'gpt-5',
+] as const
+
+type ModelFieldConfig = {
+  key: string
+  labelKey: string
+  required: boolean
+}
+
+type AppConfig = {
+  label: string
+  defaultName: string
+  modelFields: ModelFieldConfig[]
+  defaultModels?: Record<string, string>
+  modelSuggestions?: readonly string[]
+}
+
+type AppType = 'claude' | 'codex' | 'gemini'
+
+const APP_CONFIGS: Record<AppType, AppConfig> = {
   claude: {
     label: 'Claude',
     defaultName: 'My Claude',
@@ -47,6 +70,8 @@ const APP_CONFIGS = {
   codex: {
     label: 'Codex',
     defaultName: 'My Codex',
+    defaultModels: { model: 'gpt-5-codex' },
+    modelSuggestions: CODEX_MODEL_SUGGESTIONS,
     modelFields: [{ key: 'model', labelKey: 'Primary Model', required: true }],
   },
   gemini: {
@@ -54,9 +79,11 @@ const APP_CONFIGS = {
     defaultName: 'My Gemini',
     modelFields: [{ key: 'model', labelKey: 'Primary Model', required: true }],
   },
-} as const
+}
 
-type AppType = keyof typeof APP_CONFIGS
+function getDefaultModels(app: AppType): Record<string, string> {
+  return { ...(APP_CONFIGS[app].defaultModels ?? {}) }
+}
 
 function getServerAddress(): string {
   try {
@@ -114,8 +141,15 @@ export function CCSwitchDialog(props: Props) {
 
   const modelOptions = useMemo(() => {
     const items = modelsData?.data ?? []
-    return items.map((m) => ({ value: m, label: m }))
-  }, [modelsData?.data])
+    const suggestions = APP_CONFIGS[app].modelSuggestions ?? []
+    const seen = new Set<string>()
+    return [...items, ...suggestions].flatMap((model) => {
+      const value = String(model || '').trim()
+      if (!value || seen.has(value)) return []
+      seen.add(value)
+      return [{ value, label: value }]
+    })
+  }, [app, modelsData?.data])
 
   useEffect(() => {
     if (props.open) {
@@ -134,7 +168,7 @@ export function CCSwitchDialog(props: Props) {
     const appVal = val as AppType
     setApp(appVal)
     setName(APP_CONFIGS[appVal].defaultName)
-    setModels({})
+    setModels(getDefaultModels(appVal))
   }
 
   const handleSubmit = () => {
@@ -151,75 +185,79 @@ export function CCSwitchDialog(props: Props) {
   }
 
   return (
-    <Dialog open={props.open} onOpenChange={props.onOpenChange}>
-      <DialogContent className='sm:max-w-md'>
-        <DialogHeader>
-          <DialogTitle>{t('Import to CC Switch')}</DialogTitle>
-        </DialogHeader>
-
-        <div className='space-y-4'>
-          <div className='space-y-2'>
-            <Label>{t('Application')}</Label>
-            <RadioGroup
-              value={app}
-              onValueChange={handleAppChange}
-              className='flex gap-4'
-            >
-              {(
-                Object.entries(APP_CONFIGS) as [
-                  AppType,
-                  (typeof APP_CONFIGS)[AppType],
-                ][]
-              ).map(([key, cfg]) => (
-                <div key={key} className='flex items-center gap-2'>
-                  <RadioGroupItem value={key} id={`app-${key}`} />
-                  <Label htmlFor={`app-${key}`} className='cursor-pointer'>
-                    {cfg.label}
-                  </Label>
-                </div>
-              ))}
-            </RadioGroup>
-          </div>
-
-          <div className='space-y-2'>
-            <Label>{t('Name')}</Label>
-            <ComboboxInput
-              options={[]}
-              value={name}
-              onValueChange={setName}
-              placeholder={currentConfig.defaultName}
-              emptyText=''
-            />
-          </div>
-
-          {currentConfig.modelFields.map((field) => (
-            <div key={field.key} className='space-y-2'>
-              <Label>
-                {t(field.labelKey)}
-                {field.required && (
-                  <span className='text-destructive ml-0.5'>*</span>
-                )}
-              </Label>
-              <ComboboxInput
-                options={modelOptions}
-                value={models[field.key] || ''}
-                onValueChange={(v) =>
-                  setModels((prev) => ({ ...prev, [field.key]: v }))
-                }
-                placeholder={t('Select or enter model name')}
-                emptyText={t('No models found')}
-              />
-            </div>
-          ))}
-        </div>
-
-        <DialogFooter>
+    <Dialog
+      open={props.open}
+      onOpenChange={props.onOpenChange}
+      title={t('Import to CC Switch')}
+      contentClassName='sm:max-w-md'
+      contentHeight='auto'
+      bodyClassName='space-y-4'
+      footer={
+        <>
           <Button variant='outline' onClick={() => props.onOpenChange(false)}>
             {t('Cancel')}
           </Button>
           <Button onClick={handleSubmit}>{t('Open CC Switch')}</Button>
-        </DialogFooter>
-      </DialogContent>
+        </>
+      }
+    >
+      <div className='space-y-4'>
+        <div className='space-y-2'>
+          <Label>{t('Application')}</Label>
+          <RadioGroup
+            value={app}
+            onValueChange={handleAppChange}
+            className='flex gap-4'
+          >
+            {(
+              Object.entries(APP_CONFIGS) as [
+                AppType,
+                (typeof APP_CONFIGS)[AppType],
+              ][]
+            ).map(([key, cfg]) => (
+              <div key={key} className='flex items-center gap-2'>
+                <RadioGroupItem value={key} id={`app-${key}`} />
+                <Label htmlFor={`app-${key}`} className='cursor-pointer'>
+                  {cfg.label}
+                </Label>
+              </div>
+            ))}
+          </RadioGroup>
+        </div>
+
+        <div className='space-y-2'>
+          <Label>{t('Name')}</Label>
+          <ComboboxInput
+            options={[]}
+            value={name}
+            onValueChange={setName}
+            placeholder={currentConfig.defaultName}
+            emptyText=''
+            allowCustomValue={true}
+          />
+        </div>
+
+        {currentConfig.modelFields.map((field) => (
+          <div key={field.key} className='space-y-2'>
+            <Label>
+              {t(field.labelKey)}
+              {field.required && (
+                <span className='text-destructive ml-0.5'>*</span>
+              )}
+            </Label>
+            <ComboboxInput
+              options={modelOptions}
+              value={models[field.key] || ''}
+              onValueChange={(v) =>
+                setModels((prev) => ({ ...prev, [field.key]: v }))
+              }
+              placeholder={t('Select or enter model name')}
+              emptyText={t('No models found')}
+              allowCustomValue={true}
+            />
+          </div>
+        ))}
+      </div>
     </Dialog>
   )
 }

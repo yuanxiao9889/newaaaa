@@ -32,9 +32,9 @@ func applyExplicitLogTextFilter(tx *gorm.DB, column string, value string) (*gorm
 }
 
 type Log struct {
-	Id                int    `json:"id" gorm:"index:idx_created_at_id,priority:1;index:idx_user_id_id,priority:2"`
+	Id                int    `json:"id" gorm:"index:idx_created_at_id,priority:2;index:idx_user_id_id,priority:2"`
 	UserId            int    `json:"user_id" gorm:"index;index:idx_user_id_id,priority:1"`
-	CreatedAt         int64  `json:"created_at" gorm:"bigint;index:idx_created_at_id,priority:2;index:idx_created_at_type"`
+	CreatedAt         int64  `json:"created_at" gorm:"bigint;index:idx_created_at_id,priority:1;index:idx_created_at_type"`
 	Type              int    `json:"type" gorm:"index:idx_created_at_type"`
 	Content           string `json:"content"`
 	Username          string `json:"username" gorm:"index;index:index_username_model_name,priority:2;default:''"`
@@ -64,16 +64,29 @@ const (
 	LogTypeSystem  = 4
 	LogTypeError   = 5
 	LogTypeRefund  = 6
+	LogTypeLogin   = 7
 )
 
 func formatUserLogs(logs []*Log, startIdx int) {
+	FormatUserLogsForResponse(logs, startIdx)
+}
+
+func FormatUserLogsForResponse(logs []*Log, startIdx int) {
 	for i := range logs {
+		logs[i].ChannelId = 0
 		logs[i].ChannelName = ""
 		var otherMap map[string]interface{}
 		otherMap, _ = common.StrToMap(logs[i].Other)
 		if otherMap != nil {
 			// Remove admin-only debug fields.
 			delete(otherMap, "admin_info")
+			// Remove operation-audit details (operator/route info), admin-only.
+			delete(otherMap, "audit_info")
+			// Hide upstream channel routing details from the log owner.
+			delete(otherMap, "channel_id")
+			delete(otherMap, "channel_name")
+			delete(otherMap, "channel_type")
+			delete(otherMap, "async_channel_retry_path")
 			// delete(otherMap, "reject_reason")
 			delete(otherMap, "stream_status")
 		}
@@ -130,6 +143,74 @@ func RecordLogWithAdminInfo(userId int, logType int, content string, adminInfo m
 	}
 }
 
+// buildOpField 构建语言无关的操作描述（写入 Other.op）。
+// 前端依据 action(稳定操作标识) + params(结构化参数) 在渲染期用 i18n 本地化展示，
+// 因此不在数据库中存储自然语言句子。
+func buildOpField(action string, params map[string]interface{}) map[string]interface{} {
+	op := map[string]interface{}{
+		"action": action,
+	}
+	if len(params) > 0 {
+		op["params"] = params
+	}
+	return op
+}
+
+// RecordLoginLog 记录用户登录成功的审计日志（type=LogTypeLogin）。
+// username 由调用方传入（登录流程已持有用户对象），避免额外的数据库查询。
+// content 为英文兜底文本（用于导出/经典前端）；action+params 供前端本地化渲染。
+// extra 可携带 login_method、user_agent 等附加信息（普通用户可见）。
+func RecordLoginLog(userId int, username string, content string, ip string, action string, params map[string]interface{}, extra map[string]interface{}) {
+	other := map[string]interface{}{}
+	for k, v := range extra {
+		other[k] = v
+	}
+	other["op"] = buildOpField(action, params)
+	log := &Log{
+		UserId:    userId,
+		Username:  username,
+		CreatedAt: common.GetTimestamp(),
+		Type:      LogTypeLogin,
+		Content:   content,
+		Ip:        ip,
+		Other:     common.MapToJsonStr(other),
+	}
+	if err := LOG_DB.Create(log).Error; err != nil {
+		common.SysLog("failed to record login log: " + err.Error())
+	}
+}
+
+// RecordOperationAuditLog 记录管理/高危操作审计日志（type=LogTypeManage）。
+// logUserId 为日志归属者（面向用户的操作如额度调整归属目标用户，资源类操作如渠道/系统设置归属操作者），
+// username 内部按 logUserId 查询。content 为英文兜底文本（导出/经典前端用）。
+// action+params 写入 Other.op，供前端本地化渲染（普通用户可见，不含敏感信息）。
+// adminInfo 存放操作者身份（写入 Other.admin_info，普通用户查询时剥离）；
+// auditInfo 存放路由/方法/结果等中间件兜底信息（写入 Other.audit_info，普通用户查询时剥离）。
+func RecordOperationAuditLog(logUserId int, content string, ip string, action string, params map[string]interface{}, adminInfo map[string]interface{}, auditInfo map[string]interface{}) {
+	username, _ := GetUsernameById(logUserId, false)
+	other := map[string]interface{}{
+		"op": buildOpField(action, params),
+	}
+	if len(adminInfo) > 0 {
+		other["admin_info"] = adminInfo
+	}
+	if len(auditInfo) > 0 {
+		other["audit_info"] = auditInfo
+	}
+	log := &Log{
+		UserId:    logUserId,
+		Username:  username,
+		CreatedAt: common.GetTimestamp(),
+		Type:      LogTypeManage,
+		Content:   content,
+		Ip:        ip,
+		Other:     common.MapToJsonStr(other),
+	}
+	if err := LOG_DB.Create(log).Error; err != nil {
+		common.SysLog("failed to record operation audit log: " + err.Error())
+	}
+}
+
 func RecordTopupLog(userId int, content string, callerIp string, paymentMethod string, callbackPaymentMethod string) {
 	username, _ := GetUsernameById(userId, false)
 	adminInfo := map[string]interface{}{
@@ -162,6 +243,14 @@ func RecordErrorLog(c *gin.Context, userId int, channelId int, modelName string,
 	isStream bool, group string, other map[string]interface{}) {
 	logger.LogInfo(c, fmt.Sprintf("record error log: userId=%d, channelId=%d, modelName=%s, tokenName=%s, content=%s", userId, channelId, modelName, tokenName, common.LocalLogPreview(content)))
 	username := c.GetString("username")
+	if username == "" && userId > 0 {
+		username, _ = GetUsernameById(userId, false)
+	}
+	if tokenName == "" && tokenId > 0 {
+		if token, err := GetTokenById(tokenId); err == nil {
+			tokenName = token.Name
+		}
+	}
 	requestId := c.GetString(common.RequestIdKey)
 	upstreamRequestId := c.GetString(common.UpstreamRequestIdKey)
 	otherStr := common.MapToJsonStr(other)
@@ -315,6 +404,60 @@ func RecordTaskBillingLog(params RecordTaskBillingLogParams) {
 	}
 }
 
+func hydrateLogDisplayNames(logs []*Log) {
+	if len(logs) == 0 {
+		return
+	}
+
+	userIds := types.NewSet[int]()
+	tokenIds := types.NewSet[int]()
+	for _, log := range logs {
+		if log.Username == "" && log.UserId > 0 {
+			userIds.Add(log.UserId)
+		}
+		if log.TokenName == "" && log.TokenId > 0 {
+			tokenIds.Add(log.TokenId)
+		}
+	}
+
+	usernames := make(map[int]string, userIds.Len())
+	if userIds.Len() > 0 {
+		var users []struct {
+			Id       int    `gorm:"column:id"`
+			Username string `gorm:"column:username"`
+		}
+		if err := DB.Model(&User{}).Select("id, username").Where("id IN ?", userIds.Items()).Find(&users).Error; err != nil {
+			common.SysLog("failed to hydrate log usernames: " + err.Error())
+		}
+		for _, user := range users {
+			usernames[user.Id] = user.Username
+		}
+	}
+
+	tokenNames := make(map[int]string, tokenIds.Len())
+	if tokenIds.Len() > 0 {
+		var tokens []struct {
+			Id   int    `gorm:"column:id"`
+			Name string `gorm:"column:name"`
+		}
+		if err := DB.Model(&Token{}).Select("id, name").Where("id IN ?", tokenIds.Items()).Find(&tokens).Error; err != nil {
+			common.SysLog("failed to hydrate log token names: " + err.Error())
+		}
+		for _, token := range tokens {
+			tokenNames[token.Id] = token.Name
+		}
+	}
+
+	for i := range logs {
+		if logs[i].Username == "" {
+			logs[i].Username = usernames[logs[i].UserId]
+		}
+		if logs[i].TokenName == "" {
+			logs[i].TokenName = tokenNames[logs[i].TokenId]
+		}
+	}
+}
+
 func GetAllLogs(logType int, startTimestamp int64, endTimestamp int64, modelName string, username string, tokenName string, startIdx int, num int, channel int, group string, requestId string, upstreamRequestId string) (logs []*Log, total int64, err error) {
 	var tx *gorm.DB
 	if logType == LogTypeUnknown {
@@ -354,7 +497,7 @@ func GetAllLogs(logType int, startTimestamp int64, endTimestamp int64, modelName
 	if err != nil {
 		return nil, 0, err
 	}
-	err = tx.Order("logs.id desc").Limit(num).Offset(startIdx).Find(&logs).Error
+	err = tx.Order("logs.created_at desc, logs.id desc").Limit(num).Offset(startIdx).Find(&logs).Error
 	if err != nil {
 		return nil, 0, err
 	}
@@ -399,6 +542,7 @@ func GetAllLogs(logType int, startTimestamp int64, endTimestamp int64, modelName
 		}
 	}
 
+	hydrateLogDisplayNames(logs)
 	return logs, total, err
 }
 
@@ -444,6 +588,7 @@ func GetUserLogs(userId int, logType int, startTimestamp int64, endTimestamp int
 		return nil, 0, errors.New("查询日志失败")
 	}
 
+	hydrateLogDisplayNames(logs)
 	formatUserLogs(logs, startIdx)
 	return logs, total, err
 }
