@@ -4,6 +4,8 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"net/url"
+	"strconv"
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
@@ -144,17 +146,27 @@ func GetAndValidOpenAIImageRequest(c *gin.Context, relayMode int) (*dto.ImageReq
 	switch relayMode {
 	case relayconstant.RelayModeImagesEdits:
 		if strings.Contains(c.Request.Header.Get("Content-Type"), "multipart/form-data") {
-			formData, err := common.ParseMultipartFormReusable(c)
+			form, err := common.ParseMultipartFormReusable(c)
 			if err != nil {
 				return nil, fmt.Errorf("failed to parse image edit form request: %w", err)
 			}
-			values := formData.Value
-			imageRequest.Prompt = firstFormValue(values, "prompt")
-			imageRequest.Model = firstFormValue(values, "model")
-			imageRequest.N = common.GetPointer(uint(common.String2Int(firstFormValue(values, "n"))))
-			imageRequest.Quality = firstFormValue(values, "quality")
-			imageRequest.Size = firstFormValue(values, "size")
-			if imageValue := firstFormValue(values, "image"); imageValue != "" {
+			formData := url.Values(form.Value)
+			values := form.Value
+			c.Request.MultipartForm = form
+			c.Request.PostForm = formData
+			imageRequest.Prompt = formData.Get("prompt")
+			imageRequest.Model = formData.Get("model")
+			imageRequest.N = common.GetPointer(uint(common.String2Int(formData.Get("n"))))
+			imageRequest.Quality = formData.Get("quality")
+			imageRequest.Size = formData.Get("size")
+			if streamValue := strings.TrimSpace(formData.Get("stream")); streamValue != "" {
+				stream, err := strconv.ParseBool(streamValue)
+				if err != nil {
+					return nil, fmt.Errorf("invalid stream value: %w", err)
+				}
+				imageRequest.Stream = common.GetPointer(stream)
+			}
+			if imageValue := formData.Get("image"); imageValue != "" {
 				imageRequest.Image, _ = common.Marshal(imageValue)
 			}
 

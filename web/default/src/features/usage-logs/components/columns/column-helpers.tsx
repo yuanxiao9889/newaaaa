@@ -174,18 +174,30 @@ export function createChannelColumn<T>(config: {
     ),
     cell: ({ row }) => {
       const channelId = row.getValue(accessorKey) as number
+      const channelName = (row.original as { channel_name?: string })
+        .channel_name
       if (!channelId) {
         return <span className='text-muted-foreground/60 text-xs'>-</span>
       }
       return (
-        <StatusBadge
-          label={`#${channelId}`}
-          autoColor={String(channelId)}
-          copyText={String(channelId)}
-          size='sm'
-          showDot={false}
-          className='font-mono'
-        />
+        <div className='flex max-w-[160px] flex-col gap-0.5'>
+          <StatusBadge
+            label={`#${channelId}`}
+            autoColor={String(channelId)}
+            copyText={String(channelId)}
+            size='sm'
+            showDot={false}
+            className='w-fit font-mono'
+          />
+          {channelName && (
+            <span
+              className='text-muted-foreground/70 truncate text-xs'
+              title={channelName}
+            >
+              {channelName}
+            </span>
+          )}
+        </div>
       )
     },
     meta: { label: headerLabel },

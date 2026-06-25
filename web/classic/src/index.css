@@ -31,16 +31,38 @@ body {
   background-color: var(--semi-color-bg-0);
 }
 
-/* 桌面端禁止 body 纵向滚动 - 防止 VChart tooltip 触发页面滚动条 */
-@media (min-width: 768px) {
-  body {
-    overflow-y: hidden;
-  }
+.app-layout {
+  min-height: 100vh;
+  min-height: 100dvh;
 }
 
-.app-layout {
+.app-layout-fixed {
   height: 100vh;
   height: 100dvh;
+}
+
+.public-page-content {
+  display: flex;
+  flex-direction: column;
+}
+
+.classic-page-fill {
+  flex: 1 0 auto;
+  min-height: 100%;
+}
+
+.classic-home-page,
+.classic-home-default {
+  display: flex;
+  flex-direction: column;
+}
+
+.classic-home-default {
+  flex: 1 0 auto;
+}
+
+.classic-home-hero {
+  flex: 1 0 auto;
 }
 
 .app-sider {
@@ -1756,7 +1778,7 @@ html.dark .with-pastel-balls::before {
   transform: translateX(-50%);
   background:
     radial-gradient(ellipse at 50% 16%, rgba(5, 9, 16, 0.76) 0%, rgba(5, 9, 16, 0.4) 26%, transparent 48%),
-    url('/landing/cta-aurora.png') center bottom / cover no-repeat;
+    url('../public/landing/cta-aurora.png') center bottom / cover no-repeat;
   opacity: 0.94;
   filter: saturate(1.08) contrast(1.04) brightness(0.88);
   mask-image: linear-gradient(180deg, transparent 0%, rgba(0, 0, 0, 0.05) 13%, rgba(0, 0, 0, 0.24) 24%, rgba(0, 0, 0, 0.72) 40%, #000 58%, #000 100%);

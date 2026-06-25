@@ -95,6 +95,9 @@ func buildImageTaskResponse(task *model.Task) dto.ImageAsyncTaskResponse {
 		ContentURL: service.BuildAsyncImageContentURL(task.TaskID),
 		ExpiresAt:  service.GetAsyncImageExpiresAt(task),
 	}
+	if resp.Status == dto.ImageAsyncStatusSucceeded {
+		resp.URL, resp.URLExpiresAt = service.BuildSignedAsyncImageContentURL(task)
+	}
 	if resp.Status == dto.ImageAsyncStatusFailed {
 		resp.Error = task.FailReason
 	}
@@ -143,6 +146,29 @@ func GetImageTaskContent(c *gin.Context) {
 		return
 	}
 
+	serveImageTaskContent(c, task)
+}
+
+func GetSignedImageTaskContent(c *gin.Context) {
+	taskID := c.Param("task_id")
+	task, exists, err := model.GetByOnlyTaskId(taskID)
+	if err != nil {
+		imageTaskError(c, http.StatusInternalServerError, "failed to query task")
+		return
+	}
+	if !exists || task == nil || !service.IsImageTaskAction(task.Action) {
+		imageTaskError(c, http.StatusNotFound, "task not found")
+		return
+	}
+	if !service.VerifyAsyncImageToken(c.Query("token"), task) {
+		imageTaskError(c, http.StatusUnauthorized, "invalid image token")
+		return
+	}
+
+	serveImageTaskContent(c, task)
+}
+
+func serveImageTaskContent(c *gin.Context, task *model.Task) {
 	status := service.GetAsyncImageTaskStatus(task)
 	switch status {
 	case dto.ImageAsyncStatusExpired:

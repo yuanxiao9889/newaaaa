@@ -539,34 +539,58 @@ func mapTaskStatusToSimple(status model.TaskStatus) string {
 }
 
 func TaskModel2Dto(task *model.Task) *dto.TaskDto {
-	return taskModel2Dto(task, true)
+	return TaskModel2DtoWithOptions(task, true, true)
 }
 
 func TaskModel2ListDto(task *model.Task) *dto.TaskDto {
-	return taskModel2Dto(task, false)
+	return TaskModel2DtoWithOptions(task, false, true)
 }
 
-func taskModel2Dto(task *model.Task, includeData bool) *dto.TaskDto {
+func UserTaskModel2Dto(task *model.Task) *dto.TaskDto {
+	return TaskModel2DtoWithOptions(task, true, false)
+}
+
+func UserTaskModel2ListDto(task *model.Task) *dto.TaskDto {
+	return TaskModel2DtoWithOptions(task, false, false)
+}
+
+func taskModelName(task *model.Task) string {
+	if task.Properties.OriginModelName != "" {
+		return task.Properties.OriginModelName
+	}
+	if task.PrivateData.BillingContext != nil && task.PrivateData.BillingContext.OriginModelName != "" {
+		return task.PrivateData.BillingContext.OriginModelName
+	}
+	return task.Properties.UpstreamModelName
+}
+
+func TaskModel2DtoWithOptions(task *model.Task, includeData bool, includeInternalChannelInfo bool) *dto.TaskDto {
+	modelName := taskModelName(task)
 	taskDto := &dto.TaskDto{
-		ID:         task.ID,
-		CreatedAt:  task.CreatedAt,
-		UpdatedAt:  task.UpdatedAt,
-		TaskID:     task.TaskID,
-		Platform:   string(task.Platform),
-		UserId:     task.UserId,
-		Group:      task.Group,
-		ChannelId:  task.ChannelId,
-		Quota:      task.Quota,
-		Action:     task.Action,
-		Status:     string(task.Status),
-		FailReason: task.FailReason,
-		ResultURL:  task.GetResultURL(),
-		SubmitTime: task.SubmitTime,
-		StartTime:  task.StartTime,
-		FinishTime: task.FinishTime,
-		Progress:   task.Progress,
-		Properties: task.Properties,
-		Username:   task.Username,
+		ID:                task.ID,
+		CreatedAt:         task.CreatedAt,
+		UpdatedAt:         task.UpdatedAt,
+		TaskID:            task.TaskID,
+		Platform:          string(task.Platform),
+		UserId:            task.UserId,
+		Group:             task.Group,
+		ModelName:         modelName,
+		UpstreamModelName: task.Properties.UpstreamModelName,
+		Quota:             task.Quota,
+		Action:            task.Action,
+		Status:            string(task.Status),
+		FailReason:        task.FailReason,
+		ResultURL:         task.GetResultURL(),
+		SubmitTime:        task.SubmitTime,
+		StartTime:         task.StartTime,
+		FinishTime:        task.FinishTime,
+		Progress:          task.Progress,
+		Properties:        task.Properties,
+		Username:          task.Username,
+	}
+	if includeInternalChannelInfo {
+		taskDto.ChannelId = task.ChannelId
+		taskDto.ChannelName = task.ChannelName
 	}
 	if includeData {
 		taskDto.Data = task.Data
@@ -575,11 +599,16 @@ func taskModel2Dto(task *model.Task, includeData bool) *dto.TaskDto {
 		taskDto.InternalAsync = true
 		taskDto.RequestPath = task.PrivateData.RequestPath
 		taskDto.WorkerAttempts = task.PrivateData.WorkerAttempts
-		taskDto.ChannelRetryPath = append([]string(nil), task.PrivateData.ChannelRetryPath...)
 		taskDto.BillingState = task.PrivateData.BillingState
 		taskDto.PreConsumedQuota = task.PrivateData.PreConsumedQuota
 		taskDto.ActualQuota = task.PrivateData.ActualQuota
 		taskDto.BillingError = task.PrivateData.BillingError
+		taskDto.PromptTokens = task.PrivateData.PromptTokens
+		taskDto.CompletionTokens = task.PrivateData.CompletionTokens
+		taskDto.TotalTokens = task.PrivateData.TotalTokens
+		if includeInternalChannelInfo {
+			taskDto.ChannelRetryPath = append([]string(nil), task.PrivateData.ChannelRetryPath...)
+		}
 	}
 	return taskDto
 }

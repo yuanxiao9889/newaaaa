@@ -24,11 +24,10 @@ import { Music } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import { getUserAvatarFallback, getUserAvatarStyle } from '@/lib/avatar'
-import { formatTimestampToDate } from '@/lib/format'
+import { formatTimestampToDate, formatTokens } from '@/lib/format'
 import { cn } from '@/lib/utils'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { Button } from '@/components/ui/button'
-import { DataTableColumnHeader } from '@/components/data-table'
 import { StatusBadge } from '@/components/status-badge'
 import { getTaskLogDetail } from '../../api'
 import { TASK_ACTIONS, TASK_STATUS } from '../../constants'
@@ -39,6 +38,7 @@ import {
   type AudioClip,
 } from '../dialogs/audio-preview-dialog'
 import { FailReasonDialog } from '../dialogs/fail-reason-dialog'
+import { ModelBadge } from '../model-badge'
 import { useUsageLogsContext } from '../usage-logs-provider'
 import {
   createDurationColumn,
@@ -136,20 +136,18 @@ export function useTaskLogsColumns(isAdmin: boolean): ColumnDef<TaskLog>[] {
   const columns: ColumnDef<TaskLog>[] = [
     {
       accessorKey: 'submit_time',
-      header: ({ column }) => (
-        <DataTableColumnHeader column={column} title={t('Submit Time')} />
-      ),
+      header: t('Submit Time'),
       cell: ({ row }) => {
         const log = row.original
         const submitTime = row.getValue('submit_time') as number
 
         return (
-          <div className='flex flex-col gap-0.5'>
-            <span className='font-mono text-xs tabular-nums'>
+          <div className='flex min-w-0 flex-col gap-0.5'>
+            <span className='truncate font-mono text-xs tabular-nums'>
               {formatTimestampToDate(submitTime, 'seconds')}
             </span>
             {log.finish_time ? (
-              <span className='text-muted-foreground/60 font-mono text-[11px] tabular-nums'>
+              <span className='text-muted-foreground/60 truncate font-mono text-[11px] tabular-nums'>
                 {formatTimestampToDate(log.finish_time, 'seconds')}
               </span>
             ) : (
@@ -158,17 +156,15 @@ export function useTaskLogsColumns(isAdmin: boolean): ColumnDef<TaskLog>[] {
           </div>
         )
       },
-      meta: { label: t('Submit Time') },
+      size: 180,
     },
   ]
 
   if (isAdmin) {
     columns.push(createChannelColumn<TaskLog>({ headerLabel: t('Channel') }), {
       id: 'user',
+      header: t('User'),
       accessorFn: (row) => row.username || row.user_id,
-      header: ({ column }) => (
-        <DataTableColumnHeader column={column} title={t('User')} />
-      ),
       cell: function UserCell({ row }) {
         const { sensitiveVisible, setSelectedUserId, setUserInfoDialogOpen } =
           useUsageLogsContext()
@@ -204,16 +200,34 @@ export function useTaskLogsColumns(isAdmin: boolean): ColumnDef<TaskLog>[] {
           </button>
         )
       },
-      meta: { label: t('User') },
     })
   }
 
   columns.push(
     {
+      accessorKey: 'model_name',
+      header: t('Model'),
+      cell: ({ row }) => {
+        const log = row.original
+        const modelName = log.model_name
+        const actualModel =
+          log.upstream_model_name && log.upstream_model_name !== modelName
+            ? log.upstream_model_name
+            : undefined
+        if (!modelName) {
+          return <span className='text-muted-foreground/60 text-xs'>-</span>
+        }
+        return (
+          <div className='max-w-[180px]'>
+            <ModelBadge modelName={modelName} actualModel={actualModel} />
+          </div>
+        )
+      },
+      meta: { label: t('Model'), mobileTitle: true },
+    },
+    {
       accessorKey: 'task_id',
-      header: ({ column }) => (
-        <DataTableColumnHeader column={column} title={t('Task ID')} />
-      ),
+      header: t('Task ID'),
       cell: ({ row }) => {
         const log = row.original
         const taskId = row.getValue('task_id') as string
@@ -234,7 +248,7 @@ export function useTaskLogsColumns(isAdmin: boolean): ColumnDef<TaskLog>[] {
           </div>
         )
       },
-      meta: { label: t('Task ID'), mobileTitle: true },
+      meta: { mobileTitle: true },
     },
     createDurationColumn<TaskLog>({
       submitTimeKey: 'submit_time',
@@ -244,10 +258,35 @@ export function useTaskLogsColumns(isAdmin: boolean): ColumnDef<TaskLog>[] {
       warningThresholdSec: 300,
     }),
     {
+      accessorKey: 'prompt_tokens',
+      header: t('Tokens'),
+      cell: ({ row }) => {
+        const log = row.original
+        const promptTokens = Number(log.prompt_tokens || 0)
+        const completionTokens = Number(log.completion_tokens || 0)
+        const totalTokens =
+          Number(log.total_tokens || 0) || promptTokens + completionTokens
+
+        if (promptTokens === 0 && completionTokens === 0 && totalTokens === 0) {
+          return <span className='text-muted-foreground/60 text-xs'>-</span>
+        }
+
+        return (
+          <div className='flex min-w-[96px] flex-col gap-0.5 font-mono tabular-nums'>
+            <span className='text-foreground text-xs'>
+              {formatTokens(promptTokens)} / {formatTokens(completionTokens)}
+            </span>
+            <span className='text-muted-foreground/60 text-[11px]'>
+              {formatTokens(totalTokens)}
+            </span>
+          </div>
+        )
+      },
+      size: 130,
+    },
+    {
       accessorKey: 'status',
-      header: ({ column }) => (
-        <DataTableColumnHeader column={column} title={t('Status')} />
-      ),
+      header: t('Status'),
       cell: ({ row }) => {
         const status = row.getValue('status') as string
         return (
@@ -256,17 +295,15 @@ export function useTaskLogsColumns(isAdmin: boolean): ColumnDef<TaskLog>[] {
             variant={taskStatusMapper.getVariant(status)}
             size='sm'
             copyable={false}
+            className='-ml-1.5'
           />
         )
       },
-      meta: { label: t('Status') },
     },
     createProgressColumn<TaskLog>({ headerLabel: t('Progress') }),
     {
       accessorKey: 'fail_reason',
-      header: ({ column }) => (
-        <DataTableColumnHeader column={column} title={t('Details')} />
-      ),
+      header: t('Details'),
       cell: function DetailsCell({ row }) {
         const log = row.original
         const failReason = row.getValue('fail_reason') as string
@@ -326,7 +363,6 @@ export function useTaskLogsColumns(isAdmin: boolean): ColumnDef<TaskLog>[] {
           </>
         )
       },
-      meta: { label: t('Details') },
       size: 200,
       maxSize: 220,
     }

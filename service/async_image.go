@@ -1,14 +1,19 @@
 package service
 
 import (
+	"crypto/hmac"
+	"crypto/sha256"
 	"encoding/base64"
 	"fmt"
 	"io"
 	"mime"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
@@ -19,6 +24,17 @@ import (
 )
 
 const AsyncImageAssetType = "image"
+
+const defaultAsyncImageSignedURLTTLSeconds = 3600
+
+var asyncImageSigningSecretFallbackWarnOnce sync.Once
+
+type asyncImageTokenPayload struct {
+	TaskID    string `json:"task_id"`
+	UserID    int    `json:"user_id"`
+	ExpiresAt int64  `json:"expires_at"`
+	StoredAt  int64  `json:"stored_at"`
+}
 
 func IsImageTaskAction(action string) bool {
 	return action == constant.TaskActionImageGenerate ||
@@ -32,6 +48,62 @@ func BuildAsyncImageStatusURL(taskID string) string {
 
 func BuildAsyncImageContentURL(taskID string) string {
 	return joinAsyncImageURL(fmt.Sprintf("/v1/images/tasks/%s/content", taskID))
+}
+
+func BuildAsyncImageSignedContentURL(taskID string) string {
+	return joinAsyncImageURL(fmt.Sprintf("/v1/images/tasks/%s/signed-content", taskID))
+}
+
+func BuildSignedAsyncImageContentURL(task *model.Task) (string, int64) {
+	urlExpiresAt := asyncImageSignedURLExpiresAt(task, time.Now())
+	if urlExpiresAt <= 0 {
+		return "", 0
+	}
+	token := signAsyncImageToken(task, urlExpiresAt)
+	if token == "" {
+		return "", 0
+	}
+	return BuildAsyncImageSignedContentURL(task.TaskID) + "?token=" + url.QueryEscape(token), urlExpiresAt
+}
+
+func VerifyAsyncImageToken(token string, task *model.Task) bool {
+	if task == nil ||
+		task.PrivateData.AssetType != AsyncImageAssetType ||
+		task.PrivateData.LocalPath == "" ||
+		strings.TrimSpace(token) == "" {
+		return false
+	}
+	parts := strings.Split(token, ".")
+	if len(parts) != 2 {
+		return false
+	}
+
+	payloadBytes, err := base64.RawURLEncoding.DecodeString(parts[0])
+	if err != nil {
+		return false
+	}
+	signature, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		return false
+	}
+
+	var payload asyncImageTokenPayload
+	if err = common.Unmarshal(payloadBytes, &payload); err != nil {
+		return false
+	}
+	if payload.TaskID != task.TaskID ||
+		payload.UserID != task.UserId ||
+		payload.StoredAt != task.PrivateData.StoredAt ||
+		payload.ExpiresAt <= time.Now().Unix() ||
+		payload.ExpiresAt > task.PrivateData.ExpiresAt {
+		return false
+	}
+
+	expected := signAsyncImagePayload(payload, parts[0])
+	if len(expected) == 0 {
+		return false
+	}
+	return hmac.Equal(signature, expected)
 }
 
 func GetAsyncImageTaskStatus(task *model.Task) string {
@@ -62,6 +134,79 @@ func GetAsyncImageExpiresAt(task *model.Task) int64 {
 		return 0
 	}
 	return task.PrivateData.ExpiresAt
+}
+
+func asyncImageSignedURLExpiresAt(task *model.Task, now time.Time) int64 {
+	if task == nil ||
+		task.TaskID == "" ||
+		task.PrivateData.AssetType != AsyncImageAssetType ||
+		task.PrivateData.LocalPath == "" ||
+		task.PrivateData.StoredAt <= 0 ||
+		task.PrivateData.ExpiresAt <= now.Unix() {
+		return 0
+	}
+
+	ttlSeconds := common.GetEnvOrDefault("ASYNC_IMAGE_SIGNED_URL_TTL_SECONDS", defaultAsyncImageSignedURLTTLSeconds)
+	if ttlSeconds <= 0 {
+		ttlSeconds = defaultAsyncImageSignedURLTTLSeconds
+	}
+	expiresAt := now.Add(time.Duration(ttlSeconds) * time.Second).Unix()
+	if task.PrivateData.ExpiresAt < expiresAt {
+		expiresAt = task.PrivateData.ExpiresAt
+	}
+	return expiresAt
+}
+
+func signAsyncImageToken(task *model.Task, expiresAt int64) string {
+	if task == nil || expiresAt <= 0 {
+		return ""
+	}
+	payload := asyncImageTokenPayload{
+		TaskID:    task.TaskID,
+		UserID:    task.UserId,
+		ExpiresAt: expiresAt,
+		StoredAt:  task.PrivateData.StoredAt,
+	}
+	payloadJSON, err := common.Marshal(payload)
+	if err != nil {
+		return ""
+	}
+	encodedPayload := base64.RawURLEncoding.EncodeToString(payloadJSON)
+	signature := signAsyncImagePayload(payload, encodedPayload)
+	if len(signature) == 0 {
+		return ""
+	}
+	return encodedPayload + "." + base64.RawURLEncoding.EncodeToString(signature)
+}
+
+func signAsyncImagePayload(payload asyncImageTokenPayload, encodedPayload string) []byte {
+	secret := asyncImageSigningSecret()
+	if secret == "" || encodedPayload == "" {
+		return nil
+	}
+	signingText := strings.Join([]string{
+		payload.TaskID,
+		strconv.Itoa(payload.UserID),
+		strconv.FormatInt(payload.ExpiresAt, 10),
+		strconv.FormatInt(payload.StoredAt, 10),
+		encodedPayload,
+	}, ":")
+	mac := hmac.New(sha256.New, []byte(secret))
+	_, _ = mac.Write([]byte(signingText))
+	return mac.Sum(nil)
+}
+
+func asyncImageSigningSecret() string {
+	if secret := strings.TrimSpace(os.Getenv("ASYNC_IMAGE_SIGNING_SECRET")); secret != "" {
+		return secret
+	}
+	asyncImageSigningSecretFallbackWarnOnce.Do(func() {
+		common.SysError("ASYNC_IMAGE_SIGNING_SECRET is not configured, falling back to CRYPTO_SECRET for async image signed URLs")
+	})
+	if common.CryptoSecret != "" {
+		return common.CryptoSecret
+	}
+	return common.SessionSecret
 }
 
 func IsAsyncImageExpired(task *model.Task) bool {

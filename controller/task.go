@@ -93,21 +93,35 @@ func GetUserTaskDetail(c *gin.Context) {
 		common.ApiError(c, errors.New("task not found"))
 		return
 	}
-	common.ApiSuccess(c, relay.TaskModel2Dto(task))
+	common.ApiSuccess(c, relay.UserTaskModel2Dto(task))
 }
 
 func tasksToDto(tasks []*model.Task, fillUser bool, includeData bool) []*dto.TaskDto {
 	var userIdMap map[int]*model.UserBase
+	var channelNameMap map[int]string
 	if fillUser {
 		userIdMap = make(map[int]*model.UserBase)
 		userIds := types.NewSet[int]()
+		channelIds := types.NewSet[int]()
 		for _, task := range tasks {
 			userIds.Add(task.UserId)
+			if task.ChannelId > 0 {
+				channelIds.Add(task.ChannelId)
+			}
 		}
 		for _, userId := range userIds.Items() {
 			cacheUser, err := model.GetUserCache(userId)
 			if err == nil {
 				userIdMap[userId] = cacheUser
+			}
+		}
+		if len(channelIds.Items()) > 0 {
+			channelNameMap = make(map[int]string)
+			channels, err := model.GetChannelsByIds(channelIds.Items())
+			if err == nil {
+				for _, channel := range channels {
+					channelNameMap[channel.Id] = channel.Name
+				}
 			}
 		}
 	}
@@ -117,11 +131,14 @@ func tasksToDto(tasks []*model.Task, fillUser bool, includeData bool) []*dto.Tas
 			if user, ok := userIdMap[task.UserId]; ok {
 				task.Username = user.Username
 			}
+			if channelName, ok := channelNameMap[task.ChannelId]; ok {
+				task.ChannelName = channelName
+			}
 		}
 		if includeData {
-			result[i] = relay.TaskModel2Dto(task)
+			result[i] = relay.TaskModel2DtoWithOptions(task, true, fillUser)
 		} else {
-			result[i] = relay.TaskModel2ListDto(task)
+			result[i] = relay.TaskModel2DtoWithOptions(task, false, fillUser)
 		}
 	}
 	return result

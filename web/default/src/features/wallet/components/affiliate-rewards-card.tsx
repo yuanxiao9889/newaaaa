@@ -16,7 +16,8 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { Share2 } from 'lucide-react'
+import { BadgePercent, CircleDollarSign, ListChecks, Share2 } from 'lucide-react'
+import type { ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import { formatQuota } from '@/lib/format'
 import { Button } from '@/components/ui/button'
@@ -61,7 +62,7 @@ export function AffiliateRewardsCard({
 
   return (
     <Card className='bg-muted/20 py-0'>
-      <CardContent className='grid gap-3 p-3 sm:gap-4 sm:p-4 lg:grid-cols-[minmax(200px,1fr)_minmax(180px,0.65fr)_minmax(280px,1fr)] lg:items-center'>
+      <CardContent className='grid gap-3 p-3 sm:gap-4 sm:p-4 lg:grid-cols-[minmax(280px,1fr)_minmax(180px,0.65fr)_minmax(280px,1fr)] lg:items-center'>
         <div className='flex min-w-0 items-center gap-2.5'>
           <div className='bg-background flex size-8 shrink-0 items-center justify-center rounded-lg border'>
             <Share2 className='text-muted-foreground size-4' />
@@ -70,9 +71,9 @@ export function AffiliateRewardsCard({
             <h3 className='truncate text-sm font-semibold'>
               {t('Referral Program')}
             </h3>
-            <p className='text-muted-foreground line-clamp-1 text-xs'>
+            <p className='text-muted-foreground text-xs leading-relaxed'>
               {t(
-                'Earn rewards when your referrals add funds. Transfer accumulated rewards to your balance anytime.'
+                'Earn 5% when invited users complete valid wallet top-ups.'
               )}
             </p>
           </div>
@@ -80,9 +81,9 @@ export function AffiliateRewardsCard({
 
         <div className='grid grid-cols-3 gap-1.5 text-center'>
           {[
-            [t('Pending'), formatQuota(user?.aff_quota ?? 0)],
-            [t('Total Earned'), formatQuota(user?.aff_history_quota ?? 0)],
-            [t('Invites'), String(user?.aff_count ?? 0)],
+            [t('Available rewards'), formatQuota(user?.aff_quota ?? 0)],
+            [t('Total rewards'), formatQuota(user?.aff_history_quota ?? 0)],
+            [t('Invited users'), String(user?.aff_count ?? 0)],
           ].map(([label, value]) => (
             <div key={label}>
               <div className='text-muted-foreground truncate text-[10px] font-medium tracking-wider uppercase'>
@@ -127,7 +128,34 @@ export function AffiliateRewardsCard({
             )}
           </p>
         ) : null}
+        <div className='grid gap-2 border-t pt-3 text-xs sm:grid-cols-2 lg:col-span-3 lg:grid-cols-4'>
+          <RewardRule
+            icon={<BadgePercent className='size-3.5' />}
+            text={t('Inviter reward is 5% of each invited user wallet top-up payment.')}
+          />
+          <RewardRule
+            icon={<ListChecks className='size-3.5' />}
+            text={t('Rewards are granted only for the first 3 successful top-ups from each invited user.')}
+          />
+          <RewardRule
+            icon={<CircleDollarSign className='size-3.5' />}
+            text={t('Only valid wallet top-ups count; subscription purchases and failed orders do not count.')}
+          />
+          <RewardRule
+            icon={<Share2 className='size-3.5' />}
+            text={t('Rewards enter available referral rewards and can be transferred to your balance.')}
+          />
+        </div>
       </CardContent>
     </Card>
+  )
+}
+
+function RewardRule(props: { icon: ReactNode; text: string }) {
+  return (
+    <div className='text-muted-foreground flex min-w-0 items-start gap-1.5 leading-relaxed'>
+      <span className='mt-0.5 shrink-0'>{props.icon}</span>
+      <span>{props.text}</span>
+    </div>
   )
 }

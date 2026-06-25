@@ -9,8 +9,10 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -44,6 +46,8 @@ func TestMain(m *testing.M) {
 		&model.Channel{},
 		&model.TopUp{},
 		&model.UserSubscription{},
+		&model.ProfitCostPrice{},
+		&model.ProfitCostPriceVersion{},
 	); err != nil {
 		panic("failed to migrate: " + err.Error())
 	}
@@ -65,6 +69,8 @@ func truncate(t *testing.T) {
 		model.DB.Exec("DELETE FROM channels")
 		model.DB.Exec("DELETE FROM top_ups")
 		model.DB.Exec("DELETE FROM user_subscriptions")
+		model.DB.Exec("DELETE FROM profit_cost_prices")
+		model.DB.Exec("DELETE FROM profit_cost_price_versions")
 	})
 }
 
@@ -397,6 +403,53 @@ func TestRecalculate_ActualQuotaZero(t *testing.T) {
 	assert.Equal(t, int64(0), countLogs(t))
 }
 
+func TestRecalculateTaskQuotaByUsageUsesCompletionRatio(t *testing.T) {
+	truncate(t)
+	ctx := context.Background()
+
+	originalModelRatio := ratio_setting.ModelRatio2JSONString()
+	originalCompletionRatio := ratio_setting.CompletionRatio2JSONString()
+	t.Cleanup(func() {
+		require.NoError(t, ratio_setting.UpdateModelRatioByJSONString(originalModelRatio))
+		require.NoError(t, ratio_setting.UpdateCompletionRatioByJSONString(originalCompletionRatio))
+	})
+
+	const userID, tokenID, channelID = 131, 131, 131
+	const initQuota, preConsumed = 100000, 1000
+	const tokenRemain = 50000
+	const actualQuota = 6050 // (prompt 100 + completion 200 * 60) * modelRatio 0.5
+
+	require.NoError(t, ratio_setting.UpdateModelRatioByJSONString(`{"gemini-async-image-token-test":0.5}`))
+	require.NoError(t, ratio_setting.UpdateCompletionRatioByJSONString(`{"gemini-async-image-token-test":60}`))
+	seedUser(t, userID, initQuota)
+	seedToken(t, tokenID, userID, "sk-async-image-usage", tokenRemain)
+	seedChannel(t, channelID)
+
+	task := makeTask(userID, channelID, preConsumed, tokenID, BillingSourceWallet, 0)
+	task.Properties.OriginModelName = "gemini-async-image-token-test"
+	task.PrivateData.BillingContext.OriginModelName = "gemini-async-image-token-test"
+	task.PrivateData.BillingContext.ModelRatio = 0.5
+	task.PrivateData.BillingContext.GroupRatio = 1
+
+	usage := &dto.Usage{
+		PromptTokens:     100,
+		CompletionTokens: 200,
+		TotalTokens:      300,
+	}
+
+	RecalculateTaskQuotaByUsage(ctx, task, usage)
+
+	assert.Equal(t, initQuota-(actualQuota-preConsumed), getUserQuota(t, userID))
+	assert.Equal(t, tokenRemain-(actualQuota-preConsumed), getTokenRemainQuota(t, tokenID))
+	assert.Equal(t, actualQuota, task.Quota)
+
+	log := getLastLog(t)
+	require.NotNil(t, log)
+	assert.Equal(t, model.LogTypeConsume, log.Type)
+	assert.Equal(t, actualQuota-preConsumed, log.Quota)
+	assert.Equal(t, "gemini-async-image-token-test", log.ModelName)
+}
+
 func TestRecalculate_Subscription_NegativeDelta(t *testing.T) {
 	truncate(t)
 	ctx := context.Background()
@@ -713,4 +766,32 @@ func TestSettle_NonPerCall_AdaptorAdjustWorks(t *testing.T) {
 	log := getLastLog(t)
 	require.NotNil(t, log)
 	assert.Equal(t, model.LogTypeRefund, log.Type)
+}
+
+func TestCalculateTaskQuotaByUsage_GPTImage2OFUsesTokenPricing(t *testing.T) {
+	originalCompletionRatio := ratio_setting.CompletionRatio2JSONString()
+	require.NoError(t, ratio_setting.UpdateCompletionRatioByJSONString(`{"gpt-image-2-OF":6}`))
+	t.Cleanup(func() {
+		require.NoError(t, ratio_setting.UpdateCompletionRatioByJSONString(originalCompletionRatio))
+	})
+
+	task := makeTask(41, 41, 0, 0, BillingSourceWallet, 0)
+	task.Properties.OriginModelName = "gpt-image-2-OF"
+	task.PrivateData.BillingContext.OriginModelName = "gpt-image-2-OF"
+	task.PrivateData.BillingContext.ModelPrice = 0
+	task.PrivateData.BillingContext.ModelRatio = 13.0 / 1000 * ratio_setting.RMB
+	task.PrivateData.BillingContext.PerCallBilling = false
+
+	usage := &dto.Usage{
+		PromptTokens: 1000,
+		CompletionTokenDetails: dto.OutputTokenDetails{
+			ImageTokens: 200,
+		},
+	}
+
+	actualQuota := CalculateTaskQuotaByUsage(task, usage)
+	expectedQuotaFloat := (float64(1000) + float64(200)*6) * (13.0 / 1000 * ratio_setting.RMB)
+	expectedQuota := int(expectedQuotaFloat + 0.5)
+
+	assert.Equal(t, expectedQuota, actualQuota)
 }

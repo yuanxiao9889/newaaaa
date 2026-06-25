@@ -8,11 +8,13 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
+	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/model"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/gin-gonic/gin"
+	"github.com/shopspring/decimal"
 )
 
 const (
@@ -144,7 +146,11 @@ func taskBillingOther(task *model.Task) map[string]interface{} {
 		other["upstream_model_name"] = props.UpstreamModelName
 	}
 	if len(task.PrivateData.ChannelRetryPath) > 0 {
-		other["async_channel_retry_path"] = task.PrivateData.ChannelRetryPath
+		retryPath := append([]string(nil), task.PrivateData.ChannelRetryPath...)
+		other["async_channel_retry_path"] = retryPath
+		other["admin_info"] = map[string]interface{}{
+			"use_channel": retryPath,
+		}
 	}
 	return other
 }
@@ -177,6 +183,17 @@ func persistTaskBillingSnapshot(ctx context.Context, task *model.Task) {
 		Where("id = ?", task.ID).
 		Update("private_data", task.PrivateData).Error; err != nil {
 		logger.LogWarn(ctx, fmt.Sprintf("更新任务计费快照失败 task %s: %s", task.TaskID, err.Error()))
+	}
+}
+
+func persistTaskQuota(ctx context.Context, task *model.Task) {
+	if task == nil || task.ID <= 0 {
+		return
+	}
+	if err := model.DB.Model(&model.Task{}).
+		Where("id = ?", task.ID).
+		Update("quota", task.Quota).Error; err != nil {
+		logger.LogWarn(ctx, fmt.Sprintf("更新任务 quota 失败 task %s: %s", task.TaskID, err.Error()))
 	}
 }
 
@@ -336,6 +353,7 @@ func RecalculateTaskQuota(ctx context.Context, task *model.Task, actualQuota int
 	taskAdjustTokenQuota(ctx, task, quotaDelta)
 
 	task.Quota = actualQuota
+	persistTaskQuota(ctx, task)
 
 	var logType int
 	var logQuota int
@@ -363,6 +381,177 @@ func RecalculateTaskQuota(ctx context.Context, task *model.Task, actualQuota int
 		Group:     task.Group,
 		Other:     other,
 	})
+}
+
+func taskFinalGroupRatio(task *model.Task) float64 {
+	if task == nil {
+		return 0
+	}
+	if bc := task.PrivateData.BillingContext; bc != nil && bc.GroupRatio != 0 {
+		return bc.GroupRatio
+	}
+	group := task.Group
+	if group == "" {
+		user, err := model.GetUserById(task.UserId, false)
+		if err == nil {
+			group = user.Group
+		}
+	}
+	if group == "" {
+		return 0
+	}
+	groupRatio := ratio_setting.GetGroupRatio(group)
+	if userGroupRatio, hasUserGroupRatio := ratio_setting.GetGroupGroupRatio(group, group); hasUserGroupRatio {
+		return userGroupRatio
+	}
+	return groupRatio
+}
+
+func taskModelRatio(task *model.Task, modelName string) (float64, bool) {
+	if task != nil {
+		if bc := task.PrivateData.BillingContext; bc != nil && bc.ModelRatio > 0 {
+			return bc.ModelRatio, true
+		}
+	}
+	modelRatio, hasRatioSetting, _ := ratio_setting.GetModelRatio(modelName)
+	return modelRatio, hasRatioSetting && modelRatio > 0
+}
+
+// CalculateTaskQuotaByUsage mirrors normal text/image token billing for async
+// task settlement, including completion_ratio for generated image tokens.
+func CalculateTaskQuotaByUsage(task *model.Task, usage *dto.Usage) int {
+	if task == nil || usage == nil {
+		return 0
+	}
+	if usage.TotalTokens <= 0 && usage.PromptTokens+usage.CompletionTokens <= 0 {
+		return 0
+	}
+
+	modelName := taskModelName(task)
+	modelRatio, ok := taskModelRatio(task, modelName)
+	if !ok {
+		return 0
+	}
+	groupRatio := taskFinalGroupRatio(task)
+	if groupRatio == 0 {
+		return 0
+	}
+
+	promptTokens := usage.PromptTokens
+	completionTokens := usage.CompletionTokens
+	if completionTokens <= 0 && usage.TotalTokens > promptTokens {
+		completionTokens = usage.TotalTokens - promptTokens
+	}
+	if completionTokens <= 0 {
+		completionTokens = usage.CompletionTokenDetails.TextTokens +
+			usage.CompletionTokenDetails.ImageTokens +
+			usage.CompletionTokenDetails.AudioTokens +
+			usage.CompletionTokenDetails.ReasoningTokens
+	}
+
+	cacheTokens := usage.PromptTokensDetails.CachedTokens
+	cacheCreationTokens := usage.PromptTokensDetails.CachedCreationTokens
+	imageTokens := usage.PromptTokensDetails.ImageTokens
+	audioTokens := usage.PromptTokensDetails.AudioTokens
+
+	baseTokens := decimal.NewFromInt(int64(promptTokens))
+	cacheQuota := decimal.Zero
+	if cacheTokens > 0 {
+		cacheRatio, _ := ratio_setting.GetCacheRatio(modelName)
+		baseTokens = baseTokens.Sub(decimal.NewFromInt(int64(cacheTokens)))
+		cacheQuota = decimal.NewFromInt(int64(cacheTokens)).Mul(decimal.NewFromFloat(cacheRatio))
+	}
+
+	cacheCreationQuota := decimal.Zero
+	if cacheCreationTokens > 0 {
+		cacheCreationRatio, _ := ratio_setting.GetCreateCacheRatio(modelName)
+		baseTokens = baseTokens.Sub(decimal.NewFromInt(int64(cacheCreationTokens)))
+		cacheCreationQuota = decimal.NewFromInt(int64(cacheCreationTokens)).Mul(decimal.NewFromFloat(cacheCreationRatio))
+	}
+
+	imageQuota := decimal.Zero
+	if imageTokens > 0 {
+		imageRatio, _ := ratio_setting.GetImageRatio(modelName)
+		baseTokens = baseTokens.Sub(decimal.NewFromInt(int64(imageTokens)))
+		imageQuota = decimal.NewFromInt(int64(imageTokens)).Mul(decimal.NewFromFloat(imageRatio))
+	}
+
+	audioInputQuota := decimal.Zero
+	if audioTokens > 0 {
+		audioRatio := ratio_setting.GetAudioRatio(modelName)
+		baseTokens = baseTokens.Sub(decimal.NewFromInt(int64(audioTokens)))
+		audioInputQuota = decimal.NewFromInt(int64(audioTokens)).Mul(decimal.NewFromFloat(audioRatio))
+	}
+
+	if baseTokens.LessThan(decimal.Zero) {
+		baseTokens = decimal.Zero
+	}
+
+	completionQuota := decimal.NewFromInt(int64(completionTokens)).
+		Mul(decimal.NewFromFloat(ratio_setting.GetCompletionRatio(modelName)))
+
+	quota := baseTokens.
+		Add(cacheQuota).
+		Add(cacheCreationQuota).
+		Add(imageQuota).
+		Add(audioInputQuota).
+		Add(completionQuota).
+		Mul(decimal.NewFromFloat(modelRatio)).
+		Mul(decimal.NewFromFloat(groupRatio))
+
+	if bc := task.PrivateData.BillingContext; bc != nil {
+		for _, otherRatio := range bc.OtherRatios {
+			if otherRatio > 0 && otherRatio != 1 {
+				quota = quota.Mul(decimal.NewFromFloat(otherRatio))
+			}
+		}
+	}
+
+	if quota.LessThanOrEqual(decimal.Zero) {
+		return 0
+	}
+	return int(quota.Round(0).IntPart())
+}
+
+func RecalculateTaskQuotaByUsage(ctx context.Context, task *model.Task, usage *dto.Usage) {
+	actualQuota := CalculateTaskQuotaByUsage(task, usage)
+	if actualQuota <= 0 {
+		return
+	}
+	RecalculateTaskQuota(ctx, task, actualQuota, fmt.Sprintf("usage重算：prompt=%d, completion=%d, total=%d", usage.PromptTokens, usage.CompletionTokens, usage.TotalTokens))
+}
+
+// AdjustTaskQuotaForFinalSettlement reconciles pre-consumed funds to actual
+// quota before ConfirmTaskBillingSettled writes the final task billing log.
+// It intentionally does not update used-quota stats or create a delta log.
+func AdjustTaskQuotaForFinalSettlement(ctx context.Context, task *model.Task, actualQuota int, reason string) {
+	if task == nil || actualQuota <= 0 {
+		return
+	}
+	preConsumedQuota := task.Quota
+	quotaDelta := actualQuota - preConsumedQuota
+	if quotaDelta == 0 {
+		task.Quota = actualQuota
+		persistTaskQuota(ctx, task)
+		return
+	}
+
+	logger.LogInfo(ctx, fmt.Sprintf("任务 %s 最终差额结算：delta=%s（实际：%s，预扣：%s，%s）",
+		task.TaskID,
+		logger.LogQuota(quotaDelta),
+		logger.LogQuota(actualQuota),
+		logger.LogQuota(preConsumedQuota),
+		reason,
+	))
+
+	if err := taskAdjustFunding(task, quotaDelta); err != nil {
+		logger.LogError(ctx, fmt.Sprintf("最终差额结算资金调整失败 task %s: %s", task.TaskID, err.Error()))
+		markTaskBillingError(ctx, task, err.Error())
+		return
+	}
+	taskAdjustTokenQuota(ctx, task, quotaDelta)
+	task.Quota = actualQuota
+	persistTaskQuota(ctx, task)
 }
 
 // RecalculateTaskQuotaByTokens 根据实际 token 消耗重新计费（异步差额结算）。
