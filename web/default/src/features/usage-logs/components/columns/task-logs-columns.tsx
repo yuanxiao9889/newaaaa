@@ -39,6 +39,10 @@ import {
 } from '../dialogs/audio-preview-dialog'
 import { FailReasonDialog } from '../dialogs/fail-reason-dialog'
 import { ModelBadge } from '../model-badge'
+import {
+  hasTokenUsageDetails,
+  TokenUsageDetails,
+} from '../token-usage-details'
 import { useUsageLogsContext } from '../usage-logs-provider'
 import {
   createDurationColumn,
@@ -279,6 +283,13 @@ export function useTaskLogsColumns(isAdmin: boolean): ColumnDef<TaskLog>[] {
             <span className='text-muted-foreground/60 text-[11px]'>
               {formatTokens(totalTokens)}
             </span>
+            {hasTokenUsageDetails(log.usage_details) && (
+              <TokenUsageDetails
+                usage={log.usage_details}
+                compact
+                className='font-sans'
+              />
+            )}
           </div>
         )
       },

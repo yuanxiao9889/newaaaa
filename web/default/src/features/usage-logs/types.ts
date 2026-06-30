@@ -204,6 +204,7 @@ export interface LogOtherData {
   billing_state?: string
   pre_consumed_quota?: number
   actual_quota?: number
+  usage_details?: TaskUsageDetails
   reason?: string
   error_type?: string
   error_code?: string
@@ -283,10 +284,34 @@ export interface TaskLog {
   prompt_tokens?: number
   completion_tokens?: number
   total_tokens?: number
+  usage_details?: TaskUsageDetails
   status: string // NOT_START, SUBMITTED, IN_PROGRESS, SUCCESS, FAILURE, QUEUED, UNKNOWN
   other?: string
   created_at?: number
   updated_at?: number
+}
+
+export interface InputTokenDetails {
+  cached_tokens?: number
+  cached_creation_tokens?: number
+  text_tokens?: number
+  audio_tokens?: number
+  image_tokens?: number
+}
+
+export interface OutputTokenDetails {
+  text_tokens?: number
+  audio_tokens?: number
+  image_tokens?: number
+  reasoning_tokens?: number
+}
+
+export interface TaskUsageDetails {
+  prompt_tokens?: number
+  completion_tokens?: number
+  total_tokens?: number
+  prompt_tokens_details?: InputTokenDetails
+  completion_tokens_details?: OutputTokenDetails
 }
 
 // ============================================================================

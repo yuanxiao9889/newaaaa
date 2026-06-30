@@ -77,10 +77,7 @@ type AnnouncementsSectionProps = {
 }
 
 const announcementSchema = z.object({
-  content: z
-    .string()
-    .min(1, 'Content is required')
-    .max(500, 'Content must be less than 500 characters'),
+  content: z.string().min(1, 'Content is required'),
   publishDate: z.string().min(1, 'Publish date is required'),
   type: z.enum(['default', 'ongoing', 'success', 'warning', 'error']),
   extra: z
@@ -492,7 +489,7 @@ export function AnnouncementsSection({
                     />
                   </FormControl>
                   <FormDescription>
-                    {t('Maximum 500 characters. Supports Markdown and HTML.')}
+                    {t('Supports Markdown and HTML.')}
                   </FormDescription>
                   <FormMessage />
                 </FormItem>

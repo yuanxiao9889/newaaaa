@@ -1030,7 +1030,9 @@ export function DetailsDialog(props: DetailsDialogProps) {
           )}
 
           {/* Token breakdown (for consume/error types with token data) */}
-          {isDisplayableType(props.log.type) && other && (
+          {isDisplayableType(props.log.type) &&
+            other &&
+            !isAsyncTaskBillingLog(props.log, other) && (
             <TokenBreakdown log={props.log} other={other} />
           )}
 

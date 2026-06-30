@@ -2,6 +2,7 @@ package helper
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
@@ -34,6 +35,11 @@ func modelPriceNotConfiguredError(modelName string, userId int) error {
 
 // https://docs.claude.com/en/docs/build-with-claude/prompt-caching#1-hour-cache-duration
 const claudeCacheCreation1hMultiplier = 6 / 3.75
+
+var fixedAsyncImagePreConsumeUnits = map[string]float64{
+	"gpt-image-2":    0.4,
+	"gpt-image-2-OF": 0.4,
+}
 
 // HandleGroupRatio checks for "auto_group" in the context and updates the group ratio and relayInfo.UsingGroup if present
 func HandleGroupRatio(ctx *gin.Context, relayInfo *relaycommon.RelayInfo) types.GroupRatioInfo {
@@ -120,6 +126,10 @@ func ModelPriceHelper(c *gin.Context, info *relaycommon.RelayInfo, promptTokens 
 		preConsumedQuota = int(modelPrice * common.QuotaPerUnit * groupRatioInfo.GroupRatio)
 	}
 
+	if quota, ok := fixedAsyncImagePreConsumeQuota(c, info, groupRatioInfo.GroupRatio); ok {
+		preConsumedQuota = quota
+	}
+
 	// check if free model pre-consume is disabled
 	if !operation_setting.GetQuotaSetting().EnableFreeModelPreConsume {
 		// if model price or ratio is 0, do not pre-consume quota
@@ -161,6 +171,25 @@ func ModelPriceHelper(c *gin.Context, info *relaycommon.RelayInfo, promptTokens 
 	}
 	info.PriceData = priceData
 	return priceData, nil
+}
+
+func fixedAsyncImagePreConsumeQuota(c *gin.Context, info *relaycommon.RelayInfo, groupRatio float64) (int, bool) {
+	if c == nil || info == nil {
+		return 0, false
+	}
+	asyncValue := strings.TrimSpace(c.Query("async"))
+	if asyncValue == "" {
+		return 0, false
+	}
+	asyncEnabled, err := strconv.ParseBool(asyncValue)
+	if err != nil || !asyncEnabled {
+		return 0, false
+	}
+	units, ok := fixedAsyncImagePreConsumeUnits[info.OriginModelName]
+	if !ok {
+		return 0, false
+	}
+	return int(units * common.QuotaPerUnit * groupRatio), true
 }
 
 // ModelPriceHelperPerCall 按次/按量计费的 PriceHelper (MJ、Task)

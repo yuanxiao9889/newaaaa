@@ -194,6 +194,7 @@ func executeInternalAsyncImageTask(ctx context.Context, task *model.Task) error 
 		task.PrivateData.PromptTokens = usage.PromptTokens
 		task.PrivateData.CompletionTokens = usage.CompletionTokens
 		task.PrivateData.TotalTokens = usage.TotalTokens
+		task.PrivateData.UsageDetails = service.BuildTaskUsageDetails(usage)
 		actualQuota := service.CalculateTaskQuotaByUsage(task, usage)
 		if actualQuota > 0 {
 			service.AdjustTaskQuotaForFinalSettlement(ctx, task, actualQuota, "async image usage settlement")
