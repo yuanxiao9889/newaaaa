@@ -152,7 +152,32 @@ func taskBillingOther(task *model.Task) map[string]interface{} {
 			"use_channel": retryPath,
 		}
 	}
+	if task.PrivateData.PromptTokens > 0 {
+		other["prompt_tokens"] = task.PrivateData.PromptTokens
+	}
+	if task.PrivateData.CompletionTokens > 0 {
+		other["completion_tokens"] = task.PrivateData.CompletionTokens
+	}
+	if task.PrivateData.TotalTokens > 0 {
+		other["total_tokens"] = task.PrivateData.TotalTokens
+	}
+	if task.PrivateData.UsageDetails != nil {
+		other["usage_details"] = task.PrivateData.UsageDetails
+	}
 	return other
+}
+
+func BuildTaskUsageDetails(usage *dto.Usage) *dto.TaskUsageDetails {
+	if usage == nil {
+		return nil
+	}
+	return &dto.TaskUsageDetails{
+		PromptTokens:           usage.PromptTokens,
+		CompletionTokens:       usage.CompletionTokens,
+		TotalTokens:            usage.TotalTokens,
+		PromptTokensDetails:    usage.PromptTokensDetails,
+		CompletionTokenDetails: usage.CompletionTokenDetails,
+	}
 }
 
 // taskModelName 从 BillingContext 或 Properties 中获取模型名称。
@@ -253,15 +278,17 @@ func ConfirmTaskBillingSettled(ctx context.Context, task *model.Task, actualQuot
 	other["pre_consumed_quota"] = task.PrivateData.PreConsumedQuota
 	other["actual_quota"] = actualQuota
 	model.RecordTaskBillingLog(model.RecordTaskBillingLogParams{
-		UserId:    task.UserId,
-		LogType:   model.LogTypeConsume,
-		Content:   content,
-		ChannelId: task.ChannelId,
-		ModelName: taskModelName(task),
-		Quota:     actualQuota,
-		TokenId:   task.PrivateData.TokenId,
-		Group:     task.Group,
-		Other:     other,
+		UserId:           task.UserId,
+		LogType:          model.LogTypeConsume,
+		Content:          content,
+		ChannelId:        task.ChannelId,
+		ModelName:        taskModelName(task),
+		Quota:            actualQuota,
+		PromptTokens:     task.PrivateData.PromptTokens,
+		CompletionTokens: task.PrivateData.CompletionTokens,
+		TokenId:          task.PrivateData.TokenId,
+		Group:            task.Group,
+		Other:            other,
 	})
 	model.UpdateUserUsedQuotaAndRequestCount(task.UserId, actualQuota)
 	model.UpdateChannelUsedQuota(task.ChannelId, actualQuota)

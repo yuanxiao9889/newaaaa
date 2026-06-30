@@ -128,14 +128,15 @@ type TaskPrivateData struct {
 	WorkerHeartbeatAt  int64    `json:"worker_heartbeat_at,omitempty"`
 	ChannelRetryPath   []string `json:"channel_retry_path,omitempty"`
 
-	BillingState     string `json:"billing_state,omitempty"`
-	PreConsumedQuota int    `json:"pre_consumed_quota,omitempty"`
-	ActualQuota      int    `json:"actual_quota,omitempty"`
-	BillingError     string `json:"billing_error,omitempty"`
-	BillingUpdatedAt int64  `json:"billing_updated_at,omitempty"`
-	PromptTokens     int    `json:"prompt_tokens,omitempty"`
-	CompletionTokens int    `json:"completion_tokens,omitempty"`
-	TotalTokens      int    `json:"total_tokens,omitempty"`
+	BillingState     string                `json:"billing_state,omitempty"`
+	PreConsumedQuota int                   `json:"pre_consumed_quota,omitempty"`
+	ActualQuota      int                   `json:"actual_quota,omitempty"`
+	BillingError     string                `json:"billing_error,omitempty"`
+	BillingUpdatedAt int64                 `json:"billing_updated_at,omitempty"`
+	PromptTokens     int                   `json:"prompt_tokens,omitempty"`
+	CompletionTokens int                   `json:"completion_tokens,omitempty"`
+	TotalTokens      int                   `json:"total_tokens,omitempty"`
+	UsageDetails     *dto.TaskUsageDetails `json:"usage_details,omitempty"`
 }
 
 // TaskBillingContext 记录任务提交时的计费参数，以便轮询阶段可以重新计算额度。
