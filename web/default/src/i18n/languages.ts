@@ -30,12 +30,12 @@ export type InterfaceLanguageCode =
   (typeof INTERFACE_LANGUAGE_OPTIONS)[number]['code']
 
 export function normalizeInterfaceLanguage(value?: string | null): string {
-  if (!value) return 'en'
+  if (!value) return 'zh'
 
   const normalized = value.trim().replace(/_/g, '-').toLowerCase()
   if (normalized.startsWith('zh')) return 'zh'
 
   return INTERFACE_LANGUAGE_OPTIONS.some((lang) => lang.code === normalized)
     ? normalized
-    : 'en'
+    : 'zh'
 }
