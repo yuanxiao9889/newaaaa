@@ -29,6 +29,24 @@ const defaultAsyncImageSignedURLTTLSeconds = 3600
 
 var asyncImageSigningSecretFallbackWarnOnce sync.Once
 
+type asyncImageTaskDataSummary struct {
+	Object    string `json:"object"`
+	Status    string `json:"status"`
+	Action    string `json:"action,omitempty"`
+	Model     string `json:"model,omitempty"`
+	ResultURL string `json:"result_url,omitempty"`
+}
+
+type storedAsyncImageTaskData struct {
+	Data    []storedAsyncImageTaskItem `json:"data"`
+	Created int64                      `json:"created"`
+}
+
+type storedAsyncImageTaskItem struct {
+	URL           string `json:"url,omitempty"`
+	RevisedPrompt string `json:"revised_prompt,omitempty"`
+}
+
 type asyncImageTokenPayload struct {
 	TaskID    string `json:"task_id"`
 	UserID    int    `json:"user_id"`
@@ -40,6 +58,58 @@ func IsImageTaskAction(action string) bool {
 	return action == constant.TaskActionImageGenerate ||
 		action == constant.TaskActionImageEdit ||
 		action == constant.TaskActionGeminiImage
+}
+
+func BuildPendingAsyncImageTaskData(task *model.Task) []byte {
+	return buildAsyncImageTaskDataSummary(task, dto.ImageAsyncStatusSubmitted)
+}
+
+func BuildFailedAsyncImageTaskData(task *model.Task) []byte {
+	return buildAsyncImageTaskDataSummary(task, dto.ImageAsyncStatusFailed)
+}
+
+func BuildStoredAsyncImageTaskData(resp dto.ImageResponse, resultURL string) []byte {
+	data := storedAsyncImageTaskData{
+		Created: resp.Created,
+		Data:    make([]storedAsyncImageTaskItem, 0, 1),
+	}
+	item := storedAsyncImageTaskItem{URL: resultURL}
+	if len(resp.Data) > 0 {
+		item.RevisedPrompt = resp.Data[0].RevisedPrompt
+	}
+	data.Data = append(data.Data, item)
+	body, err := common.Marshal(data)
+	if err != nil {
+		return nil
+	}
+	return body
+}
+
+func buildAsyncImageTaskDataSummary(task *model.Task, status string) []byte {
+	summary := asyncImageTaskDataSummary{
+		Object: "async_image.task",
+		Status: status,
+	}
+	if task != nil {
+		summary.Action = task.Action
+		summary.Model = asyncImageTaskDataModel(task)
+		summary.ResultURL = task.PrivateData.ResultURL
+	}
+	body, err := common.Marshal(summary)
+	if err != nil {
+		return nil
+	}
+	return body
+}
+
+func asyncImageTaskDataModel(task *model.Task) string {
+	if task == nil {
+		return ""
+	}
+	if task.Properties.OriginModelName != "" {
+		return task.Properties.OriginModelName
+	}
+	return task.Properties.UpstreamModelName
 }
 
 func BuildAsyncImageStatusURL(taskID string) string {
@@ -304,6 +374,13 @@ func CleanupExpiredAsyncImages() error {
 	now := time.Now().Unix()
 	const batchSize = 500
 
+	if err := cleanupExpiredSuccessfulAsyncImages(now, batchSize); err != nil {
+		return err
+	}
+	return cleanupExpiredFailedAsyncImageTaskData(now, batchSize)
+}
+
+func cleanupExpiredSuccessfulAsyncImages(now int64, batchSize int) error {
 	for offset := 0; ; offset += batchSize {
 		tasks := model.GetSuccessfulImageTasksForCleanup(offset, batchSize)
 		if len(tasks) == 0 {
@@ -316,11 +393,13 @@ func CleanupExpiredAsyncImages() error {
 			if task.PrivateData.ExpiresAt <= 0 || task.PrivateData.ExpiresAt > now {
 				continue
 			}
-			if task.PrivateData.LocalPath == "" {
-				continue
+			if task.PrivateData.LocalPath != "" {
+				if err := os.Remove(task.PrivateData.LocalPath); err != nil && !os.IsNotExist(err) {
+					common.SysError(fmt.Sprintf("remove expired async image %s failed: %s", task.TaskID, err.Error()))
+				}
 			}
-			if err := os.Remove(task.PrivateData.LocalPath); err != nil && !os.IsNotExist(err) {
-				common.SysError(fmt.Sprintf("remove expired async image %s failed: %s", task.TaskID, err.Error()))
+			if err := compactExpiredAsyncImageTaskData(task); err != nil {
+				return err
 			}
 		}
 		if len(tasks) < batchSize {
@@ -328,6 +407,58 @@ func CleanupExpiredAsyncImages() error {
 		}
 	}
 	return nil
+}
+
+func cleanupExpiredFailedAsyncImageTaskData(now int64, batchSize int) error {
+	cutoff := now - int64(GetAsyncImageRetention().Seconds())
+	for offset := 0; ; offset += batchSize {
+		tasks := model.GetFailedImageTasksForDataCleanup(cutoff, offset, batchSize)
+		if len(tasks) == 0 {
+			break
+		}
+		for _, task := range tasks {
+			if task == nil || task.PrivateData.AssetType != AsyncImageAssetType {
+				continue
+			}
+			if err := compactExpiredAsyncImageTaskData(task); err != nil {
+				return err
+			}
+		}
+		if len(tasks) < batchSize {
+			break
+		}
+	}
+	return nil
+}
+
+func compactExpiredAsyncImageTaskData(task *model.Task) error {
+	if task == nil || !asyncImageTaskDataNeedsCompaction(task.Data) {
+		return nil
+	}
+
+	var data []byte
+	switch task.Status {
+	case model.TaskStatusSuccess:
+		data = BuildStoredAsyncImageTaskData(dto.ImageResponse{Created: task.FinishTime}, task.PrivateData.ResultURL)
+	case model.TaskStatusFailure:
+		data = BuildFailedAsyncImageTaskData(task)
+	default:
+		return nil
+	}
+	if len(data) == 0 || string(data) == string(task.Data) {
+		return nil
+	}
+	return model.UpdateTaskData(task.ID, data)
+}
+
+func asyncImageTaskDataNeedsCompaction(data []byte) bool {
+	if len(data) > 2048 {
+		return true
+	}
+	body := string(data)
+	return strings.Contains(body, "data:image") ||
+		strings.Contains(body, "inlineData") ||
+		strings.Contains(body, "b64_json")
 }
 
 func StartAsyncImageCleanupLoop() {

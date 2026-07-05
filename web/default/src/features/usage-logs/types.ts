@@ -92,6 +92,20 @@ export interface ChannelAffinityInfo {
   using_group?: string
 }
 
+export interface AsyncChannelRetryDetail {
+  attempt?: number
+  channel_id?: number
+  channel_name?: string
+  channel_type?: number
+  status?: 'success' | 'error' | string
+  status_code?: number
+  error_type?: string
+  error_code?: string
+  error?: string
+  retried?: boolean
+  attempted_at?: number
+}
+
 export interface LogOtherData {
   admin_info?: {
     is_multi_key?: boolean
@@ -201,6 +215,7 @@ export interface LogOtherData {
   async_task?: boolean
   task_id?: string
   async_channel_retry_path?: Array<number | string>
+  async_channel_retry_details?: AsyncChannelRetryDetail[]
   billing_state?: string
   pre_consumed_quota?: number
   actual_quota?: number

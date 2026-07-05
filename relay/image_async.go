@@ -136,7 +136,7 @@ func SubmitInternalAsyncImageTask(c *gin.Context, info *relaycommon.RelayInfo, r
 		OriginModelName: info.OriginModelName,
 		PerCallBilling:  info.PriceData.UsePrice,
 	}
-	task.SetData(request)
+	task.Data = service.BuildPendingAsyncImageTaskData(task)
 
 	snapshotPath, snapshotSize, err := saveInternalAsyncImageRequestSnapshot(c, task.TaskID)
 	if err != nil {
@@ -217,7 +217,7 @@ func SubmitInternalAsyncGeminiImageTask(c *gin.Context, info *relaycommon.RelayI
 		OriginModelName: info.OriginModelName,
 		PerCallBilling:  info.PriceData.UsePrice,
 	}
-	task.SetData(request)
+	task.Data = service.BuildPendingAsyncImageTaskData(task)
 
 	snapshotPath, snapshotSize, err := saveInternalAsyncImageRequestSnapshot(c, task.TaskID)
 	if err != nil {

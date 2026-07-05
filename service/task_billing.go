@@ -152,6 +152,9 @@ func taskBillingOther(task *model.Task) map[string]interface{} {
 			"use_channel": retryPath,
 		}
 	}
+	if len(task.PrivateData.ChannelRetryDetails) > 0 {
+		other["async_channel_retry_details"] = append([]dto.TaskChannelRetryDetail(nil), task.PrivateData.ChannelRetryDetails...)
+	}
 	if task.PrivateData.PromptTokens > 0 {
 		other["prompt_tokens"] = task.PrivateData.PromptTokens
 	}
