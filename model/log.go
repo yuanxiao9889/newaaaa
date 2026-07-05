@@ -87,6 +87,7 @@ func FormatUserLogsForResponse(logs []*Log, startIdx int) {
 			delete(otherMap, "channel_name")
 			delete(otherMap, "channel_type")
 			delete(otherMap, "async_channel_retry_path")
+			delete(otherMap, "async_channel_retry_details")
 			// delete(otherMap, "reject_reason")
 			delete(otherMap, "stream_status")
 		}
@@ -405,6 +406,14 @@ func RecordTaskBillingLog(params RecordTaskBillingLogParams) {
 	err := LOG_DB.Create(log).Error
 	if err != nil {
 		common.SysLog("failed to record task billing log: " + err.Error())
+	}
+	if common.DataExportEnabled {
+		switch params.LogType {
+		case LogTypeConsume:
+			LogQuotaData(params.UserId, username, params.ModelName, params.Quota, log.CreatedAt, params.PromptTokens+params.CompletionTokens)
+		case LogTypeRefund:
+			LogQuotaDataDelta(params.UserId, username, params.ModelName, 0, -params.Quota, log.CreatedAt, 0)
+		}
 	}
 }
 

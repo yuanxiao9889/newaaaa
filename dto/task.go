@@ -25,6 +25,20 @@ type TaskResponse[T TaskData] struct {
 	Data    T      `json:"data"`
 }
 
+type TaskChannelRetryDetail struct {
+	Attempt     int    `json:"attempt,omitempty"`
+	ChannelID   int    `json:"channel_id,omitempty"`
+	ChannelName string `json:"channel_name,omitempty"`
+	ChannelType int    `json:"channel_type,omitempty"`
+	Status      string `json:"status,omitempty"`
+	StatusCode  int    `json:"status_code,omitempty"`
+	ErrorType   string `json:"error_type,omitempty"`
+	ErrorCode   string `json:"error_code,omitempty"`
+	Error       string `json:"error,omitempty"`
+	Retried     bool   `json:"retried,omitempty"`
+	AttemptedAt int64  `json:"attempted_at,omitempty"`
+}
+
 func (t *TaskResponse[T]) IsSuccess() bool {
 	return t.Code == TaskSuccessCode
 }
@@ -54,18 +68,19 @@ type TaskDto struct {
 	Username          string          `json:"username,omitempty"`
 	Data              json.RawMessage `json:"data"`
 
-	InternalAsync    bool              `json:"internal_async,omitempty"`
-	RequestPath      string            `json:"request_path,omitempty"`
-	WorkerAttempts   int               `json:"worker_attempts,omitempty"`
-	ChannelRetryPath []string          `json:"channel_retry_path,omitempty"`
-	BillingState     string            `json:"billing_state,omitempty"`
-	PreConsumedQuota int               `json:"pre_consumed_quota,omitempty"`
-	ActualQuota      int               `json:"actual_quota,omitempty"`
-	BillingError     string            `json:"billing_error,omitempty"`
-	PromptTokens     int               `json:"prompt_tokens,omitempty"`
-	CompletionTokens int               `json:"completion_tokens,omitempty"`
-	TotalTokens      int               `json:"total_tokens,omitempty"`
-	UsageDetails     *TaskUsageDetails `json:"usage_details,omitempty"`
+	InternalAsync       bool                     `json:"internal_async,omitempty"`
+	RequestPath         string                   `json:"request_path,omitempty"`
+	WorkerAttempts      int                      `json:"worker_attempts,omitempty"`
+	ChannelRetryPath    []string                 `json:"channel_retry_path,omitempty"`
+	ChannelRetryDetails []TaskChannelRetryDetail `json:"channel_retry_details,omitempty"`
+	BillingState        string                   `json:"billing_state,omitempty"`
+	PreConsumedQuota    int                      `json:"pre_consumed_quota,omitempty"`
+	ActualQuota         int                      `json:"actual_quota,omitempty"`
+	BillingError        string                   `json:"billing_error,omitempty"`
+	PromptTokens        int                      `json:"prompt_tokens,omitempty"`
+	CompletionTokens    int                      `json:"completion_tokens,omitempty"`
+	TotalTokens         int                      `json:"total_tokens,omitempty"`
+	UsageDetails        *TaskUsageDetails        `json:"usage_details,omitempty"`
 }
 
 type TaskUsageDetails struct {

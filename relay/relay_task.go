@@ -609,6 +609,7 @@ func TaskModel2DtoWithOptions(task *model.Task, includeData bool, includeInterna
 		taskDto.UsageDetails = task.PrivateData.UsageDetails
 		if includeInternalChannelInfo {
 			taskDto.ChannelRetryPath = append([]string(nil), task.PrivateData.ChannelRetryPath...)
+			taskDto.ChannelRetryDetails = append([]dto.TaskChannelRetryDetail(nil), task.PrivateData.ChannelRetryDetails...)
 		}
 	}
 	return taskDto

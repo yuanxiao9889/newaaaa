@@ -116,17 +116,18 @@ type TaskPrivateData struct {
 	ExpiresAt int64  `json:"expires_at,omitempty"`
 	SourceURL string `json:"source_url,omitempty"`
 
-	InternalAsync      bool     `json:"internal_async,omitempty"`
-	RequestBodyPath    string   `json:"request_body_path,omitempty"`
-	RequestContentType string   `json:"request_content_type,omitempty"`
-	RequestBodySize    int64    `json:"request_body_size,omitempty"`
-	RequestMethod      string   `json:"request_method,omitempty"`
-	RequestPath        string   `json:"request_path,omitempty"`
-	RequestQuery       string   `json:"request_query,omitempty"`
-	RequestRelayFormat string   `json:"request_relay_format,omitempty"`
-	WorkerAttempts     int      `json:"worker_attempts,omitempty"`
-	WorkerHeartbeatAt  int64    `json:"worker_heartbeat_at,omitempty"`
-	ChannelRetryPath   []string `json:"channel_retry_path,omitempty"`
+	InternalAsync       bool                         `json:"internal_async,omitempty"`
+	RequestBodyPath     string                       `json:"request_body_path,omitempty"`
+	RequestContentType  string                       `json:"request_content_type,omitempty"`
+	RequestBodySize     int64                        `json:"request_body_size,omitempty"`
+	RequestMethod       string                       `json:"request_method,omitempty"`
+	RequestPath         string                       `json:"request_path,omitempty"`
+	RequestQuery        string                       `json:"request_query,omitempty"`
+	RequestRelayFormat  string                       `json:"request_relay_format,omitempty"`
+	WorkerAttempts      int                          `json:"worker_attempts,omitempty"`
+	WorkerHeartbeatAt   int64                        `json:"worker_heartbeat_at,omitempty"`
+	ChannelRetryPath    []string                     `json:"channel_retry_path,omitempty"`
+	ChannelRetryDetails []dto.TaskChannelRetryDetail `json:"channel_retry_details,omitempty"`
 
 	BillingState     string                `json:"billing_state,omitempty"`
 	PreConsumedQuota int                   `json:"pre_consumed_quota,omitempty"`
@@ -458,6 +459,26 @@ func GetSuccessfulImageTasksForCleanup(startIdx int, num int) []*Task {
 	return tasks
 }
 
+func GetFailedImageTasksForDataCleanup(cutoff int64, startIdx int, num int) []*Task {
+	if num <= 0 {
+		num = 500
+	}
+	var tasks []*Task
+	err := DB.Where("status = ?", TaskStatusFailure).
+		Where("platform = ?", constant.TaskPlatformInternalImage).
+		Where("action IN ?", internalAsyncImageTaskActions()).
+		Where("finish_time > 0").
+		Where("finish_time < ?", cutoff).
+		Order("finish_time asc, id asc").
+		Limit(num).
+		Offset(startIdx).
+		Find(&tasks).Error
+	if err != nil {
+		return nil
+	}
+	return tasks
+}
+
 func GetByOnlyTaskId(taskId string) (*Task, bool, error) {
 	if taskId == "" {
 		return nil, false, nil
@@ -550,6 +571,13 @@ func UpdateTaskPrivateData(id int64, privateData TaskPrivateData) error {
 		return nil
 	}
 	return DB.Model(&Task{}).Where("id = ?", id).Update("private_data", privateData).Error
+}
+
+func UpdateTaskData(id int64, data []byte) error {
+	if id == 0 {
+		return nil
+	}
+	return DB.Model(&Task{}).Where("id = ?", id).Update("data", json.RawMessage(data)).Error
 }
 
 // UpdateWithStatus performs a conditional UPDATE guarded by fromStatus (CAS).

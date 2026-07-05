@@ -45,6 +45,7 @@ func TestMain(m *testing.M) {
 		&model.Log{},
 		&model.Channel{},
 		&model.TopUp{},
+		&model.QuotaData{},
 		&model.UserSubscription{},
 		&model.ProfitCostPrice{},
 		&model.ProfitCostPriceVersion{},
@@ -68,9 +69,13 @@ func truncate(t *testing.T) {
 		model.DB.Exec("DELETE FROM logs")
 		model.DB.Exec("DELETE FROM channels")
 		model.DB.Exec("DELETE FROM top_ups")
+		model.DB.Exec("DELETE FROM quota_data")
 		model.DB.Exec("DELETE FROM user_subscriptions")
 		model.DB.Exec("DELETE FROM profit_cost_prices")
 		model.DB.Exec("DELETE FROM profit_cost_price_versions")
+		model.CacheQuotaDataLock.Lock()
+		model.CacheQuotaData = make(map[string]*model.QuotaData)
+		model.CacheQuotaDataLock.Unlock()
 	})
 }
 
@@ -141,6 +146,39 @@ func makeTask(userId, channelId, quota, tokenId int, billingSource string, subsc
 	}
 }
 
+func TestTaskBillingOtherIncludesAsyncChannelRetryDetails(t *testing.T) {
+	task := makeTask(31, 65, 1200, 31, BillingSourceWallet, 0)
+	task.PrivateData.ChannelRetryPath = []string{"72", "65"}
+	task.PrivateData.ChannelRetryDetails = []dto.TaskChannelRetryDetail{
+		{
+			Attempt:     1,
+			ChannelID:   72,
+			ChannelName: "img2-aigc",
+			Status:      "error",
+			StatusCode:  503,
+			ErrorCode:   "channel_no_available_key",
+			Error:       "status_code=503, No available compatible accounts",
+			Retried:     true,
+		},
+		{
+			Attempt:     2,
+			ChannelID:   65,
+			ChannelName: "backup",
+			Status:      "success",
+		},
+	}
+
+	other := taskBillingOther(task)
+
+	require.Equal(t, []string{"72", "65"}, other["async_channel_retry_path"])
+	details, ok := other["async_channel_retry_details"].([]dto.TaskChannelRetryDetail)
+	require.True(t, ok)
+	require.Len(t, details, 2)
+	require.Equal(t, 72, details[0].ChannelID)
+	require.Equal(t, "error", details[0].Status)
+	require.True(t, details[0].Retried)
+}
+
 // ---------------------------------------------------------------------------
 // Read-back helpers
 // ---------------------------------------------------------------------------
@@ -188,6 +226,19 @@ func countLogs(t *testing.T) int64 {
 	var count int64
 	model.LOG_DB.Model(&model.Log{}).Count(&count)
 	return count
+}
+
+func getQuotaDataTotal(t *testing.T, userID int, modelName string) (int, int) {
+	t.Helper()
+	var total struct {
+		Quota     int
+		TokenUsed int
+	}
+	require.NoError(t, model.DB.Table("quota_data").
+		Select("COALESCE(SUM(quota), 0) AS quota, COALESCE(SUM(token_used), 0) AS token_used").
+		Where("user_id = ? AND model_name = ?", userID, modelName).
+		Scan(&total).Error)
+	return total.Quota, total.TokenUsed
 }
 
 // ===========================================================================
@@ -630,6 +681,71 @@ func TestCASGuardedSettle_Win(t *testing.T) {
 
 	// task.Quota should be updated to actualQuota
 	assert.Equal(t, actualQuota, task.Quota)
+}
+
+func TestConfirmTaskBillingSettledRecordsQuotaData(t *testing.T) {
+	truncate(t)
+	ctx := context.Background()
+
+	originalDataExportEnabled := common.DataExportEnabled
+	common.DataExportEnabled = true
+	t.Cleanup(func() {
+		common.DataExportEnabled = originalDataExportEnabled
+	})
+
+	const userID, tokenID, channelID = 24, 24, 24
+	const actualQuota = 3500
+
+	seedUser(t, userID, 10000)
+	seedToken(t, tokenID, userID, "sk-quota-data", 10000)
+	seedChannel(t, channelID)
+
+	task := makeTask(userID, channelID, actualQuota, tokenID, BillingSourceWallet, 0)
+	task.TaskID = "task_quota_data"
+	task.PrivateData.PromptTokens = 123
+	task.PrivateData.CompletionTokens = 77
+
+	ConfirmTaskBillingSettled(ctx, task, actualQuota, "async task completed")
+	model.SaveQuotaDataCache()
+
+	quota, tokenUsed := getQuotaDataTotal(t, userID, "test-model")
+	assert.Equal(t, actualQuota, quota)
+	assert.Equal(t, 200, tokenUsed)
+}
+
+func TestRefundTaskQuotaOffsetsQuotaDataWithoutAddingCalls(t *testing.T) {
+	truncate(t)
+	ctx := context.Background()
+
+	originalDataExportEnabled := common.DataExportEnabled
+	common.DataExportEnabled = true
+	t.Cleanup(func() {
+		common.DataExportEnabled = originalDataExportEnabled
+	})
+
+	const userID, tokenID, channelID = 25, 25, 25
+	const preConsumed = 2000
+
+	seedUser(t, userID, 10000)
+	seedToken(t, tokenID, userID, "sk-refund-quota-data", 10000)
+	seedChannel(t, channelID)
+
+	task := makeTask(userID, channelID, preConsumed, tokenID, BillingSourceWallet, 0)
+	task.TaskID = "task_refund_quota_data"
+
+	RefundTaskQuota(ctx, task, "task failed")
+	model.SaveQuotaDataCache()
+
+	quota, tokenUsed := getQuotaDataTotal(t, userID, "test-model")
+	assert.Equal(t, -preConsumed, quota)
+	assert.Equal(t, 0, tokenUsed)
+
+	var countTotal int
+	require.NoError(t, model.DB.Table("quota_data").
+		Select("COALESCE(SUM(count), 0)").
+		Where("user_id = ? AND model_name = ?", userID, "test-model").
+		Scan(&countTotal).Error)
+	assert.Equal(t, 0, countTotal)
 }
 
 func TestNonTerminalUpdate_NoBilling(t *testing.T) {

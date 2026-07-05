@@ -22,6 +22,7 @@ import (
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting"
 	"github.com/QuantumNous/new-api/setting/system_setting"
+	"github.com/QuantumNous/new-api/types"
 
 	"github.com/gin-gonic/gin"
 )
@@ -267,9 +268,15 @@ func RelaySwapFace(c *gin.Context, info *relaycommon.RelayInfo) *dto.MidjourneyR
 		ChannelId:   c.GetInt("channel_id"),
 		Quota:       priceData.Quota,
 	}
+	if mjResp.StatusCode != http.StatusOK || midjResponse.Code != 1 {
+		midjourneyTask.Quota = 0
+	}
 	err = midjourneyTask.Insert()
 	if err != nil {
 		return service.MidjourneyErrorWrapper(constant.MjRequestError, "insert_midjourney_task_failed")
+	}
+	if mjResp.StatusCode == http.StatusOK && midjResponse.Code == 1 {
+		insertMidjourneyAsyncTask(midjourneyTask, info, priceData)
 	}
 	c.Writer.WriteHeader(mjResp.StatusCode)
 	respBody, err := json.Marshal(midjResponse)
@@ -623,12 +630,18 @@ func RelayMidjourneySubmit(c *gin.Context, relayInfo *relaycommon.RelayInfo) *dt
 		midjourneyTask.Progress = "100%"
 		midjourneyTask.Status = "SUCCESS"
 	}
+	if !consumeQuota {
+		midjourneyTask.Quota = 0
+	}
 	err = midjourneyTask.Insert()
 	if err != nil {
 		return &dto.MidjourneyResponse{
 			Code:        4,
 			Description: "insert_midjourney_task_failed",
 		}
+	}
+	if midjResponseWithStatus.StatusCode == http.StatusOK && (midjResponse.Code == 1 || midjResponse.Code == 22) {
+		insertMidjourneyAsyncTask(midjourneyTask, relayInfo, priceData)
 	}
 
 	if midjResponse.Code == 22 { //22-排队中，说明任务已存在
@@ -677,4 +690,23 @@ func getMjRequestPath(path string) string {
 		requestURL = "/mj/" + urls[1]
 	}
 	return requestURL
+}
+
+func insertMidjourneyAsyncTask(mjTask *model.Midjourney, relayInfo *relaycommon.RelayInfo, priceData types.PriceData) {
+	if mjTask == nil || mjTask.MjId == "" {
+		return
+	}
+	if _, exists, err := model.GetByTaskId(mjTask.UserId, mjTask.MjId); err != nil {
+		common.SysLog(fmt.Sprintf("check midjourney async task failed: %s, %s", mjTask.MjId, err.Error()))
+		return
+	} else if exists {
+		return
+	}
+	asyncTask := service.NewMidjourneyAsyncTask(mjTask, relayInfo, priceData)
+	if asyncTask == nil {
+		return
+	}
+	if err := asyncTask.Insert(); err != nil {
+		common.SysLog(fmt.Sprintf("insert midjourney async task failed: %s, %s", mjTask.MjId, err.Error()))
+	}
 }
