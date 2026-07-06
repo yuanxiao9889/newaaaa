@@ -336,8 +336,8 @@ func buildInternalAsyncChannelRetryDetail(attempt int, channel *model.Channel, e
 	}
 	if err != nil {
 		detail.StatusCode = err.StatusCode
-		detail.ErrorType = err.GetErrorType()
-		detail.ErrorCode = err.GetErrorCode()
+		detail.ErrorType = string(err.GetErrorType())
+		detail.ErrorCode = string(err.GetErrorCode())
 		detail.Error = err.MaskSensitiveErrorWithStatusCode()
 	}
 	return detail
