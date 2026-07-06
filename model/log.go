@@ -87,7 +87,6 @@ func FormatUserLogsForResponse(logs []*Log, startIdx int) {
 			delete(otherMap, "channel_name")
 			delete(otherMap, "channel_type")
 			delete(otherMap, "async_channel_retry_path")
-			delete(otherMap, "async_channel_retry_details")
 			// delete(otherMap, "reject_reason")
 			delete(otherMap, "stream_status")
 		}

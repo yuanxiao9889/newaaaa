@@ -62,7 +62,7 @@ import {
   isPerCallBilling,
   isTimingLogType,
 } from '../../lib/utils'
-import type { AsyncChannelRetryDetail, LogOtherData } from '../../types'
+import type { LogOtherData } from '../../types'
 
 // Maps a channel-update changed-field token (as recorded by the backend audit)
 // to its i18n label key for display in the audit details.
@@ -416,11 +416,7 @@ function AsyncTaskBillingSection(props: {
   const rows: Array<{ label: string; value: React.ReactNode; mono?: boolean }> =
     [
       { label: t('State'), value: t(stateLabel) },
-      other.task_id && {
-        label: t('Task ID'),
-        value: other.task_id,
-        mono: true,
-      },
+      other.task_id && { label: t('Task ID'), value: other.task_id, mono: true },
       other.pre_consumed_quota != null && {
         label: t('Pre-consumed'),
         value: formatLogQuota(other.pre_consumed_quota),
@@ -462,103 +458,6 @@ function formatChannelRetryPath(
 ): string | undefined {
   if (!path || path.length === 0) return undefined
   return path.map(String).join(' -> ')
-}
-
-function formatRetryDetailChannel(detail: AsyncChannelRetryDetail): string {
-  const channelId =
-    detail.channel_id != null && Number.isFinite(detail.channel_id)
-      ? `#${detail.channel_id}`
-      : '-'
-  return detail.channel_name
-    ? `${channelId} (${detail.channel_name})`
-    : channelId
-}
-
-function retryDetailStatus(detail: AsyncChannelRetryDetail): {
-  labelKey: string
-  variant: StatusBadgeProps['variant']
-} {
-  if (detail.status === 'success') {
-    return { labelKey: 'Success', variant: 'success' }
-  }
-  if (detail.retried) {
-    return { labelKey: 'Retry', variant: 'warning' }
-  }
-  if (detail.status === 'error') {
-    return { labelKey: 'No Retry', variant: 'red' }
-  }
-  return { labelKey: detail.status || 'Status', variant: 'neutral' }
-}
-
-function AsyncChannelRetryDetailsSection(props: {
-  details: AsyncChannelRetryDetail[]
-}) {
-  const { t } = useTranslation()
-
-  if (props.details.length === 0) return null
-
-  return (
-    <DetailSection
-      icon={<Route className='size-3.5' aria-hidden='true' />}
-      label={t('Retry Details')}
-    >
-      <div className='flex min-w-0 flex-col gap-2'>
-        {props.details.map((detail, idx) => {
-          const status = retryDetailStatus(detail)
-          const attempt = detail.attempt || idx + 1
-          return (
-            <div
-              key={`${detail.channel_id ?? 'unknown'}-${attempt}-${idx}`}
-              className='min-w-0 border-t pt-2 first:border-t-0 first:pt-0'
-            >
-              <div className='mb-1 flex min-w-0 items-center justify-between gap-2'>
-                <span className='text-muted-foreground min-w-0 text-xs font-medium'>
-                  {t('Attempt')} {attempt}
-                </span>
-                <StatusBadge
-                  label={t(status.labelKey)}
-                  variant={status.variant}
-                  size='sm'
-                  copyable={false}
-                />
-              </div>
-              <div className='flex min-w-0 flex-col gap-1'>
-                <DetailRow
-                  label={t('Channel')}
-                  value={formatRetryDetailChannel(detail)}
-                  mono
-                />
-                {detail.status_code != null && (
-                  <DetailRow
-                    label={t('Status Code')}
-                    value={String(detail.status_code)}
-                    mono
-                  />
-                )}
-                {detail.error_code && (
-                  <DetailRow
-                    label={t('Error Code')}
-                    value={detail.error_code}
-                    mono
-                  />
-                )}
-                {detail.error_type && (
-                  <DetailRow
-                    label={t('Error Type')}
-                    value={detail.error_type}
-                    mono
-                  />
-                )}
-                {detail.error && (
-                  <DetailRow label={t('Error')} value={detail.error} mono />
-                )}
-              </div>
-            </div>
-          )
-        })}
-      </div>
-    </DetailSection>
-  )
 }
 
 interface DetailsDialogProps {
@@ -650,9 +549,7 @@ export function DetailsDialog(props: DetailsDialogProps) {
   // Channel update records which fields changed (stable field tokens); render
   // them with their localized labels for admins.
   const changedFieldTokens =
-    isManage &&
-    props.isAdmin &&
-    Array.isArray(other?.op?.params?.changed_fields)
+    isManage && props.isAdmin && Array.isArray(other?.op?.params?.changed_fields)
       ? (other.op.params.changed_fields as string[])
       : []
   const changedFieldsText = changedFieldTokens
@@ -697,13 +594,10 @@ export function DetailsDialog(props: DetailsDialogProps) {
   const channelChain =
     formatChannelRetryPath(other?.async_channel_retry_path) ||
     formatChannelRetryPath(useChannel)
-  const retryDetails = Array.isArray(other?.async_channel_retry_details)
-    ? other.async_channel_retry_details
-    : []
   const isAsyncLog = Boolean(
     other?.async_task ||
-    (other?.is_task && other?.task_id) ||
-    props.log.request_id?.startsWith('task_')
+      (other?.is_task && other?.task_id) ||
+      props.log.request_id?.startsWith('task_')
   )
   const asyncTaskId =
     other?.task_id ||
@@ -845,10 +739,6 @@ export function DetailsDialog(props: DetailsDialogProps) {
               />
             )}
           </div>
-
-          {props.isAdmin && retryDetails.length > 0 && (
-            <AsyncChannelRetryDetailsSection details={retryDetails} />
-          )}
 
           {/* Request conversion (admin only, not for refund) */}
           {showConversion && (
@@ -1143,8 +1033,8 @@ export function DetailsDialog(props: DetailsDialogProps) {
           {isDisplayableType(props.log.type) &&
             other &&
             !isAsyncTaskBillingLog(props.log, other) && (
-              <TokenBreakdown log={props.log} other={other} />
-            )}
+            <TokenBreakdown log={props.log} other={other} />
+          )}
 
           {/* Async task billing explanation */}
           {other && <AsyncTaskBillingSection log={props.log} other={other} />}
