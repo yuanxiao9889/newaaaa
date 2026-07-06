@@ -146,39 +146,6 @@ func makeTask(userId, channelId, quota, tokenId int, billingSource string, subsc
 	}
 }
 
-func TestTaskBillingOtherIncludesAsyncChannelRetryDetails(t *testing.T) {
-	task := makeTask(31, 65, 1200, 31, BillingSourceWallet, 0)
-	task.PrivateData.ChannelRetryPath = []string{"72", "65"}
-	task.PrivateData.ChannelRetryDetails = []dto.TaskChannelRetryDetail{
-		{
-			Attempt:     1,
-			ChannelID:   72,
-			ChannelName: "img2-aigc",
-			Status:      "error",
-			StatusCode:  503,
-			ErrorCode:   "channel_no_available_key",
-			Error:       "status_code=503, No available compatible accounts",
-			Retried:     true,
-		},
-		{
-			Attempt:     2,
-			ChannelID:   65,
-			ChannelName: "backup",
-			Status:      "success",
-		},
-	}
-
-	other := taskBillingOther(task)
-
-	require.Equal(t, []string{"72", "65"}, other["async_channel_retry_path"])
-	details, ok := other["async_channel_retry_details"].([]dto.TaskChannelRetryDetail)
-	require.True(t, ok)
-	require.Len(t, details, 2)
-	require.Equal(t, 72, details[0].ChannelID)
-	require.Equal(t, "error", details[0].Status)
-	require.True(t, details[0].Retried)
-}
-
 // ---------------------------------------------------------------------------
 // Read-back helpers
 // ---------------------------------------------------------------------------

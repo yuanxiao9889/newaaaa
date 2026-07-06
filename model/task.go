@@ -116,18 +116,17 @@ type TaskPrivateData struct {
 	ExpiresAt int64  `json:"expires_at,omitempty"`
 	SourceURL string `json:"source_url,omitempty"`
 
-	InternalAsync       bool                         `json:"internal_async,omitempty"`
-	RequestBodyPath     string                       `json:"request_body_path,omitempty"`
-	RequestContentType  string                       `json:"request_content_type,omitempty"`
-	RequestBodySize     int64                        `json:"request_body_size,omitempty"`
-	RequestMethod       string                       `json:"request_method,omitempty"`
-	RequestPath         string                       `json:"request_path,omitempty"`
-	RequestQuery        string                       `json:"request_query,omitempty"`
-	RequestRelayFormat  string                       `json:"request_relay_format,omitempty"`
-	WorkerAttempts      int                          `json:"worker_attempts,omitempty"`
-	WorkerHeartbeatAt   int64                        `json:"worker_heartbeat_at,omitempty"`
-	ChannelRetryPath    []string                     `json:"channel_retry_path,omitempty"`
-	ChannelRetryDetails []dto.TaskChannelRetryDetail `json:"channel_retry_details,omitempty"`
+	InternalAsync      bool     `json:"internal_async,omitempty"`
+	RequestBodyPath    string   `json:"request_body_path,omitempty"`
+	RequestContentType string   `json:"request_content_type,omitempty"`
+	RequestBodySize    int64    `json:"request_body_size,omitempty"`
+	RequestMethod      string   `json:"request_method,omitempty"`
+	RequestPath        string   `json:"request_path,omitempty"`
+	RequestQuery       string   `json:"request_query,omitempty"`
+	RequestRelayFormat string   `json:"request_relay_format,omitempty"`
+	WorkerAttempts     int      `json:"worker_attempts,omitempty"`
+	WorkerHeartbeatAt  int64    `json:"worker_heartbeat_at,omitempty"`
+	ChannelRetryPath   []string `json:"channel_retry_path,omitempty"`
 
 	BillingState     string                `json:"billing_state,omitempty"`
 	PreConsumedQuota int                   `json:"pre_consumed_quota,omitempty"`
