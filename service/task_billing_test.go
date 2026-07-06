@@ -225,6 +225,9 @@ func TestRefundTaskQuota_Wallet(t *testing.T) {
 	seedChannel(t, channelID)
 
 	task := makeTask(userID, channelID, preConsumed, tokenID, BillingSourceWallet, 0)
+	task.SubmitTime = 1700000000
+	task.StartTime = 1700000010
+	task.FinishTime = 1700000042
 
 	RefundTaskQuota(ctx, task, "task failed: upstream error")
 
@@ -241,6 +244,7 @@ func TestRefundTaskQuota_Wallet(t *testing.T) {
 	assert.Equal(t, model.LogTypeRefund, log.Type)
 	assert.Equal(t, preConsumed, log.Quota)
 	assert.Equal(t, "test-model", log.ModelName)
+	assert.Equal(t, 32, log.UseTime)
 }
 
 func TestRefundTaskQuota_Subscription(t *testing.T) {
@@ -331,6 +335,9 @@ func TestRecalculate_PositiveDelta(t *testing.T) {
 	seedChannel(t, channelID)
 
 	task := makeTask(userID, channelID, preConsumed, tokenID, BillingSourceWallet, 0)
+	task.SubmitTime = 1700000100
+	task.StartTime = 1700000110
+	task.FinishTime = 1700000180
 
 	RecalculateTaskQuota(ctx, task, actualQuota, "adaptor adjustment")
 
@@ -348,6 +355,7 @@ func TestRecalculate_PositiveDelta(t *testing.T) {
 	require.NotNil(t, log)
 	assert.Equal(t, model.LogTypeConsume, log.Type)
 	assert.Equal(t, actualQuota-preConsumed, log.Quota)
+	assert.Equal(t, 70, log.UseTime)
 }
 
 func TestRecalculate_NegativeDelta(t *testing.T) {
@@ -669,6 +677,9 @@ func TestConfirmTaskBillingSettledRecordsQuotaData(t *testing.T) {
 
 	task := makeTask(userID, channelID, actualQuota, tokenID, BillingSourceWallet, 0)
 	task.TaskID = "task_quota_data"
+	task.SubmitTime = 1700000200
+	task.StartTime = 1700000215
+	task.FinishTime = 1700000260
 	task.PrivateData.PromptTokens = 123
 	task.PrivateData.CompletionTokens = 77
 
@@ -678,6 +689,10 @@ func TestConfirmTaskBillingSettledRecordsQuotaData(t *testing.T) {
 	quota, tokenUsed := getQuotaDataTotal(t, userID, "test-model")
 	assert.Equal(t, actualQuota, quota)
 	assert.Equal(t, 200, tokenUsed)
+
+	log := getLastLog(t)
+	require.NotNil(t, log)
+	assert.Equal(t, 45, log.UseTime)
 }
 
 func TestRefundTaskQuotaOffsetsQuotaDataWithoutAddingCalls(t *testing.T) {

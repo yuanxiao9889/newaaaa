@@ -439,6 +439,31 @@ func CountUserTokens(userId int) (int64, error) {
 	return total, err
 }
 
+func GetUserTokenIdsByIds(ids []int, userId int) ([]int, error) {
+	if len(ids) == 0 || userId == 0 {
+		return []int{}, nil
+	}
+	var tokens []Token
+	if err := DB.Select("id").
+		Where("user_id = ? AND id IN ?", userId, ids).
+		Find(&tokens).Error; err != nil {
+		return nil, err
+	}
+	owned := make(map[int]bool, len(tokens))
+	for _, token := range tokens {
+		owned[token.Id] = true
+	}
+	result := make([]int, 0, len(tokens))
+	seen := make(map[int]bool, len(ids))
+	for _, id := range ids {
+		if owned[id] && !seen[id] {
+			result = append(result, id)
+			seen[id] = true
+		}
+	}
+	return result, nil
+}
+
 // BatchDeleteTokens 删除指定用户的一组令牌，返回成功删除数量
 func BatchDeleteTokens(ids []int, userId int) (int, error) {
 	if len(ids) == 0 {

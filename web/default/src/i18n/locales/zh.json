@@ -3494,6 +3494,7 @@
     "Retention days": "保留天数",
     "Retry": "重试",
     "Retry Chain": "重试链路",
+    "Retry Failure Details": "??????",
     "Retry Suggestion": "重试建议",
     "Retry Times": "重试次数",
     "Return a custom error immediately": "立即返回自定义错误",

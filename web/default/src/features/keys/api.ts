@@ -22,6 +22,8 @@ import type {
   ApiResponse,
   GetApiKeysParams,
   GetApiKeysResponse,
+  GetApiKeyUsageStatsParams,
+  GetApiKeyUsageStatsResponse,
   SearchApiKeysParams,
   ApiKeyFormData,
 } from './types'
@@ -50,6 +52,19 @@ export async function searchApiKeys(
   if (p != null) queryParams.set('p', String(p))
   if (size != null) queryParams.set('size', String(size))
   const res = await api.get(`/api/token/search?${queryParams.toString()}`)
+  return res.data
+}
+
+export async function getApiKeyUsageStats(
+  params: GetApiKeyUsageStatsParams
+): Promise<GetApiKeyUsageStatsResponse> {
+  const queryParams = new URLSearchParams()
+  queryParams.set('period', params.period)
+  queryParams.set('token_ids', params.tokenIds.join(','))
+  if (params.timestamp != null) {
+    queryParams.set('timestamp', String(params.timestamp))
+  }
+  const res = await api.get(`/api/token/usage?${queryParams.toString()}`)
   return res.data
 }
 

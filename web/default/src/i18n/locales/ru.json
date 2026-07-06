@@ -3494,6 +3494,7 @@
     "Retention days": "Дней хранения",
     "Retry": "Повторить попытку",
     "Retry Chain": "Цепочка повторов",
+    "Retry Failure Details": "???????? ?? ??????? ????????? ???????",
     "Retry Suggestion": "Рекомендация по повтору",
     "Retry Times": "Количество повторных попыток",
     "Return a custom error immediately": "Немедленно вернуть пользовательскую ошибку",

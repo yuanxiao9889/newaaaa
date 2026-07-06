@@ -31,9 +31,21 @@ func GetAllTask(c *gin.Context) {
 		TaskID:         c.Query("task_id"),
 		Status:         c.Query("status"),
 		Action:         c.Query("action"),
+		ModelName:      c.Query("model_name"),
 		StartTimestamp: startTimestamp,
 		EndTimestamp:   endTimestamp,
 		ChannelID:      c.Query("channel_id"),
+	}
+	if username := c.Query("username"); username != "" {
+		userIDs, err := model.SearchUserIDsByUsername(username, 1000)
+		if err != nil {
+			common.ApiError(c, err)
+			return
+		}
+		if len(userIDs) == 0 {
+			userIDs = []int{-1}
+		}
+		queryParams.UserIDs = userIDs
 	}
 
 	items := model.TaskGetAllTasks(pageInfo.GetStartIdx(), pageInfo.GetPageSize(), queryParams)
@@ -70,6 +82,7 @@ func GetUserTask(c *gin.Context) {
 		TaskID:         c.Query("task_id"),
 		Status:         c.Query("status"),
 		Action:         c.Query("action"),
+		ModelName:      c.Query("model_name"),
 		StartTimestamp: startTimestamp,
 		EndTimestamp:   endTimestamp,
 	}

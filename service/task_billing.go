@@ -167,6 +167,24 @@ func taskBillingOther(task *model.Task) map[string]interface{} {
 	return other
 }
 
+func taskBillingUseTimeSeconds(task *model.Task) int {
+	if task == nil {
+		return 0
+	}
+	finishTime := task.FinishTime
+	if finishTime <= 0 {
+		finishTime = time.Now().Unix()
+	}
+	startTime := task.StartTime
+	if startTime <= 0 {
+		startTime = task.SubmitTime
+	}
+	if startTime <= 0 || finishTime <= startTime {
+		return 0
+	}
+	return int(finishTime - startTime)
+}
+
 func BuildTaskUsageDetails(usage *dto.Usage) *dto.TaskUsageDetails {
 	if usage == nil {
 		return nil
@@ -288,6 +306,7 @@ func ConfirmTaskBillingSettled(ctx context.Context, task *model.Task, actualQuot
 		CompletionTokens: task.PrivateData.CompletionTokens,
 		TokenId:          task.PrivateData.TokenId,
 		Group:            task.Group,
+		UseTimeSeconds:   taskBillingUseTimeSeconds(task),
 		Other:            other,
 	})
 	model.UpdateUserUsedQuotaAndRequestCount(task.UserId, actualQuota)
@@ -333,15 +352,16 @@ func RefundTaskQuota(ctx context.Context, task *model.Task, reason string) {
 	other["task_id"] = task.TaskID
 	other["reason"] = reason
 	model.RecordTaskBillingLog(model.RecordTaskBillingLogParams{
-		UserId:    task.UserId,
-		LogType:   model.LogTypeRefund,
-		Content:   "",
-		ChannelId: task.ChannelId,
-		ModelName: taskModelName(task),
-		Quota:     quota,
-		TokenId:   task.PrivateData.TokenId,
-		Group:     task.Group,
-		Other:     other,
+		UserId:         task.UserId,
+		LogType:        model.LogTypeRefund,
+		Content:        "",
+		ChannelId:      task.ChannelId,
+		ModelName:      taskModelName(task),
+		Quota:          quota,
+		TokenId:        task.PrivateData.TokenId,
+		Group:          task.Group,
+		UseTimeSeconds: taskBillingUseTimeSeconds(task),
+		Other:          other,
 	})
 	markTaskBillingRefunded(ctx, task, reason)
 }
@@ -398,15 +418,16 @@ func RecalculateTaskQuota(ctx context.Context, task *model.Task, actualQuota int
 	other["pre_consumed_quota"] = preConsumedQuota
 	other["actual_quota"] = actualQuota
 	model.RecordTaskBillingLog(model.RecordTaskBillingLogParams{
-		UserId:    task.UserId,
-		LogType:   logType,
-		Content:   reason,
-		ChannelId: task.ChannelId,
-		ModelName: taskModelName(task),
-		Quota:     logQuota,
-		TokenId:   task.PrivateData.TokenId,
-		Group:     task.Group,
-		Other:     other,
+		UserId:         task.UserId,
+		LogType:        logType,
+		Content:        reason,
+		ChannelId:      task.ChannelId,
+		ModelName:      taskModelName(task),
+		Quota:          logQuota,
+		TokenId:        task.PrivateData.TokenId,
+		Group:          task.Group,
+		UseTimeSeconds: taskBillingUseTimeSeconds(task),
+		Other:          other,
 	})
 }
 

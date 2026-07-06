@@ -3494,6 +3494,7 @@
     "Retention days": "Jours de rétention",
     "Retry": "Réessayer",
     "Retry Chain": "Chaîne de tentatives",
+    "Retry Failure Details": "D?tails des ?checs de nouvelle tentative",
     "Retry Suggestion": "Suggestion de relance",
     "Retry Times": "Nombre de tentatives",
     "Return a custom error immediately": "Retourner immédiatement une erreur personnalisée",

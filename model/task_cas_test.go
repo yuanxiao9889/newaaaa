@@ -240,3 +240,95 @@ func TestUpdateWithStatus_ConcurrentWinner(t *testing.T) {
 	}
 	assert.Equal(t, 1, winCount, "exactly one goroutine should win the CAS")
 }
+
+func TestTaskQueryFiltersByOriginModelName(t *testing.T) {
+	truncateTables(t)
+
+	insertTask(t, &Task{
+		TaskID:   "task_image_alpha",
+		UserId:   11,
+		Status:   TaskStatusSuccess,
+		Data:     json.RawMessage(`{}`),
+		Properties: Properties{
+			OriginModelName: "gpt-image-1",
+		},
+	})
+	insertTask(t, &Task{
+		TaskID:   "task_image_beta",
+		UserId:   11,
+		Status:   TaskStatusSuccess,
+		Data:     json.RawMessage(`{}`),
+		Properties: Properties{
+			OriginModelName: "imagen-4",
+		},
+	})
+	insertTask(t, &Task{
+		TaskID:   "task_video",
+		UserId:   12,
+		Status:   TaskStatusSuccess,
+		Data:     json.RawMessage(`{}`),
+		Properties: Properties{
+			OriginModelName: "veo-3",
+		},
+	})
+
+	queryParams := SyncTaskQueryParams{ModelName: "image"}
+
+	tasks := TaskGetAllTasks(0, 10, queryParams)
+	require.Len(t, tasks, 2)
+	assert.EqualValues(t, 2, TaskCountAllTasks(queryParams))
+
+	userTasks := TaskGetAllUserTask(11, 0, 10, queryParams)
+	require.Len(t, userTasks, 2)
+	assert.EqualValues(t, 2, TaskCountAllUserTask(11, queryParams))
+	assert.EqualValues(t, 0, TaskCountAllUserTask(12, queryParams))
+}
+
+func TestSearchUserIDsByUsername(t *testing.T) {
+	truncateTables(t)
+
+	require.NoError(t, DB.Create(&User{Username: "alice", Password: "password123"}).Error)
+	require.NoError(t, DB.Create(&User{Username: "alice-admin", Password: "password123"}).Error)
+	require.NoError(t, DB.Create(&User{Username: "bob", Password: "password123"}).Error)
+
+	ids, err := SearchUserIDsByUsername("alice", 10)
+	require.NoError(t, err)
+	require.Len(t, ids, 2)
+
+	noMatchIDs, err := SearchUserIDsByUsername("charlie", 10)
+	require.NoError(t, err)
+	assert.Empty(t, noMatchIDs)
+}
+
+func TestTaskQueryFiltersQueuedStatuses(t *testing.T) {
+	truncateTables(t)
+
+	insertTask(t, &Task{
+		TaskID: "task_queued",
+		UserId: 21,
+		Status: TaskStatusQueued,
+		Data:   json.RawMessage(`{}`),
+	})
+	insertTask(t, &Task{
+		TaskID: "task_submitted",
+		UserId: 21,
+		Status: TaskStatusSubmitted,
+		Data:   json.RawMessage(`{}`),
+	})
+	insertTask(t, &Task{
+		TaskID: "task_success",
+		UserId: 21,
+		Status: TaskStatusSuccess,
+		Data:   json.RawMessage(`{}`),
+	})
+
+	queryParams := SyncTaskQueryParams{Status: string(TaskStatusQueued)}
+
+	tasks := TaskGetAllTasks(0, 10, queryParams)
+	require.Len(t, tasks, 2)
+	assert.EqualValues(t, 2, TaskCountAllTasks(queryParams))
+
+	userTasks := TaskGetAllUserTask(21, 0, 10, queryParams)
+	require.Len(t, userTasks, 2)
+	assert.EqualValues(t, 2, TaskCountAllUserTask(21, queryParams))
+}

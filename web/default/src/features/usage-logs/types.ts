@@ -67,6 +67,9 @@ export interface DrawingLogFilters extends CommonFilters {
  */
 export interface TaskLogFilters extends CommonFilters {
   taskId?: string
+  model?: string
+  username?: string
+  status?: string
 }
 
 /**
@@ -201,6 +204,18 @@ export interface LogOtherData {
   async_task?: boolean
   task_id?: string
   async_channel_retry_path?: Array<number | string>
+  async_channel_retry_details?: Array<{
+    attempt?: number
+    channel_id?: number
+    channel_name?: string
+    channel_type?: number
+    status?: string
+    status_code?: number
+    error_type?: string
+    error_code?: string
+    error?: string
+    attempted_at?: number
+  }>
   billing_state?: string
   pre_consumed_quota?: number
   actual_quota?: number
@@ -385,6 +400,9 @@ export interface GetTaskLogsParams {
   page_size?: number
   channel_id?: string
   task_id?: string
+  model_name?: string
+  username?: string
+  status?: string
   start_timestamp?: number
   end_timestamp?: number
 }

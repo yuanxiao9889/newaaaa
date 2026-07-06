@@ -3494,6 +3494,7 @@
     "Retention days": "保持日数",
     "Retry": "再試行",
     "Retry Chain": "リトライチェーン",
+    "Retry Failure Details": "?????????",
     "Retry Suggestion": "リトライ提案",
     "Retry Times": "再試行回数",
     "Return a custom error immediately": "即座にカスタムエラーを返す",

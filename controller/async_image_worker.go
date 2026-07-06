@@ -36,6 +36,19 @@ var internalAsyncImageWorkerSerial atomic.Int64
 var internalAsyncImageWorkerGeneration atomic.Int64
 var internalAsyncImageTimeoutSweepAt atomic.Int64
 
+type internalAsyncChannelRetryDetail struct {
+	Attempt     int    `json:"attempt"`
+	ChannelID   int    `json:"channel_id"`
+	ChannelName string `json:"channel_name,omitempty"`
+	ChannelType int    `json:"channel_type,omitempty"`
+	Status      string `json:"status"`
+	StatusCode  int    `json:"status_code,omitempty"`
+	ErrorType   string `json:"error_type,omitempty"`
+	ErrorCode   string `json:"error_code,omitempty"`
+	Error       string `json:"error,omitempty"`
+	AttemptedAt int64  `json:"attempted_at"`
+}
+
 func StartInternalAsyncImageWorkerLoop() {
 	common.SysLog(fmt.Sprintf("internal async image worker supervisor started: workers=%d max_unfinished=%d", common.GetAsyncImageWorkerConcurrency(), common.GetAsyncImageMaxUnfinishedTasks()))
 	go superviseInternalAsyncImageWorkers()
@@ -216,6 +229,7 @@ func runInternalAsyncImageRelay(ctx context.Context, task *model.Task) ([]byte, 
 	var lastProxy string
 	var lastUsage *dto.Usage
 	retryPath := make([]string, 0, common.RetryTimes+1)
+	retryDetails := make([]internalAsyncChannelRetryDetail, 0, common.RetryTimes+1)
 	retryParam := &service.RetryParam{
 		Ctx:        nil,
 		TokenGroup: task.Group,
@@ -250,6 +264,7 @@ func runInternalAsyncImageRelay(ctx context.Context, task *model.Task) ([]byte, 
 			return recorder.Body.Bytes(), channel.Id, lastProxy, lastUsage, nil
 		}
 		lastErr = service.NormalizeViolationFeeError(newAPIError)
+		retryDetails = append(retryDetails, buildInternalAsyncChannelRetryDetail(retryParam.GetRetry()+1, channel, lastErr))
 		if channel != nil {
 			c.Set(suppressRelayErrorLogContextKey, true)
 			c.Set("async_channel_retry_path", append([]string(nil), retryPath...))
@@ -262,7 +277,7 @@ func runInternalAsyncImageRelay(ctx context.Context, task *model.Task) ([]byte, 
 	setInternalAsyncChannelRetryPath(task, retryPath)
 
 	if lastErr != nil {
-		recordInternalAsyncImageFinalErrorLog(lastCtx, task, lastChannel, lastErr, retryPath)
+		recordInternalAsyncImageFinalErrorLog(lastCtx, task, lastChannel, lastErr, retryPath, retryDetails)
 		if lastChannel != nil {
 			return nil, lastChannel.Id, lastProxy, nil, lastErr
 		}
@@ -306,6 +321,26 @@ func runInternalAsyncGeminiImageRelayOnce(ctx context.Context, task *model.Task,
 	addUsedChannel(c, channel.Id)
 	relayInfo.Request = geminiReq
 	return c, recorder, channel, geminiRelayHandler(c, relayInfo), nil
+}
+
+func buildInternalAsyncChannelRetryDetail(attempt int, channel *model.Channel, err *types.NewAPIError) internalAsyncChannelRetryDetail {
+	detail := internalAsyncChannelRetryDetail{
+		Attempt:     attempt,
+		Status:      "error",
+		AttemptedAt: common.GetTimestamp(),
+	}
+	if channel != nil {
+		detail.ChannelID = channel.Id
+		detail.ChannelName = channel.Name
+		detail.ChannelType = channel.Type
+	}
+	if err != nil {
+		detail.StatusCode = err.StatusCode
+		detail.ErrorType = err.GetErrorType()
+		detail.ErrorCode = err.GetErrorCode()
+		detail.Error = err.MaskSensitiveErrorWithStatusCode()
+	}
+	return detail
 }
 
 func buildInternalAsyncImageContext(ctx context.Context, task *model.Task, body []byte) (*gin.Context, *httptest.ResponseRecorder, *dto.ImageRequest, *relaycommon.RelayInfo, error) {
@@ -401,7 +436,7 @@ func buildInternalAsyncBaseContext(ctx context.Context, task *model.Task, body [
 	return c, recorder, nil
 }
 
-func recordInternalAsyncImageFinalErrorLog(c *gin.Context, task *model.Task, channel *model.Channel, err *types.NewAPIError, retryPath []string) {
+func recordInternalAsyncImageFinalErrorLog(c *gin.Context, task *model.Task, channel *model.Channel, err *types.NewAPIError, retryPath []string, retryDetails []internalAsyncChannelRetryDetail) {
 	if c == nil || task == nil || err == nil || !constant.ErrorLogEnabled || !types.IsRecordErrorLog(err) {
 		return
 	}
@@ -433,6 +468,9 @@ func recordInternalAsyncImageFinalErrorLog(c *gin.Context, task *model.Task, cha
 		"admin_info": map[string]interface{}{
 			"use_channel": path,
 		},
+	}
+	if len(retryDetails) > 0 {
+		other["async_channel_retry_details"] = retryDetails
 	}
 	if c.Request != nil && c.Request.URL != nil {
 		other["request_path"] = c.Request.URL.Path

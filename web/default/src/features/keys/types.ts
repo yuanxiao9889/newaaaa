@@ -82,6 +82,32 @@ export interface SearchApiKeysParams {
   size?: number
 }
 
+export type ApiKeyUsagePeriod = 'day' | 'week' | 'month'
+
+export interface ApiKeyUsageStat {
+  token_id: number
+  quota: number
+  consume_quota: number
+  refund_quota: number
+}
+
+export interface GetApiKeyUsageStatsParams {
+  period: ApiKeyUsagePeriod
+  tokenIds: number[]
+  timestamp?: number
+}
+
+export interface GetApiKeyUsageStatsResponse {
+  success: boolean
+  message?: string
+  data?: {
+    period: ApiKeyUsagePeriod
+    start_timestamp: number
+    end_timestamp: number
+    items: ApiKeyUsageStat[]
+  }
+}
+
 export interface ApiKeyFormData {
   name: string
   remain_quota: number

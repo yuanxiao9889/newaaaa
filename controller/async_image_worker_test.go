@@ -115,7 +115,32 @@ func TestRecordInternalAsyncImageFinalErrorLogStoresRetryPathAndIdentity(t *test
 		Id:   36,
 		Name: "XGJ-banana",
 		Type: constant.ChannelTypeGemini,
-	}, apiErr, []string{"28", "36", "36", "36"})
+	}, apiErr, []string{"28", "36", "36", "36"}, []internalAsyncChannelRetryDetail{
+		{
+			Attempt:     1,
+			ChannelID:   28,
+			ChannelName: "first-banana",
+			ChannelType: constant.ChannelTypeGemini,
+			Status:      "error",
+			StatusCode:  http.StatusBadGateway,
+			ErrorType:   "openai_error",
+			ErrorCode:   "bad_gateway",
+			Error:       "status_code=502, upstream unavailable",
+			AttemptedAt: time.Now().Unix(),
+		},
+		{
+			Attempt:     2,
+			ChannelID:   36,
+			ChannelName: "XGJ-banana",
+			ChannelType: constant.ChannelTypeGemini,
+			Status:      "error",
+			StatusCode:  http.StatusUnavailableForLegalReasons,
+			ErrorType:   "openai_error",
+			ErrorCode:   "451",
+			Error:       "status_code=451, unsafe image",
+			AttemptedAt: time.Now().Unix(),
+		},
+	})
 
 	var logs []model.Log
 	require.NoError(t, db.Find(&logs).Error)
@@ -138,6 +163,14 @@ func TestRecordInternalAsyncImageFinalErrorLogStoresRetryPathAndIdentity(t *test
 	require.Equal(t, true, other["is_task"])
 	require.Equal(t, task.TaskID, other["task_id"])
 	require.Equal(t, []interface{}{"28", "36", "36", "36"}, other["async_channel_retry_path"])
+	retryDetails, ok := other["async_channel_retry_details"].([]interface{})
+	require.True(t, ok)
+	require.Len(t, retryDetails, 2)
+	firstDetail, ok := retryDetails[0].(map[string]interface{})
+	require.True(t, ok)
+	require.Equal(t, float64(28), firstDetail["channel_id"])
+	require.Equal(t, "first-banana", firstDetail["channel_name"])
+	require.Contains(t, firstDetail["error"], "upstream unavailable")
 	require.Equal(t, "/v1beta/models/monkey-image-flash 2:generateContent", other["request_path"])
 }
 
