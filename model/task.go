@@ -5,12 +5,14 @@ import (
 	"database/sql/driver"
 	"encoding/json"
 	"reflect"
+	"strings"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
 	commonRelay "github.com/QuantumNous/new-api/relay/common"
+	"gorm.io/gorm"
 )
 
 type TaskStatus string
@@ -196,6 +198,7 @@ type SyncTaskQueryParams struct {
 	UserID         string
 	Action         string
 	Status         string
+	ModelName      string
 	StartTimestamp int64
 	EndTimestamp   int64
 	UserIDs        []int
@@ -254,26 +257,7 @@ func TaskGetAllUserTask(userId int, startIdx int, num int, queryParams SyncTaskQ
 
 	// 初始化查询构建器
 	query := DB.Omit("data", "channel_id").Where("user_id = ?", userId)
-
-	if queryParams.TaskID != "" {
-		query = query.Where("task_id = ?", queryParams.TaskID)
-	}
-	if queryParams.Action != "" {
-		query = query.Where("action = ?", queryParams.Action)
-	}
-	if queryParams.Status != "" {
-		query = query.Where("status = ?", queryParams.Status)
-	}
-	if queryParams.Platform != "" {
-		query = query.Where("platform = ?", queryParams.Platform)
-	}
-	if queryParams.StartTimestamp != 0 {
-		// 假设您已将前端传来的时间戳转换为数据库所需的时间格式，并处理了时间戳的验证和解析
-		query = query.Where("submit_time >= ?", queryParams.StartTimestamp)
-	}
-	if queryParams.EndTimestamp != 0 {
-		query = query.Where("submit_time <= ?", queryParams.EndTimestamp)
-	}
+	query = applySyncTaskQueryFilters(query, queryParams, false)
 
 	// 获取数据
 	err = query.Order("id desc").Limit(num).Offset(startIdx).Find(&tasks).Error
@@ -290,35 +274,7 @@ func TaskGetAllTasks(startIdx int, num int, queryParams SyncTaskQueryParams) []*
 
 	// 初始化查询构建器
 	query := DB.Omit("data")
-
-	// 添加过滤条件
-	if queryParams.ChannelID != "" {
-		query = query.Where("channel_id = ?", queryParams.ChannelID)
-	}
-	if queryParams.Platform != "" {
-		query = query.Where("platform = ?", queryParams.Platform)
-	}
-	if queryParams.UserID != "" {
-		query = query.Where("user_id = ?", queryParams.UserID)
-	}
-	if len(queryParams.UserIDs) != 0 {
-		query = query.Where("user_id in (?)", queryParams.UserIDs)
-	}
-	if queryParams.TaskID != "" {
-		query = query.Where("task_id = ?", queryParams.TaskID)
-	}
-	if queryParams.Action != "" {
-		query = query.Where("action = ?", queryParams.Action)
-	}
-	if queryParams.Status != "" {
-		query = query.Where("status = ?", queryParams.Status)
-	}
-	if queryParams.StartTimestamp != 0 {
-		query = query.Where("submit_time >= ?", queryParams.StartTimestamp)
-	}
-	if queryParams.EndTimestamp != 0 {
-		query = query.Where("submit_time <= ?", queryParams.EndTimestamp)
-	}
+	query = applySyncTaskQueryFilters(query, queryParams, true)
 
 	// 获取数据
 	err = query.Order("id desc").Limit(num).Offset(startIdx).Find(&tasks).Error
@@ -628,33 +584,7 @@ type TaskQuotaUsage struct {
 func TaskCountAllTasks(queryParams SyncTaskQueryParams) int64 {
 	var total int64
 	query := DB.Model(&Task{})
-	if queryParams.ChannelID != "" {
-		query = query.Where("channel_id = ?", queryParams.ChannelID)
-	}
-	if queryParams.Platform != "" {
-		query = query.Where("platform = ?", queryParams.Platform)
-	}
-	if queryParams.UserID != "" {
-		query = query.Where("user_id = ?", queryParams.UserID)
-	}
-	if len(queryParams.UserIDs) != 0 {
-		query = query.Where("user_id in (?)", queryParams.UserIDs)
-	}
-	if queryParams.TaskID != "" {
-		query = query.Where("task_id = ?", queryParams.TaskID)
-	}
-	if queryParams.Action != "" {
-		query = query.Where("action = ?", queryParams.Action)
-	}
-	if queryParams.Status != "" {
-		query = query.Where("status = ?", queryParams.Status)
-	}
-	if queryParams.StartTimestamp != 0 {
-		query = query.Where("submit_time >= ?", queryParams.StartTimestamp)
-	}
-	if queryParams.EndTimestamp != 0 {
-		query = query.Where("submit_time <= ?", queryParams.EndTimestamp)
-	}
+	query = applySyncTaskQueryFilters(query, queryParams, true)
 	_ = query.Count(&total).Error
 	return total
 }
@@ -663,6 +593,23 @@ func TaskCountAllTasks(queryParams SyncTaskQueryParams) int64 {
 func TaskCountAllUserTask(userId int, queryParams SyncTaskQueryParams) int64 {
 	var total int64
 	query := DB.Model(&Task{}).Where("user_id = ?", userId)
+	query = applySyncTaskQueryFilters(query, queryParams, false)
+	_ = query.Count(&total).Error
+	return total
+}
+
+func applySyncTaskQueryFilters(query *gorm.DB, queryParams SyncTaskQueryParams, includeAdminFilters bool) *gorm.DB {
+	if includeAdminFilters {
+		if queryParams.ChannelID != "" {
+			query = query.Where("channel_id = ?", queryParams.ChannelID)
+		}
+		if queryParams.UserID != "" {
+			query = query.Where("user_id = ?", queryParams.UserID)
+		}
+		if len(queryParams.UserIDs) != 0 {
+			query = query.Where("user_id in (?)", queryParams.UserIDs)
+		}
+	}
 	if queryParams.TaskID != "" {
 		query = query.Where("task_id = ?", queryParams.TaskID)
 	}
@@ -670,10 +617,17 @@ func TaskCountAllUserTask(userId int, queryParams SyncTaskQueryParams) int64 {
 		query = query.Where("action = ?", queryParams.Action)
 	}
 	if queryParams.Status != "" {
-		query = query.Where("status = ?", queryParams.Status)
+		if queryParams.Status == string(TaskStatusQueued) {
+			query = query.Where("status in (?)", []TaskStatus{TaskStatusQueued, TaskStatusSubmitted})
+		} else {
+			query = query.Where("status = ?", queryParams.Status)
+		}
 	}
 	if queryParams.Platform != "" {
 		query = query.Where("platform = ?", queryParams.Platform)
+	}
+	if queryParams.ModelName != "" {
+		query = applyTaskModelNameFilter(query, queryParams.ModelName)
 	}
 	if queryParams.StartTimestamp != 0 {
 		query = query.Where("submit_time >= ?", queryParams.StartTimestamp)
@@ -681,9 +635,32 @@ func TaskCountAllUserTask(userId int, queryParams SyncTaskQueryParams) int64 {
 	if queryParams.EndTimestamp != 0 {
 		query = query.Where("submit_time <= ?", queryParams.EndTimestamp)
 	}
-	_ = query.Count(&total).Error
-	return total
+	return query
 }
+
+func applyTaskModelNameFilter(query *gorm.DB, modelName string) *gorm.DB {
+	pattern := containsLikePattern(modelName)
+	if pattern == "%%" {
+		return query
+	}
+	switch {
+	case common.UsingPostgreSQL:
+		return query.Where("(properties::jsonb ->> 'origin_model_name') LIKE ? ESCAPE '!'", pattern)
+	case common.UsingMySQL:
+		return query.Where("JSON_UNQUOTE(JSON_EXTRACT(properties, '$.origin_model_name')) LIKE ? ESCAPE '!'", pattern)
+	default:
+		return query.Where("json_extract(properties, '$.origin_model_name') LIKE ? ESCAPE '!'", pattern)
+	}
+}
+
+func containsLikePattern(value string) string {
+	value = strings.TrimSpace(value)
+	value = strings.ReplaceAll(value, "!", "!!")
+	value = strings.ReplaceAll(value, "%", "!%")
+	value = strings.ReplaceAll(value, "_", "!_")
+	return "%" + value + "%"
+}
+
 func (t *Task) ToOpenAIVideo() *dto.OpenAIVideo {
 	openAIVideo := dto.NewOpenAIVideo()
 	openAIVideo.ID = t.TaskID

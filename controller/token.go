@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/i18n"
@@ -161,6 +162,129 @@ func GetTokenUsage(c *gin.Context) {
 			"model_limits_enabled": token.ModelLimitsEnabled,
 			"expires_at":           expiredAt,
 		},
+	})
+}
+
+type tokenUsagePeriodStatsItem struct {
+	TokenID      int `json:"token_id"`
+	Quota        int `json:"quota"`
+	ConsumeQuota int `json:"consume_quota"`
+	RefundQuota  int `json:"refund_quota"`
+}
+
+type tokenUsagePeriodStatsResponse struct {
+	Period         string                      `json:"period"`
+	StartTimestamp int64                       `json:"start_timestamp"`
+	EndTimestamp   int64                       `json:"end_timestamp"`
+	Items          []tokenUsagePeriodStatsItem `json:"items"`
+}
+
+func parseTokenUsagePeriod(period string) (string, error) {
+	switch period {
+	case "", "month":
+		return "month", nil
+	case "day", "week":
+		return period, nil
+	default:
+		return "", fmt.Errorf("invalid period: %s", period)
+	}
+}
+
+func tokenUsagePeriodRange(period string, timestamp int64) (int64, int64) {
+	if timestamp <= 0 {
+		timestamp = time.Now().Unix()
+	}
+	at := time.Unix(timestamp, 0).In(time.Local)
+	switch period {
+	case "day":
+		start := time.Date(at.Year(), at.Month(), at.Day(), 0, 0, 0, 0, at.Location())
+		return start.Unix(), start.AddDate(0, 0, 1).Unix()
+	case "week":
+		start := time.Date(at.Year(), at.Month(), at.Day(), 0, 0, 0, 0, at.Location())
+		daysSinceMonday := (int(start.Weekday()) + 6) % 7
+		start = start.AddDate(0, 0, -daysSinceMonday)
+		return start.Unix(), start.AddDate(0, 0, 7).Unix()
+	default:
+		start := time.Date(at.Year(), at.Month(), 1, 0, 0, 0, 0, at.Location())
+		return start.Unix(), start.AddDate(0, 1, 0).Unix()
+	}
+}
+
+func parseTokenIdList(raw string) ([]int, error) {
+	if strings.TrimSpace(raw) == "" {
+		return []int{}, nil
+	}
+	parts := strings.Split(raw, ",")
+	ids := make([]int, 0, len(parts))
+	seen := make(map[int]bool, len(parts))
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		id, err := strconv.Atoi(part)
+		if err != nil || id <= 0 {
+			return nil, fmt.Errorf("invalid token id: %s", part)
+		}
+		if !seen[id] {
+			ids = append(ids, id)
+			seen[id] = true
+		}
+	}
+	return ids, nil
+}
+
+func GetTokenUsagePeriodStats(c *gin.Context) {
+	period, err := parseTokenUsagePeriod(c.Query("period"))
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	tokenIds, err := parseTokenIdList(c.Query("token_ids"))
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	if len(tokenIds) > 100 {
+		common.ApiErrorI18n(c, i18n.MsgBatchTooMany, map[string]any{"Max": 100})
+		return
+	}
+
+	userId := c.GetInt("id")
+	ownedTokenIds, err := model.GetUserTokenIdsByIds(tokenIds, userId)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+
+	timestamp, _ := strconv.ParseInt(c.Query("timestamp"), 10, 64)
+	startTimestamp, endTimestamp := tokenUsagePeriodRange(period, timestamp)
+	stats, err := model.SumUserTokenUsageStats(userId, ownedTokenIds, startTimestamp, endTimestamp)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+
+	statsByTokenId := make(map[int]model.TokenUsageStat, len(stats))
+	for _, stat := range stats {
+		statsByTokenId[stat.TokenId] = stat
+	}
+	items := make([]tokenUsagePeriodStatsItem, 0, len(ownedTokenIds))
+	for _, tokenId := range ownedTokenIds {
+		stat := statsByTokenId[tokenId]
+		items = append(items, tokenUsagePeriodStatsItem{
+			TokenID:      tokenId,
+			Quota:        stat.Quota,
+			ConsumeQuota: stat.ConsumeQuota,
+			RefundQuota:  stat.RefundQuota,
+		})
+	}
+
+	common.ApiSuccess(c, tokenUsagePeriodStatsResponse{
+		Period:         period,
+		StartTimestamp: startTimestamp,
+		EndTimestamp:   endTimestamp,
+		Items:          items,
 	})
 }
 

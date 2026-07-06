@@ -42,27 +42,39 @@ type tokenKeyResponse struct {
 	Key string `json:"key"`
 }
 
+type tokenUsagePeriodResponse struct {
+	Period         string `json:"period"`
+	StartTimestamp int64  `json:"start_timestamp"`
+	EndTimestamp   int64  `json:"end_timestamp"`
+	Items          []struct {
+		TokenID      int `json:"token_id"`
+		Quota        int `json:"quota"`
+		ConsumeQuota int `json:"consume_quota"`
+		RefundQuota  int `json:"refund_quota"`
+	} `json:"items"`
+}
+
 type sqliteColumnInfo struct {
 	Name string `gorm:"column:name"`
 	Type string `gorm:"column:type"`
 }
 
 type legacyToken struct {
-	Id                 int            `gorm:"primaryKey"`
-	UserId             int            `gorm:"index"`
-	Key                string         `gorm:"column:key;type:char(48);uniqueIndex"`
-	Status             int            `gorm:"default:1"`
-	Name               string         `gorm:"index"`
-	CreatedTime        int64          `gorm:"bigint"`
-	AccessedTime       int64          `gorm:"bigint"`
-	ExpiredTime        int64          `gorm:"bigint;default:-1"`
-	RemainQuota        int            `gorm:"default:0"`
+	Id                 int    `gorm:"primaryKey"`
+	UserId             int    `gorm:"index"`
+	Key                string `gorm:"column:key;type:char(48);uniqueIndex"`
+	Status             int    `gorm:"default:1"`
+	Name               string `gorm:"index"`
+	CreatedTime        int64  `gorm:"bigint"`
+	AccessedTime       int64  `gorm:"bigint"`
+	ExpiredTime        int64  `gorm:"bigint;default:-1"`
+	RemainQuota        int    `gorm:"default:0"`
 	UnlimitedQuota     bool
 	ModelLimitsEnabled bool
-	ModelLimits        string         `gorm:"type:text"`
-	AllowIps           *string        `gorm:"default:''"`
-	UsedQuota          int            `gorm:"default:0"`
-	Group              string         `gorm:"column:group;default:''"`
+	ModelLimits        string  `gorm:"type:text"`
+	AllowIps           *string `gorm:"default:''"`
+	UsedQuota          int     `gorm:"default:0"`
+	Group              string  `gorm:"column:group;default:''"`
 	CrossGroupRetry    bool
 	DeletedAt          gorm.DeletedAt `gorm:"index"`
 }
@@ -537,5 +549,117 @@ func TestGetTokenKeyRequiresOwnershipAndReturnsFullKey(t *testing.T) {
 	}
 	if strings.Contains(unauthorizedRecorder.Body.String(), token.Key) {
 		t.Fatalf("unauthorized key response leaked raw token key: %s", unauthorizedRecorder.Body.String())
+	}
+}
+
+func TestGetTokenUsagePeriodStatsReturnsOwnedTokenUsageByPeriod(t *testing.T) {
+	db := setupTokenControllerTestDB(t)
+	if err := db.AutoMigrate(&model.Log{}); err != nil {
+		t.Fatalf("failed to migrate logs table: %v", err)
+	}
+
+	firstToken := seedToken(t, db, 1, "first-token", "usage1234first5678")
+	secondToken := seedToken(t, db, 1, "second-token", "usage1234second5678")
+	otherUserToken := seedToken(t, db, 2, "other-token", "usage1234other5678")
+
+	logs := []model.Log{
+		{UserId: 1, TokenId: firstToken.Id, Type: model.LogTypeConsume, Quota: 100, CreatedAt: 1783353600},
+		{UserId: 1, TokenId: firstToken.Id, Type: model.LogTypeConsume, Quota: 40, CreatedAt: 1783439999},
+		{UserId: 1, TokenId: firstToken.Id, Type: model.LogTypeRefund, Quota: 15, CreatedAt: 1783430000},
+		{UserId: 1, TokenId: firstToken.Id, Type: model.LogTypeConsume, Quota: 200, CreatedAt: 1783267200},
+		{UserId: 1, TokenId: secondToken.Id, Type: model.LogTypeConsume, Quota: 70, CreatedAt: 1783430000},
+		{UserId: 2, TokenId: otherUserToken.Id, Type: model.LogTypeConsume, Quota: 999, CreatedAt: 1783430000},
+	}
+	if err := db.Create(&logs).Error; err != nil {
+		t.Fatalf("failed to seed logs: %v", err)
+	}
+
+	target := fmt.Sprintf(
+		"/api/token/usage?period=day&timestamp=1783430000&token_ids=%d,%d,%d",
+		firstToken.Id,
+		secondToken.Id,
+		otherUserToken.Id,
+	)
+	ctx, recorder := newAuthenticatedContext(t, http.MethodGet, target, nil, 1)
+	GetTokenUsagePeriodStats(ctx)
+
+	response := decodeAPIResponse(t, recorder)
+	if !response.Success {
+		t.Fatalf("expected success response, got message: %s", response.Message)
+	}
+
+	var usage tokenUsagePeriodResponse
+	if err := common.Unmarshal(response.Data, &usage); err != nil {
+		t.Fatalf("failed to decode usage period response: %v", err)
+	}
+
+	if usage.Period != "day" {
+		t.Fatalf("expected day period, got %q", usage.Period)
+	}
+	if usage.StartTimestamp != 1783353600 || usage.EndTimestamp != 1783440000 {
+		t.Fatalf("unexpected day range: %d-%d", usage.StartTimestamp, usage.EndTimestamp)
+	}
+	if len(usage.Items) != 2 {
+		t.Fatalf("expected two owned token usage rows, got %d", len(usage.Items))
+	}
+
+	usageByTokenID := map[int]struct {
+		Quota        int
+		ConsumeQuota int
+		RefundQuota  int
+	}{}
+	for _, item := range usage.Items {
+		usageByTokenID[item.TokenID] = struct {
+			Quota        int
+			ConsumeQuota int
+			RefundQuota  int
+		}{
+			Quota:        item.Quota,
+			ConsumeQuota: item.ConsumeQuota,
+			RefundQuota:  item.RefundQuota,
+		}
+	}
+
+	firstUsage := usageByTokenID[firstToken.Id]
+	if firstUsage.Quota != 125 || firstUsage.ConsumeQuota != 140 || firstUsage.RefundQuota != 15 {
+		t.Fatalf("unexpected first token usage: %+v", firstUsage)
+	}
+	secondUsage := usageByTokenID[secondToken.Id]
+	if secondUsage.Quota != 70 || secondUsage.ConsumeQuota != 70 || secondUsage.RefundQuota != 0 {
+		t.Fatalf("unexpected second token usage: %+v", secondUsage)
+	}
+	if _, ok := usageByTokenID[otherUserToken.Id]; ok {
+		t.Fatalf("response included another user's token usage")
+	}
+
+	weekCtx, weekRecorder := newAuthenticatedContext(t, http.MethodGet, fmt.Sprintf(
+		"/api/token/usage?period=week&timestamp=1783430000&token_ids=%d",
+		firstToken.Id,
+	), nil, 1)
+	GetTokenUsagePeriodStats(weekCtx)
+	weekResponse := decodeAPIResponse(t, weekRecorder)
+	var weekUsage tokenUsagePeriodResponse
+	if err := common.Unmarshal(weekResponse.Data, &weekUsage); err != nil {
+		t.Fatalf("failed to decode week usage response: %v", err)
+	}
+	if weekUsage.StartTimestamp != 1783267200 || weekUsage.EndTimestamp != 1783872000 {
+		t.Fatalf("unexpected week range: %d-%d", weekUsage.StartTimestamp, weekUsage.EndTimestamp)
+	}
+	if len(weekUsage.Items) != 1 || weekUsage.Items[0].Quota != 325 {
+		t.Fatalf("unexpected week token usage: %+v", weekUsage.Items)
+	}
+
+	monthCtx, monthRecorder := newAuthenticatedContext(t, http.MethodGet, fmt.Sprintf(
+		"/api/token/usage?period=month&timestamp=1783430000&token_ids=%d",
+		firstToken.Id,
+	), nil, 1)
+	GetTokenUsagePeriodStats(monthCtx)
+	monthResponse := decodeAPIResponse(t, monthRecorder)
+	var monthUsage tokenUsagePeriodResponse
+	if err := common.Unmarshal(monthResponse.Data, &monthUsage); err != nil {
+		t.Fatalf("failed to decode month usage response: %v", err)
+	}
+	if monthUsage.StartTimestamp != 1782835200 || monthUsage.EndTimestamp != 1785513600 {
+		t.Fatalf("unexpected month range: %d-%d", monthUsage.StartTimestamp, monthUsage.EndTimestamp)
 	}
 }

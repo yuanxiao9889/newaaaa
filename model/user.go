@@ -293,6 +293,24 @@ func SearchUsers(keyword string, group string, role *int, status *int, startIdx 
 	return users, total, nil
 }
 
+func SearchUserIDsByUsername(keyword string, limit int) ([]int, error) {
+	keyword = strings.TrimSpace(keyword)
+	if keyword == "" {
+		return nil, nil
+	}
+	if limit <= 0 {
+		limit = 100
+	}
+
+	var ids []int
+	err := DB.Unscoped().Model(&User{}).
+		Select("id").
+		Where("username LIKE ? ESCAPE '!'", containsLikePattern(keyword)).
+		Limit(limit).
+		Find(&ids).Error
+	return ids, err
+}
+
 func GetUserById(id int, selectAll bool) (*User, error) {
 	if id == 0 {
 		return nil, errors.New("id 为空！")

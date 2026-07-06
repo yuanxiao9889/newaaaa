@@ -24,6 +24,7 @@ import { formatQuota, formatTimestampToDate } from '@/lib/format'
 import { cn } from '@/lib/utils'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Progress } from '@/components/ui/progress'
+import { Skeleton } from '@/components/ui/skeleton'
 import {
   Tooltip,
   TooltipContent,
@@ -32,13 +33,18 @@ import {
 import { GroupBadge } from '@/components/group-badge'
 import { StatusBadge } from '@/components/status-badge'
 import { API_KEY_STATUSES } from '../constants'
-import { type ApiKey } from '../types'
+import { type ApiKey, type ApiKeyUsageStat } from '../types'
 import {
   ApiKeyCell,
   ModelLimitsCell,
   IpRestrictionsCell,
 } from './api-keys-cells'
 import { DataTableRowActions } from './data-table-row-actions'
+
+interface ApiKeysColumnsOptions {
+  usageByTokenId?: Record<number, ApiKeyUsageStat | undefined>
+  isUsageLoading?: boolean
+}
 
 function getQuotaProgressColor(percentage: number): string {
   if (percentage <= 10) return '[&_[data-slot=progress-indicator]]:bg-rose-500'
@@ -66,7 +72,9 @@ function useGroupRatios(): Record<string, number> {
   return data ?? {}
 }
 
-export function useApiKeysColumns(): ColumnDef<ApiKey>[] {
+export function useApiKeysColumns(
+  options: ApiKeysColumnsOptions = {}
+): ColumnDef<ApiKey>[] {
   const { t } = useTranslation()
   const groupRatios = useGroupRatios()
   return [
@@ -187,6 +195,45 @@ export function useApiKeysColumns(): ColumnDef<ApiKey>[] {
         )
       },
       size: 170,
+    },
+    {
+      id: 'usage',
+      header: t('Usage'),
+      cell: ({ row }) => {
+        if (options.isUsageLoading) {
+          return <Skeleton className='h-5 w-24' />
+        }
+
+        const stat = options.usageByTokenId?.[row.original.id]
+        const quota = stat?.quota ?? 0
+
+        return (
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <span className='block w-[120px] font-medium tabular-nums' />
+              }
+            >
+              {formatQuota(quota)}
+            </TooltipTrigger>
+            <TooltipContent>
+              <div className='flex flex-col gap-1 text-xs'>
+                <div>
+                  {t('Usage')}: {formatQuota(quota)}
+                </div>
+                <div>
+                  {t('Used:')} {formatQuota(stat?.consume_quota ?? 0)}
+                </div>
+                <div>
+                  {t('Refunded')}: {formatQuota(stat?.refund_quota ?? 0)}
+                </div>
+              </div>
+            </TooltipContent>
+          </Tooltip>
+        )
+      },
+      size: 140,
+      meta: { mobileHidden: true },
     },
     {
       accessorKey: 'group',

@@ -202,6 +202,15 @@ export const TASK_STATUS = {
   UNKNOWN: 'UNKNOWN', // 未知
 } as const
 
+export const TASK_STATUS_ALL_VALUE = 'all' as const
+
+export const TASK_STATUS_FILTERS = [
+  { label: 'All Status', value: TASK_STATUS_ALL_VALUE },
+  { label: 'Success', value: TASK_STATUS.SUCCESS },
+  { label: 'Failed', value: TASK_STATUS.FAILURE },
+  { label: 'Queued', value: TASK_STATUS.QUEUED },
+] as const
+
 /**
  * Task platforms
  */

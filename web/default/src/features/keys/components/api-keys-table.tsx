@@ -16,6 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import { useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { getRouteApi } from '@tanstack/react-router'
 import { type Table as TanstackTable } from '@tanstack/react-table'
@@ -34,6 +35,7 @@ import {
 } from '@/components/ui/empty'
 import { Input } from '@/components/ui/input'
 import { Skeleton } from '@/components/ui/skeleton'
+import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import {
   DISABLED_ROW_DESKTOP,
   DISABLED_ROW_MOBILE,
@@ -42,14 +44,18 @@ import {
   useDataTable,
 } from '@/components/data-table'
 import { StatusBadge } from '@/components/status-badge'
-import { getApiKeys, searchApiKeys } from '../api'
+import { getApiKeyUsageStats, getApiKeys, searchApiKeys } from '../api'
 import {
   API_KEY_STATUS,
   API_KEY_STATUS_OPTIONS,
   API_KEY_STATUSES,
   ERROR_MESSAGES,
 } from '../constants'
-import { type ApiKey } from '../types'
+import {
+  type ApiKey,
+  type ApiKeyUsagePeriod,
+  type ApiKeyUsageStat,
+} from '../types'
 import { ApiKeyCell } from './api-keys-cells'
 import { useApiKeysColumns } from './api-keys-columns'
 import { useApiKeys } from './api-keys-provider'
@@ -88,9 +94,13 @@ function ApiKeysMobileSkeleton() {
 function ApiKeysMobileList({
   table,
   isLoading,
+  usageByTokenId,
+  isUsageLoading,
 }: {
   table: TanstackTable<ApiKey>
   isLoading: boolean
+  usageByTokenId: Record<number, number | undefined>
+  isUsageLoading: boolean
 }) {
   const { t } = useTranslation()
   const rows = table.getRowModel().rows
@@ -171,6 +181,17 @@ function ApiKeysMobileList({
                 </span>
               )}
             </div>
+
+            <div className='flex items-center justify-between gap-2 text-xs'>
+              <span className='text-muted-foreground'>{t('Usage')}</span>
+              {isUsageLoading ? (
+                <Skeleton className='h-4 w-20' />
+              ) : (
+                <span className='font-medium tabular-nums'>
+                  {formatQuota(usageByTokenId[apiKey.id] ?? 0)}
+                </span>
+              )}
+            </div>
           </div>
         )
       })}
@@ -181,7 +202,7 @@ function ApiKeysMobileList({
 export function ApiKeysTable() {
   const { t } = useTranslation()
   const { refreshTrigger } = useApiKeys()
-  const columns = useApiKeysColumns()
+  const [usagePeriod, setUsagePeriod] = useState<ApiKeyUsagePeriod>('month')
 
   const {
     globalFilter,
@@ -258,6 +279,45 @@ export function ApiKeysTable() {
   })
 
   const apiKeys = data?.items || []
+  const tokenIds = useMemo(() => apiKeys.map((apiKey) => apiKey.id), [apiKeys])
+
+  const { data: usageStats = [], isFetching: isUsageFetching } = useQuery({
+    queryKey: ['keys-usage', usagePeriod, tokenIds.join(','), refreshTrigger],
+    enabled: tokenIds.length > 0,
+    queryFn: async () => {
+      const result = await getApiKeyUsageStats({
+        period: usagePeriod,
+        tokenIds,
+      })
+
+      if (!result.success) {
+        toast.error(result.message || t(ERROR_MESSAGES.LOAD_FAILED))
+        return []
+      }
+
+      return result.data?.items || []
+    },
+    placeholderData: (previousData) => previousData,
+  })
+
+  const usageByTokenId = useMemo<Record<number, ApiKeyUsageStat | undefined>>(
+    () =>
+      Object.fromEntries(
+        usageStats.map((stat) => [stat.token_id, stat] as const)
+      ),
+    [usageStats]
+  )
+  const mobileUsageByTokenId = useMemo<Record<number, number | undefined>>(
+    () =>
+      Object.fromEntries(
+        usageStats.map((stat) => [stat.token_id, stat.quota] as const)
+      ),
+    [usageStats]
+  )
+  const columns = useApiKeysColumns({
+    usageByTokenId,
+    isUsageLoading: isUsageFetching,
+  })
 
   const { table } = useDataTable({
     data: apiKeys,
@@ -290,13 +350,31 @@ export function ApiKeysTable() {
       toolbarProps={{
         searchPlaceholder: t('Filter by name...'),
         additionalSearch: (
-          <Input
-            placeholder={t('Filter by API key...')}
-            aria-label={t('Filter by API key...')}
-            value={tokenFilterInput}
-            onChange={(e) => setTokenFilterInput(e.target.value)}
-            className='w-full sm:w-50 lg:w-60'
-          />
+          <div className='flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center'>
+            <Input
+              placeholder={t('Filter by API key...')}
+              aria-label={t('Filter by API key...')}
+              value={tokenFilterInput}
+              onChange={(e) => setTokenFilterInput(e.target.value)}
+              className='w-full sm:w-50 lg:w-60'
+            />
+            <ToggleGroup
+              value={[usagePeriod]}
+              onValueChange={(value) => {
+                const nextPeriod = value.at(-1)
+                if (nextPeriod) setUsagePeriod(nextPeriod as ApiKeyUsagePeriod)
+              }}
+              variant='outline'
+              size='sm'
+              spacing={0}
+              aria-label={t('Usage')}
+              className='shrink-0'
+            >
+              <ToggleGroupItem value='day'>{t('Day')}</ToggleGroupItem>
+              <ToggleGroupItem value='week'>{t('Week')}</ToggleGroupItem>
+              <ToggleGroupItem value='month'>{t('Month')}</ToggleGroupItem>
+            </ToggleGroup>
+          </div>
         ),
         filters: [
           {
@@ -307,7 +385,14 @@ export function ApiKeysTable() {
           },
         ],
       }}
-      mobile={<ApiKeysMobileList table={table} isLoading={isLoading} />}
+      mobile={
+        <ApiKeysMobileList
+          table={table}
+          isLoading={isLoading}
+          usageByTokenId={mobileUsageByTokenId}
+          isUsageLoading={isUsageFetching}
+        />
+      }
       getRowClassName={(row) =>
         isDisabledApiKeyRow(row.original) ? DISABLED_ROW_DESKTOP : undefined
       }

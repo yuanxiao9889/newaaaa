@@ -460,6 +460,24 @@ function formatChannelRetryPath(
   return path.map(String).join(' -> ')
 }
 
+function formatAsyncRetryDetail(
+  detail: NonNullable<LogOtherData['async_channel_retry_details']>[number],
+  index: number
+): string {
+  const attempt = detail.attempt ?? index + 1
+  const channel = detail.channel_id
+    ? `${detail.channel_id}${detail.channel_name ? ` (${detail.channel_name})` : ''}`
+    : '-'
+  const parts = [
+    `#${attempt}`,
+    `channel=${channel}`,
+    detail.status_code != null ? `status_code=${detail.status_code}` : '',
+    detail.error_code ? `error_code=${detail.error_code}` : '',
+    detail.error_type ? `error_type=${detail.error_type}` : '',
+  ].filter(Boolean)
+  return `${parts.join(', ')}${detail.error ? `\n${detail.error}` : ''}`
+}
+
 interface DetailsDialogProps {
   log: UsageLog
   isAdmin: boolean
@@ -594,6 +612,12 @@ export function DetailsDialog(props: DetailsDialogProps) {
   const channelChain =
     formatChannelRetryPath(other?.async_channel_retry_path) ||
     formatChannelRetryPath(useChannel)
+  const asyncRetryDetails = props.isAdmin
+    ? other?.async_channel_retry_details?.filter(Boolean) || []
+    : []
+  const asyncRetryDetailsText = asyncRetryDetails
+    .map((detail, idx) => formatAsyncRetryDetail(detail, idx))
+    .join('\n\n')
   const isAsyncLog = Boolean(
     other?.async_task ||
       (other?.is_task && other?.task_id) ||
@@ -775,6 +799,44 @@ export function DetailsDialog(props: DetailsDialogProps) {
                       {conversionLabel}
                     </span>
                   </div>
+                </div>
+              </div>
+            </DetailSection>
+          )}
+
+          {/* Async retry failure details (admin only) */}
+          {asyncRetryDetails.length > 0 && (
+            <DetailSection
+              icon={<AlertTriangle className='size-3.5' aria-hidden='true' />}
+              label={t('Retry Failure Details')}
+              variant='danger'
+            >
+              <div className='relative min-w-0'>
+                <Button
+                  variant='ghost'
+                  size='sm'
+                  className='absolute top-0 right-0 h-5 w-5 p-0'
+                  onClick={() => copyToClipboard(asyncRetryDetailsText)}
+                  title={t('Copy to clipboard')}
+                  aria-label={t('Copy to clipboard')}
+                >
+                  {copiedText === asyncRetryDetailsText ? (
+                    <Check className='size-3 text-green-600' />
+                  ) : (
+                    <Copy className='size-3' />
+                  )}
+                </Button>
+                <div className='min-w-0 space-y-2 pr-6'>
+                  {asyncRetryDetails.map((detail, idx) => (
+                    <div
+                      key={`${detail.attempt ?? idx}-${detail.channel_id ?? 'unknown'}`}
+                      className='bg-background/70 min-w-0 rounded border p-2'
+                    >
+                      <p className='font-mono text-[11px] leading-relaxed break-all whitespace-pre-wrap sm:break-words'>
+                        {formatAsyncRetryDetail(detail, idx)}
+                      </p>
+                    </div>
+                  ))}
                 </div>
               </div>
             </DetailSection>
