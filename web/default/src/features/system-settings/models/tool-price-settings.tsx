@@ -16,15 +16,17 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { memo, useCallback, useEffect, useMemo, useState } from 'react'
 import { Code2, Copy, Eye, Plus, Trash2 } from 'lucide-react'
+import { memo, useCallback, useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
+
+import { StaticDataTable } from '@/components/data-table'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
-import { StaticDataTable } from '@/components/data-table'
+
 import { useUpdateOption } from '../hooks/use-update-option'
 
 const OPTION_KEY = 'tool_price_setting.prices'
@@ -263,11 +265,11 @@ export const ToolPriceSettings = memo(function ToolPriceSettings({
               id: 'tool',
               header: t('Tool identifier'),
               cell: (row) => (
-                    <Input
-                      value={row.key}
-                      placeholder='web_search_preview:gpt-4o*'
-                      onChange={(e) => updateRow(row.id, 'key', e.target.value)}
-                    />
+                <Input
+                  value={row.key}
+                  placeholder='web_search_preview:gpt-4o*'
+                  onChange={(e) => updateRow(row.id, 'key', e.target.value)}
+                />
               ),
             },
             {
@@ -275,31 +277,31 @@ export const ToolPriceSettings = memo(function ToolPriceSettings({
               header: t('Price ($/1K calls)'),
               className: 'w-[200px]',
               cell: (row) => (
-                    <Input
-                      type='number'
-                      min={0}
-                      step={0.5}
-                      value={row.price}
-                      onChange={(e) =>
-                        updateRow(row.id, 'price', Number(e.target.value) || 0)
-                      }
-                    />
+                <Input
+                  type='number'
+                  min={0}
+                  step={0.5}
+                  value={row.price}
+                  onChange={(e) =>
+                    updateRow(row.id, 'price', Number(e.target.value) || 0)
+                  }
+                />
               ),
             },
             {
               id: 'actions',
               header: t('Actions'),
-              className: 'w-[80px] text-right',
+              className: 'text-right',
               cellClassName: 'text-right',
               cell: (row) => (
-                    <Button
-                      variant='ghost'
-                      size='icon'
-                      onClick={() => removeRow(row.id)}
-                      aria-label={t('Delete')}
-                    >
-                      <Trash2 className='text-destructive h-4 w-4' />
-                    </Button>
+                <Button
+                  variant='ghost'
+                  size='icon'
+                  onClick={() => removeRow(row.id)}
+                  aria-label={t('Delete')}
+                >
+                  <Trash2 className='text-destructive h-4 w-4' />
+                </Button>
               ),
             },
           ]}

@@ -16,13 +16,17 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import { Plus } from 'lucide-react'
 import { useState } from 'react'
-import { Pencil, Trash2, Plus } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
-import { Button } from '@/components/ui/button'
+
 import { ConfirmDialog } from '@/components/confirm-dialog'
-import { StaticDataTable } from '@/components/data-table'
+import { BadgeCell } from '@/components/data-table/core/badge-cell'
+import { StaticDataTable } from '@/components/data-table/static/static-data-table'
+import { StaticRowActions } from '@/components/data-table/static/static-row-actions'
 import { StatusBadge } from '@/components/status-badge'
+import { Button } from '@/components/ui/button'
+
 import { useDeleteProvider } from '../hooks/use-custom-oauth-mutations'
 import type { CustomOAuthProvider } from '../types'
 
@@ -83,28 +87,33 @@ export function ProviderTable(props: ProviderTableProps) {
             id: 'slug',
             header: t('Slug'),
             cell: (provider) => (
-              <StatusBadge
-                label={provider.slug}
-                variant='neutral'
-                copyable={false}
-              />
+              <BadgeCell>
+                <StatusBadge
+                  label={provider.slug}
+                  variant='neutral'
+                  copyable={false}
+                />
+              </BadgeCell>
             ),
           },
           {
             id: 'status',
             header: t('Status'),
             cell: (provider) => (
-              <StatusBadge
-                label={provider.enabled ? t('Enabled') : t('Disabled')}
-                variant={provider.enabled ? 'success' : 'neutral'}
-                copyable={false}
-              />
+              <BadgeCell>
+                <StatusBadge
+                  label={provider.enabled ? t('Enabled') : t('Disabled')}
+                  variant={provider.enabled ? 'success' : 'neutral'}
+                  copyable={false}
+                />
+              </BadgeCell>
             ),
           },
           {
             id: 'client-id',
             header: t('Client ID'),
-            cellClassName: 'text-muted-foreground max-w-[120px] truncate font-mono',
+            cellClassName:
+              'text-muted-foreground max-w-[120px] truncate font-mono',
             cell: (provider) => provider.client_id,
           },
           {
@@ -113,22 +122,13 @@ export function ProviderTable(props: ProviderTableProps) {
             className: 'text-right',
             cellClassName: 'text-right',
             cell: (provider) => (
-              <div className='flex justify-end gap-1'>
-                <Button
-                  variant='ghost'
-                  size='sm'
-                  onClick={() => props.onEdit(provider)}
-                >
-                  <Pencil className='h-4 w-4' />
-                </Button>
-                <Button
-                  variant='ghost'
-                  size='sm'
-                  onClick={() => setDeleteTarget(provider)}
-                >
-                  <Trash2 className='text-destructive h-4 w-4' />
-                </Button>
-              </div>
+              <StaticRowActions
+                editLabel={t('Edit')}
+                deleteLabel={t('Delete')}
+                menuLabel={t('Open menu')}
+                onEdit={() => props.onEdit(provider)}
+                onDelete={() => setDeleteTarget(provider)}
+              />
             ),
           },
         ]}

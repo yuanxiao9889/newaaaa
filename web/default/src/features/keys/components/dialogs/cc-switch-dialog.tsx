@@ -16,16 +16,17 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useState, useEffect, useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
+import { useState, useEffect, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
-import { getUserModels } from '@/lib/api'
+
+import { Dialog } from '@/components/dialog'
 import { Button } from '@/components/ui/button'
 import { ComboboxInput } from '@/components/ui/combobox-input'
 import { Label } from '@/components/ui/label'
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
-import { Dialog } from '@/components/dialog'
+import { getUserModels } from '@/lib/api'
 
 const CODEX_MODEL_SUGGESTIONS = [
   'gpt-5-codex',
@@ -191,7 +192,9 @@ export function CCSwitchDialog(props: Props) {
       title={t('Import to CC Switch')}
       contentClassName='sm:max-w-md'
       contentHeight='auto'
-      bodyClassName='space-y-4'
+      bodyClassName={
+        currentConfig.modelFields.length === 1 ? 'space-y-4 pb-52' : 'space-y-4'
+      }
       footer={
         <>
           <Button variant='outline' onClick={() => props.onOpenChange(false)}>

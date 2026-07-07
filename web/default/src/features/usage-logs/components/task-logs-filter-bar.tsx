@@ -16,11 +16,12 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useState, useEffect, useCallback } from 'react'
 import { useQueryClient, useIsFetching } from '@tanstack/react-query'
 import { useNavigate, getRouteApi } from '@tanstack/react-router'
 import { type Table } from '@tanstack/react-table'
+import { useState, useEffect, useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
+
 import { useIsAdmin } from '@/hooks/use-admin'
 import {
   Select,
@@ -200,7 +201,7 @@ export function TaskLogsFilterBar<TData>(props: TaskLogsFilterBarProps<TData>) {
     'All Status'
   const placeholder =
     props.logCategory === 'drawing'
-      ? t('Filter by Midjourney task ID')
+      ? t('Filter by MjProxy task ID')
       : t('Filter by task ID')
   const taskSearchValues =
     props.logCategory === 'task'

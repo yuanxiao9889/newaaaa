@@ -17,13 +17,13 @@
       "file": "ja.json",
       "missingCount": 0,
       "extrasCount": 0,
-      "untranslatedCount": 64
+      "untranslatedCount": 67
     },
     "ru": {
       "file": "ru.json",
       "missingCount": 0,
       "extrasCount": 0,
-      "untranslatedCount": 63
+      "untranslatedCount": 66
     },
     "vi": {
       "file": "vi.json",
@@ -31,11 +31,17 @@
       "extrasCount": 0,
       "untranslatedCount": 7
     },
+    "zh-TW": {
+      "file": "zh-TW.json",
+      "missingCount": 118,
+      "extrasCount": 0,
+      "untranslatedCount": 0
+    },
     "zh": {
       "file": "zh.json",
       "missingCount": 0,
       "extrasCount": 0,
-      "untranslatedCount": 0
+      "untranslatedCount": 3
     }
   }
 }
