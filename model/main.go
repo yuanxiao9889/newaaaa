@@ -268,7 +268,7 @@ func migrateDB() error {
 		return err
 	}
 
-	err := DB.AutoMigrate(
+	models := []interface{}{
 		&Channel{},
 		&Token{},
 		&User{},
@@ -279,7 +279,11 @@ func migrateDB() error {
 		&Log{},
 		&Midjourney{},
 		&TopUp{},
-		&AffiliateRewardRecord{},
+	}
+	if !common.UsingMainDatabase(common.DatabaseTypeSQLite) {
+		models = append(models, &AffiliateRewardRecord{})
+	}
+	models = append(models,
 		&ProfitCostPrice{},
 		&ProfitCostPriceVersion{},
 		&QuotaData{},
@@ -303,10 +307,14 @@ func migrateDB() error {
 		&CasbinRule{},
 		&AuthzRole{},
 	)
+	err := DB.AutoMigrate(models...)
 	if err != nil {
 		return err
 	}
 	if common.UsingMainDatabase(common.DatabaseTypeSQLite) {
+		if err := ensureAffiliateRewardRecordTableSQLite(); err != nil {
+			return err
+		}
 		if err := ensureSubscriptionPlanTableSQLite(); err != nil {
 			return err
 		}
@@ -336,7 +344,6 @@ func migrateDBFast() error {
 		{&Log{}, "Log"},
 		{&Midjourney{}, "Midjourney"},
 		{&TopUp{}, "TopUp"},
-		{&AffiliateRewardRecord{}, "AffiliateRewardRecord"},
 		{&ProfitCostPrice{}, "ProfitCostPrice"},
 		{&ProfitCostPriceVersion{}, "ProfitCostPriceVersion"},
 		{&QuotaData{}, "QuotaData"},
@@ -359,6 +366,12 @@ func migrateDBFast() error {
 		{&SystemTaskLock{}, "SystemTaskLock"},
 	}
 	// 动态计算migration数量，确保errChan缓冲区足够大
+	if !common.UsingMainDatabase(common.DatabaseTypeSQLite) {
+		migrations = append(migrations, struct {
+			model interface{}
+			name  string
+		}{&AffiliateRewardRecord{}, "AffiliateRewardRecord"})
+	}
 	errChan := make(chan error, len(migrations))
 
 	for _, m := range migrations {
@@ -382,6 +395,9 @@ func migrateDBFast() error {
 		}
 	}
 	if common.UsingMainDatabase(common.DatabaseTypeSQLite) {
+		if err := ensureAffiliateRewardRecordTableSQLite(); err != nil {
+			return err
+		}
 		if err := ensureSubscriptionPlanTableSQLite(); err != nil {
 			return err
 		}
@@ -493,6 +509,69 @@ func clickHouseCreateTableHasTTL(createTableSQL string) bool {
 type sqliteColumnDef struct {
 	Name string
 	DDL  string
+}
+
+func ensureAffiliateRewardRecordTableSQLite() error {
+	if !common.UsingMainDatabase(common.DatabaseTypeSQLite) {
+		return nil
+	}
+	tableName := "affiliate_reward_records"
+	if !DB.Migrator().HasTable(tableName) {
+		createSQL := `CREATE TABLE ` + "`" + tableName + "`" + ` (
+` + "`id`" + ` integer,
+` + "`inviter_id`" + ` integer NOT NULL,
+` + "`invitee_id`" + ` integer NOT NULL,
+` + "`top_up_id`" + ` integer NOT NULL,
+` + "`trade_no`" + ` varchar(255) NOT NULL,
+` + "`payment_amount`" + ` real NOT NULL DEFAULT 0,
+` + "`reward_quota`" + ` integer NOT NULL DEFAULT 0,
+` + "`created_at`" + ` integer,
+PRIMARY KEY (` + "`id`" + `)
+)`
+		if err := DB.Exec(createSQL).Error; err != nil {
+			return err
+		}
+	}
+	var cols []struct {
+		Name string `gorm:"column:name"`
+	}
+	if err := DB.Raw("PRAGMA table_info(`" + tableName + "`)").Scan(&cols).Error; err != nil {
+		return err
+	}
+	existing := make(map[string]struct{}, len(cols))
+	for _, c := range cols {
+		existing[c.Name] = struct{}{}
+	}
+	required := []sqliteColumnDef{
+		{Name: "inviter_id", DDL: "`inviter_id` integer NOT NULL DEFAULT 0"},
+		{Name: "invitee_id", DDL: "`invitee_id` integer NOT NULL DEFAULT 0"},
+		{Name: "top_up_id", DDL: "`top_up_id` integer NOT NULL DEFAULT 0"},
+		{Name: "trade_no", DDL: "`trade_no` varchar(255) NOT NULL DEFAULT ''"},
+		{Name: "payment_amount", DDL: "`payment_amount` real NOT NULL DEFAULT 0"},
+		{Name: "reward_quota", DDL: "`reward_quota` integer NOT NULL DEFAULT 0"},
+		{Name: "created_at", DDL: "`created_at` integer"},
+	}
+	for _, col := range required {
+		if _, ok := existing[col.Name]; ok {
+			continue
+		}
+		if err := DB.Exec("ALTER TABLE `" + tableName + "` ADD COLUMN " + col.DDL).Error; err != nil {
+			return err
+		}
+	}
+	indexes := []string{
+		"CREATE INDEX IF NOT EXISTS `idx_affiliate_reward_inviter` ON `affiliate_reward_records`(`inviter_id`)",
+		"CREATE INDEX IF NOT EXISTS `idx_affiliate_reward_invitee` ON `affiliate_reward_records`(`invitee_id`)",
+		"CREATE UNIQUE INDEX IF NOT EXISTS `idx_affiliate_reward_records_top_up_id` ON `affiliate_reward_records`(`top_up_id`)",
+		"CREATE UNIQUE INDEX IF NOT EXISTS `idx_affiliate_reward_records_trade_no` ON `affiliate_reward_records`(`trade_no`)",
+		"CREATE INDEX IF NOT EXISTS `idx_affiliate_reward_records_created_at` ON `affiliate_reward_records`(`created_at`)",
+	}
+	for _, stmt := range indexes {
+		if err := DB.Exec(stmt).Error; err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func ensureSubscriptionPlanTableSQLite() error {
