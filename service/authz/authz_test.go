@@ -53,7 +53,7 @@ func TestInitSeedsBuiltInRolesAndPoliciesOnce(t *testing.T) {
 	assert.False(t, Can(3, common.RoleCommonUser, ChannelRead))
 }
 
-func TestInitOnSlaveOnlyLoadsPolicies(t *testing.T) {
+func TestInitOnSlaveEnsuresSchemaWithoutSeeding(t *testing.T) {
 	wasMaster := common.IsMasterNode
 	common.IsMasterNode = false
 	t.Cleanup(func() {
@@ -64,7 +64,6 @@ func TestInitOnSlaveOnlyLoadsPolicies(t *testing.T) {
 	sqlDB, err := db.DB()
 	require.NoError(t, err)
 	sqlDB.SetMaxOpenConns(1)
-	require.NoError(t, db.AutoMigrate(&model.CasbinRule{}, &model.AuthzRole{}))
 
 	require.NoError(t, Init(db))
 

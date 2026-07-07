@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/model"
 	"github.com/casbin/casbin/v2"
 	casbinmodel "github.com/casbin/casbin/v2/model"
 	"gorm.io/gorm"
@@ -31,6 +32,10 @@ m = r.sub == p.sub && r.obj == p.obj && r.act == p.act && p.eft == "allow"
 `
 
 func Init(db *gorm.DB) error {
+	if err := ensureSchema(db); err != nil {
+		return err
+	}
+
 	if common.IsMasterNode {
 		if err := seedBuiltInRoles(db); err != nil {
 			return err
@@ -58,6 +63,14 @@ func Init(db *gorm.DB) error {
 		return nil
 	}
 	return seedDefaultPolicies()
+}
+
+func ensureSchema(db *gorm.DB) error {
+	migrator := db.Migrator()
+	if migrator.HasTable(&model.CasbinRule{}) && migrator.HasTable(&model.AuthzRole{}) {
+		return nil
+	}
+	return db.AutoMigrate(&model.CasbinRule{}, &model.AuthzRole{})
 }
 
 func currentEnforcer() *casbin.SyncedEnforcer {
