@@ -33,7 +33,7 @@ func TestMain(m *testing.M) {
 	model.DB = db
 	model.LOG_DB = db
 
-	common.UsingSQLite = true
+	common.SetDatabaseTypes(common.DatabaseTypeSQLite, common.DatabaseTypeSQLite)
 	common.RedisEnabled = false
 	common.BatchUpdateEnabled = false
 	common.LogConsumeEnabled = true
@@ -49,6 +49,8 @@ func TestMain(m *testing.M) {
 		&model.UserSubscription{},
 		&model.ProfitCostPrice{},
 		&model.ProfitCostPriceVersion{},
+		&model.SystemTask{},
+		&model.SystemTaskLock{},
 	); err != nil {
 		panic("failed to migrate: " + err.Error())
 	}
@@ -73,6 +75,8 @@ func truncate(t *testing.T) {
 		model.DB.Exec("DELETE FROM user_subscriptions")
 		model.DB.Exec("DELETE FROM profit_cost_prices")
 		model.DB.Exec("DELETE FROM profit_cost_price_versions")
+		model.DB.Exec("DELETE FROM system_task_locks")
+		model.DB.Exec("DELETE FROM system_tasks")
 		model.CacheQuotaDataLock.Lock()
 		model.CacheQuotaData = make(map[string]*model.QuotaData)
 		model.CacheQuotaDataLock.Unlock()

@@ -17,7 +17,9 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { useTranslation } from 'react-i18next'
+
 import { cn } from '@/lib/utils'
+
 import type { RankingPeriod } from '../types'
 
 const PERIODS: { id: RankingPeriod; labelKey: string }[] = [
@@ -25,7 +27,6 @@ const PERIODS: { id: RankingPeriod; labelKey: string }[] = [
   { id: 'week', labelKey: 'Week' },
   { id: 'month', labelKey: 'Month' },
   { id: 'year', labelKey: 'Year' },
-  { id: 'all', labelKey: 'All-time' },
 ]
 
 type RankingsHeroProps = {

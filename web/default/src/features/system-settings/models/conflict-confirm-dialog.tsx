@@ -17,6 +17,8 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { useTranslation } from 'react-i18next'
+
+import { StaticDataTable } from '@/components/data-table'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -27,9 +29,6 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
-import {
-  StaticDataTable,
-} from '@/components/data-table'
 
 export type ConflictItem = {
   channel: string
@@ -86,18 +85,18 @@ export function ConflictConfirmDialog({
               id: 'current',
               header: t('Current Billing'),
               cell: (conflict) => (
-                  <pre className='text-sm whitespace-pre-wrap'>
-                    {conflict.current}
-                  </pre>
+                <pre className='text-sm whitespace-pre-wrap'>
+                  {conflict.current}
+                </pre>
               ),
             },
             {
               id: 'new',
               header: t('Change To'),
               cell: (conflict) => (
-                  <pre className='text-sm whitespace-pre-wrap'>
-                    {conflict.newVal}
-                  </pre>
+                <pre className='text-sm whitespace-pre-wrap'>
+                  {conflict.newVal}
+                </pre>
               ),
             },
           ]}

@@ -17,6 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import * as React from 'react'
+
 import { StatusBadgeList } from '@/components/status-badge'
 import {
   Tooltip,
@@ -50,7 +51,7 @@ export function BadgeListCell({
   return (
     <TooltipProvider>
       <Tooltip>
-        <TooltipTrigger render={<div className='-ml-1.5' />}>
+        <TooltipTrigger render={<div className='-ml-1.5 max-w-full' />}>
           <StatusBadgeList
             items={items}
             max={max}

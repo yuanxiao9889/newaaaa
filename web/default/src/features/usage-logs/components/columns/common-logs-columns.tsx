@@ -16,10 +16,24 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useState } from 'react'
 import { type ColumnDef } from '@tanstack/react-table'
-import { CircleAlert, Sparkles, KeyRound } from 'lucide-react'
+import { CircleAlert, GitBranch, Sparkles, KeyRound } from 'lucide-react'
+import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
+
+import { StatusBadge, type StatusBadgeProps } from '@/components/status-badge'
+import { Avatar, AvatarFallback } from '@/components/ui/avatar'
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from '@/components/ui/popover'
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from '@/components/ui/tooltip'
 import { getUserAvatarFallback, getUserAvatarStyle } from '@/lib/avatar'
 import { formatBillingCurrencyFromUSD } from '@/lib/currency'
 import {
@@ -28,14 +42,7 @@ import {
   formatTimestampToDate,
 } from '@/lib/format'
 import { cn } from '@/lib/utils'
-import { Avatar, AvatarFallback } from '@/components/ui/avatar'
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from '@/components/ui/tooltip'
-import { StatusBadge, type StatusBadgeProps } from '@/components/status-badge'
+
 import { LOG_TYPE_ALL_VALUE } from '../../constants'
 import type { UsageLog } from '../../data/schema'
 import {
@@ -99,6 +106,23 @@ function splitQuotaDisplay(value: string): { prefix: string; amount: string } {
 }
 
 function buildDetailSegments(
+  log: UsageLog,
+  other: LogOtherData | null,
+  t: (key: string, opts?: Record<string, unknown>) => string,
+  isAdmin: boolean
+): DetailSegment[] {
+  const segments = buildTypeDetailSegments(log, other, t)
+  // Quota saturation is a rare, admin-only anomaly marker; surface it first
+  // and in danger styling so it stands out on the related billing log. The
+  // backend already strips admin_info for non-admins; gate on isAdmin too as
+  // defense in depth so the marker never leaks if that changes.
+  if (isAdmin && other?.admin_info?.quota_saturation) {
+    return [{ text: t('Quota clamped'), danger: true }, ...segments]
+  }
+  return segments
+}
+
+function buildTypeDetailSegments(
   log: UsageLog,
   other: LogOtherData | null,
   t: (key: string, opts?: Record<string, unknown>) => string
@@ -336,20 +360,22 @@ export function useCommonLogsColumns(isAdmin: boolean): ColumnDef<UsageLog>[] {
 
           const other = parseLogOther(log.other)
           const affinity = other?.admin_info?.channel_affinity
-          const useChannel = other?.admin_info?.use_channel
-          const asyncRetryPath = other?.async_channel_retry_path
+          const rawUseChannel = other?.admin_info?.use_channel ?? []
+          const useChannel = Array.isArray(rawUseChannel)
+            ? rawUseChannel.map(String).filter(Boolean)
+            : []
+          const rawAsyncRetryPath = other?.async_channel_retry_path ?? []
+          const asyncRetryPath = Array.isArray(rawAsyncRetryPath)
+            ? rawAsyncRetryPath.map(String).filter(Boolean)
+            : []
           const channelPath =
-            useChannel && useChannel.length > 0
-              ? useChannel
-              : asyncRetryPath && asyncRetryPath.length > 0
-                ? asyncRetryPath
-                : undefined
-          const channelChain =
-            channelPath && channelPath.length > 0
-              ? channelPath.map(String).join(' -> ')
-              : undefined
+            useChannel.length > 0 ? useChannel : asyncRetryPath
+          const hasRetryChain = channelPath.length > 1
+          const channelChain = hasRetryChain
+            ? channelPath.join(' → ')
+            : undefined
           const fallbackChannelId =
-            channelPath && channelPath.length > 0
+            channelPath.length > 0
               ? String(channelPath[channelPath.length - 1])
               : String(log.channel)
           const channelDisplay = log.channel_name
@@ -360,6 +386,11 @@ export function useCommonLogsColumns(isAdmin: boolean): ColumnDef<UsageLog>[] {
           const channelIdDisplay =
             log.channel > 0 ? `#${log.channel}` : channelChain || `#${log.channel}`
           const channelName = sensitiveVisible ? log.channel_name : '••••'
+          const multiKeyIndex = other?.admin_info?.multi_key_index
+          const showMultiKeyIndex =
+            other?.admin_info?.is_multi_key === true &&
+            typeof multiKeyIndex === 'number' &&
+            Number.isFinite(multiKeyIndex)
 
           return (
             <TooltipProvider>
@@ -369,7 +400,7 @@ export function useCommonLogsColumns(isAdmin: boolean): ColumnDef<UsageLog>[] {
                     <div className='flex max-w-[160px] flex-col gap-0.5' />
                   }
                 >
-                  <div className='relative inline-flex w-fit'>
+                  <div className='relative inline-flex w-fit items-center gap-1'>
                     <StatusBadge
                       label={channelIdDisplay}
                       autoColor={fallbackChannelId}
@@ -378,6 +409,48 @@ export function useCommonLogsColumns(isAdmin: boolean): ColumnDef<UsageLog>[] {
                       showDot={false}
                       className='font-mono'
                     />
+                    {showMultiKeyIndex && (
+                      <StatusBadge
+                        label={String(multiKeyIndex)}
+                        size='sm'
+                        showDot={false}
+                        copyable={false}
+                        variant='neutral'
+                        className='h-5 min-w-5 justify-center rounded-full px-1 font-mono text-xs'
+                        aria-label={`${t('Key')} ${multiKeyIndex}`}
+                      />
+                    )}
+                    {hasRetryChain && (
+                      <Popover>
+                        <PopoverTrigger
+                          render={
+                            <button
+                              type='button'
+                              className='text-muted-foreground hover:text-foreground focus-visible:ring-ring inline-flex size-5 shrink-0 items-center justify-center rounded-full transition-colors focus-visible:ring-2 focus-visible:outline-none'
+                              aria-label={t('Retry Chain')}
+                              onClick={(e) => e.stopPropagation()}
+                            />
+                          }
+                        >
+                          <GitBranch
+                            className='size-3.5 text-amber-500'
+                            aria-hidden='true'
+                          />
+                        </PopoverTrigger>
+                        <PopoverContent
+                          side='top'
+                          align='start'
+                          className='w-64 text-xs'
+                        >
+                          <div className='flex flex-col gap-1'>
+                            <p className='font-medium'>{t('Retry Chain')}</p>
+                            <p className='text-muted-foreground font-mono break-all'>
+                              {channelChain}
+                            </p>
+                          </div>
+                        </PopoverContent>
+                      </Popover>
+                    )}
                     {affinity && (
                       <button
                         type='button'
@@ -414,6 +487,11 @@ export function useCommonLogsColumns(isAdmin: boolean): ColumnDef<UsageLog>[] {
                     {channelChain && (
                       <p className='text-muted-foreground text-xs'>
                         {t('Chain')}: {channelChain}
+                      </p>
+                    )}
+                    {showMultiKeyIndex && (
+                      <p className='text-muted-foreground text-xs'>
+                        {t('Key')}: {multiKeyIndex}
                       </p>
                     )}
                     {affinity && (
@@ -596,11 +674,11 @@ export function useCommonLogsColumns(isAdmin: boolean): ColumnDef<UsageLog>[] {
 
         const timingBgMap: Record<string, string> = {
           success:
-            'border border-emerald-200/40 bg-emerald-50/35 dark:border-emerald-900/40 dark:bg-emerald-950/15',
+            'border border-emerald-200/40 bg-emerald-50/35 !text-emerald-600 dark:border-emerald-900/40 dark:bg-emerald-950/15 dark:!text-emerald-400',
           warning:
-            'border border-amber-200/45 bg-amber-50/35 dark:border-amber-900/40 dark:bg-amber-950/15',
+            'border border-amber-200/45 bg-amber-50/35 !text-amber-600 dark:border-amber-900/40 dark:bg-amber-950/15 dark:!text-amber-400',
           danger:
-            'border border-rose-200/50 bg-rose-50/35 dark:border-rose-900/40 dark:bg-rose-950/15',
+            'border border-rose-200/50 bg-rose-50/35 !text-red-600 dark:border-rose-900/40 dark:bg-rose-950/15 dark:!text-red-400',
           neutral:
             'border border-border/60 bg-muted/30 dark:border-border/40 dark:bg-muted/20',
         }
@@ -803,7 +881,7 @@ export function useCommonLogsColumns(isAdmin: boolean): ColumnDef<UsageLog>[] {
         const log = row.original
         const other = parseLogOther(log.other)
 
-        const segments = buildDetailSegments(log, other, t)
+        const segments = buildDetailSegments(log, other, t, isAdmin)
         const primary = segments[0]
         const hasMore = segments.length > 1
 
