@@ -664,9 +664,9 @@ func applyTaskModelNameFilter(query *gorm.DB, modelName string) *gorm.DB {
 		return query
 	}
 	switch {
-	case common.UsingPostgreSQL:
+	case common.UsingMainDatabase(common.DatabaseTypePostgreSQL):
 		return query.Where("(properties::jsonb ->> 'origin_model_name') LIKE ? ESCAPE '!'", pattern)
-	case common.UsingMySQL:
+	case common.UsingMainDatabase(common.DatabaseTypeMySQL):
 		return query.Where("JSON_UNQUOTE(JSON_EXTRACT(properties, '$.origin_model_name')) LIKE ? ESCAPE '!'", pattern)
 	default:
 		return query.Where("json_extract(properties, '$.origin_model_name') LIKE ? ESCAPE '!'", pattern)
