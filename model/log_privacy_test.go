@@ -19,9 +19,24 @@ func TestFormatUserLogsForResponseHidesChannelInfo(t *testing.T) {
 				"channel_id":               12,
 				"channel_name":             "upstream-a",
 				"channel_type":             1,
+				"request_path":             "/v1/images/edits",
+				"request_conversion":       []string{"openai-image"},
+				"status_code":              502,
+				"error_type":               "openai_error",
+				"error_code":               "upstream_error",
 				"async_channel_retry_path": []string{"12", "18"},
-				"stream_status":            map[string]interface{}{"status": "done"},
-				"task_id":                  "task_public",
+				"async_channel_retry_details": []map[string]interface{}{
+					{
+						"attempt":      1,
+						"channel_id":   12,
+						"channel_name": "upstream-a",
+						"status_code":  502,
+						"error_code":   "upstream_error",
+						"error":        "provider failed",
+					},
+				},
+				"stream_status": map[string]interface{}{"status": "done"},
+				"task_id":       "task_public",
 			}),
 		},
 	}
@@ -40,6 +55,12 @@ func TestFormatUserLogsForResponseHidesChannelInfo(t *testing.T) {
 	require.NotContains(t, other, "channel_name")
 	require.NotContains(t, other, "channel_type")
 	require.NotContains(t, other, "async_channel_retry_path")
+	require.NotContains(t, other, "async_channel_retry_details")
+	require.NotContains(t, other, "request_path")
+	require.NotContains(t, other, "request_conversion")
+	require.NotContains(t, other, "status_code")
+	require.NotContains(t, other, "error_type")
+	require.NotContains(t, other, "error_code")
 	require.NotContains(t, other, "stream_status")
 	require.Equal(t, "task_public", other["task_id"])
 }
