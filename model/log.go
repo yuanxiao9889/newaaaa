@@ -133,6 +133,12 @@ func FormatUserLogsForResponse(logs []*Log, startIdx int) {
 			delete(otherMap, "channel_name")
 			delete(otherMap, "channel_type")
 			delete(otherMap, "async_channel_retry_path")
+			delete(otherMap, "async_channel_retry_details")
+			delete(otherMap, "request_path")
+			delete(otherMap, "request_conversion")
+			delete(otherMap, "status_code")
+			delete(otherMap, "error_type")
+			delete(otherMap, "error_code")
 			// delete(otherMap, "reject_reason")
 			delete(otherMap, "stream_status")
 		}
@@ -426,7 +432,7 @@ type RecordTaskBillingLogParams struct {
 	Group            string
 	UseTimeSeconds   int
 	Other            map[string]interface{}
-	NodeName          string // 任务发起节点；为空时回退当前节点
+	NodeName         string // 任务发起节点；为空时回退当前节点
 }
 
 func RecordTaskBillingLog(params RecordTaskBillingLogParams) {
