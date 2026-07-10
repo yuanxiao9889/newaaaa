@@ -16,7 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useMemo, useState } from 'react'
+import { useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { getRouteApi } from '@tanstack/react-router'
 import { type Table as TanstackTable } from '@tanstack/react-table'
@@ -35,7 +35,6 @@ import {
 } from '@/components/ui/empty'
 import { Input } from '@/components/ui/input'
 import { Skeleton } from '@/components/ui/skeleton'
-import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import {
   DISABLED_ROW_DESKTOP,
   DISABLED_ROW_MOBILE,
@@ -44,6 +43,8 @@ import {
   useDataTable,
 } from '@/components/data-table'
 import { StatusBadge } from '@/components/status-badge'
+import { CompactDateTimeRangePicker } from '@/features/usage-logs/components/compact-date-time-range-picker'
+import dayjs from '@/lib/dayjs'
 import { getApiKeyUsageStats, getApiKeys, searchApiKeys } from '../api'
 import {
   API_KEY_STATUS,
@@ -53,7 +54,6 @@ import {
 } from '../constants'
 import {
   type ApiKey,
-  type ApiKeyUsagePeriod,
   type ApiKeyUsageStat,
 } from '../types'
 import { ApiKeyCell } from './api-keys-cells'
@@ -203,7 +203,31 @@ function ApiKeysMobileList({
 export function ApiKeysTable() {
   const { t } = useTranslation()
   const { refreshTrigger } = useApiKeys()
-  const [usagePeriod, setUsagePeriod] = useState<ApiKeyUsagePeriod>('month')
+  const search = route.useSearch()
+  const navigate = route.useNavigate()
+  const defaultUsageRange = useMemo(() => {
+    const now = dayjs()
+    return {
+      start: now.startOf('month').toDate(),
+      end: now.endOf('month').toDate(),
+    }
+  }, [])
+  const usageRange = useMemo(
+    () => ({
+      start: search.usageStartTime
+        ? new Date(search.usageStartTime)
+        : defaultUsageRange.start,
+      end: search.usageEndTime
+        ? new Date(search.usageEndTime)
+        : defaultUsageRange.end,
+    }),
+    [
+      defaultUsageRange.end,
+      defaultUsageRange.start,
+      search.usageEndTime,
+      search.usageStartTime,
+    ]
+  )
 
   const {
     globalFilter,
@@ -214,8 +238,8 @@ export function ApiKeysTable() {
     onPaginationChange,
     ensurePageInRange,
   } = useTableUrlState({
-    search: route.useSearch(),
-    navigate: route.useNavigate(),
+    search,
+    navigate,
     pagination: { defaultPage: 1, defaultPageSize: 20 },
     globalFilter: { enabled: true, key: 'filter' },
     columnFilters: [
@@ -283,12 +307,23 @@ export function ApiKeysTable() {
   const tokenIds = useMemo(() => apiKeys.map((apiKey) => apiKey.id), [apiKeys])
 
   const { data: usageStats = [], isFetching: isUsageFetching } = useQuery({
-    queryKey: ['keys-usage', usagePeriod, tokenIds.join(','), refreshTrigger],
+    queryKey: [
+      'keys-usage',
+      usageRange.start?.getTime(),
+      usageRange.end?.getTime(),
+      tokenIds.join(','),
+      refreshTrigger,
+    ],
     enabled: tokenIds.length > 0,
     queryFn: async () => {
       const result = await getApiKeyUsageStats({
-        period: usagePeriod,
         tokenIds,
+        startTimestamp: usageRange.start
+          ? Math.floor(usageRange.start.getTime() / 1000)
+          : undefined,
+        endTimestamp: usageRange.end
+          ? Math.floor(usageRange.end.getTime() / 1000)
+          : undefined,
       })
 
       if (!result.success) {
@@ -360,22 +395,22 @@ export function ApiKeysTable() {
               onChange={(e) => setTokenFilterInput(e.target.value)}
               className='w-full sm:w-50 lg:w-60'
             />
-            <ToggleGroup
-              value={[usagePeriod]}
-              onValueChange={(value) => {
-                const nextPeriod = value.at(-1)
-                if (nextPeriod) setUsagePeriod(nextPeriod as ApiKeyUsagePeriod)
+            <CompactDateTimeRangePicker
+              start={usageRange.start}
+              end={usageRange.end}
+              onChange={(range) => {
+                navigate({
+                  to: '/keys',
+                  search: (prev) => ({
+                    ...prev,
+                    page: 1,
+                    usageStartTime: range.start?.getTime(),
+                    usageEndTime: range.end?.getTime(),
+                  }),
+                })
               }}
-              variant='outline'
-              size='sm'
-              spacing={0}
-              aria-label={t('Usage')}
-              className='shrink-0'
-            >
-              <ToggleGroupItem value='day'>{t('Day')}</ToggleGroupItem>
-              <ToggleGroupItem value='week'>{t('Week')}</ToggleGroupItem>
-              <ToggleGroupItem value='month'>{t('Month')}</ToggleGroupItem>
-            </ToggleGroup>
+              className='w-full sm:w-72 lg:w-96'
+            />
           </div>
         ),
         filters: [

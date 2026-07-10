@@ -661,4 +661,29 @@ func TestGetTokenUsagePeriodStatsReturnsOwnedTokenUsageByPeriod(t *testing.T) {
 	if monthUsage.StartTimestamp != 1782835200 || monthUsage.EndTimestamp != 1785513600 {
 		t.Fatalf("unexpected month range: %d-%d", monthUsage.StartTimestamp, monthUsage.EndTimestamp)
 	}
+
+	customCtx, customRecorder := newAuthenticatedContext(t, http.MethodGet, fmt.Sprintf(
+		"/api/token/usage?start_timestamp=1783430000&end_timestamp=1783440000&token_ids=%d,%d",
+		firstToken.Id,
+		secondToken.Id,
+	), nil, 1)
+	GetTokenUsagePeriodStats(customCtx)
+	customResponse := decodeAPIResponse(t, customRecorder)
+	var customUsage tokenUsagePeriodResponse
+	if err := common.Unmarshal(customResponse.Data, &customUsage); err != nil {
+		t.Fatalf("failed to decode custom usage response: %v", err)
+	}
+	if customUsage.Period != "custom" {
+		t.Fatalf("expected custom period, got %q", customUsage.Period)
+	}
+	if customUsage.StartTimestamp != 1783430000 || customUsage.EndTimestamp != 1783440000 {
+		t.Fatalf("unexpected custom range: %d-%d", customUsage.StartTimestamp, customUsage.EndTimestamp)
+	}
+	customUsageByTokenID := map[int]int{}
+	for _, item := range customUsage.Items {
+		customUsageByTokenID[item.TokenID] = item.Quota
+	}
+	if customUsageByTokenID[firstToken.Id] != 25 || customUsageByTokenID[secondToken.Id] != 70 {
+		t.Fatalf("unexpected custom token usage: %+v", customUsage.Items)
+	}
 }

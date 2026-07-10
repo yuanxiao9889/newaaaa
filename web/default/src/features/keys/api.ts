@@ -60,10 +60,16 @@ export async function getApiKeyUsageStats(
   params: GetApiKeyUsageStatsParams
 ): Promise<GetApiKeyUsageStatsResponse> {
   const queryParams = new URLSearchParams()
-  queryParams.set('period', params.period)
+  if (params.period) queryParams.set('period', params.period)
   queryParams.set('token_ids', params.tokenIds.join(','))
   if (params.timestamp != null) {
     queryParams.set('timestamp', String(params.timestamp))
+  }
+  if (params.startTimestamp != null) {
+    queryParams.set('start_timestamp', String(params.startTimestamp))
+  }
+  if (params.endTimestamp != null) {
+    queryParams.set('end_timestamp', String(params.endTimestamp))
   }
   const res = await api.get(`/api/token/usage?${queryParams.toString()}`)
   return res.data

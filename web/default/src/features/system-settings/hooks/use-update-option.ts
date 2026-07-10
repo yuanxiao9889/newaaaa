@@ -39,6 +39,22 @@ const STATUS_RELATED_KEYS = [
   'general_setting.custom_currency_exchange_rate',
 ]
 
+const PRICING_RELATED_KEYS = [
+  'ModelPrice',
+  'ModelRatio',
+  'CompletionRatio',
+  'CacheRatio',
+  'CreateCacheRatio',
+  'ImageRatio',
+  'AudioRatio',
+  'AudioCompletionRatio',
+  'GroupRatio',
+  'GroupGroupRatio',
+  'UserUsableGroups',
+  'billing_setting.billing_mode',
+  'billing_setting.billing_expr',
+]
+
 export function useUpdateOption() {
   const queryClient = useQueryClient()
 
@@ -57,6 +73,10 @@ export function useUpdateOption() {
           } catch {
             /* empty */
           }
+        }
+
+        if (PRICING_RELATED_KEYS.includes(variables.key)) {
+          queryClient.invalidateQueries({ queryKey: ['pricing'] })
         }
 
         toast.success(i18next.t('Setting updated successfully'))
