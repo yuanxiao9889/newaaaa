@@ -83,6 +83,7 @@ export interface SearchApiKeysParams {
 }
 
 export type ApiKeyUsagePeriod = 'day' | 'week' | 'month'
+export type ApiKeyUsageResponsePeriod = ApiKeyUsagePeriod | 'custom'
 
 export interface ApiKeyUsageStat {
   token_id: number
@@ -92,16 +93,18 @@ export interface ApiKeyUsageStat {
 }
 
 export interface GetApiKeyUsageStatsParams {
-  period: ApiKeyUsagePeriod
+  period?: ApiKeyUsagePeriod
   tokenIds: number[]
   timestamp?: number
+  startTimestamp?: number
+  endTimestamp?: number
 }
 
 export interface GetApiKeyUsageStatsResponse {
   success: boolean
   message?: string
   data?: {
-    period: ApiKeyUsagePeriod
+    period: ApiKeyUsageResponsePeriod
     start_timestamp: number
     end_timestamp: number
     items: ApiKeyUsageStat[]

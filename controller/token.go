@@ -179,6 +179,21 @@ type tokenUsagePeriodStatsResponse struct {
 	Items          []tokenUsagePeriodStatsItem `json:"items"`
 }
 
+func parseTokenUsageTimeRange(c *gin.Context, period string) (int64, int64, string, error) {
+	startTimestamp, startErr := strconv.ParseInt(c.Query("start_timestamp"), 10, 64)
+	endTimestamp, endErr := strconv.ParseInt(c.Query("end_timestamp"), 10, 64)
+	if c.Query("start_timestamp") != "" || c.Query("end_timestamp") != "" {
+		if startErr != nil || endErr != nil || startTimestamp <= 0 || endTimestamp <= 0 || startTimestamp >= endTimestamp {
+			return 0, 0, "", fmt.Errorf("invalid time range")
+		}
+		return startTimestamp, endTimestamp, "custom", nil
+	}
+
+	timestamp, _ := strconv.ParseInt(c.Query("timestamp"), 10, 64)
+	startTimestamp, endTimestamp = tokenUsagePeriodRange(period, timestamp)
+	return startTimestamp, endTimestamp, period, nil
+}
+
 func parseTokenUsagePeriod(period string) (string, error) {
 	switch period {
 	case "", "month":
@@ -257,8 +272,11 @@ func GetTokenUsagePeriodStats(c *gin.Context) {
 		return
 	}
 
-	timestamp, _ := strconv.ParseInt(c.Query("timestamp"), 10, 64)
-	startTimestamp, endTimestamp := tokenUsagePeriodRange(period, timestamp)
+	startTimestamp, endTimestamp, responsePeriod, err := parseTokenUsageTimeRange(c, period)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
 	stats, err := model.SumUserTokenUsageStats(userId, ownedTokenIds, startTimestamp, endTimestamp)
 	if err != nil {
 		common.ApiError(c, err)
@@ -281,7 +299,7 @@ func GetTokenUsagePeriodStats(c *gin.Context) {
 	}
 
 	common.ApiSuccess(c, tokenUsagePeriodStatsResponse{
-		Period:         period,
+		Period:         responsePeriod,
 		StartTimestamp: startTimestamp,
 		EndTimestamp:   endTimestamp,
 		Items:          items,

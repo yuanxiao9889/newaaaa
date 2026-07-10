@@ -596,6 +596,13 @@ func updateOptionMap(key string, value string) (err error) {
 		// The value is already stored in OptionMap at the top of this function (line: common.OptionMap[key] = value).
 		// No additional in-memory variable to update.
 	}
+	if err == nil {
+		switch key {
+		case "ModelRatio", "ModelPrice", "CompletionRatio", "CacheRatio", "CreateCacheRatio", "ImageRatio", "AudioRatio", "AudioCompletionRatio", "GroupRatio", "GroupGroupRatio":
+			InvalidatePricingCache()
+			ratio_setting.InvalidateExposedDataCache()
+		}
+	}
 	return err
 }
 
