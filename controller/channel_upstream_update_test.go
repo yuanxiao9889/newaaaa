@@ -11,6 +11,40 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestBuildChannelModelsURL(t *testing.T) {
+	tests := []struct {
+		name        string
+		channelType int
+		baseURL     string
+		want        string
+	}{
+		{
+			name:        "OpenAI compatible base URL without trailing slash",
+			channelType: 1,
+			baseURL:     "https://www.oopii.cc",
+			want:        "https://www.oopii.cc/v1/models",
+		},
+		{
+			name:        "OpenAI compatible base URL with trailing slash",
+			channelType: 1,
+			baseURL:     "https://www.oopii.cc/",
+			want:        "https://www.oopii.cc/v1/models",
+		},
+		{
+			name:        "Ali compatible endpoint",
+			channelType: 17,
+			baseURL:     "https://dashscope.aliyuncs.com/",
+			want:        "https://dashscope.aliyuncs.com/compatible-mode/v1/models",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			require.Equal(t, tt.want, buildChannelModelsURL(tt.channelType, tt.baseURL))
+		})
+	}
+}
+
 func TestNormalizeModelNames(t *testing.T) {
 	result := normalizeModelNames([]string{
 		" gpt-4o ",

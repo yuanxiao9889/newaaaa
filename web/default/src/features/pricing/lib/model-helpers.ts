@@ -71,5 +71,5 @@ export function isSecondBasedFixedPriceModel(model: PricingModel): boolean {
   const endpoints = model.supported_endpoint_types || []
   if (endpoints.includes('openai-video')) return true
 
-  return /video|sora|veo|kling|pika|grok/i.test(modelName)
+  return /video|sora|veo|kling|pika/i.test(modelName)
 }

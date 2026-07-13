@@ -399,13 +399,18 @@ export function ApiKeysTable() {
               start={usageRange.start}
               end={usageRange.end}
               onChange={(range) => {
+                const hasCompleteRange = !!range.start && !!range.end
                 navigate({
                   to: '/keys',
                   search: (prev) => ({
                     ...prev,
                     page: 1,
-                    usageStartTime: range.start?.getTime(),
-                    usageEndTime: range.end?.getTime(),
+                    usageStartTime: hasCompleteRange
+                      ? range.start?.getTime()
+                      : undefined,
+                    usageEndTime: hasCompleteRange
+                      ? range.end?.getTime()
+                      : undefined,
                   }),
                 })
               }}

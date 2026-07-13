@@ -20,8 +20,17 @@ type ImageRequest struct {
 	Prompt            string          `json:"prompt" binding:"required"`
 	N                 *uint           `json:"n,omitempty"`
 	Size              string          `json:"size,omitempty"`
+	AspectRatio       json.RawMessage `json:"aspect_ratio,omitempty"`
+	AspectRatioCompat json.RawMessage `json:"aspectRatio,omitempty"`
+	ImageSize         json.RawMessage `json:"image_size,omitempty"`
+	ImageBackend      json.RawMessage `json:"image_backend,omitempty"`
 	Quality           string          `json:"quality,omitempty"`
 	ResponseFormat    string          `json:"response_format,omitempty"`
+	ReferenceImages   json.RawMessage `json:"reference_images,omitempty"`
+	OutputResolution  json.RawMessage `json:"output_resolution,omitempty"`
+	Resolution        json.RawMessage `json:"resolution,omitempty"`
+	GenerationConfig  json.RawMessage `json:"generationConfig,omitempty"`
+	ExtraBody         json.RawMessage `json:"extra_body,omitempty"`
 	Style             json.RawMessage `json:"style,omitempty"`
 	User              json.RawMessage `json:"user,omitempty"`
 	ExtraFields       json.RawMessage `json:"extra_fields,omitempty"`

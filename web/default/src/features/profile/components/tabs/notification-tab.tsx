@@ -1,4 +1,4 @@
-/*
+﻿/*
 Copyright (C) 2023-2026 QuantumNous
 
 This program is free software: you can redistribute it and/or modify
@@ -27,6 +27,8 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
+import { getCurrencyDisplay } from '@/lib/currency'
+import { parseQuotaFromDollars, quotaUnitsToDollars } from '@/lib/format'
 import { ROLE } from '@/lib/roles'
 
 import { updateUserSettings } from '../../api'
@@ -82,6 +84,9 @@ export function NotificationTab({ profile, onUpdate }: NotificationTabProps) {
     record_ip_log: false,
     upstream_model_update_notify_enabled: false,
   })
+  const [quotaWarningAmount, setQuotaWarningAmount] = useState(() =>
+    quotaUnitsToDollars(DEFAULT_QUOTA_WARNING_THRESHOLD)
+  )
 
   // Update form field helper
   const updateField = useCallback(
@@ -94,10 +99,11 @@ export function NotificationTab({ profile, onUpdate }: NotificationTabProps) {
   useEffect(() => {
     if (profile?.setting) {
       const parsed = parseUserSettings(profile.setting)
+      const rawQuotaWarningThreshold =
+        parsed.quota_warning_threshold ?? DEFAULT_QUOTA_WARNING_THRESHOLD
       setSettings({
         notify_type: normalizeNotifyType(parsed.notify_type),
-        quota_warning_threshold:
-          parsed.quota_warning_threshold ?? DEFAULT_QUOTA_WARNING_THRESHOLD,
+        quota_warning_threshold: rawQuotaWarningThreshold,
         notification_email: parsed.notification_email ?? '',
         webhook_url: parsed.webhook_url ?? '',
         webhook_secret: parsed.webhook_secret ?? '',
@@ -111,13 +117,17 @@ export function NotificationTab({ profile, onUpdate }: NotificationTabProps) {
         upstream_model_update_notify_enabled:
           parsed.upstream_model_update_notify_enabled || false,
       })
+      setQuotaWarningAmount(quotaUnitsToDollars(rawQuotaWarningThreshold))
     }
   }, [profile])
 
   const handleSave = async () => {
     try {
       setLoading(true)
-      const response = await updateUserSettings(settings)
+      const response = await updateUserSettings({
+        ...settings,
+        quota_warning_threshold: parseQuotaFromDollars(quotaWarningAmount),
+      })
 
       if (response.success) {
         toast.success(t('Settings updated successfully'))
@@ -125,7 +135,7 @@ export function NotificationTab({ profile, onUpdate }: NotificationTabProps) {
       } else {
         toast.error(response.message || t('Failed to update settings'))
       }
-    } catch (_error) {
+    } catch {
       toast.error(t('Failed to update settings'))
     } finally {
       setLoading(false)
@@ -133,6 +143,10 @@ export function NotificationTab({ profile, onUpdate }: NotificationTabProps) {
   }
 
   const notifyType = normalizeNotifyType(settings.notify_type)
+  const { meta: currencyMeta } = getCurrencyDisplay()
+  const quotaWarningUnit =
+    currencyMeta.kind === 'tokens' ? t('Tokens') : currencyMeta.symbol
+  const minimumQuotaWarningAmount = quotaUnitsToDollars(1)
 
   return (
     <div className='space-y-4 sm:space-y-6'>
@@ -143,8 +157,9 @@ export function NotificationTab({ profile, onUpdate }: NotificationTabProps) {
           value={[notifyType]}
           onValueChange={(value) => {
             const nextValue = value.find((item) => item !== notifyType)
-            if (nextValue)
+            if (nextValue) {
               updateField('notify_type', normalizeNotifyType(nextValue))
+            }
           }}
           aria-label={t('Notification Method')}
           variant='outline'
@@ -172,19 +187,23 @@ export function NotificationTab({ profile, onUpdate }: NotificationTabProps) {
 
       {/* Warning Threshold */}
       <div className='space-y-1.5'>
-        <Label htmlFor='threshold'>{t('Quota Warning Threshold')}</Label>
+        <Label htmlFor='threshold'>
+          {t('Quota Warning Threshold')} ({quotaWarningUnit})
+        </Label>
         <Input
           id='threshold'
           type='number'
           className='h-9'
-          value={settings.quota_warning_threshold}
-          onChange={(e) =>
-            updateField('quota_warning_threshold', Number(e.target.value))
-          }
+          min={minimumQuotaWarningAmount}
+          step='any'
+          value={quotaWarningAmount}
+          onChange={(e) => setQuotaWarningAmount(Number(e.target.value))}
           placeholder={t('Enter threshold')}
         />
         <p className='text-muted-foreground text-xs'>
-          {t('Get notified when balance falls below this value')}
+          {t(
+            'Notifications are sent once when balance falls below 100%, 50%, and 20% of this threshold'
+          )}
         </p>
       </div>
 
