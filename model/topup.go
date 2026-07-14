@@ -15,6 +15,7 @@ type TopUp struct {
 	Id              int     `json:"id"`
 	UserId          int     `json:"user_id" gorm:"index"`
 	Amount          int64   `json:"amount"`
+	QuotaAmount     int     `json:"quota_amount,omitempty" gorm:"type:int;default:0"`
 	Money           float64 `json:"money"`
 	TradeNo         string  `json:"trade_no" gorm:"unique;type:varchar(255);index"`
 	PaymentMethod   string  `json:"payment_method" gorm:"type:varchar(50)"`
@@ -25,11 +26,12 @@ type TopUp struct {
 }
 
 const (
-	PaymentMethodStripe       = "stripe"
-	PaymentMethodCreem        = "creem"
-	PaymentMethodWaffo        = "waffo"
-	PaymentMethodWaffoPancake = "waffo_pancake"
-	PaymentMethodBalance      = "balance"
+	PaymentMethodStripe          = "stripe"
+	PaymentMethodCreem           = "creem"
+	PaymentMethodWaffo           = "waffo"
+	PaymentMethodWaffoPancake    = "waffo_pancake"
+	PaymentMethodBalance         = "balance"
+	PaymentMethodOfficialWebsite = "official_website"
 )
 
 const (
@@ -39,6 +41,7 @@ const (
 	PaymentProviderWaffo        = "waffo"
 	PaymentProviderWaffoPancake = "waffo_pancake"
 	PaymentProviderBalance      = "balance"
+	PaymentProviderAdmin        = "admin"
 )
 
 var (
@@ -307,6 +310,14 @@ func topUpQueryCutoff() int64 {
 	return common.GetTimestamp() - topUpQueryWindowSeconds
 }
 
+// scopeUserVisibleTopUps keeps historical administrator grants visible beyond the normal query window.
+func scopeUserVisibleTopUps(tx *gorm.DB, userId int) *gorm.DB {
+	return tx.Where(
+		"user_id = ? AND (create_time >= ? OR payment_provider = ?)",
+		userId, topUpQueryCutoff(), PaymentProviderAdmin,
+	)
+}
+
 func GetUserTopUps(userId int, pageInfo *common.PageInfo) (topups []*TopUp, total int64, err error) {
 	// Start transaction
 	tx := DB.Begin()
@@ -319,17 +330,15 @@ func GetUserTopUps(userId int, pageInfo *common.PageInfo) (topups []*TopUp, tota
 		}
 	}()
 
-	cutoff := topUpQueryCutoff()
-
 	// Get total count within transaction
-	err = tx.Model(&TopUp{}).Where("user_id = ? AND create_time >= ?", userId, cutoff).Count(&total).Error
+	err = scopeUserVisibleTopUps(tx.Model(&TopUp{}), userId).Count(&total).Error
 	if err != nil {
 		tx.Rollback()
 		return nil, 0, err
 	}
 
 	// Get paginated topups within same transaction
-	err = tx.Where("user_id = ? AND create_time >= ?", userId, cutoff).Order("id desc").Limit(pageInfo.GetPageSize()).Offset(pageInfo.GetStartIdx()).Find(&topups).Error
+	err = scopeUserVisibleTopUps(tx, userId).Order("id desc").Limit(pageInfo.GetPageSize()).Offset(pageInfo.GetStartIdx()).Find(&topups).Error
 	if err != nil {
 		tx.Rollback()
 		return nil, 0, err
@@ -388,7 +397,7 @@ func SearchUserTopUps(userId int, keyword string, pageInfo *common.PageInfo) (to
 		}
 	}()
 
-	query := tx.Model(&TopUp{}).Where("user_id = ? AND create_time >= ?", userId, topUpQueryCutoff())
+	query := scopeUserVisibleTopUps(tx.Model(&TopUp{}), userId)
 	if keyword != "" {
 		pattern, perr := sanitizeLikePattern(keyword)
 		if perr != nil {

@@ -1036,7 +1036,7 @@ type ManageRequest struct {
 // ManageUser Only admin user can do this
 func ManageUser(c *gin.Context) {
 	var req ManageRequest
-	err := json.NewDecoder(c.Request.Body).Decode(&req)
+	err := common.DecodeJson(c.Request.Body, &req)
 
 	if err != nil {
 		common.ApiErrorI18n(c, i18n.MsgInvalidParams)
@@ -1109,12 +1109,13 @@ func ManageUser(c *gin.Context) {
 				common.ApiErrorI18n(c, i18n.MsgUserQuotaChangeZero)
 				return
 			}
-			if err := model.IncreaseUserQuota(user.Id, req.Value, true); err != nil {
+			if _, err := model.AddAdminQuota(user.Id, req.Value); err != nil {
 				common.ApiError(c, err)
 				return
 			}
 			recordManageAuditFor(c, user.Id, "user.quota_add", map[string]interface{}{
-				"quota": logger.LogQuota(req.Value),
+				"quota":       logger.LogQuota(req.Value),
+				"quota_value": req.Value,
 			})
 		case "subtract":
 			if req.Value <= 0 {
