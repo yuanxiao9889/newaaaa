@@ -340,6 +340,14 @@ func InitResources() error {
 	if err != nil {
 		return err
 	}
+	if common.IsMasterNode {
+		count, backfillErr := model.BackfillAdminQuotaTopUps()
+		if backfillErr != nil {
+			common.SysError("failed to backfill administrator quota top-ups: " + backfillErr.Error())
+		} else if count > 0 {
+			common.SysLog(fmt.Sprintf("backfilled %d administrator quota top-ups", count))
+		}
+	}
 
 	// Initialize Redis
 	err = common.InitRedisClient()
