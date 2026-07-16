@@ -16,16 +16,25 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useMemo } from 'react'
+
 import { useQuery } from '@tanstack/react-query'
 import { getRouteApi } from '@tanstack/react-router'
-import { type Table as TanstackTable } from '@tanstack/react-table'
+import type { Table as TanstackTable } from '@tanstack/react-table'
 import { Database } from 'lucide-react'
+import { useEffect, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
-import { formatQuota } from '@/lib/format'
-import { cn } from '@/lib/utils'
-import { useTableUrlState } from '@/hooks/use-table-url-state'
+
+import {
+  DISABLED_ROW_DESKTOP,
+  DISABLED_ROW_MOBILE,
+  DataTablePage,
+  useDebouncedColumnFilter,
+  useDataTable,
+} from '@/components/data-table'
+import { StatusBadge } from '@/components/status-badge'
+import { Button } from '@/components/ui/button'
+import { Checkbox } from '@/components/ui/checkbox'
 import {
   Empty,
   EmptyDescription,
@@ -35,16 +44,12 @@ import {
 } from '@/components/ui/empty'
 import { Input } from '@/components/ui/input'
 import { Skeleton } from '@/components/ui/skeleton'
-import {
-  DISABLED_ROW_DESKTOP,
-  DISABLED_ROW_MOBILE,
-  DataTablePage,
-  useDebouncedColumnFilter,
-  useDataTable,
-} from '@/components/data-table'
-import { StatusBadge } from '@/components/status-badge'
 import { CompactDateTimeRangePicker } from '@/features/usage-logs/components/compact-date-time-range-picker'
+import { useTableUrlState } from '@/hooks/use-table-url-state'
 import dayjs from '@/lib/dayjs'
+import { formatQuota } from '@/lib/format'
+import { cn } from '@/lib/utils'
+
 import { getApiKeyUsageStats, getApiKeys, searchApiKeys } from '../api'
 import {
   API_KEY_STATUS,
@@ -52,10 +57,7 @@ import {
   API_KEY_STATUSES,
   ERROR_MESSAGES,
 } from '../constants'
-import {
-  type ApiKey,
-  type ApiKeyUsageStat,
-} from '../types'
+import type { ApiKey, ApiKeyUsageStat } from '../types'
 import { ApiKeyCell } from './api-keys-cells'
 import { useApiKeysColumns } from './api-keys-columns'
 import { useApiKeys } from './api-keys-provider'
@@ -97,11 +99,13 @@ function ApiKeysMobileList({
   isLoading,
   usageByTokenId,
   isUsageLoading,
+  isUsageError,
 }: {
   table: TanstackTable<ApiKey>
   isLoading: boolean
   usageByTokenId: Record<number, number | undefined>
   isUsageLoading: boolean
+  isUsageError: boolean
 }) {
   const { t } = useTranslation()
   const rows = table.getRowModel().rows
@@ -134,6 +138,16 @@ function ApiKeysMobileList({
         const apiKey = row.original
         const statusConfig = API_KEY_STATUSES[apiKey.status]
         const total = apiKey.used_quota + apiKey.remain_quota
+        let usageContent = (
+          <span className='font-medium tabular-nums'>
+            {formatQuota(usageByTokenId[apiKey.id] ?? 0)}
+          </span>
+        )
+        if (isUsageLoading) {
+          usageContent = <Skeleton className='h-4 w-20' />
+        } else if (isUsageError) {
+          usageContent = <span className='text-muted-foreground'>—</span>
+        }
 
         return (
           <div
@@ -144,12 +158,22 @@ function ApiKeysMobileList({
             )}
           >
             <div className='flex items-start justify-between gap-3'>
-              <div className='min-w-0'>
-                <div className='truncate text-sm font-semibold'>
-                  {apiKey.name}
-                </div>
-                <div className='text-muted-foreground text-[11px]'>
-                  {t('API Key')}
+              <div className='flex min-w-0 items-start gap-2'>
+                <Checkbox
+                  checked={row.getIsSelected()}
+                  onCheckedChange={(value) => row.toggleSelected(!!value)}
+                  aria-label={t('Select API key {{name}}', {
+                    name: apiKey.name,
+                  })}
+                  className='mt-0.5 shrink-0'
+                />
+                <div className='min-w-0'>
+                  <div className='truncate text-sm font-semibold'>
+                    {apiKey.name}
+                  </div>
+                  <div className='text-muted-foreground text-[11px]'>
+                    {t('API Key')}
+                  </div>
                 </div>
               </div>
               {statusConfig && (
@@ -184,14 +208,10 @@ function ApiKeysMobileList({
             </div>
 
             <div className='flex items-center justify-between gap-2 text-xs'>
-              <span className='text-muted-foreground'>{t('Usage')}</span>
-              {isUsageLoading ? (
-                <Skeleton className='h-4 w-20' />
-              ) : (
-                <span className='font-medium tabular-nums'>
-                  {formatQuota(usageByTokenId[apiKey.id] ?? 0)}
-                </span>
-              )}
+              <span className='text-muted-foreground'>
+                {t('Settled usage (selected period)')}
+              </span>
+              {usageContent}
             </div>
           </div>
         )
@@ -303,15 +323,21 @@ export function ApiKeysTable() {
     placeholderData: (previousData) => previousData,
   })
 
-  const apiKeys = data?.items || []
+  const apiKeys = useMemo(() => data?.items || [], [data?.items])
   const tokenIds = useMemo(() => apiKeys.map((apiKey) => apiKey.id), [apiKeys])
+  const tokenIdsKey = tokenIds.join(',')
 
-  const { data: usageStats = [], isFetching: isUsageFetching } = useQuery({
+  const {
+    data: usageStatsResult,
+    isFetching: isUsageFetching,
+    isError: isUsageQueryError,
+    isPlaceholderData: isUsagePlaceholderData,
+  } = useQuery({
     queryKey: [
       'keys-usage',
       usageRange.start?.getTime(),
       usageRange.end?.getTime(),
-      tokenIds.join(','),
+      tokenIdsKey,
       refreshTrigger,
     ],
     enabled: tokenIds.length > 0,
@@ -322,19 +348,23 @@ export function ApiKeysTable() {
           ? Math.floor(usageRange.start.getTime() / 1000)
           : undefined,
         endTimestamp: usageRange.end
-          ? Math.floor(usageRange.end.getTime() / 1000)
+          ? Math.floor(usageRange.end.getTime() / 1000) + 1
           : undefined,
       })
 
       if (!result.success) {
         toast.error(result.message || t(ERROR_MESSAGES.LOAD_FAILED))
-        return []
+        return null
       }
 
       return result.data?.items || []
     },
     placeholderData: (previousData) => previousData,
   })
+  const isUsageError = isUsageQueryError || usageStatsResult === null
+  const isUsageLoading =
+    !isUsageError && (isUsageFetching || isUsagePlaceholderData)
+  const usageStats = useMemo(() => usageStatsResult ?? [], [usageStatsResult])
 
   const usageByTokenId = useMemo<Record<number, ApiKeyUsageStat | undefined>>(
     () =>
@@ -352,7 +382,8 @@ export function ApiKeysTable() {
   )
   const columns = useApiKeysColumns({
     usageByTokenId,
-    isUsageLoading: isUsageFetching,
+    isUsageLoading,
+    isUsageError,
   })
 
   const { table } = useDataTable({
@@ -368,9 +399,31 @@ export function ApiKeysTable() {
     onGlobalFilterChange,
     onColumnFiltersChange,
     manualPagination: true,
+    getRowId: (row) => String(row.id),
     totalCount: data?.total || 0,
     ensurePageInRange,
   })
+
+  useEffect(() => {
+    table.resetRowSelection()
+  }, [table, tokenIdsKey])
+
+  const selectedRows = table.getSelectedRowModel().rows
+  const selectedCount = selectedRows.length
+  const selectedUsage = selectedRows.reduce(
+    (total, row) => total + (usageByTokenId[row.original.id]?.quota ?? 0),
+    0
+  )
+  let selectedUsageContent = (
+    <span className='text-foreground ml-1 font-semibold tabular-nums'>
+      {formatQuota(selectedUsage)}
+    </span>
+  )
+  if (isUsageLoading) {
+    selectedUsageContent = <Skeleton className='ml-1 h-3.5 w-16' />
+  } else if (isUsageError) {
+    selectedUsageContent = <span className='text-muted-foreground ml-1'>—</span>
+  }
 
   return (
     <DataTablePage
@@ -426,13 +479,35 @@ export function ApiKeysTable() {
             singleSelect: true,
           },
         ],
+        preActions:
+          selectedCount > 0 ? (
+            <div className='bg-muted/60 text-muted-foreground flex flex-wrap items-center gap-1.5 rounded-md border px-2 py-1 text-xs'>
+              <span>
+                {t('Selected API keys: {{count}}', { count: selectedCount })}
+              </span>
+              <span aria-hidden='true'>·</span>
+              <div className='flex items-center'>
+                <span>{t('Selected settled usage (current page)')}:</span>
+                {selectedUsageContent}
+              </div>
+              <Button
+                variant='ghost'
+                size='sm'
+                className='h-6 px-1.5 text-xs'
+                onClick={() => table.resetRowSelection()}
+              >
+                {t('Clear selection')}
+              </Button>
+            </div>
+          ) : null,
       }}
       mobile={
         <ApiKeysMobileList
           table={table}
           isLoading={isLoading}
           usageByTokenId={mobileUsageByTokenId}
-          isUsageLoading={isUsageFetching}
+          isUsageLoading={isUsageLoading}
+          isUsageError={isUsageError}
         />
       }
       getRowClassName={(row) =>

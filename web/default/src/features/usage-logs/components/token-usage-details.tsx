@@ -17,8 +17,10 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { useTranslation } from 'react-i18next'
+
 import { formatTokens } from '@/lib/format'
 import { cn } from '@/lib/utils'
+
 import type { TaskUsageDetails } from '../types'
 
 type TokenUsageLike = TaskUsageDetails & {
@@ -71,12 +73,7 @@ export function TokenUsageDetails(props: {
   if (cacheReadTokens === 0 && cacheWriteTokens === 0) return null
 
   return (
-    <div
-      className={cn(
-        'flex items-center gap-1 text-[11px]',
-        props.className
-      )}
-    >
+    <div className={cn('flex items-center gap-1 text-[11px]', props.className)}>
       {cacheReadTokens > 0 && (
         <span className='text-muted-foreground/60'>
           {t('Cache')}↓ {formatTokens(cacheReadTokens)}

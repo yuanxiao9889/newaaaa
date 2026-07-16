@@ -1059,6 +1059,39 @@ func GetUserSetting(id int, fromDB bool) (settingMap dto.UserSetting, err error)
 	return userBase.GetSetting(), nil
 }
 
+// AdjustUserQuotaImmediately applies a wallet delta directly to the main
+// database and only refreshes Redis after persistence succeeds. It bypasses
+// the batch updater so critical asynchronous billing can observe failures.
+func AdjustUserQuotaImmediately(id int, delta int) error {
+	if id <= 0 {
+		return fmt.Errorf("invalid user id: %d", id)
+	}
+	if delta == 0 {
+		return nil
+	}
+	result := DB.Model(&User{}).Where("id = ?", id).Update("quota", gorm.Expr("quota + ?", delta))
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return gorm.ErrRecordNotFound
+	}
+	if common.RedisEnabled {
+		gopool.Go(func() {
+			var err error
+			if delta > 0 {
+				err = cacheIncrUserQuota(id, int64(delta))
+			} else {
+				err = cacheDecrUserQuota(id, int64(-delta))
+			}
+			if err != nil {
+				common.SysLog("failed to adjust user quota cache: " + err.Error())
+			}
+		})
+	}
+	return nil
+}
+
 func IncreaseUserQuota(id int, quota int, db bool) (err error) {
 	if quota < 0 {
 		return errors.New("quota 不能为负数！")
@@ -1143,6 +1176,17 @@ func UpdateUserUsedQuotaAndRequestCount(id int, quota int) {
 		return
 	}
 	updateUserUsedQuotaAndRequestCount(id, quota, 1)
+}
+
+func UpdateUserUsedQuota(id int, quota int) {
+	if quota == 0 {
+		return
+	}
+	if common.BatchUpdateEnabled {
+		addNewRecord(BatchUpdateTypeUsedQuota, id, quota)
+		return
+	}
+	updateUserUsedQuota(id, quota)
 }
 
 func updateUserUsedQuotaAndRequestCount(id int, quota int, count int) {

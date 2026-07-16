@@ -47,6 +47,7 @@ import { DataTableRowActions } from './data-table-row-actions'
 interface ApiKeysColumnsOptions {
   usageByTokenId?: Record<number, ApiKeyUsageStat | undefined>
   isUsageLoading?: boolean
+  isUsageError?: boolean
 }
 
 function getQuotaProgressColor(percentage: number): string {
@@ -88,7 +89,7 @@ export function useApiKeysColumns(
           checked={table.getIsAllPageRowsSelected()}
           indeterminate={table.getIsSomePageRowsSelected()}
           onCheckedChange={(value) => table.toggleAllPageRowsSelected(!!value)}
-          aria-label='Select all'
+          aria-label={t('Select all API keys on this page')}
           className='translate-y-[2px]'
         />
       ),
@@ -96,7 +97,7 @@ export function useApiKeysColumns(
         <Checkbox
           checked={row.getIsSelected()}
           onCheckedChange={(value) => row.toggleSelected(!!value)}
-          aria-label='Select row'
+          aria-label={t('Select API key {{name}}', { name: row.original.name })}
           className='translate-y-[2px]'
         />
       ),
@@ -181,7 +182,7 @@ export function useApiKeysColumns(
             <TooltipContent>
               <div className='space-y-1 text-xs'>
                 <div>
-                  {t('Used:')} {formatQuota(used)}
+                  {t('Token quota consumed (lifetime)')}: {formatQuota(used)}
                 </div>
                 <div>
                   {t('Remaining:')} {formatQuota(remaining)} (
@@ -199,10 +200,13 @@ export function useApiKeysColumns(
     },
     {
       id: 'usage',
-      header: t('Usage'),
+      header: t('Settled usage (selected period)'),
       cell: ({ row }) => {
         if (options.isUsageLoading) {
           return <Skeleton className='h-5 w-24' />
+        }
+        if (options.isUsageError) {
+          return <span className='text-muted-foreground'>—</span>
         }
 
         const stat = options.usageByTokenId?.[row.original.id]
@@ -220,13 +224,17 @@ export function useApiKeysColumns(
             <TooltipContent>
               <div className='flex flex-col gap-1 text-xs'>
                 <div>
-                  {t('Usage')}: {formatQuota(quota)}
+                  {t('Settled usage (selected period)')}: {formatQuota(quota)}
                 </div>
                 <div>
                   {t('Used:')} {formatQuota(stat?.consume_quota ?? 0)}
                 </div>
                 <div>
                   {t('Refunded')}: {formatQuota(stat?.refund_quota ?? 0)}
+                </div>
+                <div>
+                  {t('Pre-consume rollback')}:
+                  {formatQuota(stat?.rollback_quota ?? 0)}
                 </div>
               </div>
             </TooltipContent>

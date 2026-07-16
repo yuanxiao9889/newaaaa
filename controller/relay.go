@@ -604,17 +604,41 @@ func RelayTask(c *gin.Context) {
 
 	// ── 成功：结算 + 日志 + 插入任务 ──
 	if taskErr == nil {
-		if settleErr := service.SettleBilling(c, relayInfo, result.Quota); settleErr != nil {
-			common.SysError("settle task billing error: " + settleErr.Error())
+		accountedQuota := result.Quota
+		billingError := ""
+		preConsumedQuota := relayInfo.FinalPreConsumedQuota
+		if relayInfo.Billing != nil {
+			preConsumedQuota = relayInfo.Billing.GetPreConsumedQuota()
 		}
-		service.LogTaskConsumption(c, relayInfo)
+		if settleErr := service.SettleBilling(c, relayInfo, result.Quota); settleErr != nil {
+			billingError = "task settlement failed; retained pre-consumed quota: " + settleErr.Error()
+			accountedQuota = preConsumedQuota
+			relayInfo.PriceData.Quota = accountedQuota
+			common.SysError(billingError)
+		}
+		usageAccountingMode := model.TaskUsageAccountingSubmit
+		if usageErr := service.LogTaskConsumption(c, relayInfo); usageErr != nil {
+			usageAccountingMode = model.TaskUsageAccountingFinal
+			if billingError != "" {
+				billingError += "; "
+			}
+			billingError += "task usage accounting failed; deferred until completion: " + usageErr.Error()
+			common.SysError(billingError)
+		}
 
 		task := model.InitTask(result.Platform, relayInfo)
 		task.PrivateData.UpstreamTaskID = result.UpstreamTaskID
 		task.PrivateData.BillingSource = relayInfo.BillingSource
 		task.PrivateData.SubscriptionId = relayInfo.SubscriptionId
 		task.PrivateData.TokenId = relayInfo.TokenId
+		task.TokenName = c.GetString("token_name")
 		task.PrivateData.NodeName = common.NodeName
+		task.PrivateData.BillingState = service.TaskBillingStatePending
+		task.PrivateData.UsageAccountingMode = usageAccountingMode
+		task.PrivateData.PreConsumedQuota = preConsumedQuota
+		task.PrivateData.ActualQuota = result.Quota
+		task.PrivateData.BillingError = billingError
+		task.PrivateData.BillingUpdatedAt = time.Now().Unix()
 		task.PrivateData.BillingContext = &model.TaskBillingContext{
 			ModelPrice:      relayInfo.PriceData.ModelPrice,
 			GroupRatio:      relayInfo.PriceData.GroupRatioInfo.GroupRatio,
@@ -623,11 +647,14 @@ func RelayTask(c *gin.Context) {
 			OriginModelName: relayInfo.OriginModelName,
 			PerCallBilling:  common.StringsContains(constant.TaskPricePatches, relayInfo.OriginModelName) || relayInfo.PriceData.UsePrice,
 		}
-		task.Quota = result.Quota
+		task.Quota = accountedQuota
 		task.Data = result.TaskData
 		task.Action = relayInfo.Action
 		if insertErr := task.Insert(); insertErr != nil {
 			common.SysError("insert task error: " + insertErr.Error())
+			if refundErr := service.RefundTaskQuota(c, task, "task persistence failed after submission"); refundErr != nil {
+				common.SysError("refund task after insert failure error: " + refundErr.Error())
+			}
 		}
 	}
 

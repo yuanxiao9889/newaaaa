@@ -18,11 +18,10 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { useQueryClient, useIsFetching } from '@tanstack/react-query'
 import { useNavigate, getRouteApi } from '@tanstack/react-router'
-import { type Table } from '@tanstack/react-table'
+import type { Table } from '@tanstack/react-table'
 import { useState, useEffect, useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
 
-import { useIsAdmin } from '@/hooks/use-admin'
 import {
   Select,
   SelectContent,
@@ -31,6 +30,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import { useIsAdmin } from '@/hooks/use-admin'
+
 import { TASK_STATUS_ALL_VALUE, TASK_STATUS_FILTERS } from '../constants'
 import { buildSearchParams } from '../lib/filter'
 import { getDefaultTimeRange } from '../lib/utils'
@@ -115,6 +116,7 @@ export function TaskLogsFilterBar<TData>(props: TaskLogsFilterBarProps<TData>) {
             ...baseFilters,
             ...(searchParams.filter ? { taskId: searchParams.filter } : {}),
             ...(searchParams.model ? { model: searchParams.model } : {}),
+            ...(searchParams.token ? { token: searchParams.token } : {}),
             ...(searchParams.status ? { status: searchParams.status } : {}),
             ...(isAdmin && searchParams.username
               ? { username: searchParams.username }
@@ -130,6 +132,7 @@ export function TaskLogsFilterBar<TData>(props: TaskLogsFilterBarProps<TData>) {
     searchParams.channel,
     searchParams.filter,
     searchParams.model,
+    searchParams.token,
     searchParams.status,
     searchParams.username,
   ])
@@ -188,6 +191,7 @@ export function TaskLogsFilterBar<TData>(props: TaskLogsFilterBarProps<TData>) {
   const filterValue = getFilterValue(filters, props.logCategory)
   const taskFilters = filters as TaskLogFilters
   const modelValue = props.logCategory === 'task' ? taskFilters.model || '' : ''
+  const tokenValue = props.logCategory === 'task' ? taskFilters.token || '' : ''
   const usernameValue =
     props.logCategory === 'task' && isAdmin ? taskFilters.username || '' : ''
   const statusValue =
@@ -207,6 +211,7 @@ export function TaskLogsFilterBar<TData>(props: TaskLogsFilterBarProps<TData>) {
     props.logCategory === 'task'
       ? [
           modelValue,
+          tokenValue,
           usernameValue,
           statusValue === TASK_STATUS_ALL_VALUE ? '' : statusValue,
         ]
@@ -243,6 +248,17 @@ export function TaskLogsFilterBar<TData>(props: TaskLogsFilterBarProps<TData>) {
           placeholder={t('Model Name')}
           value={modelValue}
           onChange={(e) => handleChange('model', e.target.value)}
+          onKeyDown={handleKeyDown}
+        />
+      </LogsFilterField>
+    ) : null
+  const tokenFilter =
+    props.logCategory === 'task' ? (
+      <LogsFilterField>
+        <LogsFilterInput
+          placeholder={t('Token Name')}
+          value={tokenValue}
+          onChange={(e) => handleChange('token', e.target.value)}
           onKeyDown={handleKeyDown}
         />
       </LogsFilterField>
@@ -309,6 +325,7 @@ export function TaskLogsFilterBar<TData>(props: TaskLogsFilterBarProps<TData>) {
           {dateRangeFilter}
           {taskIdFilter}
           {modelFilter}
+          {tokenFilter}
           {statusFilter}
           {usernameFilter}
           {channelFilter}
@@ -319,6 +336,7 @@ export function TaskLogsFilterBar<TData>(props: TaskLogsFilterBarProps<TData>) {
         <>
           {taskIdFilter}
           {modelFilter}
+          {tokenFilter}
           {statusFilter}
           {usernameFilter}
           {channelFilter}

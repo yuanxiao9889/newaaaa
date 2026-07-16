@@ -26,6 +26,7 @@ func GetAllTask(c *gin.Context) {
 		Status:         c.Query("status"),
 		Action:         c.Query("action"),
 		ModelName:      c.Query("model_name"),
+		TokenName:      c.Query("token_name"),
 		StartTimestamp: startTimestamp,
 		EndTimestamp:   endTimestamp,
 		ChannelID:      c.Query("channel_id"),
@@ -60,6 +61,9 @@ func GetTask(c *gin.Context) {
 		common.ApiError(c, errors.New("task not found"))
 		return
 	}
+	if err := model.HydrateTaskTokenNames([]*model.Task{task}); err != nil {
+		common.SysLog("failed to hydrate task token name: " + err.Error())
+	}
 	common.ApiSuccess(c, relay.TaskModel2Dto(task))
 }
 
@@ -77,6 +81,7 @@ func GetUserTask(c *gin.Context) {
 		Status:         c.Query("status"),
 		Action:         c.Query("action"),
 		ModelName:      c.Query("model_name"),
+		TokenName:      c.Query("token_name"),
 		StartTimestamp: startTimestamp,
 		EndTimestamp:   endTimestamp,
 	}
@@ -100,10 +105,16 @@ func GetUserTaskDetail(c *gin.Context) {
 		common.ApiError(c, errors.New("task not found"))
 		return
 	}
+	if err := model.HydrateTaskTokenNames([]*model.Task{task}); err != nil {
+		common.SysLog("failed to hydrate task token name: " + err.Error())
+	}
 	common.ApiSuccess(c, relay.UserTaskModel2Dto(task))
 }
 
 func tasksToDto(tasks []*model.Task, fillUser bool, includeData bool) []*dto.TaskDto {
+	if err := model.HydrateTaskTokenNames(tasks); err != nil {
+		common.SysLog("failed to hydrate task token names: " + err.Error())
+	}
 	var userIdMap map[int]*model.UserBase
 	var channelNameMap map[int]string
 	if fillUser {

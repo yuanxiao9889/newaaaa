@@ -166,10 +166,11 @@ func GetTokenUsage(c *gin.Context) {
 }
 
 type tokenUsagePeriodStatsItem struct {
-	TokenID      int `json:"token_id"`
-	Quota        int `json:"quota"`
-	ConsumeQuota int `json:"consume_quota"`
-	RefundQuota  int `json:"refund_quota"`
+	TokenID       int `json:"token_id"`
+	Quota         int `json:"quota"`
+	ConsumeQuota  int `json:"consume_quota"`
+	RefundQuota   int `json:"refund_quota"`
+	RollbackQuota int `json:"rollback_quota"`
 }
 
 type tokenUsagePeriodStatsResponse struct {
@@ -291,10 +292,11 @@ func GetTokenUsagePeriodStats(c *gin.Context) {
 	for _, tokenId := range ownedTokenIds {
 		stat := statsByTokenId[tokenId]
 		items = append(items, tokenUsagePeriodStatsItem{
-			TokenID:      tokenId,
-			Quota:        stat.Quota,
-			ConsumeQuota: stat.ConsumeQuota,
-			RefundQuota:  stat.RefundQuota,
+			TokenID:       tokenId,
+			Quota:         stat.Quota,
+			ConsumeQuota:  stat.ConsumeQuota,
+			RefundQuota:   stat.RefundQuota,
+			RollbackQuota: stat.RollbackQuota,
 		})
 	}
 

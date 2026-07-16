@@ -16,6 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+
 import {
   Copy,
   Check,
@@ -32,16 +33,19 @@ import {
   LogIn,
 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
-import { formatBillingCurrencyFromUSD } from '@/lib/currency'
-import { formatLogQuota, formatTokens, formatUseTime } from '@/lib/format'
-import { cn } from '@/lib/utils'
-import { useCopyToClipboard } from '@/hooks/use-copy-to-clipboard'
+
+import { Dialog } from '@/components/dialog'
+import { StatusBadge, type StatusBadgeProps } from '@/components/status-badge'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import { ScrollArea } from '@/components/ui/scroll-area'
-import { Dialog } from '@/components/dialog'
-import { StatusBadge, type StatusBadgeProps } from '@/components/status-badge'
 import { DynamicPricingBreakdown } from '@/features/pricing/components/dynamic-pricing-breakdown'
+import { useCopyToClipboard } from '@/hooks/use-copy-to-clipboard'
+import { formatBillingCurrencyFromUSD } from '@/lib/currency'
+import { formatLogQuota, formatTokens, formatUseTime } from '@/lib/format'
+import { cn } from '@/lib/utils'
+
+import { LOG_TYPE_ENUM } from '../../constants'
 import type { UsageLog } from '../../data/schema'
 import {
   parseLogOther,
@@ -425,7 +429,12 @@ function AsyncTaskBillingSection(props: {
   const rows: Array<{ label: string; value: React.ReactNode; mono?: boolean }> =
     [
       { label: t('State'), value: t(stateLabel) },
-      other.task_id && { label: t('Task ID'), value: other.task_id, mono: true },
+      other.task_id && {
+        label: t('Task ID'),
+        value: other.task_id,
+        mono: true,
+      },
+      other.reason && { label: t('Reason'), value: other.reason },
       other.pre_consumed_quota != null && {
         label: t('Pre-consumed'),
         value: formatLogQuota(other.pre_consumed_quota),
@@ -445,7 +454,11 @@ function AsyncTaskBillingSection(props: {
   return (
     <DetailSection
       icon={<Info className='size-3.5' aria-hidden='true' />}
-      label={t('Async Task Billing')}
+      label={
+        log.type === LOG_TYPE_ENUM.PRE_CONSUME_ROLLBACK
+          ? t('Pre-consume rollback details')
+          : t('Async Task Billing')
+      }
     >
       {rows.map((row, idx) => (
         <DetailRow
@@ -502,7 +515,9 @@ export function DetailsDialog(props: DetailsDialogProps) {
   const typeConfig = getLogTypeConfig(props.log.type)
 
   const isViolation = isViolationFeeLog(other)
-  const isRefund = props.log.type === 6
+  const isRefund = props.log.type === LOG_TYPE_ENUM.REFUND
+  const isPreConsumeRollback =
+    props.log.type === LOG_TYPE_ENUM.PRE_CONSUME_ROLLBACK
   const isConsume = props.log.type === 2
   const isTopup = props.log.type === 1
   const isManage = props.log.type === 3
@@ -576,7 +591,9 @@ export function DetailsDialog(props: DetailsDialogProps) {
   // Channel update records which fields changed (stable field tokens); render
   // them with their localized labels for admins.
   const changedFieldTokens =
-    isManage && props.isAdmin && Array.isArray(other?.op?.params?.changed_fields)
+    isManage &&
+    props.isAdmin &&
+    Array.isArray(other?.op?.params?.changed_fields)
       ? (other.op.params.changed_fields as string[])
       : []
   const changedFieldsText = changedFieldTokens
@@ -629,8 +646,8 @@ export function DetailsDialog(props: DetailsDialogProps) {
     .join('\n\n')
   const isAsyncLog = Boolean(
     other?.async_task ||
-      (other?.is_task && other?.task_id) ||
-      props.log.request_id?.startsWith('task_')
+    (other?.is_task && other?.task_id) ||
+    props.log.request_id?.startsWith('task_')
   )
   const asyncTaskId =
     other?.task_id ||
@@ -925,17 +942,26 @@ export function DetailsDialog(props: DetailsDialogProps) {
             </DetailSection>
           )}
 
-          {/* Refund details (type=6) */}
-          {isRefund && other && (other.task_id || other.reason) && (
-            <DetailSection label={t('Refund Details')}>
-              {other.task_id && (
-                <DetailRow label={t('Task ID')} value={other.task_id} mono />
-              )}
-              {other.reason && (
-                <DetailRow label={t('Reason')} value={other.reason} />
-              )}
-            </DetailSection>
-          )}
+          {/* Refund details (type=6) / pre-consume rollback details (type=8) */}
+          {(isRefund || isPreConsumeRollback) &&
+            other &&
+            !isAsyncTaskBillingLog(props.log, other) &&
+            (other.task_id || other.reason) && (
+              <DetailSection
+                label={
+                  isPreConsumeRollback
+                    ? t('Pre-consume rollback details')
+                    : t('Refund Details')
+                }
+              >
+                {other.task_id && (
+                  <DetailRow label={t('Task ID')} value={other.task_id} mono />
+                )}
+                {other.reason && (
+                  <DetailRow label={t('Reason')} value={other.reason} />
+                )}
+              </DetailSection>
+            )}
 
           {/* Top-up audit info (type=1, admin only) */}
           {showTopupAuditSection && (
@@ -1139,8 +1165,8 @@ export function DetailsDialog(props: DetailsDialogProps) {
           {isDisplayableType(props.log.type) &&
             other &&
             !isAsyncTaskBillingLog(props.log, other) && (
-            <TokenBreakdown log={props.log} other={other} />
-          )}
+              <TokenBreakdown log={props.log} other={other} />
+            )}
 
           {/* Async task billing explanation */}
           {other && <AsyncTaskBillingSection log={props.log} other={other} />}
@@ -1341,5 +1367,5 @@ export function DetailsDialog(props: DetailsDialogProps) {
 }
 
 function isDisplayableType(type: number): boolean {
-  return [0, 2, 5, 6].includes(type)
+  return [0, 2, 5, 6, 8].includes(type)
 }

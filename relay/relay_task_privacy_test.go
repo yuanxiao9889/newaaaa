@@ -16,6 +16,8 @@ func TestUserTaskModelDtoHidesInternalChannelInfo(t *testing.T) {
 		Platform:    constant.TaskPlatform("suno"),
 		UserId:      7,
 		Group:       "default",
+		TokenId:     23,
+		TokenName:   "task-token",
 		ChannelId:   12,
 		ChannelName: "upstream-a",
 		Properties: model.Properties{
@@ -49,6 +51,8 @@ func TestUserTaskModelDtoHidesInternalChannelInfo(t *testing.T) {
 	require.Equal(t, 12, adminDto.ChannelId)
 	require.Equal(t, "upstream-a", adminDto.ChannelName)
 	require.Equal(t, []string{"12", "18"}, adminDto.ChannelRetryPath)
+	require.Equal(t, 23, adminDto.TokenId)
+	require.Equal(t, "task-token", adminDto.TokenName)
 	require.Equal(t, 111, adminDto.PromptTokens)
 	require.Equal(t, 222, adminDto.CompletionTokens)
 	require.Equal(t, 333, adminDto.TotalTokens)
@@ -60,6 +64,8 @@ func TestUserTaskModelDtoHidesInternalChannelInfo(t *testing.T) {
 	require.Zero(t, userDto.ChannelId)
 	require.Empty(t, userDto.ChannelName)
 	require.Empty(t, userDto.ChannelRetryPath)
+	require.Equal(t, 23, userDto.TokenId)
+	require.Equal(t, "task-token", userDto.TokenName)
 	require.True(t, userDto.InternalAsync)
 	require.Equal(t, "model-public", userDto.ModelName)
 	require.Equal(t, "model-upstream", userDto.UpstreamModelName)

@@ -385,6 +385,14 @@ func PostAudioConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, u
 }
 
 func PreConsumeTokenQuota(relayInfo *relaycommon.RelayInfo, quota int) error {
+	return preConsumeTokenQuota(relayInfo, quota, false)
+}
+
+func preConsumeTokenQuotaImmediately(relayInfo *relaycommon.RelayInfo, quota int) error {
+	return preConsumeTokenQuota(relayInfo, quota, true)
+}
+
+func preConsumeTokenQuota(relayInfo *relaycommon.RelayInfo, quota int, immediate bool) error {
 	if quota < 0 {
 		return errors.New("quota 不能为负数！")
 	}
@@ -394,14 +402,24 @@ func PreConsumeTokenQuota(relayInfo *relaycommon.RelayInfo, quota int) error {
 	//if relayInfo.TokenUnlimited {
 	//	return nil
 	//}
-	token, err := model.GetTokenByKey(relayInfo.TokenKey, false)
+	var token *model.Token
+	var err error
+	if immediate {
+		token, err = model.GetTokenById(relayInfo.TokenId)
+	} else {
+		token, err = model.GetTokenByKey(relayInfo.TokenKey, false)
+	}
 	if err != nil {
 		return err
 	}
 	if !relayInfo.TokenUnlimited && token.RemainQuota < quota {
 		return fmt.Errorf("token quota is not enough, token remain quota: %s, need quota: %s", logger.FormatQuota(token.RemainQuota), logger.FormatQuota(quota))
 	}
-	err = model.DecreaseTokenQuota(relayInfo.TokenId, relayInfo.TokenKey, quota)
+	if immediate {
+		err = model.DecreaseTokenQuotaImmediately(relayInfo.TokenId, relayInfo.TokenKey, quota)
+	} else {
+		err = model.DecreaseTokenQuota(relayInfo.TokenId, relayInfo.TokenKey, quota)
+	}
 	if err != nil {
 		return err
 	}

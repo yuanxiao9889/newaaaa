@@ -90,6 +90,7 @@ export interface ApiKeyUsageStat {
   quota: number
   consume_quota: number
   refund_quota: number
+  rollback_quota: number
 }
 
 export interface GetApiKeyUsageStatsParams {

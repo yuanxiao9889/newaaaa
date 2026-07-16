@@ -47,10 +47,11 @@ type tokenUsagePeriodResponse struct {
 	StartTimestamp int64  `json:"start_timestamp"`
 	EndTimestamp   int64  `json:"end_timestamp"`
 	Items          []struct {
-		TokenID      int `json:"token_id"`
-		Quota        int `json:"quota"`
-		ConsumeQuota int `json:"consume_quota"`
-		RefundQuota  int `json:"refund_quota"`
+		TokenID       int `json:"token_id"`
+		Quota         int `json:"quota"`
+		ConsumeQuota  int `json:"consume_quota"`
+		RefundQuota   int `json:"refund_quota"`
+		RollbackQuota int `json:"rollback_quota"`
 	} `json:"items"`
 }
 
@@ -565,6 +566,7 @@ func TestGetTokenUsagePeriodStatsReturnsOwnedTokenUsageByPeriod(t *testing.T) {
 		{UserId: 1, TokenId: firstToken.Id, Type: model.LogTypeConsume, Quota: 100, CreatedAt: 1783353600},
 		{UserId: 1, TokenId: firstToken.Id, Type: model.LogTypeConsume, Quota: 40, CreatedAt: 1783439999},
 		{UserId: 1, TokenId: firstToken.Id, Type: model.LogTypeRefund, Quota: 15, CreatedAt: 1783430000},
+		{UserId: 1, TokenId: firstToken.Id, Type: model.LogTypePreConsumeRollback, Quota: 30, CreatedAt: 1783430001},
 		{UserId: 1, TokenId: firstToken.Id, Type: model.LogTypeConsume, Quota: 200, CreatedAt: 1783267200},
 		{UserId: 1, TokenId: secondToken.Id, Type: model.LogTypeConsume, Quota: 70, CreatedAt: 1783430000},
 		{UserId: 2, TokenId: otherUserToken.Id, Type: model.LogTypeConsume, Quota: 999, CreatedAt: 1783430000},
@@ -603,24 +605,27 @@ func TestGetTokenUsagePeriodStatsReturnsOwnedTokenUsageByPeriod(t *testing.T) {
 	}
 
 	usageByTokenID := map[int]struct {
-		Quota        int
-		ConsumeQuota int
-		RefundQuota  int
+		Quota         int
+		ConsumeQuota  int
+		RefundQuota   int
+		RollbackQuota int
 	}{}
 	for _, item := range usage.Items {
 		usageByTokenID[item.TokenID] = struct {
-			Quota        int
-			ConsumeQuota int
-			RefundQuota  int
+			Quota         int
+			ConsumeQuota  int
+			RefundQuota   int
+			RollbackQuota int
 		}{
-			Quota:        item.Quota,
-			ConsumeQuota: item.ConsumeQuota,
-			RefundQuota:  item.RefundQuota,
+			Quota:         item.Quota,
+			ConsumeQuota:  item.ConsumeQuota,
+			RefundQuota:   item.RefundQuota,
+			RollbackQuota: item.RollbackQuota,
 		}
 	}
 
 	firstUsage := usageByTokenID[firstToken.Id]
-	if firstUsage.Quota != 125 || firstUsage.ConsumeQuota != 140 || firstUsage.RefundQuota != 15 {
+	if firstUsage.Quota != 125 || firstUsage.ConsumeQuota != 140 || firstUsage.RefundQuota != 15 || firstUsage.RollbackQuota != 30 {
 		t.Fatalf("unexpected first token usage: %+v", firstUsage)
 	}
 	secondUsage := usageByTokenID[secondToken.Id]

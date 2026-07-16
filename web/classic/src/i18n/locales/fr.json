@@ -3684,6 +3684,8 @@
     "默认折叠侧边栏": "Réduire la barre latérale par défaut",
     "默认测试模型": "Modèle de test par défaut",
     "默认用户消息": "Bonjour",
-    "默认补全倍率": "Taux de complétion par défaut"
+    "默认补全倍率": "Taux de complétion par défaut",
+    "预扣回滚": "Annulation de pré-consommation",
+    "预扣回滚额度": "Quota d’annulation de pré-consommation"
   }
 }

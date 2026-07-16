@@ -185,7 +185,6 @@ func executeInternalAsyncImageTask(ctx context.Context, task *model.Task) error 
 
 	now := time.Now().Unix()
 	task.ChannelId = channelID
-	task.Status = model.TaskStatusSuccess
 	task.Progress = "100%"
 	task.FailReason = ""
 	if task.StartTime == 0 {
@@ -193,27 +192,42 @@ func executeInternalAsyncImageTask(ctx context.Context, task *model.Task) error 
 	}
 	task.FinishTime = now
 	task.Data = service.BuildStoredAsyncImageTaskData(imageResp, task.PrivateData.ResultURL)
-	snapshotPath := clearInternalAsyncImageRequestSnapshotFields(task)
-	won, updateErr := task.UpdateWithStatus(model.TaskStatusInProgress)
-	if updateErr != nil {
-		return updateErr
-	}
-	if !won {
-		logger.LogWarn(ctx, fmt.Sprintf("internal async image task %s already transitioned, skip settle", task.TaskID))
-		return nil
-	}
-	removeInternalAsyncImageRequestSnapshot(snapshotPath)
+
+	preSettlementQuota := task.Quota
+	var quotaClamp *common.QuotaClamp
 	if usage != nil {
 		task.PrivateData.PromptTokens = usage.PromptTokens
 		task.PrivateData.CompletionTokens = usage.CompletionTokens
 		task.PrivateData.TotalTokens = usage.TotalTokens
 		task.PrivateData.UsageDetails = service.BuildTaskUsageDetails(usage)
-		actualQuota := service.CalculateTaskQuotaByUsage(task, usage)
+		actualQuota, clamp := service.CalculateTaskQuotaByUsageChecked(task, usage)
+		quotaClamp = clamp
 		if actualQuota > 0 {
-			service.AdjustTaskQuotaForFinalSettlement(ctx, task, actualQuota, "async image usage settlement")
+			if err = service.AdjustTaskQuotaForFinalSettlement(ctx, task, actualQuota, "async image usage settlement"); err != nil {
+				return fmt.Errorf("async image usage settlement failed: %w", err)
+			}
 		}
 	}
-	service.ConfirmTaskBillingSettled(ctx, task, task.Quota, "async image stored")
+
+	task.Status = model.TaskStatusSuccess
+	snapshotPath := clearInternalAsyncImageRequestSnapshotFields(task)
+	won, updateErr := task.UpdateWithStatus(model.TaskStatusInProgress)
+	if updateErr != nil || !won {
+		if task.Quota != preSettlementQuota {
+			if rollbackErr := service.AdjustTaskQuotaForFinalSettlement(ctx, task, preSettlementQuota, "rollback after task status transition failure"); rollbackErr != nil {
+				logger.LogError(ctx, fmt.Sprintf("internal async image task %s billing rollback failed: %s", task.TaskID, rollbackErr.Error()))
+			}
+		}
+		if updateErr != nil {
+			return updateErr
+		}
+		logger.LogWarn(ctx, fmt.Sprintf("internal async image task %s already transitioned, skip settle", task.TaskID))
+		return nil
+	}
+	removeInternalAsyncImageRequestSnapshot(snapshotPath)
+	if err = service.ConfirmTaskBillingSettled(ctx, task, task.Quota, "async image stored", quotaClamp); err != nil {
+		return fmt.Errorf("confirm async image billing failed: %w", err)
+	}
 	return nil
 }
 
@@ -632,7 +646,9 @@ func failInternalAsyncImageTask(ctx context.Context, task *model.Task, reason st
 		return
 	}
 	removeInternalAsyncImageRequestSnapshot(snapshotPath)
-	service.RefundTaskQuota(ctx, task, reason)
+	if err := service.RefundTaskQuota(ctx, task, reason); err != nil {
+		logger.LogError(ctx, fmt.Sprintf("refund internal async image task %s failed: %s", task.TaskID, err.Error()))
+	}
 }
 
 func formatInternalAsyncFailureReason(task *model.Task, reason string) string {

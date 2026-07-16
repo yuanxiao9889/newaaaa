@@ -196,7 +196,7 @@ func adminQuotaTopUpFromLog(logEntry *Log) *TopUp {
 // from management audit logs. The migration is idempotent and runs once.
 func BackfillAdminQuotaTopUps() (int64, error) {
 	var marker Option
-	err := DB.Where("key = ?", adminQuotaTopUpBackfillOptionKey).Take(&marker).Error
+	err := DB.Where(commonKeyCol+" = ?", adminQuotaTopUpBackfillOptionKey).Take(&marker).Error
 	if err == nil {
 		return 0, nil
 	}

@@ -16,7 +16,12 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { BadgePercent, CircleDollarSign, ListChecks, Share2 } from 'lucide-react'
+import {
+  BadgePercent,
+  CircleDollarSign,
+  ListChecks,
+  Share2,
+} from 'lucide-react'
 import type { ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 
@@ -74,9 +79,7 @@ export function AffiliateRewardsCard({
               {t('Referral Program')}
             </h3>
             <p className='text-muted-foreground text-xs leading-relaxed'>
-              {t(
-                'Earn 5% when invited users complete valid wallet top-ups.'
-              )}
+              {t('Earn 5% when invited users complete valid wallet top-ups.')}
             </p>
           </div>
         </div>
@@ -133,19 +136,27 @@ export function AffiliateRewardsCard({
         <div className='grid gap-2 border-t pt-3 text-xs sm:grid-cols-2 lg:col-span-3 lg:grid-cols-4'>
           <RewardRule
             icon={<BadgePercent className='size-3.5' />}
-            text={t('Inviter reward is 5% of each invited user wallet top-up payment.')}
+            text={t(
+              'Inviter reward is 5% of each invited user wallet top-up payment.'
+            )}
           />
           <RewardRule
             icon={<ListChecks className='size-3.5' />}
-            text={t('Rewards are granted only for the first 3 successful top-ups from each invited user.')}
+            text={t(
+              'Rewards are granted only for the first 3 successful top-ups from each invited user.'
+            )}
           />
           <RewardRule
             icon={<CircleDollarSign className='size-3.5' />}
-            text={t('Only valid wallet top-ups count; subscription purchases and failed orders do not count.')}
+            text={t(
+              'Only valid wallet top-ups count; subscription purchases and failed orders do not count.'
+            )}
           />
           <RewardRule
             icon={<Share2 className='size-3.5' />}
-            text={t('Rewards enter available referral rewards and can be transferred to your balance.')}
+            text={t(
+              'Rewards enter available referral rewards and can be transferred to your balance.'
+            )}
           />
         </div>
       </CardContent>

@@ -3830,6 +3830,8 @@
     "默认折叠侧边栏": "Default collapse sidebar",
     "默认测试模型": "Default Test Model",
     "默认用户消息": "Default User Message",
-    "默认补全倍率": "Default completion ratio"
+    "默认补全倍率": "Default completion ratio",
+    "预扣回滚": "Pre-consume rollback",
+    "预扣回滚额度": "Pre-consume rollback quota"
   }
 }

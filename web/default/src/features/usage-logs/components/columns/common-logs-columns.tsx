@@ -16,6 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+
 import { type ColumnDef } from '@tanstack/react-table'
 import { CircleAlert, GitBranch, Sparkles, KeyRound } from 'lucide-react'
 import { useState } from 'react'
@@ -43,7 +44,7 @@ import {
 } from '@/lib/format'
 import { cn } from '@/lib/utils'
 
-import { LOG_TYPE_ALL_VALUE } from '../../constants'
+import { LOG_TYPE_ALL_VALUE, LOG_TYPE_ENUM } from '../../constants'
 import type { UsageLog } from '../../data/schema'
 import {
   formatModelName,
@@ -134,7 +135,11 @@ function buildTypeDetailSegments(
     return text ? [{ text }] : []
   }
 
-  if (log.type === 6) {
+  if (log.type === LOG_TYPE_ENUM.PRE_CONSUME_ROLLBACK) {
+    return [{ text: t('Pre-consume rollback') }]
+  }
+
+  if (log.type === LOG_TYPE_ENUM.REFUND) {
     return [{ text: t('Async task refund') }]
   }
 
@@ -384,7 +389,9 @@ export function useCommonLogsColumns(isAdmin: boolean): ColumnDef<UsageLog>[] {
               ? `${t('Retry Chain')}: ${channelChain}`
               : `#${log.channel}`
           const channelIdDisplay =
-            log.channel > 0 ? `#${log.channel}` : channelChain || `#${log.channel}`
+            log.channel > 0
+              ? `#${log.channel}`
+              : channelChain || `#${log.channel}`
           const channelName = sensitiveVisible ? log.channel_name : '••••'
           const multiKeyIndex = other?.admin_info?.multi_key_index
           const showMultiKeyIndex =
@@ -547,9 +554,7 @@ export function useCommonLogsColumns(isAdmin: boolean): ColumnDef<UsageLog>[] {
                     !sensitiveVisible && 'bg-muted text-muted-foreground'
                   )}
                   style={
-                    sensitiveVisible
-                      ? getUserAvatarStyle(username)
-                      : undefined
+                    sensitiveVisible ? getUserAvatarStyle(username) : undefined
                   }
                 >
                   {sensitiveVisible ? getUserAvatarFallback(username) : '•'}

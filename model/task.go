@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"database/sql/driver"
 	"encoding/json"
+	"fmt"
 	"reflect"
 	"strings"
 	"time"
@@ -16,6 +17,93 @@ import (
 )
 
 type TaskStatus string
+
+// ApplyTaskBillingAccounting persists the task billing snapshot together with
+// the user's and channel's usage counters. It intentionally bypasses the batch
+// updater so asynchronous billing state and wallet usage remain atomic in the
+// main database.
+func ApplyTaskBillingAccounting(task *Task, usedQuotaDelta int, requestCountDelta int) error {
+	if task == nil {
+		return nil
+	}
+	if task.UserId <= 0 {
+		return fmt.Errorf("invalid task billing user id: %d", task.UserId)
+	}
+
+	return DB.Transaction(func(tx *gorm.DB) error {
+		if task.ID > 0 {
+			result := tx.Model(&Task{}).
+				Where("id = ?", task.ID).
+				Update("private_data", task.PrivateData)
+			if result.Error != nil {
+				return result.Error
+			}
+			if result.RowsAffected == 0 {
+				return gorm.ErrRecordNotFound
+			}
+		}
+
+		return adjustTaskUsageAccounting(tx, task.UserId, task.ChannelId, usedQuotaDelta, requestCountDelta)
+	})
+}
+
+// ApplyTaskQuotaAccounting persists a reconciled task quota and its usage
+// delta in one main-database transaction.
+func ApplyTaskQuotaAccounting(task *Task, usedQuotaDelta int) error {
+	if task == nil {
+		return nil
+	}
+	if task.UserId <= 0 {
+		return fmt.Errorf("invalid task billing user id: %d", task.UserId)
+	}
+
+	return DB.Transaction(func(tx *gorm.DB) error {
+		if task.ID > 0 {
+			result := tx.Model(&Task{}).Where("id = ?", task.ID).Update("quota", task.Quota)
+			if result.Error != nil {
+				return result.Error
+			}
+			if result.RowsAffected == 0 {
+				return gorm.ErrRecordNotFound
+			}
+		}
+
+		return adjustTaskUsageAccounting(tx, task.UserId, task.ChannelId, usedQuotaDelta, 0)
+	})
+}
+
+// AdjustTaskUsageAccounting synchronously applies usage counters for task
+// billing paths that do not have a model.Task row, such as legacy tasks.
+func AdjustTaskUsageAccounting(userId int, channelId int, usedQuotaDelta int, requestCountDelta int) error {
+	if userId <= 0 {
+		return fmt.Errorf("invalid task billing user id: %d", userId)
+	}
+	return DB.Transaction(func(tx *gorm.DB) error {
+		return adjustTaskUsageAccounting(tx, userId, channelId, usedQuotaDelta, requestCountDelta)
+	})
+}
+
+func adjustTaskUsageAccounting(tx *gorm.DB, userId int, channelId int, usedQuotaDelta int, requestCountDelta int) error {
+	if usedQuotaDelta == 0 && requestCountDelta == 0 {
+		return nil
+	}
+	result := tx.Model(&User{}).Where("id = ?", userId).Updates(map[string]interface{}{
+		"used_quota":    gorm.Expr("used_quota + ?", usedQuotaDelta),
+		"request_count": gorm.Expr("request_count + ?", requestCountDelta),
+	})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return gorm.ErrRecordNotFound
+	}
+	if channelId <= 0 || usedQuotaDelta == 0 {
+		return nil
+	}
+	return tx.Model(&Channel{}).
+		Where("id = ?", channelId).
+		Update("used_quota", gorm.Expr("used_quota + ?", usedQuotaDelta)).Error
+}
 
 func (t TaskStatus) ToVideoStatus() string {
 	var status string
@@ -53,6 +141,8 @@ type Task struct {
 	UserId      int                   `json:"user_id" gorm:"index"`
 	Group       string                `json:"group" gorm:"type:varchar(50)"` // 修正计费用
 	ChannelId   int                   `json:"channel_id" gorm:"index"`
+	TokenId     int                   `json:"-" gorm:"index"`
+	TokenName   string                `json:"-" gorm:"type:varchar(50);index"`
 	Quota       int                   `json:"quota"`
 	Action      string                `json:"action" gorm:"type:varchar(40);index"` // 任务类型, song, lyrics, description-mode
 	Status      TaskStatus            `json:"status" gorm:"type:varchar(20);index"` // 任务状态
@@ -131,15 +221,31 @@ type TaskPrivateData struct {
 	WorkerHeartbeatAt  int64    `json:"worker_heartbeat_at,omitempty"`
 	ChannelRetryPath   []string `json:"channel_retry_path,omitempty"`
 
-	BillingState     string                `json:"billing_state,omitempty"`
-	PreConsumedQuota int                   `json:"pre_consumed_quota,omitempty"`
-	ActualQuota      int                   `json:"actual_quota,omitempty"`
-	BillingError     string                `json:"billing_error,omitempty"`
-	BillingUpdatedAt int64                 `json:"billing_updated_at,omitempty"`
-	PromptTokens     int                   `json:"prompt_tokens,omitempty"`
-	CompletionTokens int                   `json:"completion_tokens,omitempty"`
-	TotalTokens      int                   `json:"total_tokens,omitempty"`
-	UsageDetails     *dto.TaskUsageDetails `json:"usage_details,omitempty"`
+	BillingState        string                `json:"billing_state,omitempty"`
+	UsageAccountingMode string                `json:"usage_accounting_mode,omitempty"`
+	PreConsumedQuota    int                   `json:"pre_consumed_quota,omitempty"`
+	ActualQuota         int                   `json:"actual_quota,omitempty"`
+	BillingError        string                `json:"billing_error,omitempty"`
+	BillingUpdatedAt    int64                 `json:"billing_updated_at,omitempty"`
+	PromptTokens        int                   `json:"prompt_tokens,omitempty"`
+	CompletionTokens    int                   `json:"completion_tokens,omitempty"`
+	TotalTokens         int                   `json:"total_tokens,omitempty"`
+	UsageDetails        *dto.TaskUsageDetails `json:"usage_details,omitempty"`
+}
+
+const (
+	TaskUsageAccountingSubmit = "submit"
+	TaskUsageAccountingFinal  = "final"
+)
+
+func (p TaskPrivateData) GetUsageAccountingMode() string {
+	if p.UsageAccountingMode == TaskUsageAccountingSubmit || p.UsageAccountingMode == TaskUsageAccountingFinal {
+		return p.UsageAccountingMode
+	}
+	if p.InternalAsync {
+		return TaskUsageAccountingFinal
+	}
+	return TaskUsageAccountingSubmit
 }
 
 // TaskBillingContext 记录任务提交时的计费参数，以便轮询阶段可以重新计算额度。
@@ -168,6 +274,13 @@ func (t *Task) GetResultURL() string {
 		return t.PrivateData.ResultURL
 	}
 	return t.FailReason
+}
+
+func (t *Task) GetTokenID() int {
+	if t.TokenId > 0 {
+		return t.TokenId
+	}
+	return t.PrivateData.TokenId
 }
 
 // GenerateTaskID 生成对外暴露的 task_xxxx 格式 ID
@@ -200,6 +313,7 @@ type SyncTaskQueryParams struct {
 	Action         string
 	Status         string
 	ModelName      string
+	TokenName      string
 	StartTimestamp int64
 	EndTimestamp   int64
 	UserIDs        []int
@@ -214,6 +328,7 @@ func InitTask(platform constant.TaskPlatform, relayInfo *commonRelay.RelayInfo) 
 	if relayInfo != nil {
 		userID = relayInfo.UserId
 		usingGroup = relayInfo.UsingGroup
+		privateData.TokenId = relayInfo.TokenId
 		if relayInfo.ChannelMeta != nil {
 			channelID = relayInfo.ChannelId
 			if relayInfo.ChannelMeta.ChannelType == constant.ChannelTypeGemini ||
@@ -241,6 +356,7 @@ func InitTask(platform constant.TaskPlatform, relayInfo *commonRelay.RelayInfo) 
 		TaskID:      taskID,
 		UserId:      userID,
 		Group:       usingGroup,
+		TokenId:     privateData.TokenId,
 		SubmitTime:  time.Now().Unix(),
 		Status:      TaskStatusNotStart,
 		Progress:    "0%",
@@ -284,6 +400,50 @@ func TaskGetAllTasks(startIdx int, num int, queryParams SyncTaskQueryParams) []*
 	}
 
 	return tasks
+}
+
+func HydrateTaskTokenNames(tasks []*Task) error {
+	tokenIDs := make([]int, 0)
+	seenTokenIDs := make(map[int]struct{})
+	for _, task := range tasks {
+		if task == nil {
+			continue
+		}
+		task.TokenId = task.GetTokenID()
+		if task.TokenName != "" || task.TokenId <= 0 {
+			continue
+		}
+		if _, exists := seenTokenIDs[task.TokenId]; exists {
+			continue
+		}
+		seenTokenIDs[task.TokenId] = struct{}{}
+		tokenIDs = append(tokenIDs, task.TokenId)
+	}
+	if len(tokenIDs) == 0 {
+		return nil
+	}
+
+	var tokens []struct {
+		Id   int    `gorm:"column:id"`
+		Name string `gorm:"column:name"`
+	}
+	if err := DB.Model(&Token{}).
+		Select("id, name").
+		Where("id IN ?", tokenIDs).
+		Find(&tokens).Error; err != nil {
+		return err
+	}
+
+	tokenNames := make(map[int]string, len(tokens))
+	for _, token := range tokens {
+		tokenNames[token.Id] = token.Name
+	}
+	for _, task := range tasks {
+		if task != nil && task.TokenName == "" {
+			task.TokenName = tokenNames[task.TokenId]
+		}
+	}
+	return nil
 }
 
 func GetTimedOutUnfinishedTasks(cutoffUnix int64, limit int) []*Task {
@@ -649,6 +809,9 @@ func applySyncTaskQueryFilters(query *gorm.DB, queryParams SyncTaskQueryParams, 
 	if queryParams.ModelName != "" {
 		query = applyTaskModelNameFilter(query, queryParams.ModelName)
 	}
+	if queryParams.TokenName != "" {
+		query = applyTaskTokenNameFilter(query, queryParams.TokenName)
+	}
 	if queryParams.StartTimestamp != 0 {
 		query = query.Where("submit_time >= ?", queryParams.StartTimestamp)
 	}
@@ -656,6 +819,22 @@ func applySyncTaskQueryFilters(query *gorm.DB, queryParams SyncTaskQueryParams, 
 		query = query.Where("submit_time <= ?", queryParams.EndTimestamp)
 	}
 	return query
+}
+
+func applyTaskTokenNameFilter(query *gorm.DB, tokenName string) *gorm.DB {
+	tokenIDs := DB.Model(&Token{}).Select("id").Where("name = ?", tokenName)
+	legacyTokenIDExpression := "CAST(json_extract(private_data, '$.token_id') AS INTEGER)"
+	if common.UsingMainDatabase(common.DatabaseTypePostgreSQL) {
+		legacyTokenIDExpression = "CAST(NULLIF(private_data::json ->> 'token_id', '') AS INTEGER)"
+	} else if common.UsingMainDatabase(common.DatabaseTypeMySQL) {
+		legacyTokenIDExpression = "CAST(JSON_UNQUOTE(JSON_EXTRACT(private_data, '$.token_id')) AS UNSIGNED)"
+	}
+	return query.Where(
+		"(token_name = ? OR token_id IN (?) OR "+legacyTokenIDExpression+" IN (?))",
+		tokenName,
+		tokenIDs,
+		tokenIDs,
+	)
 }
 
 func applyTaskModelNameFilter(query *gorm.DB, modelName string) *gorm.DB {

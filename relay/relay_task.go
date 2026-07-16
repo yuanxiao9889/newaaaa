@@ -593,6 +593,8 @@ func TaskModel2DtoWithOptions(task *model.Task, includeData bool, includeInterna
 		Platform:          string(task.Platform),
 		UserId:            task.UserId,
 		Group:             task.Group,
+		TokenId:           task.GetTokenID(),
+		TokenName:         task.TokenName,
 		ModelName:         modelName,
 		UpstreamModelName: task.Properties.UpstreamModelName,
 		Quota:             task.Quota,

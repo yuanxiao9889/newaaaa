@@ -28,11 +28,11 @@ import { NavigationProgress } from '@/components/navigation-progress'
 import { Toaster } from '@/components/ui/sonner'
 import { ThemeCustomizationProvider } from '@/context/theme-customization-provider'
 import { saveAffiliateCode } from '@/features/auth/lib/storage'
-import { clearFrontendRecoveryAttempt } from '@/lib/frontend-recovery'
 import { GeneralError } from '@/features/errors/general-error'
 import { NotFoundError } from '@/features/errors/not-found-error'
 import { getSetupStatus } from '@/features/setup/api'
 import { useSystemConfig } from '@/hooks/use-system-config'
+import { clearFrontendRecoveryAttempt } from '@/lib/frontend-recovery'
 
 function RootComponent() {
   // Load system configuration (logo, system name, etc.) from backend

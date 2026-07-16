@@ -217,7 +217,9 @@ func runMidjourneyTaskUpdateOnce(ctx context.Context, report func(processed, tot
 				asyncTask, asyncTaskExists := syncMidjourneyAsyncTask(ctx, task, responseItem)
 				if shouldReturnQuota {
 					if asyncTask != nil {
-						service.RefundTaskQuota(ctx, asyncTask, "构图失败")
+						if err := service.RefundTaskQuota(ctx, asyncTask, "构图失败"); err != nil {
+							logger.LogError(ctx, fmt.Sprintf("refund Midjourney async task %s failed: %v", asyncTask.TaskID, err))
+						}
 					} else if !asyncTaskExists {
 						refundLegacyMidjourneyTask(ctx, task)
 					}
@@ -322,11 +324,18 @@ func refundLegacyMidjourneyTask(ctx context.Context, task *model.Midjourney) {
 	if task == nil || task.Quota == 0 {
 		return
 	}
-	err := model.IncreaseUserQuota(task.UserId, task.Quota, false)
-	if err != nil {
+	if err := model.AdjustUserQuotaImmediately(task.UserId, task.Quota); err != nil {
 		logger.LogError(ctx, "fail to increase user quota: "+err.Error())
+		return
 	}
-	model.RecordTaskBillingLog(model.RecordTaskBillingLogParams{
+	if err := model.AdjustTaskUsageAccounting(task.UserId, task.ChannelId, -task.Quota, 0); err != nil {
+		if compensationErr := model.AdjustUserQuotaImmediately(task.UserId, -task.Quota); compensationErr != nil {
+			logger.LogError(ctx, fmt.Sprintf("legacy Midjourney usage rollback failed for task %s: %v", task.MjId, compensationErr))
+		}
+		logger.LogError(ctx, fmt.Sprintf("adjust legacy Midjourney usage failed for task %s: %v", task.MjId, err))
+		return
+	}
+	if err := model.RecordTaskBillingLog(model.RecordTaskBillingLogParams{
 		UserId:    task.UserId,
 		LogType:   model.LogTypeRefund,
 		Content:   "",
@@ -334,10 +343,13 @@ func refundLegacyMidjourneyTask(ctx context.Context, task *model.Midjourney) {
 		ModelName: service.CovertMjpActionToModelName(task.Action),
 		Quota:     task.Quota,
 		Other: map[string]interface{}{
-			"task_id": task.MjId,
-			"reason":  "构图失败",
+			"task_id":             task.MjId,
+			"reason":              "构图失败",
+			"unattributed_refund": true,
 		},
-	})
+	}); err != nil {
+		logger.LogError(ctx, fmt.Sprintf("record legacy Midjourney refund log failed for task %s: %v", task.MjId, err))
+	}
 }
 
 func GetAllMidjourney(c *gin.Context) {

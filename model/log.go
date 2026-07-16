@@ -82,14 +82,15 @@ type Log struct {
 
 // don't use iota, avoid change log type value
 const (
-	LogTypeUnknown = 0
-	LogTypeTopup   = 1
-	LogTypeConsume = 2
-	LogTypeManage  = 3
-	LogTypeSystem  = 4
-	LogTypeError   = 5
-	LogTypeRefund  = 6
-	LogTypeLogin   = 7
+	LogTypeUnknown            = 0
+	LogTypeTopup              = 1
+	LogTypeConsume            = 2
+	LogTypeManage             = 3
+	LogTypeSystem             = 4
+	LogTypeError              = 5
+	LogTypeRefund             = 6
+	LogTypeLogin              = 7
+	LogTypePreConsumeRollback = 8
 )
 
 func ensureLogRequestId(log *Log) {
@@ -435,9 +436,9 @@ type RecordTaskBillingLogParams struct {
 	NodeName         string // 任务发起节点；为空时回退当前节点
 }
 
-func RecordTaskBillingLog(params RecordTaskBillingLogParams) {
+func RecordTaskBillingLog(params RecordTaskBillingLogParams) error {
 	if params.LogType == LogTypeConsume && !common.LogConsumeEnabled {
-		return
+		return nil
 	}
 	username, _ := GetUsernameById(params.UserId, false)
 	tokenName := ""
@@ -467,6 +468,7 @@ func RecordTaskBillingLog(params RecordTaskBillingLogParams) {
 	err := createLog(log)
 	if err != nil {
 		common.SysLog("failed to record task billing log: " + err.Error())
+		return err
 	}
 	if common.DataExportEnabled {
 		nodeName := params.NodeName
@@ -493,6 +495,7 @@ func RecordTaskBillingLog(params RecordTaskBillingLogParams) {
 			LogQuotaDataDelta(quotaData, 0)
 		}
 	}
+	return nil
 }
 
 func hydrateLogDisplayNames(logs []*Log) {
@@ -702,10 +705,11 @@ type Stat struct {
 }
 
 type TokenUsageStat struct {
-	TokenId      int `json:"token_id" gorm:"column:token_id"`
-	Quota        int `json:"quota" gorm:"column:quota"`
-	ConsumeQuota int `json:"consume_quota" gorm:"column:consume_quota"`
-	RefundQuota  int `json:"refund_quota" gorm:"column:refund_quota"`
+	TokenId       int `json:"token_id" gorm:"column:token_id"`
+	Quota         int `json:"quota" gorm:"column:quota"`
+	ConsumeQuota  int `json:"consume_quota" gorm:"column:consume_quota"`
+	RefundQuota   int `json:"refund_quota" gorm:"column:refund_quota"`
+	RollbackQuota int `json:"rollback_quota" gorm:"column:rollback_quota"`
 }
 
 func SumUserTokenUsageStats(userId int, tokenIds []int, startTimestamp int64, endTimestamp int64) ([]TokenUsageStat, error) {
@@ -719,12 +723,13 @@ func SumUserTokenUsageStats(userId int, tokenIds []int, startTimestamp int64, en
 			`token_id,
 			COALESCE(SUM(CASE WHEN type = ? THEN quota WHEN type = ? THEN -quota ELSE 0 END), 0) AS quota,
 			COALESCE(SUM(CASE WHEN type = ? THEN quota ELSE 0 END), 0) AS consume_quota,
-			COALESCE(SUM(CASE WHEN type = ? THEN quota ELSE 0 END), 0) AS refund_quota`,
-			LogTypeConsume, LogTypeRefund, LogTypeConsume, LogTypeRefund,
+			COALESCE(SUM(CASE WHEN type = ? THEN quota ELSE 0 END), 0) AS refund_quota,
+			COALESCE(SUM(CASE WHEN type = ? THEN quota ELSE 0 END), 0) AS rollback_quota`,
+			LogTypeConsume, LogTypeRefund, LogTypeConsume, LogTypeRefund, LogTypePreConsumeRollback,
 		).
 		Where("user_id = ?", userId).
 		Where("token_id IN ?", tokenIds).
-		Where("type IN ?", []int{LogTypeConsume, LogTypeRefund}).
+		Where("type IN ?", []int{LogTypeConsume, LogTypeRefund, LogTypePreConsumeRollback}).
 		Where("created_at >= ? AND created_at < ?", startTimestamp, endTimestamp).
 		Group("token_id").
 		Scan(&stats).Error

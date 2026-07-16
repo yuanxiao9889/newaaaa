@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"testing"
 	"time"
@@ -13,6 +14,8 @@ import (
 	"github.com/QuantumNous/new-api/model"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
+	"github.com/QuantumNous/new-api/types"
+	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -161,6 +164,20 @@ func getUserQuota(t *testing.T, id int) int {
 	return user.Quota
 }
 
+func getUserUsedQuotaAndRequestCount(t *testing.T, id int) (int, int) {
+	t.Helper()
+	var user model.User
+	require.NoError(t, model.DB.Select("used_quota", "request_count").Where("id = ?", id).First(&user).Error)
+	return user.UsedQuota, user.RequestCount
+}
+
+func getChannelUsedQuota(t *testing.T, id int) int {
+	t.Helper()
+	var channel model.Channel
+	require.NoError(t, model.DB.Select("used_quota").Where("id = ?", id).First(&channel).Error)
+	return int(channel.UsedQuota)
+}
+
 func getTokenRemainQuota(t *testing.T, id int) int {
 	t.Helper()
 	var token model.Token
@@ -227,6 +244,10 @@ func TestRefundTaskQuota_Wallet(t *testing.T) {
 	seedUser(t, userID, initQuota)
 	seedToken(t, tokenID, userID, "sk-test-key", tokenRemain)
 	seedChannel(t, channelID)
+	require.NoError(t, model.DB.Model(&model.User{}).Where("id = ?", userID).Updates(map[string]any{
+		"used_quota": preConsumed, "request_count": 1,
+	}).Error)
+	require.NoError(t, model.DB.Model(&model.Channel{}).Where("id = ?", channelID).Update("used_quota", preConsumed).Error)
 
 	task := makeTask(userID, channelID, preConsumed, tokenID, BillingSourceWallet, 0)
 	task.SubmitTime = 1700000000
@@ -242,6 +263,11 @@ func TestRefundTaskQuota_Wallet(t *testing.T) {
 	assert.Equal(t, tokenRemain+preConsumed, getTokenRemainQuota(t, tokenID))
 	assert.Equal(t, -preConsumed, getTokenUsedQuota(t, tokenID))
 
+	usedQuota, requestCount := getUserUsedQuotaAndRequestCount(t, userID)
+	assert.Equal(t, 0, usedQuota)
+	assert.Equal(t, 1, requestCount)
+	assert.Equal(t, 0, getChannelUsedQuota(t, channelID))
+
 	// A refund log should be created
 	log := getLastLog(t)
 	require.NotNil(t, log)
@@ -249,6 +275,46 @@ func TestRefundTaskQuota_Wallet(t *testing.T) {
 	assert.Equal(t, preConsumed, log.Quota)
 	assert.Equal(t, "test-model", log.ModelName)
 	assert.Equal(t, 32, log.UseTime)
+}
+
+func TestRefundTaskQuota_FinalAccountingRecordsRollbackOnly(t *testing.T) {
+	truncate(t)
+	ctx := context.Background()
+
+	originalDataExportEnabled := common.DataExportEnabled
+	common.DataExportEnabled = true
+	t.Cleanup(func() {
+		common.DataExportEnabled = originalDataExportEnabled
+	})
+
+	const userID, tokenID, channelID = 26, 26, 26
+	const initQuota, preConsumed, tokenRemain = 10000, 3000, 5000
+
+	seedUser(t, userID, initQuota)
+	seedToken(t, tokenID, userID, "sk-final-rollback", tokenRemain)
+	seedChannel(t, channelID)
+
+	task := makeTask(userID, channelID, preConsumed, tokenID, BillingSourceWallet, 0)
+	task.PrivateData.UsageAccountingMode = model.TaskUsageAccountingFinal
+
+	RefundTaskQuota(ctx, task, "async image failed")
+	model.SaveQuotaDataCache()
+
+	assert.Equal(t, initQuota+preConsumed, getUserQuota(t, userID))
+	assert.Equal(t, tokenRemain+preConsumed, getTokenRemainQuota(t, tokenID))
+	usedQuota, requestCount := getUserUsedQuotaAndRequestCount(t, userID)
+	assert.Equal(t, 0, usedQuota)
+	assert.Equal(t, 0, requestCount)
+	assert.Equal(t, 0, getChannelUsedQuota(t, channelID))
+
+	log := getLastLog(t)
+	require.NotNil(t, log)
+	assert.Equal(t, model.LogTypePreConsumeRollback, log.Type)
+	assert.Equal(t, preConsumed, log.Quota)
+
+	quota, tokenUsed := getQuotaDataTotal(t, userID, "test-model")
+	assert.Equal(t, 0, quota)
+	assert.Equal(t, 0, tokenUsed)
 }
 
 func TestRefundTaskQuota_Subscription(t *testing.T) {
@@ -321,6 +387,49 @@ func TestRefundTaskQuota_NoToken(t *testing.T) {
 	assert.Equal(t, model.LogTypeRefund, log.Type)
 }
 
+func TestRefundTaskQuotaCompensatesWhenRefundStatePersistenceFails(t *testing.T) {
+	truncate(t)
+	ctx := context.Background()
+
+	const userID, tokenID, channelID = 45, 45, 45
+	const initQuota, preConsumed = 10000, 1500
+	const tokenRemain = 5000
+
+	seedUser(t, userID, initQuota)
+	seedToken(t, tokenID, userID, "sk-refund-persist-fail", tokenRemain)
+	seedChannel(t, channelID)
+	require.NoError(t, model.DB.Model(&model.User{}).Where("id = ?", userID).Updates(map[string]any{
+		"used_quota": preConsumed, "request_count": 1,
+	}).Error)
+	require.NoError(t, model.DB.Model(&model.Channel{}).Where("id = ?", channelID).Update("used_quota", preConsumed).Error)
+
+	task := makeTask(userID, channelID, preConsumed, tokenID, BillingSourceWallet, 0)
+	task.PrivateData.UsageAccountingMode = model.TaskUsageAccountingSubmit
+	require.NoError(t, model.DB.Create(task).Error)
+	require.NoError(t, model.DB.Exec(`
+		CREATE TRIGGER fail_task_refund_state_update
+		BEFORE UPDATE OF private_data ON tasks
+		BEGIN
+			SELECT RAISE(ABORT, 'forced refund state update failure');
+		END;
+	`).Error)
+	t.Cleanup(func() {
+		model.DB.Exec("DROP TRIGGER IF EXISTS fail_task_refund_state_update")
+	})
+
+	err := RefundTaskQuota(ctx, task, "forced persistence failure")
+	require.Error(t, err)
+
+	assert.Equal(t, initQuota, getUserQuota(t, userID))
+	assert.Equal(t, tokenRemain, getTokenRemainQuota(t, tokenID))
+	usedQuota, requestCount := getUserUsedQuotaAndRequestCount(t, userID)
+	assert.Equal(t, preConsumed, usedQuota)
+	assert.Equal(t, 1, requestCount)
+	assert.Equal(t, preConsumed, getChannelUsedQuota(t, channelID))
+	assert.NotEqual(t, TaskBillingStateRefunded, task.PrivateData.BillingState)
+	assert.Equal(t, int64(0), countLogs(t))
+}
+
 // ===========================================================================
 // RecalculateTaskQuota tests
 // ===========================================================================
@@ -337,6 +446,10 @@ func TestRecalculate_PositiveDelta(t *testing.T) {
 	seedUser(t, userID, initQuota)
 	seedToken(t, tokenID, userID, "sk-recalc-pos", tokenRemain)
 	seedChannel(t, channelID)
+	require.NoError(t, model.DB.Model(&model.User{}).Where("id = ?", userID).Updates(map[string]any{
+		"used_quota": preConsumed, "request_count": 1,
+	}).Error)
+	require.NoError(t, model.DB.Model(&model.Channel{}).Where("id = ?", channelID).Update("used_quota", preConsumed).Error)
 
 	task := makeTask(userID, channelID, preConsumed, tokenID, BillingSourceWallet, 0)
 	task.SubmitTime = 1700000100
@@ -354,12 +467,64 @@ func TestRecalculate_PositiveDelta(t *testing.T) {
 	// task.Quota should be updated to actualQuota
 	assert.Equal(t, actualQuota, task.Quota)
 
+	usedQuota, requestCount := getUserUsedQuotaAndRequestCount(t, userID)
+	assert.Equal(t, actualQuota, usedQuota)
+	assert.Equal(t, 1, requestCount)
+	assert.Equal(t, actualQuota, getChannelUsedQuota(t, channelID))
+
 	// Log type should be Consume (additional charge)
 	log := getLastLog(t)
 	require.NotNil(t, log)
 	assert.Equal(t, model.LogTypeConsume, log.Type)
 	assert.Equal(t, actualQuota-preConsumed, log.Quota)
 	assert.Equal(t, 70, log.UseTime)
+}
+
+func TestRecalculateTaskQuotaCompensatesWhenQuotaPersistenceFails(t *testing.T) {
+	truncate(t)
+	ctx := context.Background()
+
+	const userID, tokenID, channelID = 44, 44, 44
+	const initQuota, preConsumed, actualQuota = 10000, 2000, 3000
+	const tokenRemain = 5000
+
+	seedUser(t, userID, initQuota)
+	seedToken(t, tokenID, userID, "sk-recalc-persist-fail", tokenRemain)
+	seedChannel(t, channelID)
+	require.NoError(t, model.DB.Model(&model.User{}).Where("id = ?", userID).Updates(map[string]any{
+		"used_quota": preConsumed, "request_count": 1,
+	}).Error)
+	require.NoError(t, model.DB.Model(&model.Channel{}).Where("id = ?", channelID).Update("used_quota", preConsumed).Error)
+
+	task := makeTask(userID, channelID, preConsumed, tokenID, BillingSourceWallet, 0)
+	require.NoError(t, model.DB.Create(task).Error)
+	require.NoError(t, model.DB.Exec(`
+		CREATE TRIGGER fail_task_quota_update
+		BEFORE UPDATE OF quota ON tasks
+		BEGIN
+			SELECT RAISE(ABORT, 'forced quota update failure');
+		END;
+	`).Error)
+	t.Cleanup(func() {
+		model.DB.Exec("DROP TRIGGER IF EXISTS fail_task_quota_update")
+	})
+
+	err := RecalculateTaskQuota(ctx, task, actualQuota, "forced persistence failure")
+	require.Error(t, err)
+
+	assert.Equal(t, initQuota, getUserQuota(t, userID))
+	assert.Equal(t, tokenRemain, getTokenRemainQuota(t, tokenID))
+	assert.Equal(t, preConsumed, task.Quota)
+	usedQuota, requestCount := getUserUsedQuotaAndRequestCount(t, userID)
+	assert.Equal(t, preConsumed, usedQuota)
+	assert.Equal(t, 1, requestCount)
+	assert.Equal(t, preConsumed, getChannelUsedQuota(t, channelID))
+	assert.Equal(t, int64(0), countLogs(t))
+
+	var persisted model.Task
+	require.NoError(t, model.DB.First(&persisted, task.ID).Error)
+	assert.Equal(t, preConsumed, persisted.Quota)
+	assert.NotEmpty(t, persisted.PrivateData.BillingError)
 }
 
 func TestRecalculate_NegativeDelta(t *testing.T) {
@@ -374,6 +539,10 @@ func TestRecalculate_NegativeDelta(t *testing.T) {
 	seedUser(t, userID, initQuota)
 	seedToken(t, tokenID, userID, "sk-recalc-neg", tokenRemain)
 	seedChannel(t, channelID)
+	require.NoError(t, model.DB.Model(&model.User{}).Where("id = ?", userID).Updates(map[string]any{
+		"used_quota": preConsumed, "request_count": 1,
+	}).Error)
+	require.NoError(t, model.DB.Model(&model.Channel{}).Where("id = ?", channelID).Update("used_quota", preConsumed).Error)
 
 	task := makeTask(userID, channelID, preConsumed, tokenID, BillingSourceWallet, 0)
 
@@ -387,6 +556,11 @@ func TestRecalculate_NegativeDelta(t *testing.T) {
 
 	// task.Quota updated
 	assert.Equal(t, actualQuota, task.Quota)
+
+	usedQuota, requestCount := getUserUsedQuotaAndRequestCount(t, userID)
+	assert.Equal(t, actualQuota, usedQuota)
+	assert.Equal(t, 1, requestCount)
+	assert.Equal(t, actualQuota, getChannelUsedQuota(t, channelID))
 
 	// Log type should be Refund
 	log := getLastLog(t)
@@ -686,8 +860,9 @@ func TestConfirmTaskBillingSettledRecordsQuotaData(t *testing.T) {
 	task.FinishTime = 1700000260
 	task.PrivateData.PromptTokens = 123
 	task.PrivateData.CompletionTokens = 77
+	task.PrivateData.UsageAccountingMode = model.TaskUsageAccountingFinal
 
-	ConfirmTaskBillingSettled(ctx, task, actualQuota, "async task completed")
+	require.NoError(t, ConfirmTaskBillingSettled(ctx, task, actualQuota, "async task completed"))
 	model.SaveQuotaDataCache()
 
 	quota, tokenUsed := getQuotaDataTotal(t, userID, "test-model")
@@ -896,4 +1071,574 @@ func TestCalculateTaskQuotaByUsage_GPTImage2OFUsesTokenPricing(t *testing.T) {
 	expectedQuota := int(expectedQuotaFloat + 0.5)
 
 	assert.Equal(t, expectedQuota, actualQuota)
+}
+
+func TestCalculateTaskQuotaByUsageCheckedClampsOverflow(t *testing.T) {
+	task := makeTask(42, 42, 0, 0, BillingSourceWallet, 0)
+	task.PrivateData.BillingContext.ModelPrice = 0
+	task.PrivateData.BillingContext.ModelRatio = 1e20
+	task.PrivateData.BillingContext.GroupRatio = 1
+
+	quota, clamp := CalculateTaskQuotaByUsageChecked(task, &dto.Usage{PromptTokens: 100})
+
+	assert.Equal(t, common.MaxQuota, quota)
+	require.NotNil(t, clamp)
+	assert.Equal(t, common.QuotaClampOverflow, clamp.Kind)
+	assert.Equal(t, common.MaxQuota, CalculateTaskQuotaByUsage(task, &dto.Usage{PromptTokens: 100}))
+}
+
+func TestConfirmTaskBillingSettledAttachesQuotaClamp(t *testing.T) {
+	truncate(t)
+	ctx := context.Background()
+
+	const userID, tokenID, channelID = 43, 43, 43
+	seedUser(t, userID, 10000)
+	seedToken(t, tokenID, userID, "sk-clamped-task", 10000)
+	seedChannel(t, channelID)
+
+	task := makeTask(userID, channelID, 1000, tokenID, BillingSourceWallet, 0)
+	task.PrivateData.UsageAccountingMode = model.TaskUsageAccountingFinal
+	clamp := &common.QuotaClamp{
+		Op:       "QuotaFromDecimal",
+		Kind:     common.QuotaClampOverflow,
+		Original: 1e30,
+		Clamped:  common.MaxQuota,
+	}
+	require.NoError(t, ConfirmTaskBillingSettled(ctx, task, 1000, "clamped settlement", clamp))
+
+	log := getLastLog(t)
+	require.NotNil(t, log)
+	var other map[string]interface{}
+	require.NoError(t, common.UnmarshalJsonStr(log.Other, &other))
+	adminInfo, ok := other["admin_info"].(map[string]interface{})
+	require.True(t, ok)
+	saturation, ok := adminInfo["quota_saturation"].(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, common.QuotaClampOverflow, saturation["kind"])
+}
+
+func TestRefundTaskQuotaDeletedTokenStillRefundsFunding(t *testing.T) {
+	truncate(t)
+	ctx := context.Background()
+
+	const userID, deletedTokenID = 41, 4100
+	const initQuota, preConsumed = 10000, 1500
+	seedUser(t, userID, initQuota)
+
+	task := makeTask(userID, 0, preConsumed, deletedTokenID, BillingSourceWallet, 0)
+	require.NoError(t, model.DB.Create(task).Error)
+
+	require.NoError(t, RefundTaskQuota(ctx, task, "deleted token task failed"))
+
+	assert.Equal(t, initQuota+preConsumed, getUserQuota(t, userID))
+	assert.Equal(t, TaskBillingStateRefunded, task.PrivateData.BillingState)
+	log := getLastLog(t)
+	require.NotNil(t, log)
+	assert.Equal(t, model.LogTypeRefund, log.Type)
+	assert.Equal(t, deletedTokenID, log.TokenId)
+}
+
+func TestConfirmTaskBillingSettledRollsBackStateWhenUsageAccountingFails(t *testing.T) {
+	truncate(t)
+	ctx := context.Background()
+
+	const userID, tokenID, channelID, actualQuota = 46, 46, 46, 1800
+	seedUser(t, userID, 10000)
+	seedToken(t, tokenID, userID, "sk-confirm-accounting-fail", 5000)
+	seedChannel(t, channelID)
+
+	task := makeTask(userID, channelID, actualQuota, tokenID, BillingSourceWallet, 0)
+	task.PrivateData.UsageAccountingMode = model.TaskUsageAccountingFinal
+	require.NoError(t, model.DB.Create(task).Error)
+	require.NoError(t, model.DB.Exec(`
+		CREATE TRIGGER fail_confirm_user_usage_update
+		BEFORE UPDATE OF used_quota ON users
+		BEGIN
+			SELECT RAISE(ABORT, 'forced confirm usage update failure');
+		END;
+	`).Error)
+	t.Cleanup(func() {
+		model.DB.Exec("DROP TRIGGER IF EXISTS fail_confirm_user_usage_update")
+	})
+
+	err := ConfirmTaskBillingSettled(ctx, task, actualQuota, "forced accounting failure")
+	require.Error(t, err)
+
+	usedQuota, requestCount := getUserUsedQuotaAndRequestCount(t, userID)
+	assert.Zero(t, usedQuota)
+	assert.Zero(t, requestCount)
+	assert.Zero(t, getChannelUsedQuota(t, channelID))
+	assert.NotEqual(t, TaskBillingStateSettled, task.PrivateData.BillingState)
+	assert.NotEmpty(t, task.PrivateData.BillingError)
+	assert.Equal(t, int64(0), countLogs(t))
+
+	var persisted model.Task
+	require.NoError(t, model.DB.First(&persisted, task.ID).Error)
+	assert.NotEqual(t, TaskBillingStateSettled, persisted.PrivateData.BillingState)
+	assert.NotEmpty(t, persisted.PrivateData.BillingError)
+}
+
+func TestRecalculateTaskQuotaCompensatesWhenUsageAccountingFails(t *testing.T) {
+	truncate(t)
+	ctx := context.Background()
+
+	const userID, tokenID, channelID = 47, 47, 47
+	const initQuota, preConsumed, actualQuota, tokenRemain = 10000, 2000, 3000, 5000
+	seedUser(t, userID, initQuota)
+	seedToken(t, tokenID, userID, "sk-recalc-accounting-fail", tokenRemain)
+	seedChannel(t, channelID)
+	require.NoError(t, model.DB.Model(&model.User{}).Where("id = ?", userID).Updates(map[string]any{
+		"used_quota": preConsumed, "request_count": 1,
+	}).Error)
+	require.NoError(t, model.DB.Model(&model.Channel{}).Where("id = ?", channelID).Update("used_quota", preConsumed).Error)
+
+	task := makeTask(userID, channelID, preConsumed, tokenID, BillingSourceWallet, 0)
+	require.NoError(t, model.DB.Create(task).Error)
+	require.NoError(t, model.DB.Exec(`
+		CREATE TRIGGER fail_recalculate_channel_usage_update
+		BEFORE UPDATE OF used_quota ON channels
+		BEGIN
+			SELECT RAISE(ABORT, 'forced channel usage update failure');
+		END;
+	`).Error)
+	t.Cleanup(func() {
+		model.DB.Exec("DROP TRIGGER IF EXISTS fail_recalculate_channel_usage_update")
+	})
+
+	err := RecalculateTaskQuota(ctx, task, actualQuota, "forced accounting failure")
+	require.Error(t, err)
+
+	assert.Equal(t, initQuota, getUserQuota(t, userID))
+	assert.Equal(t, tokenRemain, getTokenRemainQuota(t, tokenID))
+	usedQuota, requestCount := getUserUsedQuotaAndRequestCount(t, userID)
+	assert.Equal(t, preConsumed, usedQuota)
+	assert.Equal(t, 1, requestCount)
+	assert.Equal(t, preConsumed, getChannelUsedQuota(t, channelID))
+	assert.Equal(t, preConsumed, task.Quota)
+	assert.Equal(t, int64(0), countLogs(t))
+
+	var persisted model.Task
+	require.NoError(t, model.DB.First(&persisted, task.ID).Error)
+	assert.Equal(t, preConsumed, persisted.Quota)
+	assert.NotEmpty(t, persisted.PrivateData.BillingError)
+}
+
+func TestRefundTaskQuotaBypassesBatchUpdaterForCriticalAccounting(t *testing.T) {
+	truncate(t)
+	ctx := context.Background()
+
+	oldBatchUpdateEnabled := common.BatchUpdateEnabled
+	common.BatchUpdateEnabled = true
+	t.Cleanup(func() {
+		common.BatchUpdateEnabled = oldBatchUpdateEnabled
+	})
+
+	const userID, tokenID, channelID = 48, 48, 48
+	const initQuota, preConsumed, tokenRemain = 10000, 1500, 5000
+	seedUser(t, userID, initQuota)
+	seedToken(t, tokenID, userID, "sk-refund-batch-bypass", tokenRemain)
+	seedChannel(t, channelID)
+	require.NoError(t, model.DB.Model(&model.User{}).Where("id = ?", userID).Updates(map[string]any{
+		"used_quota": preConsumed, "request_count": 1,
+	}).Error)
+	require.NoError(t, model.DB.Model(&model.Channel{}).Where("id = ?", channelID).Update("used_quota", preConsumed).Error)
+
+	task := makeTask(userID, channelID, preConsumed, tokenID, BillingSourceWallet, 0)
+	require.NoError(t, model.DB.Create(task).Error)
+	require.NoError(t, RefundTaskQuota(ctx, task, "batch updater bypass"))
+
+	assert.Equal(t, initQuota+preConsumed, getUserQuota(t, userID))
+	assert.Equal(t, tokenRemain+preConsumed, getTokenRemainQuota(t, tokenID))
+	usedQuota, requestCount := getUserUsedQuotaAndRequestCount(t, userID)
+	assert.Zero(t, usedQuota)
+	assert.Equal(t, 1, requestCount)
+	assert.Zero(t, getChannelUsedQuota(t, channelID))
+	assert.Equal(t, TaskBillingStateRefunded, task.PrivateData.BillingState)
+}
+
+func TestUpdateSunoTasksMissingChannelKeepsTaskPending(t *testing.T) {
+	truncate(t)
+	ctx := context.Background()
+
+	const userID, missingChannelID = 42, 4200
+	seedUser(t, userID, 10000)
+
+	task := makeTask(userID, missingChannelID, 1200, 0, BillingSourceWallet, 0)
+	task.Status = model.TaskStatusInProgress
+	require.NoError(t, model.DB.Create(task).Error)
+
+	err := updateSunoTasks(ctx, missingChannelID, []string{"upstream-task"}, map[string]*model.Task{
+		"upstream-task": task,
+	})
+	require.Error(t, err)
+
+	var reloaded model.Task
+	require.NoError(t, model.DB.First(&reloaded, task.ID).Error)
+	assert.EqualValues(t, model.TaskStatusInProgress, reloaded.Status)
+	assert.Equal(t, 1200, reloaded.Quota)
+	assert.Equal(t, int64(0), countLogs(t))
+}
+
+func TestForcePreConsumePersistsAndRefundsBeforeReturning(t *testing.T) {
+	truncate(t)
+
+	oldBatchUpdateEnabled := common.BatchUpdateEnabled
+	common.BatchUpdateEnabled = true
+	t.Cleanup(func() {
+		common.BatchUpdateEnabled = oldBatchUpdateEnabled
+	})
+
+	const userID, tokenID = 49, 49
+	const userQuota, tokenQuota, preConsumed = 10000, 5000, 1500
+	const tokenKey = "sk-force-preconsume"
+	seedUser(t, userID, userQuota)
+	seedToken(t, tokenID, userID, tokenKey, tokenQuota)
+
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/images/generations?async=true", nil)
+	info := &relaycommon.RelayInfo{
+		UserId:          userID,
+		TokenId:         tokenID,
+		TokenKey:        tokenKey,
+		ForcePreConsume: true,
+		UserSetting: dto.UserSetting{
+			BillingPreference: "wallet_only",
+		},
+	}
+
+	require.Nil(t, PreConsumeBilling(c, preConsumed, info))
+	assert.Equal(t, userQuota-preConsumed, getUserQuota(t, userID))
+	assert.Equal(t, tokenQuota-preConsumed, getTokenRemainQuota(t, tokenID))
+	assert.Equal(t, preConsumed, getTokenUsedQuota(t, tokenID))
+
+	info.Billing.Refund(c)
+	assert.Equal(t, userQuota, getUserQuota(t, userID))
+	assert.Equal(t, tokenQuota, getTokenRemainQuota(t, tokenID))
+	assert.Zero(t, getTokenUsedQuota(t, tokenID))
+}
+
+func TestForcePreConsumeRollsBackTokenWhenWalletPersistenceFails(t *testing.T) {
+	truncate(t)
+
+	oldBatchUpdateEnabled := common.BatchUpdateEnabled
+	common.BatchUpdateEnabled = true
+	t.Cleanup(func() {
+		common.BatchUpdateEnabled = oldBatchUpdateEnabled
+	})
+
+	const userID, tokenID = 50, 50
+	const userQuota, tokenQuota, preConsumed = 10000, 5000, 1500
+	const tokenKey = "sk-force-preconsume-wallet-failure"
+	seedUser(t, userID, userQuota)
+	seedToken(t, tokenID, userID, tokenKey, tokenQuota)
+	require.NoError(t, model.DB.Exec(`
+		CREATE TRIGGER fail_force_preconsume_wallet_update
+		BEFORE UPDATE OF quota ON users
+		BEGIN
+			SELECT RAISE(ABORT, 'forced wallet update failure');
+		END;
+	`).Error)
+	t.Cleanup(func() {
+		model.DB.Exec("DROP TRIGGER IF EXISTS fail_force_preconsume_wallet_update")
+	})
+
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/images/generations?async=true", nil)
+	info := &relaycommon.RelayInfo{
+		UserId:          userID,
+		TokenId:         tokenID,
+		TokenKey:        tokenKey,
+		ForcePreConsume: true,
+		UserSetting: dto.UserSetting{
+			BillingPreference: "wallet_only",
+		},
+	}
+
+	require.NotNil(t, PreConsumeBilling(c, preConsumed, info))
+	assert.Equal(t, userQuota, getUserQuota(t, userID))
+	assert.Equal(t, tokenQuota, getTokenRemainQuota(t, tokenID))
+	assert.Zero(t, getTokenUsedQuota(t, tokenID))
+}
+
+func TestForcePreConsumeSettleCompensatesFundingWhenTokenPersistenceFails(t *testing.T) {
+	truncate(t)
+
+	oldBatchUpdateEnabled := common.BatchUpdateEnabled
+	common.BatchUpdateEnabled = true
+	t.Cleanup(func() {
+		common.BatchUpdateEnabled = oldBatchUpdateEnabled
+	})
+
+	const userID, tokenID = 51, 51
+	const userQuota, tokenQuota, preConsumed, actualQuota = 10000, 5000, 1000, 1600
+	const tokenKey = "sk-force-preconsume-settle-failure"
+	seedUser(t, userID, userQuota)
+	seedToken(t, tokenID, userID, tokenKey, tokenQuota)
+
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/video/generations", nil)
+	info := &relaycommon.RelayInfo{
+		UserId:          userID,
+		TokenId:         tokenID,
+		TokenKey:        tokenKey,
+		ForcePreConsume: true,
+		UserSetting: dto.UserSetting{
+			BillingPreference: "wallet_only",
+		},
+	}
+	require.Nil(t, PreConsumeBilling(c, preConsumed, info))
+
+	require.NoError(t, model.DB.Exec(`
+		CREATE TRIGGER fail_force_preconsume_token_settlement
+		BEFORE UPDATE OF remain_quota ON tokens
+		BEGIN
+			SELECT RAISE(ABORT, 'forced token settlement failure');
+		END;
+	`).Error)
+
+	err := info.Billing.Settle(actualQuota)
+	require.Error(t, err)
+	assert.Equal(t, userQuota-preConsumed, getUserQuota(t, userID))
+	assert.Equal(t, tokenQuota-preConsumed, getTokenRemainQuota(t, tokenID))
+	assert.Equal(t, preConsumed, getTokenUsedQuota(t, tokenID))
+
+	require.NoError(t, model.DB.Exec("DROP TRIGGER IF EXISTS fail_force_preconsume_token_settlement").Error)
+	info.Billing.Refund(c)
+	assert.Equal(t, userQuota, getUserQuota(t, userID))
+	assert.Equal(t, tokenQuota, getTokenRemainQuota(t, tokenID))
+	assert.Zero(t, getTokenUsedQuota(t, tokenID))
+}
+
+func TestForcePreConsumeSettlementBypassesBatchUpdater(t *testing.T) {
+	truncate(t)
+
+	oldBatchUpdateEnabled := common.BatchUpdateEnabled
+	common.BatchUpdateEnabled = true
+	t.Cleanup(func() {
+		common.BatchUpdateEnabled = oldBatchUpdateEnabled
+	})
+
+	const userID, tokenID = 52, 52
+	const userQuota, tokenQuota, preConsumed, actualQuota = 10000, 5000, 1000, 1600
+	const tokenKey = "sk-force-preconsume-settlement"
+	seedUser(t, userID, userQuota)
+	seedToken(t, tokenID, userID, tokenKey, tokenQuota)
+
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/video/generations", nil)
+	info := &relaycommon.RelayInfo{
+		UserId:          userID,
+		TokenId:         tokenID,
+		TokenKey:        tokenKey,
+		ForcePreConsume: true,
+		UserSetting: dto.UserSetting{
+			BillingPreference: "wallet_only",
+		},
+	}
+
+	require.Nil(t, PreConsumeBilling(c, preConsumed, info))
+	require.NoError(t, info.Billing.Settle(actualQuota))
+	assert.Equal(t, userQuota-actualQuota, getUserQuota(t, userID))
+	assert.Equal(t, tokenQuota-actualQuota, getTokenRemainQuota(t, tokenID))
+	assert.Equal(t, actualQuota, getTokenUsedQuota(t, tokenID))
+
+	info.Billing.Refund(c)
+	assert.Equal(t, userQuota-actualQuota, getUserQuota(t, userID))
+	assert.Equal(t, tokenQuota-actualQuota, getTokenRemainQuota(t, tokenID))
+	assert.Equal(t, actualQuota, getTokenUsedQuota(t, tokenID))
+}
+
+func TestLogTaskConsumptionBypassesBatchUpdaterForForcedPreConsume(t *testing.T) {
+	truncate(t)
+
+	oldBatchUpdateEnabled := common.BatchUpdateEnabled
+	common.BatchUpdateEnabled = true
+	t.Cleanup(func() {
+		common.BatchUpdateEnabled = oldBatchUpdateEnabled
+	})
+
+	const userID, tokenID, channelID, quota = 53, 53, 53, 1200
+	seedUser(t, userID, 10000)
+	seedToken(t, tokenID, userID, "sk-task-usage-accounting", 5000)
+	seedChannel(t, channelID)
+
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/video/generations", nil)
+	c.Set("username", "test_user")
+	c.Set("token_name", "test_token")
+	info := &relaycommon.RelayInfo{
+		UserId:          userID,
+		TokenId:         tokenID,
+		OriginModelName: "test-model",
+		UsingGroup:      "default",
+		ForcePreConsume: true,
+		PriceData: types.PriceData{
+			Quota: quota,
+		},
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelId: channelID,
+		},
+		TaskRelayInfo: &relaycommon.TaskRelayInfo{
+			Action: "video",
+		},
+	}
+
+	require.NoError(t, LogTaskConsumption(c, info))
+	usedQuota, requestCount := getUserUsedQuotaAndRequestCount(t, userID)
+	assert.Equal(t, quota, usedQuota)
+	assert.Equal(t, 1, requestCount)
+	assert.Equal(t, quota, getChannelUsedQuota(t, channelID))
+
+	log := getLastLog(t)
+	require.NotNil(t, log)
+	assert.Equal(t, model.LogTypeConsume, log.Type)
+	assert.Equal(t, quota, log.Quota)
+	assert.Equal(t, tokenID, log.TokenId)
+}
+
+func TestConfirmTaskBillingSettledSubmitModeDoesNotDoubleAccount(t *testing.T) {
+	truncate(t)
+	ctx := context.Background()
+
+	const userID, tokenID, channelID, actualQuota = 54, 54, 54, 1800
+	seedUser(t, userID, 10000)
+	seedToken(t, tokenID, userID, "sk-submit-confirm", 5000)
+	seedChannel(t, channelID)
+	require.NoError(t, model.AdjustTaskUsageAccounting(userID, channelID, actualQuota, 1))
+
+	task := makeTask(userID, channelID, actualQuota, tokenID, BillingSourceWallet, 0)
+	task.PrivateData.BillingState = TaskBillingStatePending
+	task.PrivateData.UsageAccountingMode = model.TaskUsageAccountingSubmit
+	task.PrivateData.PreConsumedQuota = actualQuota
+	require.NoError(t, model.DB.Create(task).Error)
+
+	require.NoError(t, ConfirmTaskBillingSettled(ctx, task, actualQuota, "submit-accounted task completed"))
+
+	usedQuota, requestCount := getUserUsedQuotaAndRequestCount(t, userID)
+	assert.Equal(t, actualQuota, usedQuota)
+	assert.Equal(t, 1, requestCount)
+	assert.Equal(t, actualQuota, getChannelUsedQuota(t, channelID))
+	assert.Equal(t, int64(0), countLogs(t))
+	assert.Equal(t, TaskBillingStateSettled, task.PrivateData.BillingState)
+
+	var persisted model.Task
+	require.NoError(t, model.DB.First(&persisted, task.ID).Error)
+	assert.Equal(t, TaskBillingStateSettled, persisted.PrivateData.BillingState)
+}
+
+func TestRecalculateTaskQuotaFinalModeDefersUsageUntilConfirmation(t *testing.T) {
+	truncate(t)
+	ctx := context.Background()
+
+	const userID, tokenID, channelID = 55, 55, 55
+	const currentQuota, preConsumed, actualQuota, tokenRemain = 10000, 1200, 2000, 5000
+	seedUser(t, userID, currentQuota)
+	seedToken(t, tokenID, userID, "sk-final-accounting", tokenRemain)
+	seedChannel(t, channelID)
+
+	task := makeTask(userID, channelID, preConsumed, tokenID, BillingSourceWallet, 0)
+	task.PrivateData.BillingState = TaskBillingStatePending
+	task.PrivateData.UsageAccountingMode = model.TaskUsageAccountingFinal
+	task.PrivateData.PreConsumedQuota = preConsumed
+	require.NoError(t, model.DB.Create(task).Error)
+
+	require.NoError(t, RecalculateTaskQuota(ctx, task, actualQuota, "final-mode adjustment"))
+	assert.Equal(t, currentQuota-(actualQuota-preConsumed), getUserQuota(t, userID))
+	assert.Equal(t, tokenRemain-(actualQuota-preConsumed), getTokenRemainQuota(t, tokenID))
+	usedQuota, requestCount := getUserUsedQuotaAndRequestCount(t, userID)
+	assert.Zero(t, usedQuota)
+	assert.Zero(t, requestCount)
+	assert.Zero(t, getChannelUsedQuota(t, channelID))
+	assert.Equal(t, int64(0), countLogs(t))
+
+	require.NoError(t, ConfirmTaskBillingSettled(ctx, task, task.Quota, "final-mode task completed"))
+	usedQuota, requestCount = getUserUsedQuotaAndRequestCount(t, userID)
+	assert.Equal(t, actualQuota, usedQuota)
+	assert.Equal(t, 1, requestCount)
+	assert.Equal(t, actualQuota, getChannelUsedQuota(t, channelID))
+	log := getLastLog(t)
+	require.NotNil(t, log)
+	assert.Equal(t, model.LogTypeConsume, log.Type)
+	assert.Equal(t, actualQuota, log.Quota)
+}
+
+func TestSettleTaskBillingRetriesDeferredSubmitSettlement(t *testing.T) {
+	truncate(t)
+	ctx := context.Background()
+
+	const userID, tokenID, channelID = 56, 56, 56
+	const currentQuota, preConsumed, actualQuota, tokenRemain = 10000, 1500, 2400, 5000
+	seedUser(t, userID, currentQuota)
+	seedToken(t, tokenID, userID, "sk-deferred-settlement", tokenRemain)
+	seedChannel(t, channelID)
+	require.NoError(t, model.AdjustTaskUsageAccounting(userID, channelID, preConsumed, 1))
+
+	task := makeTask(userID, channelID, preConsumed, tokenID, BillingSourceWallet, 0)
+	task.PrivateData.BillingState = TaskBillingStatePending
+	task.PrivateData.UsageAccountingMode = model.TaskUsageAccountingSubmit
+	task.PrivateData.PreConsumedQuota = preConsumed
+	task.PrivateData.ActualQuota = actualQuota
+	task.PrivateData.BillingError = "task settlement failed; retained pre-consumed quota"
+	task.PrivateData.BillingContext.PerCallBilling = true
+	require.NoError(t, model.DB.Create(task).Error)
+
+	adaptor := &mockAdaptor{adjustReturn: 0}
+	taskResult := &relaycommon.TaskInfo{Status: model.TaskStatusSuccess}
+	require.NoError(t, settleTaskBillingOnComplete(ctx, adaptor, task, taskResult))
+
+	assert.Equal(t, currentQuota-(actualQuota-preConsumed), getUserQuota(t, userID))
+	assert.Equal(t, tokenRemain-(actualQuota-preConsumed), getTokenRemainQuota(t, tokenID))
+	usedQuota, requestCount := getUserUsedQuotaAndRequestCount(t, userID)
+	assert.Equal(t, actualQuota, usedQuota)
+	assert.Equal(t, 1, requestCount)
+	assert.Equal(t, actualQuota, getChannelUsedQuota(t, channelID))
+	assert.Equal(t, actualQuota, task.Quota)
+	assert.Equal(t, TaskBillingStateSettled, task.PrivateData.BillingState)
+	assert.Empty(t, task.PrivateData.BillingError)
+
+	log := getLastLog(t)
+	require.NotNil(t, log)
+	assert.Equal(t, model.LogTypeConsume, log.Type)
+	assert.Equal(t, actualQuota-preConsumed, log.Quota)
+}
+
+func TestLogTaskConsumptionDoesNotWriteLogWhenImmediateUsageAccountingFails(t *testing.T) {
+	truncate(t)
+
+	const userID, tokenID, channelID, quota = 57, 57, 57, 1200
+	seedUser(t, userID, 10000)
+	seedToken(t, tokenID, userID, "sk-task-usage-failure", 5000)
+	seedChannel(t, channelID)
+	require.NoError(t, model.DB.Exec(`
+		CREATE TRIGGER fail_log_task_usage_update
+		BEFORE UPDATE OF used_quota ON users
+		BEGIN
+			SELECT RAISE(ABORT, 'forced task usage failure');
+		END;
+	`).Error)
+	t.Cleanup(func() {
+		model.DB.Exec("DROP TRIGGER IF EXISTS fail_log_task_usage_update")
+	})
+
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/video/generations", nil)
+	info := &relaycommon.RelayInfo{
+		UserId:          userID,
+		TokenId:         tokenID,
+		OriginModelName: "test-model",
+		UsingGroup:      "default",
+		ForcePreConsume: true,
+		PriceData: types.PriceData{
+			Quota: quota,
+		},
+		ChannelMeta:   &relaycommon.ChannelMeta{ChannelId: channelID},
+		TaskRelayInfo: &relaycommon.TaskRelayInfo{Action: "video"},
+	}
+
+	require.Error(t, LogTaskConsumption(c, info))
+	usedQuota, requestCount := getUserUsedQuotaAndRequestCount(t, userID)
+	assert.Zero(t, usedQuota)
+	assert.Zero(t, requestCount)
+	assert.Zero(t, getChannelUsedQuota(t, channelID))
+	assert.Equal(t, int64(0), countLogs(t))
 }

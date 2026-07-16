@@ -43,6 +43,8 @@ import { ITEMS_PER_PAGE } from '../../constants';
 import { useTableCompactMode } from '../common/useTableCompactMode';
 import ParamOverrideEntry from '../../components/table/usage-logs/components/ParamOverrideEntry';
 
+const isTaskCreditLogType = (type) => type === 6 || type === 8;
+
 export const useLogsData = () => {
   const { t } = useTranslation();
 
@@ -389,7 +391,7 @@ export const useLogsData = () => {
       let other = getLogOther(logs[i].other);
       let expandDataLocal = [];
 
-      if (isAdminUser && (logs[i].type === 0 || logs[i].type === 2 || logs[i].type === 6)) {
+      if (isAdminUser && (logs[i].type === 0 || logs[i].type === 2 || isTaskCreditLogType(logs[i].type))) {
         expandDataLocal.push({
           key: t('渠道信息'),
           value: `${logs[i].channel} - ${logs[i].channel_name || '[未知]'}`,
@@ -515,7 +517,7 @@ export const useLogsData = () => {
           });
         }
       }
-      if (logs[i].type === 6) {
+      if (isTaskCreditLogType(logs[i].type)) {
         if (other?.task_id) {
           expandDataLocal.push({
             key: t('任务ID'),
@@ -534,7 +536,7 @@ export const useLogsData = () => {
         }
       }
       if (other?.async_task || other?.is_task) {
-        if (other?.task_id && logs[i].type !== 6) {
+        if (other?.task_id && !isTaskCreditLogType(logs[i].type)) {
           expandDataLocal.push({
             key: t('Task ID'),
             value: other.task_id,
@@ -661,13 +663,13 @@ export const useLogsData = () => {
           ),
         });
       }
-      if (isAdminUser && logs[i].type !== 6 && logs[i].type !== 1) {
+      if (isAdminUser && !isTaskCreditLogType(logs[i].type) && logs[i].type !== 1) {
         expandDataLocal.push({
           key: t('请求转换'),
           value: requestConversionDisplayValue(other?.request_conversion),
         });
       }
-      if (isAdminUser && logs[i].type !== 6 && logs[i].type !== 1) {
+      if (isAdminUser && !isTaskCreditLogType(logs[i].type) && logs[i].type !== 1) {
         let localCountMode = '';
         if (other?.admin_info?.local_count_tokens) {
           localCountMode = t('本地计费');

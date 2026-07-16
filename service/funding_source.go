@@ -27,8 +27,9 @@ type FundingSource interface {
 // ---------------------------------------------------------------------------
 
 type WalletFunding struct {
-	userId   int
-	consumed int // 实际预扣的用户额度
+	userId    int
+	consumed  int  // 实际预扣的用户额度
+	immediate bool // 异步任务关键路径绕过批量更新，确保预扣与补偿已落主库
 }
 
 func (w *WalletFunding) Source() string { return BillingSourceWallet }
@@ -37,7 +38,13 @@ func (w *WalletFunding) PreConsume(amount int) error {
 	if amount <= 0 {
 		return nil
 	}
-	if err := model.DecreaseUserQuota(w.userId, amount, false); err != nil {
+	var err error
+	if w.immediate {
+		err = model.AdjustUserQuotaImmediately(w.userId, -amount)
+	} else {
+		err = model.DecreaseUserQuota(w.userId, amount, false)
+	}
+	if err != nil {
 		return err
 	}
 	w.consumed = amount
@@ -48,6 +55,9 @@ func (w *WalletFunding) Settle(delta int) error {
 	if delta == 0 {
 		return nil
 	}
+	if w.immediate {
+		return model.AdjustUserQuotaImmediately(w.userId, -delta)
+	}
 	if delta > 0 {
 		return model.DecreaseUserQuota(w.userId, delta, false)
 	}
@@ -57,6 +67,9 @@ func (w *WalletFunding) Settle(delta int) error {
 func (w *WalletFunding) Refund() error {
 	if w.consumed <= 0 {
 		return nil
+	}
+	if w.immediate {
+		return model.AdjustUserQuotaImmediately(w.userId, w.consumed)
 	}
 	// IncreaseUserQuota 是 quota += N 的非幂等操作，不能重试，否则会多退额度。
 	// 订阅的 RefundSubscriptionPreConsume 有 requestId 幂等保护所以可以重试。

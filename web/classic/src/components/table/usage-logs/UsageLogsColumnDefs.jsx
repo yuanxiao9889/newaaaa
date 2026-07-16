@@ -95,6 +95,10 @@ function buildChannelAffinityTooltip(affinity, t) {
 }
 
 // Render functions
+function isTaskCreditLogType(type) {
+  return type === 6 || type === 8;
+}
+
 function renderType(type, t) {
   switch (type) {
     case 1:
@@ -137,6 +141,12 @@ function renderType(type, t) {
       return (
         <Tag color='teal' shape='circle'>
           {t('退款')}
+        </Tag>
+      );
+    case 8:
+      return (
+        <Tag color='teal' shape='circle'>
+          {t('预扣回滚')}
         </Tag>
       );
     default:
@@ -433,9 +443,14 @@ function renderCompactDetailSummary(summarySegments) {
 function getUsageLogDetailSummary(record, text, billingDisplayMode, t) {
   const other = getLogOther(record.other);
 
-  if (record.type === 6) {
+  if (isTaskCreditLogType(record.type)) {
     return {
-      segments: [{ text: t('异步任务退款'), tone: 'primary' }],
+      segments: [
+        {
+          text: t(record.type === 8 ? '预扣回滚' : '异步任务退款'),
+          tone: 'primary',
+        },
+      ],
     };
   }
 
@@ -528,7 +543,7 @@ export const getLogsColumns = ({
           (record.type === 0 ||
             record.type === 2 ||
             record.type === 5 ||
-            record.type === 6) ? (
+            isTaskCreditLogType(record.type)) ? (
           <Space>
             <span style={{ position: 'relative', display: 'inline-block' }}>
               <Tooltip content={record.channel_name || t('未知渠道')}>
@@ -622,7 +637,7 @@ export const getLogsColumns = ({
         return record.type === 0 ||
           record.type === 2 ||
           record.type === 5 ||
-          record.type === 6 ? (
+          isTaskCreditLogType(record.type) ? (
           <div>
             <Tag
               color='grey'
@@ -649,7 +664,7 @@ export const getLogsColumns = ({
           record.type === 0 ||
           record.type === 2 ||
           record.type === 5 ||
-          record.type === 6
+          isTaskCreditLogType(record.type)
         ) {
           if (record.group) {
             return <>{renderGroup(record.group)}</>;
@@ -693,7 +708,7 @@ export const getLogsColumns = ({
         return record.type === 0 ||
           record.type === 2 ||
           record.type === 5 ||
-          record.type === 6 ? (
+          isTaskCreditLogType(record.type) ? (
           <>{renderModelName(record, copyText, t)}</>
         ) : (
           <></>
@@ -763,7 +778,7 @@ export const getLogsColumns = ({
         return record.type === 0 ||
           record.type === 2 ||
           record.type === 5 ||
-          record.type === 6 ? (
+          isTaskCreditLogType(record.type) ? (
           <div
             style={{
               display: 'inline-flex',
@@ -800,7 +815,7 @@ export const getLogsColumns = ({
           (record.type === 0 ||
             record.type === 2 ||
             record.type === 5 ||
-            record.type === 6) ? (
+            isTaskCreditLogType(record.type)) ? (
           <>{<span> {text} </span>}</>
         ) : (
           <></>
@@ -817,12 +832,21 @@ export const getLogsColumns = ({
             record.type === 0 ||
             record.type === 2 ||
             record.type === 5 ||
-            record.type === 6
+            isTaskCreditLogType(record.type)
           )
         ) {
           return <></>;
         }
         const other = getLogOther(record.other);
+        if (record.type === 8) {
+          return (
+            <Tooltip content={t('预扣回滚额度')}>
+              <span style={{ color: 'var(--semi-color-success)' }}>
+                +{renderQuota(text, 6)}
+              </span>
+            </Tooltip>
+          );
+        }
         const isSubscription = other?.billing_source === 'subscription';
         if (isSubscription) {
           // Subscription billed: show only tag (no $0), but keep tooltip for equivalent cost.

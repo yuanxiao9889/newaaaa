@@ -101,7 +101,7 @@ export function isAsyncTaskBillingLog(
   other: LogOtherData | null
 ): boolean {
   if (!other?.is_task || !other.task_id) return false
-  if (log.type === 6) return true
+  if (log.type === 6 || log.type === 8) return true
   return (
     log.type === 2 &&
     (other.billing_state != null ||
@@ -114,6 +114,7 @@ export function getAsyncTaskBillingStateLabel(
   state: string | undefined,
   logType: number
 ): string {
+  if (logType === 8) return 'Pre-consume rollback'
   if (logType === 6 || state === 'refunded') return 'Refunded'
   if (state === 'settled') return 'Settled'
   if (state === 'pending') return 'Pre-charged'

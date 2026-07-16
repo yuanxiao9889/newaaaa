@@ -81,7 +81,7 @@ func ClaudeToOpenAIRequest(claudeRequest dto.ClaudeRequest, info *relaycommon.Re
 			Function: dto.FunctionRequest{
 				Name:        claudeTool.Name,
 				Description: claudeTool.Description,
-				Parameters:  claudeTool.InputSchema,
+				Parameters:  normalizeOpenAIToolSchema(claudeTool.InputSchema),
 			},
 		}
 		openAITools = append(openAITools, openAITool)
@@ -214,6 +214,33 @@ func ClaudeToOpenAIRequest(claudeRequest dto.ClaudeRequest, info *relaycommon.Re
 	openAIRequest.Messages = openAIMessages
 
 	return &openAIRequest, nil
+}
+
+// normalizeOpenAIToolSchema repairs empty-array values emitted by some Claude
+// clients for JSON Schema fields that OpenAI-compatible providers require to be
+// objects or booleans.
+func normalizeOpenAIToolSchema(schema any) any {
+	switch value := schema.(type) {
+	case map[string]interface{}:
+		for key, child := range value {
+			if items, ok := child.([]interface{}); ok && len(items) == 0 {
+				switch key {
+				case "properties":
+					value[key] = map[string]interface{}{}
+					continue
+				case "additionalProperties":
+					value[key] = false
+					continue
+				}
+			}
+			value[key] = normalizeOpenAIToolSchema(child)
+		}
+	case []interface{}:
+		for i, child := range value {
+			value[i] = normalizeOpenAIToolSchema(child)
+		}
+	}
+	return schema
 }
 
 func generateStopBlock(index int) *dto.ClaudeResponse {

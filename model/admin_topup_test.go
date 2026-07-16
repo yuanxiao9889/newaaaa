@@ -57,9 +57,9 @@ func TestAddAdminQuotaRollsBackWhenUserDoesNotExist(t *testing.T) {
 func TestBackfillAdminQuotaTopUps(t *testing.T) {
 	truncateTables(t)
 	require.NoError(t, DB.AutoMigrate(&Option{}))
-	require.NoError(t, DB.Where("key = ?", adminQuotaTopUpBackfillOptionKey).Delete(&Option{}).Error)
+	require.NoError(t, DB.Where(commonKeyCol+" = ?", adminQuotaTopUpBackfillOptionKey).Delete(&Option{}).Error)
 	t.Cleanup(func() {
-		DB.Where("key = ?", adminQuotaTopUpBackfillOptionKey).Delete(&Option{})
+		DB.Where(commonKeyCol+" = ?", adminQuotaTopUpBackfillOptionKey).Delete(&Option{})
 	})
 
 	oldCreatedAt := int64(1_700_000_000)
