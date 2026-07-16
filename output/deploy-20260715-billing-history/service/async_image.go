@@ -1,0 +1,654 @@
+package service
+
+import (
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/base64"
+	"fmt"
+	"io"
+	"mime"
+	"net/http"
+	"net/url"
+	"os"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
+	"github.com/QuantumNous/new-api/dto"
+	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/setting/system_setting"
+)
+
+const AsyncImageAssetType = "image"
+
+const defaultAsyncImageSignedURLTTLSeconds = 3600
+
+var asyncImageSigningSecretFallbackWarnOnce sync.Once
+
+type asyncImageTaskDataSummary struct {
+	Object    string `json:"object"`
+	Status    string `json:"status"`
+	Action    string `json:"action,omitempty"`
+	Model     string `json:"model,omitempty"`
+	ResultURL string `json:"result_url,omitempty"`
+}
+
+type storedAsyncImageTaskData struct {
+	Data    []storedAsyncImageTaskItem `json:"data"`
+	Created int64                      `json:"created"`
+}
+
+type storedAsyncImageTaskItem struct {
+	URL           string `json:"url,omitempty"`
+	RevisedPrompt string `json:"revised_prompt,omitempty"`
+}
+
+type asyncImageTokenPayload struct {
+	TaskID    string `json:"task_id"`
+	UserID    int    `json:"user_id"`
+	ExpiresAt int64  `json:"expires_at"`
+	StoredAt  int64  `json:"stored_at"`
+}
+
+func IsImageTaskAction(action string) bool {
+	return action == constant.TaskActionImageGenerate ||
+		action == constant.TaskActionImageEdit ||
+		action == constant.TaskActionGeminiImage
+}
+
+func BuildPendingAsyncImageTaskData(task *model.Task) []byte {
+	return buildAsyncImageTaskDataSummary(task, dto.ImageAsyncStatusSubmitted)
+}
+
+func BuildFailedAsyncImageTaskData(task *model.Task) []byte {
+	return buildAsyncImageTaskDataSummary(task, dto.ImageAsyncStatusFailed)
+}
+
+func BuildStoredAsyncImageTaskData(resp dto.ImageResponse, resultURL string) []byte {
+	data := storedAsyncImageTaskData{
+		Created: resp.Created,
+		Data:    make([]storedAsyncImageTaskItem, 0, 1),
+	}
+	item := storedAsyncImageTaskItem{URL: resultURL}
+	if len(resp.Data) > 0 {
+		item.RevisedPrompt = resp.Data[0].RevisedPrompt
+	}
+	data.Data = append(data.Data, item)
+	body, err := common.Marshal(data)
+	if err != nil {
+		return nil
+	}
+	return body
+}
+
+func buildAsyncImageTaskDataSummary(task *model.Task, status string) []byte {
+	summary := asyncImageTaskDataSummary{
+		Object: "async_image.task",
+		Status: status,
+	}
+	if task != nil {
+		summary.Action = task.Action
+		summary.Model = asyncImageTaskDataModel(task)
+		summary.ResultURL = task.PrivateData.ResultURL
+	}
+	body, err := common.Marshal(summary)
+	if err != nil {
+		return nil
+	}
+	return body
+}
+
+func asyncImageTaskDataModel(task *model.Task) string {
+	if task == nil {
+		return ""
+	}
+	if task.Properties.OriginModelName != "" {
+		return task.Properties.OriginModelName
+	}
+	return task.Properties.UpstreamModelName
+}
+
+func BuildAsyncImageStatusURL(taskID string) string {
+	return joinAsyncImageURL(fmt.Sprintf("/v1/images/tasks/%s", taskID))
+}
+
+func BuildAsyncImageContentURL(taskID string) string {
+	return joinAsyncImageURL(fmt.Sprintf("/v1/images/tasks/%s/content", taskID))
+}
+
+func BuildAsyncImageSignedContentURL(taskID string) string {
+	return joinAsyncImageURL(fmt.Sprintf("/v1/images/tasks/%s/signed-content", taskID))
+}
+
+func BuildSignedAsyncImageContentURL(task *model.Task) (string, int64) {
+	urlExpiresAt := asyncImageSignedURLExpiresAt(task, time.Now())
+	if urlExpiresAt <= 0 {
+		return "", 0
+	}
+	token := signAsyncImageToken(task, urlExpiresAt)
+	if token == "" {
+		return "", 0
+	}
+	return BuildAsyncImageSignedContentURL(task.TaskID) + "?token=" + url.QueryEscape(token), urlExpiresAt
+}
+
+func VerifyAsyncImageToken(token string, task *model.Task) bool {
+	if task == nil ||
+		task.PrivateData.AssetType != AsyncImageAssetType ||
+		task.PrivateData.LocalPath == "" ||
+		strings.TrimSpace(token) == "" {
+		return false
+	}
+	parts := strings.Split(token, ".")
+	if len(parts) != 2 {
+		return false
+	}
+
+	payloadBytes, err := base64.RawURLEncoding.DecodeString(parts[0])
+	if err != nil {
+		return false
+	}
+	signature, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		return false
+	}
+
+	var payload asyncImageTokenPayload
+	if err = common.Unmarshal(payloadBytes, &payload); err != nil {
+		return false
+	}
+	if payload.TaskID != task.TaskID ||
+		payload.UserID != task.UserId ||
+		payload.StoredAt != task.PrivateData.StoredAt ||
+		payload.ExpiresAt <= time.Now().Unix() ||
+		payload.ExpiresAt > task.PrivateData.ExpiresAt {
+		return false
+	}
+
+	expected := signAsyncImagePayload(payload, parts[0])
+	if len(expected) == 0 {
+		return false
+	}
+	return hmac.Equal(signature, expected)
+}
+
+func GetAsyncImageTaskStatus(task *model.Task) string {
+	if task == nil {
+		return dto.ImageAsyncStatusFailed
+	}
+	if IsAsyncImageExpired(task) {
+		return dto.ImageAsyncStatusExpired
+	}
+	switch task.Status {
+	case model.TaskStatusSubmitted, model.TaskStatusNotStart:
+		return dto.ImageAsyncStatusSubmitted
+	case model.TaskStatusQueued:
+		return dto.ImageAsyncStatusQueued
+	case model.TaskStatusInProgress:
+		return dto.ImageAsyncStatusProcessing
+	case model.TaskStatusSuccess:
+		return dto.ImageAsyncStatusSucceeded
+	case model.TaskStatusFailure:
+		return dto.ImageAsyncStatusFailed
+	default:
+		return dto.ImageAsyncStatusProcessing
+	}
+}
+
+func GetAsyncImageExpiresAt(task *model.Task) int64 {
+	if task == nil || task.PrivateData.AssetType != AsyncImageAssetType {
+		return 0
+	}
+	return task.PrivateData.ExpiresAt
+}
+
+func asyncImageSignedURLExpiresAt(task *model.Task, now time.Time) int64 {
+	if task == nil ||
+		task.TaskID == "" ||
+		task.PrivateData.AssetType != AsyncImageAssetType ||
+		task.PrivateData.LocalPath == "" ||
+		task.PrivateData.StoredAt <= 0 ||
+		task.PrivateData.ExpiresAt <= now.Unix() {
+		return 0
+	}
+
+	ttlSeconds := common.GetEnvOrDefault("ASYNC_IMAGE_SIGNED_URL_TTL_SECONDS", defaultAsyncImageSignedURLTTLSeconds)
+	if ttlSeconds <= 0 {
+		ttlSeconds = defaultAsyncImageSignedURLTTLSeconds
+	}
+	expiresAt := now.Add(time.Duration(ttlSeconds) * time.Second).Unix()
+	if task.PrivateData.ExpiresAt < expiresAt {
+		expiresAt = task.PrivateData.ExpiresAt
+	}
+	return expiresAt
+}
+
+func signAsyncImageToken(task *model.Task, expiresAt int64) string {
+	if task == nil || expiresAt <= 0 {
+		return ""
+	}
+	payload := asyncImageTokenPayload{
+		TaskID:    task.TaskID,
+		UserID:    task.UserId,
+		ExpiresAt: expiresAt,
+		StoredAt:  task.PrivateData.StoredAt,
+	}
+	payloadJSON, err := common.Marshal(payload)
+	if err != nil {
+		return ""
+	}
+	encodedPayload := base64.RawURLEncoding.EncodeToString(payloadJSON)
+	signature := signAsyncImagePayload(payload, encodedPayload)
+	if len(signature) == 0 {
+		return ""
+	}
+	return encodedPayload + "." + base64.RawURLEncoding.EncodeToString(signature)
+}
+
+func signAsyncImagePayload(payload asyncImageTokenPayload, encodedPayload string) []byte {
+	secret := asyncImageSigningSecret()
+	if secret == "" || encodedPayload == "" {
+		return nil
+	}
+	signingText := strings.Join([]string{
+		payload.TaskID,
+		strconv.Itoa(payload.UserID),
+		strconv.FormatInt(payload.ExpiresAt, 10),
+		strconv.FormatInt(payload.StoredAt, 10),
+		encodedPayload,
+	}, ":")
+	mac := hmac.New(sha256.New, []byte(secret))
+	_, _ = mac.Write([]byte(signingText))
+	return mac.Sum(nil)
+}
+
+func asyncImageSigningSecret() string {
+	if secret := strings.TrimSpace(os.Getenv("ASYNC_IMAGE_SIGNING_SECRET")); secret != "" {
+		return secret
+	}
+	asyncImageSigningSecretFallbackWarnOnce.Do(func() {
+		common.SysError("ASYNC_IMAGE_SIGNING_SECRET is not configured, falling back to CRYPTO_SECRET for async image signed URLs")
+	})
+	if common.CryptoSecret != "" {
+		return common.CryptoSecret
+	}
+	return common.SessionSecret
+}
+
+func IsAsyncImageExpired(task *model.Task) bool {
+	if task == nil || task.Status != model.TaskStatusSuccess {
+		return false
+	}
+	if task.PrivateData.AssetType != AsyncImageAssetType {
+		return false
+	}
+	if task.PrivateData.ExpiresAt <= 0 {
+		return false
+	}
+	if time.Now().Unix() >= task.PrivateData.ExpiresAt {
+		return true
+	}
+	if task.PrivateData.LocalPath == "" {
+		return true
+	}
+	_, err := os.Stat(task.PrivateData.LocalPath)
+	return err != nil
+}
+
+func GetAsyncImageStoragePath() string {
+	return filepath.Clean(common.GetEnvOrDefaultString("ASYNC_IMAGE_STORAGE_PATH", "./data/async-images"))
+}
+
+func GetAsyncImageRetention() time.Duration {
+	return time.Duration(common.GetAsyncImageRetentionHours()) * time.Hour
+}
+
+func GetAsyncImageCleanupInterval() time.Duration {
+	return time.Duration(common.GetEnvOrDefault("ASYNC_IMAGE_CLEANUP_INTERVAL_MINUTES", 10)) * time.Minute
+}
+
+func StoreAsyncImageResult(task *model.Task, proxy string, assetRef string) error {
+	if task == nil {
+		return fmt.Errorf("task is nil")
+	}
+	assetRef = strings.TrimSpace(assetRef)
+	if assetRef == "" {
+		return fmt.Errorf("image asset is empty")
+	}
+
+	var (
+		mimeType string
+		data     []byte
+		err      error
+	)
+
+	if isLikelyRawBase64Image(assetRef) {
+		assetRef = "data:image/*;base64," + assetRef
+	}
+
+	if strings.HasPrefix(assetRef, "http://") || strings.HasPrefix(assetRef, "https://") {
+		mimeType, data, err = downloadAsyncImageBytesWithRetry(assetRef, proxy)
+	} else {
+		mimeType, data, err = decodeAsyncImageBytes(assetRef)
+	}
+	if err != nil {
+		return err
+	}
+
+	if err = os.MkdirAll(GetAsyncImageStoragePath(), 0755); err != nil {
+		return fmt.Errorf("create async image storage path failed: %w", err)
+	}
+
+	fileExt := imageExtensionByMime(mimeType)
+	localPath := filepath.Join(GetAsyncImageStoragePath(), task.TaskID+fileExt)
+	tmpPath := localPath + ".tmp"
+	if err = os.WriteFile(tmpPath, data, 0600); err != nil {
+		return fmt.Errorf("write async image temp file failed: %w", err)
+	}
+	if err = os.Rename(tmpPath, localPath); err != nil {
+		_ = os.Remove(tmpPath)
+		return fmt.Errorf("move async image file failed: %w", err)
+	}
+
+	now := time.Now()
+	task.PrivateData.AssetType = AsyncImageAssetType
+	task.PrivateData.LocalPath = localPath
+	task.PrivateData.MimeType = mimeType
+	task.PrivateData.FileSize = int64(len(data))
+	task.PrivateData.StoredAt = now.Unix()
+	task.PrivateData.ExpiresAt = now.Add(GetAsyncImageRetention()).Unix()
+	if strings.HasPrefix(assetRef, "http://") || strings.HasPrefix(assetRef, "https://") {
+		task.PrivateData.SourceURL = assetRef
+	} else {
+		task.PrivateData.SourceURL = ""
+	}
+	task.PrivateData.ResultURL = BuildAsyncImageContentURL(task.TaskID)
+	return nil
+}
+
+func CleanupExpiredAsyncImages() error {
+	now := time.Now().Unix()
+	const batchSize = 500
+
+	if err := cleanupExpiredSuccessfulAsyncImages(now, batchSize); err != nil {
+		return err
+	}
+	return cleanupExpiredFailedAsyncImageTaskData(now, batchSize)
+}
+
+func cleanupExpiredSuccessfulAsyncImages(now int64, batchSize int) error {
+	for offset := 0; ; offset += batchSize {
+		tasks := model.GetSuccessfulImageTasksForCleanup(offset, batchSize)
+		if len(tasks) == 0 {
+			break
+		}
+		for _, task := range tasks {
+			if task == nil || task.PrivateData.AssetType != AsyncImageAssetType {
+				continue
+			}
+			if task.PrivateData.ExpiresAt <= 0 || task.PrivateData.ExpiresAt > now {
+				continue
+			}
+			if task.PrivateData.LocalPath != "" {
+				if err := os.Remove(task.PrivateData.LocalPath); err != nil && !os.IsNotExist(err) {
+					common.SysError(fmt.Sprintf("remove expired async image %s failed: %s", task.TaskID, err.Error()))
+				}
+			}
+			if err := compactExpiredAsyncImageTaskData(task); err != nil {
+				return err
+			}
+		}
+		if len(tasks) < batchSize {
+			break
+		}
+	}
+	return nil
+}
+
+func cleanupExpiredFailedAsyncImageTaskData(now int64, batchSize int) error {
+	cutoff := now - int64(GetAsyncImageRetention().Seconds())
+	for offset := 0; ; offset += batchSize {
+		tasks := model.GetFailedImageTasksForDataCleanup(cutoff, offset, batchSize)
+		if len(tasks) == 0 {
+			break
+		}
+		for _, task := range tasks {
+			if task == nil || task.PrivateData.AssetType != AsyncImageAssetType {
+				continue
+			}
+			if err := compactExpiredAsyncImageTaskData(task); err != nil {
+				return err
+			}
+		}
+		if len(tasks) < batchSize {
+			break
+		}
+	}
+	return nil
+}
+
+func compactExpiredAsyncImageTaskData(task *model.Task) error {
+	if task == nil || !asyncImageTaskDataNeedsCompaction(task.Data) {
+		return nil
+	}
+
+	var data []byte
+	switch task.Status {
+	case model.TaskStatusSuccess:
+		data = BuildStoredAsyncImageTaskData(dto.ImageResponse{Created: task.FinishTime}, task.PrivateData.ResultURL)
+	case model.TaskStatusFailure:
+		data = BuildFailedAsyncImageTaskData(task)
+	default:
+		return nil
+	}
+	if len(data) == 0 || string(data) == string(task.Data) {
+		return nil
+	}
+	return model.UpdateTaskData(task.ID, data)
+}
+
+func asyncImageTaskDataNeedsCompaction(data []byte) bool {
+	if len(data) > 2048 {
+		return true
+	}
+	body := string(data)
+	return strings.Contains(body, "data:image") ||
+		strings.Contains(body, "inlineData") ||
+		strings.Contains(body, "b64_json")
+}
+
+func StartAsyncImageCleanupLoop() {
+	if err := CleanupExpiredAsyncImages(); err != nil {
+		common.SysError("cleanup expired async images failed: " + err.Error())
+	}
+
+	interval := GetAsyncImageCleanupInterval()
+	if interval <= 0 {
+		return
+	}
+
+	go func() {
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for range ticker.C {
+			if err := CleanupExpiredAsyncImages(); err != nil {
+				common.SysError("cleanup expired async images failed: " + err.Error())
+			}
+		}
+	}()
+}
+
+func isLikelyRawBase64Image(assetRef string) bool {
+	if strings.Contains(assetRef, ",") || strings.HasPrefix(assetRef, "data:") {
+		return false
+	}
+	trimmed := strings.TrimSpace(assetRef)
+	if len(trimmed) < 32 {
+		return false
+	}
+	for _, r := range trimmed {
+		if (r >= 'A' && r <= 'Z') || (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '+' || r == '/' || r == '=' || r == '-' || r == '_' {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+func joinAsyncImageURL(path string) string {
+	base := strings.TrimRight(system_setting.ServerAddress, "/")
+	if base == "" {
+		return path
+	}
+	return base + path
+}
+
+func downloadAsyncImageBytesWithRetry(assetURL string, proxy string) (string, []byte, error) {
+	delays := []time.Duration{0, 500 * time.Millisecond, 1500 * time.Millisecond, 3000 * time.Millisecond}
+	var lastErr error
+	for i, delay := range delays {
+		if delay > 0 {
+			time.Sleep(delay)
+		}
+		mimeType, data, err := downloadAsyncImageBytes(assetURL, proxy)
+		if err == nil {
+			return mimeType, data, nil
+		}
+		lastErr = err
+		if !shouldRetryAsyncImageDownload(err) || i == len(delays)-1 {
+			break
+		}
+	}
+	return "", nil, lastErr
+}
+
+func shouldRetryAsyncImageDownload(err error) bool {
+	if err == nil {
+		return false
+	}
+	message := err.Error()
+	noRetryMessages := []string{
+		"request blocked",
+		"invalid image content type",
+		"svg image content is not supported",
+		"image size exceeds maximum allowed size",
+	}
+	for _, item := range noRetryMessages {
+		if strings.Contains(message, item) {
+			return false
+		}
+	}
+	return true
+}
+
+func downloadAsyncImageBytes(assetURL string, proxy string) (string, []byte, error) {
+	fetchSetting := system_setting.GetFetchSetting()
+	if err := common.ValidateURLWithFetchSetting(assetURL, fetchSetting.EnableSSRFProtection, fetchSetting.AllowPrivateIp, fetchSetting.DomainFilterMode, fetchSetting.IpFilterMode, fetchSetting.DomainList, fetchSetting.IpList, fetchSetting.AllowedPorts, fetchSetting.ApplyIPFilterForDomain); err != nil {
+		return "", nil, fmt.Errorf("request blocked: %w", err)
+	}
+
+	client, err := GetHttpClientWithProxy(proxy)
+	if err != nil {
+		return "", nil, err
+	}
+	req, err := http.NewRequest(http.MethodGet, assetURL, nil)
+	if err != nil {
+		return "", nil, err
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", nil, fmt.Errorf("download image failed with status %d", resp.StatusCode)
+	}
+
+	maxBytes := int64(constant.MaxFileDownloadMB*1024*1024) + 1
+	data, err := io.ReadAll(io.LimitReader(resp.Body, maxBytes))
+	if err != nil {
+		return "", nil, err
+	}
+	if int64(len(data)) >= maxBytes {
+		return "", nil, fmt.Errorf("image size exceeds maximum allowed size")
+	}
+
+	mimeType := normalizeMimeType(resp.Header.Get("Content-Type"))
+	if mimeType == "" || mimeType == "application/octet-stream" {
+		mimeType = normalizeMimeType(http.DetectContentType(data))
+	}
+	if mimeType == "image/svg+xml" {
+		return "", nil, fmt.Errorf("svg image content is not supported")
+	}
+	if !strings.HasPrefix(mimeType, "image/") {
+		return "", nil, fmt.Errorf("invalid image content type: %s", mimeType)
+	}
+	return mimeType, data, nil
+}
+
+func decodeAsyncImageBytes(assetRef string) (string, []byte, error) {
+	mimeType, base64Data, err := DecodeBase64FileData(assetRef)
+	if err != nil {
+		return "", nil, err
+	}
+
+	data, err := base64.StdEncoding.DecodeString(base64Data)
+	if err != nil {
+		data, err = base64.RawStdEncoding.DecodeString(base64Data)
+		if err != nil {
+			return "", nil, err
+		}
+	}
+
+	mimeType = normalizeMimeType(mimeType)
+	if mimeType == "" || mimeType == "application/octet-stream" {
+		mimeType = normalizeMimeType(http.DetectContentType(data))
+	}
+	if mimeType == "image/svg+xml" {
+		return "", nil, fmt.Errorf("svg image content is not supported")
+	}
+	if !strings.HasPrefix(mimeType, "image/") {
+		return "", nil, fmt.Errorf("invalid image content type: %s", mimeType)
+	}
+	return mimeType, data, nil
+}
+
+func normalizeMimeType(mimeType string) string {
+	mimeType = strings.TrimSpace(mimeType)
+	if mimeType == "" {
+		return ""
+	}
+	parsedType, _, err := mime.ParseMediaType(mimeType)
+	if err == nil {
+		mimeType = parsedType
+	}
+	return strings.ToLower(mimeType)
+}
+
+func imageExtensionByMime(mimeType string) string {
+	switch normalizeMimeType(mimeType) {
+	case "image/jpeg":
+		return ".jpg"
+	case "image/png":
+		return ".png"
+	case "image/webp":
+		return ".webp"
+	case "image/gif":
+		return ".gif"
+	case "image/bmp":
+		return ".bmp"
+	case "image/tiff":
+		return ".tiff"
+	case "image/heic":
+		return ".heic"
+	case "image/heif":
+		return ".heif"
+	default:
+		return ".img"
+	}
+}

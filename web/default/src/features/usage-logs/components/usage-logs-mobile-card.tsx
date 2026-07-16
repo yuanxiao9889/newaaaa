@@ -45,6 +45,8 @@ const logTypeRowTint: Record<number, string> = {
     'bg-rose-50/40 dark:bg-rose-950/20 border-rose-200/50 dark:border-rose-900/30',
   [LOG_TYPE_ENUM.REFUND]:
     'bg-blue-50/30 dark:bg-blue-950/15 border-blue-200/50 dark:border-blue-900/30',
+  [LOG_TYPE_ENUM.PRE_CONSUME_ROLLBACK]:
+    'bg-sky-50/30 dark:bg-sky-950/15 border-sky-200/50 dark:border-sky-900/30',
 }
 
 interface UsageLogsMobileListProps<TData> {
@@ -260,6 +262,7 @@ function TaskLogsCard<TData>({
       <div className='grid grid-cols-2 gap-1.5'>
         <SummaryField label={t('Submit Time')} cell={submitTimeCell} />
         <SummaryField label={t('User')} cell={cells.get('user')} primaryOnly />
+        <SummaryField label={t('Token')} cell={cells.get('token_name')} />
         <SummaryField
           label={t('Tokens')}
           cell={cells.get('prompt_tokens')}

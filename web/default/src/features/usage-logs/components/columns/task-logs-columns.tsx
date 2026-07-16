@@ -19,7 +19,7 @@ For commercial licensing, please contact support@quantumnous.com
 /* eslint-disable react-refresh/only-export-components */
 import { useQuery } from '@tanstack/react-query'
 import type { ColumnDef } from '@tanstack/react-table'
-import { Music } from 'lucide-react'
+import { KeyRound, Music } from 'lucide-react'
 import { useState, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
@@ -30,8 +30,8 @@ import { Button } from '@/components/ui/button'
 import { getUserAvatarFallback, getUserAvatarStyle } from '@/lib/avatar'
 import { formatTimestampToDate, formatTokens } from '@/lib/format'
 import { cn } from '@/lib/utils'
-import { getTaskLogDetail } from '../../api'
 
+import { getTaskLogDetail } from '../../api'
 import { TASK_ACTIONS, TASK_STATUS } from '../../constants'
 import { taskActionMapper, taskStatusMapper } from '../../lib/mappers'
 import type { TaskLog } from '../../types'
@@ -41,10 +41,7 @@ import {
 } from '../dialogs/audio-preview-dialog'
 import { FailReasonDialog } from '../dialogs/fail-reason-dialog'
 import { ModelBadge } from '../model-badge'
-import {
-  hasTokenUsageDetails,
-  TokenUsageDetails,
-} from '../token-usage-details'
+import { hasTokenUsageDetails, TokenUsageDetails } from '../token-usage-details'
 import { useUsageLogsContext } from '../usage-logs-provider'
 import {
   createDurationColumn,
@@ -96,19 +93,18 @@ function AudioPreviewCell({
     )
   }, [detailLog.data])
 
-  const handleOpen = () => {
+  const handleOpen = async () => {
     setEnabled(true)
     if (log.data || clips.length > 0) {
       setOpen(true)
       return
     }
-    detailQuery.refetch().then((result) => {
-      if (result.error) {
-        toast.error(result.error.message || t('Failed to load task details'))
-        return
-      }
-      setOpen(true)
-    })
+    const result = await detailQuery.refetch()
+    if (result.error) {
+      toast.error(result.error.message || t('Failed to load task details'))
+      return
+    }
+    setOpen(true)
   }
 
   return (
@@ -210,6 +206,32 @@ export function useTaskLogsColumns(isAdmin: boolean): ColumnDef<TaskLog>[] {
   }
 
   columns.push(
+    {
+      accessorKey: 'token_name',
+      header: t('Token'),
+      cell: function TokenNameCell({ row }) {
+        const { sensitiveVisible } = useUsageLogsContext()
+        const log = row.original
+        const tokenLabel =
+          log.token_name || (log.token_id ? `#${log.token_id}` : '')
+        if (!tokenLabel) {
+          return <span className='text-muted-foreground/60 text-xs'>-</span>
+        }
+
+        return (
+          <StatusBadge
+            label={sensitiveVisible ? tokenLabel : '••••••••'}
+            icon={KeyRound}
+            copyText={sensitiveVisible ? tokenLabel : undefined}
+            variant='neutral'
+            size='sm'
+            showDot={false}
+            className='border-border/60 bg-muted/30 text-foreground h-6 max-w-[160px] gap-1.5 overflow-hidden rounded-md border px-2 py-0.5 [font-family:var(--font-body)]'
+          />
+        )
+      },
+      size: 160,
+    },
     {
       accessorKey: 'model_name',
       header: t('Model'),

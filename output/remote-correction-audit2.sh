@@ -1,0 +1,15 @@
+set -eu
+mysqlc=newapi_isgp-mysql-1
+pass=$(docker inspect "$mysqlc" --format '{{range .Config.Env}}{{println .}}{{end}}' | sed -n 's/^MYSQL_ROOT_PASSWORD=//p')
+db=$(docker inspect "$mysqlc" --format '{{range .Config.Env}}{{println .}}{{end}}' | sed -n 's/^MYSQL_DATABASE=//p')
+mysqlq() { docker exec -e MYSQL_PWD="$pass" "$mysqlc" mysql --batch --raw -uroot "$db" -e "$1"; }
+uid=$(docker exec -e MYSQL_PWD="$pass" "$mysqlc" mysql --batch --raw --skip-column-names -uroot "$db" -e "SELECT id FROM users WHERE username='AIGC@YCDM' OR email='AIGC@YCDM' ORDER BY id LIMIT 1")
+cutoff=142557
+printf '== FAILURE ACCOUNTING MODE ==\n'
+mysqlq "SELECT COALESCE(JSON_UNQUOTE(JSON_EXTRACT(private_data,'$.usage_accounting_mode')),'NULL') explicit_mode,COALESCE(JSON_UNQUOTE(JSON_EXTRACT(private_data,'$.internal_async')),'NULL') internal_async,COALESCE(JSON_UNQUOTE(JSON_EXTRACT(private_data,'$.billing_state')),'NULL') billing_state,COUNT(*) tasks,SUM(quota) quota_sum FROM tasks WHERE user_id=$uid AND status='FAILURE' GROUP BY explicit_mode,internal_async,billing_state;"
+printf '\n== REFUND LOG TO FAILURE TASK MATCH ==\n'
+mysqlq "SELECT COUNT(*) matched_logs,COALESCE(SUM(l.quota),0) quota_sum,SUM(t.id IS NULL) unmatched,SUM(COALESCE(JSON_UNQUOTE(JSON_EXTRACT(t.private_data,'$.internal_async')),'false')='true') internal_async_matches,SUM(COALESCE(JSON_UNQUOTE(JSON_EXTRACT(t.private_data,'$.usage_accounting_mode')),'')='submit') submit_mode_matches,SUM(COALESCE(JSON_UNQUOTE(JSON_EXTRACT(t.private_data,'$.usage_accounting_mode')),'')='final') final_mode_matches FROM logs l LEFT JOIN tasks t ON t.user_id=l.user_id AND t.task_id=JSON_UNQUOTE(JSON_EXTRACT(l.other,'$.task_id')) WHERE l.user_id=$uid AND l.type=6 AND l.id<=$cutoff;"
+printf '\n== ELIGIBLE RECLASSIFICATION ==\n'
+mysqlq "SELECT COUNT(*) rows_count,COALESCE(SUM(l.quota),0) quota_sum,MIN(l.id) min_log_id,MAX(l.id) max_log_id FROM logs l JOIN tasks t ON t.user_id=l.user_id AND t.task_id=JSON_UNQUOTE(JSON_EXTRACT(l.other,'$.task_id')) WHERE l.user_id=$uid AND l.type=6 AND l.id<=$cutoff AND t.status='FAILURE' AND COALESCE(JSON_UNQUOTE(JSON_EXTRACT(t.private_data,'$.billing_state')),'')='refunded' AND (COALESCE(JSON_UNQUOTE(JSON_EXTRACT(t.private_data,'$.usage_accounting_mode')),'')='final' OR (JSON_EXTRACT(t.private_data,'$.usage_accounting_mode') IS NULL AND COALESCE(JSON_UNQUOTE(JSON_EXTRACT(t.private_data,'$.internal_async')),'false')='true'));"
+printf '\n== CURRENT TOTALS ==\n'
+mysqlq "SELECT u.quota wallet_remaining,u.used_quota user_used,u.request_count,(SELECT COALESCE(SUM(used_quota),0) FROM tokens WHERE user_id=u.id) token_used_sum,(SELECT COALESCE(SUM(CASE WHEN type=2 THEN quota WHEN type=6 THEN -quota ELSE 0 END),0) FROM logs WHERE user_id=u.id) current_settled,(SELECT COALESCE(SUM(CASE WHEN type=2 THEN quota ELSE 0 END),0) FROM logs WHERE user_id=u.id) consume_sum,(SELECT COALESCE(SUM(CASE WHEN type=6 THEN quota ELSE 0 END),0) FROM logs WHERE user_id=u.id) refund_sum,(SELECT COALESCE(SUM(CASE WHEN type=8 THEN quota ELSE 0 END),0) FROM logs WHERE user_id=u.id) rollback_sum FROM users u WHERE u.id=$uid;"

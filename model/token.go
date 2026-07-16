@@ -398,6 +398,34 @@ func IncreaseTokenQuota(tokenId int, key string, quota int) (err error) {
 	return increaseTokenQuota(tokenId, quota)
 }
 
+// IncreaseTokenQuotaImmediately updates the main database before refreshing
+// Redis and intentionally bypasses the batch updater. Billing compensation
+// paths use it when a persistence error must be returned to the caller.
+func IncreaseTokenQuotaImmediately(tokenId int, key string, quota int) error {
+	if quota < 0 {
+		return errors.New("quota 不能为负数！")
+	}
+	result := DB.Model(&Token{}).Where("id = ?", tokenId).Updates(map[string]interface{}{
+		"remain_quota":  gorm.Expr("remain_quota + ?", quota),
+		"used_quota":    gorm.Expr("used_quota - ?", quota),
+		"accessed_time": common.GetTimestamp(),
+	})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return gorm.ErrRecordNotFound
+	}
+	if common.RedisEnabled {
+		gopool.Go(func() {
+			if err := cacheIncrTokenQuota(key, int64(quota)); err != nil {
+				common.SysLog("failed to increase token quota cache: " + err.Error())
+			}
+		})
+	}
+	return nil
+}
+
 func increaseTokenQuota(id int, quota int) (err error) {
 	err = DB.Model(&Token{}).Where("id = ?", id).Updates(
 		map[string]interface{}{
@@ -426,6 +454,33 @@ func DecreaseTokenQuota(id int, key string, quota int) (err error) {
 		return nil
 	}
 	return decreaseTokenQuota(id, quota)
+}
+
+// DecreaseTokenQuotaImmediately updates the main database before refreshing
+// Redis and intentionally bypasses the batch updater.
+func DecreaseTokenQuotaImmediately(id int, key string, quota int) error {
+	if quota < 0 {
+		return errors.New("quota 不能为负数！")
+	}
+	result := DB.Model(&Token{}).Where("id = ?", id).Updates(map[string]interface{}{
+		"remain_quota":  gorm.Expr("remain_quota - ?", quota),
+		"used_quota":    gorm.Expr("used_quota + ?", quota),
+		"accessed_time": common.GetTimestamp(),
+	})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return gorm.ErrRecordNotFound
+	}
+	if common.RedisEnabled {
+		gopool.Go(func() {
+			if err := cacheDecrTokenQuota(key, int64(quota)); err != nil {
+				common.SysLog("failed to decrease token quota cache: " + err.Error())
+			}
+		})
+	}
+	return nil
 }
 
 func decreaseTokenQuota(id int, quota int) (err error) {
@@ -529,6 +584,13 @@ func InvalidateUserTokensCache(userId int) error {
 		Where("user_id = ?", userId).
 		Find(&tokens).Error; err != nil {
 		return err
+	}
+	return invalidateTokensCache(tokens)
+}
+
+func invalidateTokensCache(tokens []Token) error {
+	if !common.RedisEnabled {
+		return nil
 	}
 	var firstErr error
 	for _, t := range tokens {

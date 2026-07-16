@@ -123,7 +123,9 @@ func SubmitInternalAsyncImageTask(c *gin.Context, info *relaycommon.RelayInfo, r
 	task.PrivateData.BillingSource = info.BillingSource
 	task.PrivateData.SubscriptionId = info.SubscriptionId
 	task.PrivateData.TokenId = info.TokenId
+	task.TokenName = c.GetString("token_name")
 	task.PrivateData.BillingState = service.TaskBillingStatePending
+	task.PrivateData.UsageAccountingMode = model.TaskUsageAccountingFinal
 	task.PrivateData.PreConsumedQuota = preConsumedQuota
 	task.PrivateData.ActualQuota = 0
 	task.PrivateData.BillingError = ""
@@ -204,7 +206,9 @@ func SubmitInternalAsyncGeminiImageTask(c *gin.Context, info *relaycommon.RelayI
 	task.PrivateData.BillingSource = info.BillingSource
 	task.PrivateData.SubscriptionId = info.SubscriptionId
 	task.PrivateData.TokenId = info.TokenId
+	task.TokenName = c.GetString("token_name")
 	task.PrivateData.BillingState = service.TaskBillingStatePending
+	task.PrivateData.UsageAccountingMode = model.TaskUsageAccountingFinal
 	task.PrivateData.PreConsumedQuota = preConsumedQuota
 	task.PrivateData.ActualQuota = 0
 	task.PrivateData.BillingError = ""

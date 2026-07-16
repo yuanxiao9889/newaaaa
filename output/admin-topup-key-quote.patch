@@ -1,0 +1,27 @@
+diff --git a/model/admin_topup.go b/model/admin_topup.go
+--- a/model/admin_topup.go
++++ b/model/admin_topup.go
+@@ -196,7 +196,7 @@ func adminQuotaTopUpFromLog(logEntry *Log) *TopUp {
+ // from management audit logs. The migration is idempotent and runs once.
+ func BackfillAdminQuotaTopUps() (int64, error) {
+ 	var marker Option
+-	err := DB.Where("key = ?", adminQuotaTopUpBackfillOptionKey).Take(&marker).Error
++	err := DB.Where(commonKeyCol+" = ?", adminQuotaTopUpBackfillOptionKey).Take(&marker).Error
+ 	if err == nil {
+ 		return 0, nil
+ 	}
+diff --git a/model/admin_topup_test.go b/model/admin_topup_test.go
+--- a/model/admin_topup_test.go
++++ b/model/admin_topup_test.go
+@@ -57,9 +57,9 @@ func TestBackfillAdminQuotaTopUps(t *testing.T) {
+ func TestBackfillAdminQuotaTopUps(t *testing.T) {
+ 	truncateTables(t)
+ 	require.NoError(t, DB.AutoMigrate(&Option{}))
+-	require.NoError(t, DB.Where("key = ?", adminQuotaTopUpBackfillOptionKey).Delete(&Option{}).Error)
++	require.NoError(t, DB.Where(commonKeyCol+" = ?", adminQuotaTopUpBackfillOptionKey).Delete(&Option{}).Error)
+ 	t.Cleanup(func() {
+-		DB.Where("key = ?", adminQuotaTopUpBackfillOptionKey).Delete(&Option{})
++		DB.Where(commonKeyCol+" = ?", adminQuotaTopUpBackfillOptionKey).Delete(&Option{})
+ 	})
+ 
+ 	users := []*User{

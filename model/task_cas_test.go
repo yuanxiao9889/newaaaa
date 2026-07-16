@@ -255,28 +255,28 @@ func TestTaskQueryFiltersByOriginModelName(t *testing.T) {
 	truncateTables(t)
 
 	insertTask(t, &Task{
-		TaskID:   "task_image_alpha",
-		UserId:   11,
-		Status:   TaskStatusSuccess,
-		Data:     json.RawMessage(`{}`),
+		TaskID: "task_image_alpha",
+		UserId: 11,
+		Status: TaskStatusSuccess,
+		Data:   json.RawMessage(`{}`),
 		Properties: Properties{
 			OriginModelName: "gpt-image-1",
 		},
 	})
 	insertTask(t, &Task{
-		TaskID:   "task_image_beta",
-		UserId:   11,
-		Status:   TaskStatusSuccess,
-		Data:     json.RawMessage(`{}`),
+		TaskID: "task_image_beta",
+		UserId: 11,
+		Status: TaskStatusSuccess,
+		Data:   json.RawMessage(`{}`),
 		Properties: Properties{
 			OriginModelName: "imagen-4",
 		},
 	})
 	insertTask(t, &Task{
-		TaskID:   "task_video",
-		UserId:   12,
-		Status:   TaskStatusSuccess,
-		Data:     json.RawMessage(`{}`),
+		TaskID: "task_video",
+		UserId: 12,
+		Status: TaskStatusSuccess,
+		Data:   json.RawMessage(`{}`),
 		Properties: Properties{
 			OriginModelName: "veo-3",
 		},
@@ -292,6 +292,58 @@ func TestTaskQueryFiltersByOriginModelName(t *testing.T) {
 	require.Len(t, userTasks, 2)
 	assert.EqualValues(t, 2, TaskCountAllUserTask(11, queryParams))
 	assert.EqualValues(t, 0, TaskCountAllUserTask(12, queryParams))
+}
+
+func TestTaskQueryFiltersAndHydratesTokenName(t *testing.T) {
+	truncateTables(t)
+
+	token := &Token{
+		UserId: 31,
+		Name:   "primary-token",
+		Key:    "task-filter-token-key",
+	}
+	require.NoError(t, DB.Create(token).Error)
+
+	insertTask(t, &Task{
+		TaskID:    "task_token_snapshot",
+		UserId:    31,
+		TokenId:   token.Id,
+		TokenName: token.Name,
+		Status:    TaskStatusSuccess,
+		Data:      json.RawMessage(`{}`),
+	})
+	insertTask(t, &Task{
+		TaskID: "task_token_legacy",
+		UserId: 31,
+		Status: TaskStatusSuccess,
+		Data:   json.RawMessage(`{}`),
+		PrivateData: TaskPrivateData{
+			TokenId: token.Id,
+		},
+	})
+	insertTask(t, &Task{
+		TaskID:    "task_other_token",
+		UserId:    31,
+		TokenId:   999,
+		TokenName: "other-token",
+		Status:    TaskStatusSuccess,
+		Data:      json.RawMessage(`{}`),
+	})
+
+	queryParams := SyncTaskQueryParams{TokenName: token.Name}
+	tasks := TaskGetAllTasks(0, 10, queryParams)
+	require.Len(t, tasks, 2)
+	assert.EqualValues(t, 2, TaskCountAllTasks(queryParams))
+
+	require.NoError(t, HydrateTaskTokenNames(tasks))
+	for _, task := range tasks {
+		assert.Equal(t, token.Id, task.GetTokenID())
+		assert.Equal(t, token.Name, task.TokenName)
+	}
+
+	userTasks := TaskGetAllUserTask(31, 0, 10, queryParams)
+	require.Len(t, userTasks, 2)
+	assert.EqualValues(t, 2, TaskCountAllUserTask(31, queryParams))
 }
 
 func TestSearchUserIDsByUsername(t *testing.T) {
@@ -341,4 +393,29 @@ func TestTaskQueryFiltersQueuedStatuses(t *testing.T) {
 	userTasks := TaskGetAllUserTask(21, 0, 10, queryParams)
 	require.Len(t, userTasks, 2)
 	assert.EqualValues(t, 2, TaskCountAllUserTask(21, queryParams))
+}
+
+func TestTaskPrivateDataGetUsageAccountingMode(t *testing.T) {
+	tests := []struct {
+		name          string
+		mode          string
+		internalAsync bool
+		want          string
+	}{
+		{name: "explicit submit", mode: TaskUsageAccountingSubmit, internalAsync: true, want: TaskUsageAccountingSubmit},
+		{name: "explicit final", mode: TaskUsageAccountingFinal, want: TaskUsageAccountingFinal},
+		{name: "empty internal async", internalAsync: true, want: TaskUsageAccountingFinal},
+		{name: "unknown internal async", mode: "legacy-invalid", internalAsync: true, want: TaskUsageAccountingFinal},
+		{name: "unknown regular task", mode: "legacy-invalid", want: TaskUsageAccountingSubmit},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			privateData := TaskPrivateData{
+				UsageAccountingMode: tt.mode,
+				InternalAsync:       tt.internalAsync,
+			}
+			assert.Equal(t, tt.want, privateData.GetUsageAccountingMode())
+		})
+	}
 }
