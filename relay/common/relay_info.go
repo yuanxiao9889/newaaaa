@@ -41,8 +41,10 @@ type ClaudeConvertInfo struct {
 	FinishReason     string
 	Done             bool
 
-	ToolCallBaseIndex      int
-	ToolCallMaxIndexOffset int
+	ToolCallBaseIndex int
+	ToolCallCount     int
+	ToolCallIndexMap  map[int]int
+	ToolCallIDs       map[int]string
 }
 
 type RerankerInfo struct {
