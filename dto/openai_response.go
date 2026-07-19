@@ -93,6 +93,28 @@ type ChatCompletionsStreamResponseChoiceDelta struct {
 	ToolCalls        []ToolCallResponse `json:"tool_calls,omitempty"`
 }
 
+func (c *ChatCompletionsStreamResponseChoiceDelta) UnmarshalJSON(data []byte) error {
+	if common.GetJsonType(data) == "array" {
+		var items []json.RawMessage
+		if err := common.Unmarshal(data, &items); err != nil {
+			return err
+		}
+		if len(items) != 0 {
+			return fmt.Errorf("chat completion choice delta array must be empty")
+		}
+		*c = ChatCompletionsStreamResponseChoiceDelta{}
+		return nil
+	}
+
+	type deltaAlias ChatCompletionsStreamResponseChoiceDelta
+	var delta deltaAlias
+	if err := common.Unmarshal(data, &delta); err != nil {
+		return err
+	}
+	*c = ChatCompletionsStreamResponseChoiceDelta(delta)
+	return nil
+}
+
 func (c *ChatCompletionsStreamResponseChoiceDelta) SetContentString(s string) {
 	c.Content = &s
 }
