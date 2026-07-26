@@ -6,6 +6,11 @@ const (
 )
 
 const (
+	MjSpeedModeFast  = "fast"
+	MjSpeedModeRelax = "relax"
+)
+
+const (
 	MjActionImagine       = "IMAGINE"
 	MjActionDescribe      = "DESCRIBE"
 	MjActionBlend         = "BLEND"

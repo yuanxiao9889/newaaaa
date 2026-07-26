@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -71,6 +72,17 @@ func GetMjRequestModel(relayMode int, midjRequest *dto.MidjourneyRequest) (strin
 		}
 	}
 	modelName := CovertMjpActionToModelName(action)
+	speedMode := strings.ToLower(strings.TrimSpace(midjRequest.SpeedMode))
+	switch speedMode {
+	case "":
+		// Keep the canonical model name for clients that predate speed routing.
+	case constant.MjSpeedModeFast, constant.MjSpeedModeRelax:
+		if strings.HasPrefix(modelName, "mj_") {
+			modelName = "mj_" + speedMode + "_" + strings.TrimPrefix(modelName, "mj_")
+		}
+	default:
+		return "", MidjourneyErrorWrapper(constant.MjRequestError, "invalid_speed_mode"), false
+	}
 	return modelName, nil, true
 }
 
@@ -162,6 +174,14 @@ func ConvertSimpleChangeParams(content string) *dto.MidjourneyRequest {
 	return changeParams
 }
 
+func shouldForwardMidjourneySpeedMode(fullRequestURL string) bool {
+	parsedURL, err := url.Parse(fullRequestURL)
+	if err != nil {
+		return false
+	}
+	return strings.EqualFold(parsedURL.Hostname(), "ai.t8star.org")
+}
+
 func DoMidjourneyHttpRequest(c *gin.Context, timeout time.Duration, fullRequestURL string) (*dto.MidjourneyResponseWithStatusCode, []byte, error) {
 	var nullBytes []byte
 	//var requestBody io.Reader
@@ -179,6 +199,9 @@ func DoMidjourneyHttpRequest(c *gin.Context, timeout time.Duration, fullRequestU
 		}
 		if !setting.MjNotifyEnabled {
 			delete(mapResult, "notifyHook")
+		}
+		if !shouldForwardMidjourneySpeedMode(fullRequestURL) {
+			delete(mapResult, "speedMode")
 		}
 		//req, err := http.NewRequest(c.Request.Method, fullRequestURL, requestBody)
 		// make new request with mapResult
@@ -209,6 +232,7 @@ func DoMidjourneyHttpRequest(c *gin.Context, timeout time.Duration, fullRequestU
 	if auth != "" {
 		auth = strings.TrimPrefix(auth, "Bearer ")
 		req.Header.Set("mj-api-secret", auth)
+		req.Header.Set("Authorization", "Bearer "+auth)
 	}
 	defer cancel()
 	resp, err := GetHttpClient().Do(req)
