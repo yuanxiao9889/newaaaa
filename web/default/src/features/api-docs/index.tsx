@@ -17,9 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import {
-  Check,
   ChevronRight,
-  Clipboard,
   Code2,
   Download,
   FileImage,
@@ -31,8 +29,8 @@ import {
   Search,
   ShieldAlert,
   Sparkles,
-  Terminal,
   Upload,
+  Workflow,
   X,
 } from "lucide-react";
 import { useMemo, useState } from "react";
@@ -46,11 +44,12 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useStatus } from "@/hooks/use-status";
 import { cn } from "@/lib/utils";
 
+import { CodeExample, type CodeSamples } from "./code-example";
 import { type ImageModelDoc, imageModels, sizeRows } from "./data";
+import { MidjourneyDocs } from "./midjourney-docs";
+import { midjourneyNavItems } from "./midjourney-data";
 
-type CodeLanguage = "curl" | "python" | "javascript";
 type ModelOperation = "generate" | "edit";
-type CodeSamples = Record<CodeLanguage, string>;
 
 const referenceItems = [
   ["models-api", "Query available models"],
@@ -434,71 +433,6 @@ await sharp('reference.png')
   };
 }
 
-function CodeExample({
-  samples,
-  title,
-}: {
-  samples: CodeSamples;
-  title: string;
-}) {
-  const { t } = useTranslation();
-  const [language, setLanguage] = useState<CodeLanguage>("curl");
-  const [copied, setCopied] = useState(false);
-
-  const copyCode = async () => {
-    await navigator.clipboard.writeText(samples[language]);
-    setCopied(true);
-    window.setTimeout(() => setCopied(false), 1600);
-  };
-
-  return (
-    <div className="border-border/70 bg-card overflow-hidden rounded-xl border shadow-sm">
-      <div className="border-border/70 bg-muted/25 flex flex-wrap items-center gap-3 border-b px-3 py-2.5">
-        <div className="text-muted-foreground flex items-center gap-2 text-xs font-medium">
-          <Terminal className="size-3.5" />
-          {title}
-        </div>
-        <Tabs
-          value={language}
-          onValueChange={(value) => setLanguage(value as CodeLanguage)}
-          className="ml-auto"
-        >
-          <TabsList className="h-7 p-0.5">
-            {(["curl", "python", "javascript"] as const).map((item) => (
-              <TabsTrigger
-                key={item}
-                value={item}
-                className="h-6 px-2 text-[11px]"
-              >
-                {item === "curl"
-                  ? "cURL"
-                  : item === "python"
-                    ? "Python"
-                    : "JavaScript"}
-              </TabsTrigger>
-            ))}
-          </TabsList>
-        </Tabs>
-        <Button
-          variant="ghost"
-          size="icon-sm"
-          onClick={copyCode}
-          aria-label={t("Copy code")}
-        >
-          {copied ? (
-            <Check className="size-3.5" />
-          ) : (
-            <Clipboard className="size-3.5" />
-          )}
-        </Button>
-      </div>
-      <pre className="max-h-[34rem] overflow-auto bg-[#0b1020] p-4 text-[12px] leading-6 text-slate-200 dark:bg-black/35">
-        <code>{samples[language]}</code>
-      </pre>
-    </div>
-  );
-}
-
 function SectionHeading({
   id,
   eyebrow,
@@ -598,6 +532,11 @@ function DocsNavigation({ onNavigate }: { onNavigate?: () => void }) {
       items: imageModels
         .filter((model) => model.family === "gemini")
         .map((model) => [`model-${model.id}`, model.model]),
+    },
+    {
+      label: "Midjourney task API",
+      icon: Workflow,
+      items: midjourneyNavItems,
     },
     {
       label: "API reference",
@@ -904,6 +843,7 @@ export function ApiDocs() {
                   <Badge variant="secondary">OOpii</Badge>
                   <Badge variant="outline">OpenAI Images</Badge>
                   <Badge variant="outline">Gemini generateContent</Badge>
+                  <Badge variant="outline">Midjourney</Badge>
                 </div>
                 <h1 className="mt-5 max-w-4xl text-3xl font-semibold tracking-tight sm:text-5xl">
                   {t("Image generation API reference")}
@@ -916,7 +856,7 @@ export function ApiDocs() {
                 <div className="mt-8 grid gap-4 sm:grid-cols-3">
                   {[
                     [String(imageModels.length), "Documented models"],
-                    ["2", "Compatible protocols"],
+                    ["3", "Compatible protocols"],
                     ["3", "Example languages"],
                   ].map(([value, label]) => (
                     <div
@@ -971,6 +911,8 @@ export function ApiDocs() {
                   />
                 ))}
               </div>
+
+              <MidjourneyDocs baseUrl={baseUrl} />
 
               <section className="mt-16 border-border/70 border-t pt-12">
                 <SectionHeading

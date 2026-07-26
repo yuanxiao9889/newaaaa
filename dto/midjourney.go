@@ -16,6 +16,7 @@ type MidjourneyRequest struct {
 	Prompt      string   `json:"prompt"`
 	CustomId    string   `json:"customId"`
 	BotType     string   `json:"botType"`
+	SpeedMode   string   `json:"speedMode"`
 	NotifyHook  string   `json:"notifyHook"`
 	Action      string   `json:"action"`
 	Index       int      `json:"index"`
