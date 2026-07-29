@@ -26,14 +26,6 @@ func setupImageTaskTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
 
 	originalDB := model.DB
-	originalSQLite := common.UsingSQLite
-	originalMySQL := common.UsingMySQL
-	originalPostgreSQL := common.UsingPostgreSQL
-
-	common.UsingSQLite = true
-	common.UsingMySQL = false
-	common.UsingPostgreSQL = false
-
 	dsn := fmt.Sprintf("file:%s?mode=memory&cache=shared", strings.ReplaceAll(t.Name(), "/", "_"))
 	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{})
 	require.NoError(t, err)
@@ -46,9 +38,6 @@ func setupImageTaskTestDB(t *testing.T) *gorm.DB {
 			_ = sqlDB.Close()
 		}
 		model.DB = originalDB
-		common.UsingSQLite = originalSQLite
-		common.UsingMySQL = originalMySQL
-		common.UsingPostgreSQL = originalPostgreSQL
 	})
 
 	return db

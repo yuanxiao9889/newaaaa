@@ -11,8 +11,9 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
-	"github.com/QuantumNous/new-api/dto"
+	rootdto "github.com/QuantumNous/new-api/dto"
 	commonRelay "github.com/QuantumNous/new-api/relay/common"
+	relaydto "github.com/QuantumNous/new-api/relaykit/dto"
 	"gorm.io/gorm"
 )
 
@@ -109,15 +110,15 @@ func (t TaskStatus) ToVideoStatus() string {
 	var status string
 	switch t {
 	case TaskStatusQueued, TaskStatusSubmitted:
-		status = dto.VideoStatusQueued
+		status = relaydto.VideoStatusQueued
 	case TaskStatusInProgress:
-		status = dto.VideoStatusInProgress
+		status = relaydto.VideoStatusInProgress
 	case TaskStatusSuccess:
-		status = dto.VideoStatusCompleted
+		status = relaydto.VideoStatusCompleted
 	case TaskStatusFailure:
-		status = dto.VideoStatusFailed
+		status = relaydto.VideoStatusFailed
 	default:
-		status = dto.VideoStatusUnknown // Default fallback
+		status = relaydto.VideoStatusUnknown // Default fallback
 	}
 	return status
 }
@@ -131,6 +132,10 @@ const (
 	TaskStatusSuccess               = "SUCCESS"
 	TaskStatusUnknown               = "UNKNOWN"
 )
+
+// TaskRefundLegacyCutoff separates tasks created before timeout refunds were
+// introduced. Those legacy tasks are failed without an automatic refund.
+const TaskRefundLegacyCutoff int64 = 1771718400 // 2026-02-22 00:00:00 UTC
 
 type Task struct {
 	ID          int64                 `json:"id" gorm:"primary_key;AUTO_INCREMENT"`
@@ -221,16 +226,16 @@ type TaskPrivateData struct {
 	WorkerHeartbeatAt  int64    `json:"worker_heartbeat_at,omitempty"`
 	ChannelRetryPath   []string `json:"channel_retry_path,omitempty"`
 
-	BillingState        string                `json:"billing_state,omitempty"`
-	UsageAccountingMode string                `json:"usage_accounting_mode,omitempty"`
-	PreConsumedQuota    int                   `json:"pre_consumed_quota,omitempty"`
-	ActualQuota         int                   `json:"actual_quota,omitempty"`
-	BillingError        string                `json:"billing_error,omitempty"`
-	BillingUpdatedAt    int64                 `json:"billing_updated_at,omitempty"`
-	PromptTokens        int                   `json:"prompt_tokens,omitempty"`
-	CompletionTokens    int                   `json:"completion_tokens,omitempty"`
-	TotalTokens         int                   `json:"total_tokens,omitempty"`
-	UsageDetails        *dto.TaskUsageDetails `json:"usage_details,omitempty"`
+	BillingState        string                    `json:"billing_state,omitempty"`
+	UsageAccountingMode string                    `json:"usage_accounting_mode,omitempty"`
+	PreConsumedQuota    int                       `json:"pre_consumed_quota,omitempty"`
+	ActualQuota         int                       `json:"actual_quota,omitempty"`
+	BillingError        string                    `json:"billing_error,omitempty"`
+	BillingUpdatedAt    int64                     `json:"billing_updated_at,omitempty"`
+	PromptTokens        int                       `json:"prompt_tokens,omitempty"`
+	CompletionTokens    int                       `json:"completion_tokens,omitempty"`
+	TotalTokens         int                       `json:"total_tokens,omitempty"`
+	UsageDetails        *rootdto.TaskUsageDetails `json:"usage_details,omitempty"`
 }
 
 const (
@@ -717,7 +722,9 @@ func (t *Task) UpdateQuota() error {
 
 // UpdateWithStatus performs a conditional UPDATE guarded by fromStatus (CAS).
 // Returns (true, nil) if this caller won the update, (false, nil) if
-// another process already moved the task out of fromStatus.
+// another process already moved the task out of fromStatus. MySQL commonly
+// reports changed rows rather than matched rows, so a same-value no-op update
+// can also return false even when the status predicate still matched.
 //
 // Uses Model().Select("*").Updates() instead of Save() because GORM's Save
 // falls back to INSERT ON CONFLICT when the WHERE-guarded UPDATE matches
@@ -728,17 +735,6 @@ func (t *Task) UpdateWithStatus(fromStatus TaskStatus) (bool, error) {
 		return false, result.Error
 	}
 	return result.RowsAffected > 0, nil
-}
-
-// TaskBulkUpdate performs an unconditional bulk UPDATE by upstream task_id strings.
-// Same caveats as TaskBulkUpdateByID — no CAS guard.
-func TaskBulkUpdate(taskIds []string, params map[string]any) error {
-	if len(taskIds) == 0 {
-		return nil
-	}
-	return DB.Model(&Task{}).
-		Where("task_id in (?)", taskIds).
-		Updates(params).Error
 }
 
 // TaskBulkUpdateByID performs an unconditional bulk UPDATE by primary key IDs.
@@ -860,8 +856,8 @@ func containsLikePattern(value string) string {
 	return "%" + value + "%"
 }
 
-func (t *Task) ToOpenAIVideo() *dto.OpenAIVideo {
-	openAIVideo := dto.NewOpenAIVideo()
+func (t *Task) ToOpenAIVideo() *relaydto.OpenAIVideo {
+	openAIVideo := relaydto.NewOpenAIVideo()
 	openAIVideo.ID = t.TaskID
 	openAIVideo.Status = t.Status.ToVideoStatus()
 	openAIVideo.Model = t.Properties.OriginModelName

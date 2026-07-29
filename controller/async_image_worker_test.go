@@ -24,15 +24,9 @@ func setupAsyncImageWorkerTestDB(t *testing.T) *gorm.DB {
 
 	originalDB := model.DB
 	originalLogDB := model.LOG_DB
-	originalSQLite := common.UsingSQLite
-	originalMySQL := common.UsingMySQL
-	originalPostgreSQL := common.UsingPostgreSQL
 	originalRedisEnabled := common.RedisEnabled
 	originalErrorLogEnabled := constant.ErrorLogEnabled
 
-	common.UsingSQLite = true
-	common.UsingMySQL = false
-	common.UsingPostgreSQL = false
 	common.RedisEnabled = false
 	constant.ErrorLogEnabled = true
 
@@ -50,9 +44,6 @@ func setupAsyncImageWorkerTestDB(t *testing.T) *gorm.DB {
 		}
 		model.DB = originalDB
 		model.LOG_DB = originalLogDB
-		common.UsingSQLite = originalSQLite
-		common.UsingMySQL = originalMySQL
-		common.UsingPostgreSQL = originalPostgreSQL
 		common.RedisEnabled = originalRedisEnabled
 		constant.ErrorLogEnabled = originalErrorLogEnabled
 	})

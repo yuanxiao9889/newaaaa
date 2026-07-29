@@ -38,9 +38,9 @@ func TestNewMidjourneyAsyncTaskCapturesBillingSnapshot(t *testing.T) {
 		GroupRatioInfo: types.GroupRatioInfo{
 			GroupRatio: 1.2,
 		},
-		UsePrice:    true,
-		OtherRatios: map[string]float64{"mode": 2},
+		UsePrice: true,
 	}
+	priceData.AddOtherRatio("mode", 2)
 
 	task := NewMidjourneyAsyncTask(mjTask, relayInfo, priceData)
 	require.NotNil(t, task)

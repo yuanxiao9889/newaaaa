@@ -75,7 +75,7 @@ func NewMidjourneyAsyncTask(mjTask *model.Midjourney, relayInfo *relaycommon.Rel
 				ModelPrice:      priceData.ModelPrice,
 				GroupRatio:      priceData.GroupRatioInfo.GroupRatio,
 				ModelRatio:      priceData.ModelRatio,
-				OtherRatios:     cloneFloatRatios(priceData.OtherRatios),
+				OtherRatios:     cloneFloatRatios(priceData.OtherRatios()),
 				OriginModelName: modelName,
 				PerCallBilling:  true,
 			},
