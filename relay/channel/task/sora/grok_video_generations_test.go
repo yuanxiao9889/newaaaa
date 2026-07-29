@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
@@ -256,11 +257,9 @@ func TestBuildGrokVideoGenerationsRequestKeepsDirectFlexibleModel(t *testing.T) 
 
 func TestConvertToOpenAIVideoExposesDirectAndProxyURLsForGrokGenerations(t *testing.T) {
 	task := &model.Task{
-		TaskID: "task_public",
-		Status: model.TaskStatusSuccess,
-		Platform: constant.TaskPlatform(
-			"59",
-		),
+		TaskID:   "task_public",
+		Status:   model.TaskStatusSuccess,
+		Platform: constant.TaskPlatform(strconv.Itoa(constant.ChannelTypeGrokVideo)),
 		Properties: model.Properties{
 			UpstreamModelName: "grok-video-3-20s",
 		},

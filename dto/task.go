@@ -2,6 +2,8 @@ package dto
 
 import (
 	"encoding/json"
+
+	relaydto "github.com/QuantumNous/new-api/relaykit/dto"
 )
 
 type TaskError struct {
@@ -71,11 +73,11 @@ type TaskDto struct {
 }
 
 type TaskUsageDetails struct {
-	PromptTokens           int                `json:"prompt_tokens,omitempty"`
-	CompletionTokens       int                `json:"completion_tokens,omitempty"`
-	TotalTokens            int                `json:"total_tokens,omitempty"`
-	PromptTokensDetails    InputTokenDetails  `json:"prompt_tokens_details,omitempty"`
-	CompletionTokenDetails OutputTokenDetails `json:"completion_tokens_details,omitempty"`
+	PromptTokens           int                         `json:"prompt_tokens,omitempty"`
+	CompletionTokens       int                         `json:"completion_tokens,omitempty"`
+	TotalTokens            int                         `json:"total_tokens,omitempty"`
+	PromptTokensDetails    relaydto.InputTokenDetails  `json:"prompt_tokens_details,omitempty"`
+	CompletionTokenDetails relaydto.OutputTokenDetails `json:"completion_tokens_details,omitempty"`
 }
 
 type FetchReq struct {

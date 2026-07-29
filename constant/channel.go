@@ -56,7 +56,9 @@ const (
 	ChannelTypeReplicate      = 56
 	ChannelTypeCodex          = 57
 	ChannelTypeAdvancedCustom = 58
-	ChannelTypeGrokVideo      = 59
+	ChannelTypeSub2API        = 59
+	ChannelTypeNewAPI         = 60
+	ChannelTypeGrokVideo      = 61
 	ChannelTypeDummy          // this one is only for count, do not add any channel after this
 
 )
@@ -122,6 +124,8 @@ var ChannelBaseURLs = []string{
 	"https://chatgpt.com",                       //57
 	"",                                          //58
 	"",                                          //59
+	"",                                          //60
+	"",                                          //61
 }
 
 var ChannelTypeNames = map[int]string{
@@ -180,6 +184,8 @@ var ChannelTypeNames = map[int]string{
 	ChannelTypeReplicate:      "Replicate",
 	ChannelTypeCodex:          "ChatGPT Subscription (Codex)",
 	ChannelTypeAdvancedCustom: "Advanced Custom",
+	ChannelTypeSub2API:        "Sub2API",
+	ChannelTypeNewAPI:         "New API",
 	ChannelTypeGrokVideo:      "Grok Video (Generations)",
 }
 

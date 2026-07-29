@@ -567,15 +567,12 @@ func persistInternalAsyncChannelRetryPath(task *model.Task, retryPath []string) 
 
 func prepareInternalAsyncRelayInfo(task *model.Task, relayInfo *relaycommon.RelayInfo) {
 	relayInfo.ChannelMeta = &relaycommon.ChannelMeta{}
-	relayInfo.PriceData.OtherRatios = map[string]float64{}
+	relayInfo.PriceData.ReplaceOtherRatios(nil)
 	if bc := task.PrivateData.BillingContext; bc != nil {
 		relayInfo.PriceData.ModelPrice = bc.ModelPrice
 		relayInfo.PriceData.GroupRatioInfo.GroupRatio = bc.GroupRatio
 		relayInfo.PriceData.ModelRatio = bc.ModelRatio
-		relayInfo.PriceData.OtherRatios = bc.OtherRatios
-	}
-	if relayInfo.PriceData.OtherRatios == nil {
-		relayInfo.PriceData.OtherRatios = map[string]float64{}
+		relayInfo.PriceData.ReplaceOtherRatios(bc.OtherRatios)
 	}
 	relayInfo.PriceData.Quota = task.Quota
 	relayInfo.PriceData.QuotaToPreConsume = task.Quota

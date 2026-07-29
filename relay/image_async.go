@@ -16,8 +16,8 @@ import (
 	"github.com/QuantumNous/new-api/relay/channel/task/taskcommon"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
+	"github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/QuantumNous/new-api/service"
-	"github.com/QuantumNous/new-api/types"
 
 	"github.com/gin-gonic/gin"
 )
@@ -38,7 +38,7 @@ func IsAsyncImageRequest(c *gin.Context) bool {
 }
 
 func IsAsyncGeminiImageRequest(c *gin.Context, request *dto.GeminiChatRequest) bool {
-	if !IsAsyncImageRequest(c) || request == nil || request.IsStream(c) {
+	if !IsAsyncImageRequest(c) || request == nil || request.IsStream(c.Request) {
 		return false
 	}
 	if !strings.Contains(c.Request.URL.Path, "generateContent") {
@@ -134,7 +134,7 @@ func SubmitInternalAsyncImageTask(c *gin.Context, info *relaycommon.RelayInfo, r
 		ModelPrice:      info.PriceData.ModelPrice,
 		GroupRatio:      info.PriceData.GroupRatioInfo.GroupRatio,
 		ModelRatio:      info.PriceData.ModelRatio,
-		OtherRatios:     info.PriceData.OtherRatios,
+		OtherRatios:     info.PriceData.OtherRatios(),
 		OriginModelName: info.OriginModelName,
 		PerCallBilling:  info.PriceData.UsePrice,
 	}
@@ -217,7 +217,7 @@ func SubmitInternalAsyncGeminiImageTask(c *gin.Context, info *relaycommon.RelayI
 		ModelPrice:      info.PriceData.ModelPrice,
 		GroupRatio:      info.PriceData.GroupRatioInfo.GroupRatio,
 		ModelRatio:      info.PriceData.ModelRatio,
-		OtherRatios:     info.PriceData.OtherRatios,
+		OtherRatios:     info.PriceData.OtherRatios(),
 		OriginModelName: info.OriginModelName,
 		PerCallBilling:  info.PriceData.UsePrice,
 	}

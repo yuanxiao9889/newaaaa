@@ -11,6 +11,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/middleware"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/service"
 	"github.com/gin-contrib/sessions"
 	"github.com/gin-contrib/sessions/cookie"
 	"github.com/gin-gonic/gin"
@@ -25,15 +26,11 @@ func setupProfitControllerTestDB(t *testing.T) *gorm.DB {
 	gin.SetMode(gin.TestMode)
 	originalDB := model.DB
 	originalLogDB := model.LOG_DB
-	originalSQLite := common.UsingSQLite
-	originalMySQL := common.UsingMySQL
-	originalPostgreSQL := common.UsingPostgreSQL
 	originalRedisEnabled := common.RedisEnabled
+	originalMemoryCacheEnabled := common.MemoryCacheEnabled
 
-	common.UsingSQLite = true
-	common.UsingMySQL = false
-	common.UsingPostgreSQL = false
 	common.RedisEnabled = false
+	common.MemoryCacheEnabled = false
 
 	dsn := fmt.Sprintf("file:%s?mode=memory&cache=shared", strings.ReplaceAll(t.Name(), "/", "_"))
 	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{})
@@ -45,6 +42,7 @@ func setupProfitControllerTestDB(t *testing.T) *gorm.DB {
 		&model.Option{},
 		&model.ProfitCostPrice{},
 		&model.ProfitCostPriceVersion{},
+		&model.UserSession{},
 	))
 	model.DB = db
 	model.LOG_DB = db
@@ -62,10 +60,8 @@ func setupProfitControllerTestDB(t *testing.T) *gorm.DB {
 		}
 		model.DB = originalDB
 		model.LOG_DB = originalLogDB
-		common.UsingSQLite = originalSQLite
-		common.UsingMySQL = originalMySQL
-		common.UsingPostgreSQL = originalPostgreSQL
 		common.RedisEnabled = originalRedisEnabled
+		common.MemoryCacheEnabled = originalMemoryCacheEnabled
 		common.OptionMapRWMutex.Lock()
 		common.OptionMap = originalOptionMap
 		common.OptionMapRWMutex.Unlock()
@@ -77,6 +73,12 @@ func setupProfitControllerTestDB(t *testing.T) *gorm.DB {
 func newProfitTestRouter() *gin.Engine {
 	router := gin.New()
 	router.Use(sessions.Sessions("session", cookie.NewStore([]byte("profit-controller-test"))))
+	router.Use(func(c *gin.Context) {
+		if accessToken, ok := sessions.Default(c).Get("access_token").(string); ok {
+			c.Request.Header.Set("Authorization", "Bearer "+accessToken)
+		}
+		c.Next()
+	})
 	router.GET("/login/:role", func(c *gin.Context) {
 		role := common.RoleAdminUser
 		if c.Param("role") == "user" {
@@ -88,6 +90,46 @@ func newProfitTestRouter() *gin.Engine {
 		session.Set("id", 1001)
 		session.Set("status", common.UserStatusEnabled)
 		session.Set("group", "default")
+		user := model.User{
+			Id:          1001,
+			Username:    "profit-test",
+			Password:    "profit-test-password",
+			Role:        role,
+			Status:      common.UserStatusEnabled,
+			Group:       "default",
+			AffCode:     "profit-test",
+			AuthVersion: 1,
+		}
+		if err := model.DB.Save(&user).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"success": false})
+			return
+		}
+		loginSession := model.UserSession{
+			SID:             "profit-test-session",
+			UserID:          user.Id,
+			Version:         1,
+			UserAuthVersion: user.AuthVersion,
+			Status:          model.UserSessionStatusActive,
+			RefreshHash:     strings.Repeat("a", 64),
+			LoginMethod:     "password",
+			LastActiveAt:    time.Now().Unix(),
+			ExpiresAt:       time.Now().Add(time.Hour).Unix(),
+		}
+		if err := model.DB.Save(&loginSession).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"success": false})
+			return
+		}
+		accessToken, _, err := service.IssueAccessToken(service.AuthIdentity{
+			UserID:          user.Id,
+			SessionID:       loginSession.SID,
+			UserAuthVersion: loginSession.UserAuthVersion,
+			SessionVersion:  loginSession.Version,
+		})
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"success": false})
+			return
+		}
+		session.Set("access_token", accessToken)
 		if c.Query("verified") == "true" {
 			session.Set(middleware.ProfitVerificationSessionKey, time.Now().Unix())
 		}
@@ -190,7 +232,7 @@ func TestProfitRouteRejectsNonAdmin(t *testing.T) {
 
 	recorder := performProfitSummaryRequest(t, router, "user", "verified=true")
 
-	require.Equal(t, http.StatusOK, recorder.Code)
+	require.Equal(t, http.StatusForbidden, recorder.Code)
 	require.Contains(t, recorder.Body.String(), `"success":false`)
 }
 

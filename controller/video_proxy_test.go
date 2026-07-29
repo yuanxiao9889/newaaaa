@@ -23,14 +23,8 @@ func setupVideoProxyTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
 
 	originalDB := model.DB
-	originalSQLite := common.UsingSQLite
-	originalMySQL := common.UsingMySQL
-	originalPostgreSQL := common.UsingPostgreSQL
 	originalMemoryCacheEnabled := common.MemoryCacheEnabled
 
-	common.UsingSQLite = true
-	common.UsingMySQL = false
-	common.UsingPostgreSQL = false
 	common.MemoryCacheEnabled = false
 	service.InitHttpClient()
 
@@ -46,9 +40,6 @@ func setupVideoProxyTestDB(t *testing.T) *gorm.DB {
 			_ = sqlDB.Close()
 		}
 		model.DB = originalDB
-		common.UsingSQLite = originalSQLite
-		common.UsingMySQL = originalMySQL
-		common.UsingPostgreSQL = originalPostgreSQL
 		common.MemoryCacheEnabled = originalMemoryCacheEnabled
 	})
 
