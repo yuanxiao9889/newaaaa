@@ -41,6 +41,7 @@ type ImageURL struct {
 type responseTask struct {
 	ID                 string                `json:"id"`
 	TaskID             string                `json:"task_id,omitempty"` //兼容旧接口
+	Created            int64                 `json:"created,omitempty"`
 	Object             string                `json:"object"`
 	Model              string                `json:"model"`
 	Status             string                `json:"status"`
@@ -72,6 +73,10 @@ type responseTaskResult struct {
 }
 
 type responseTaskData struct {
+	ID        string   `json:"id,omitempty"`
+	TaskID    string   `json:"task_id,omitempty"`
+	Status    string   `json:"status,omitempty"`
+	Model     string   `json:"model,omitempty"`
 	VideoURL  string   `json:"video_url,omitempty"`
 	VideoURLs []string `json:"video_urls,omitempty"`
 }
@@ -152,6 +157,9 @@ func (a *TaskAdaptor) BuildRequestURL(info *relaycommon.RelayInfo) (string, erro
 	if info.Action == constant.TaskActionRemix {
 		return fmt.Sprintf("%s/v1/videos/%s/remix", a.baseURL, info.OriginTaskID), nil
 	}
+	if isGrokVideoGenerationsChannel(info) {
+		return fmt.Sprintf("%s/v1/videos/generations", a.baseURL), nil
+	}
 	return fmt.Sprintf("%s/v1/videos", a.baseURL), nil
 }
 
@@ -174,6 +182,18 @@ func (a *TaskAdaptor) BuildRequestBody(c *gin.Context, info *relaycommon.RelayIn
 	contentType := c.GetHeader("Content-Type")
 
 	if strings.HasPrefix(contentType, "application/json") {
+		if isGrokVideoGenerationsChannel(info) {
+			convertedBody, err := buildGrokVideoGenerationsRequest(
+				cachedBody,
+				info.UpstreamModelName,
+				info.OriginModelName,
+			)
+			if err != nil {
+				return nil, err
+			}
+			return bytes.NewReader(convertedBody), nil
+		}
+
 		var bodyMap map[string]interface{}
 		if err := common.Unmarshal(cachedBody, &bodyMap); err == nil {
 			bodyMap["model"] = info.UpstreamModelName
@@ -259,9 +279,9 @@ func (a *TaskAdaptor) DoResponse(c *gin.Context, resp *http.Response, info *rela
 		return
 	}
 
-	upstreamID := dResp.ID
-	if upstreamID == "" {
-		upstreamID = dResp.TaskID
+	upstreamID := firstNonEmpty(dResp.ID, dResp.TaskID)
+	if upstreamID == "" && dResp.Data != nil {
+		upstreamID = firstNonEmpty(dResp.Data.ID, dResp.Data.TaskID)
 	}
 	if upstreamID == "" {
 		taskErr = service.TaskErrorWrapper(fmt.Errorf("task_id is empty"), "invalid_response", http.StatusInternalServerError)
@@ -269,11 +289,25 @@ func (a *TaskAdaptor) DoResponse(c *gin.Context, resp *http.Response, info *rela
 	}
 
 	// 使用公开 task_xxxx ID 返回给客户端
+	if dResp.Status == "" && dResp.Data != nil {
+		dResp.Status = dResp.Data.Status
+	}
+	if dResp.Model == "" && dResp.Data != nil {
+		dResp.Model = dResp.Data.Model
+	}
 	if dResp.Error != nil && dResp.Error.Message == "" && dResp.Error.Code == "" {
 		dResp.Error = nil
 	}
 	dResp.ID = info.PublicTaskID
 	dResp.TaskID = info.PublicTaskID
+	if dResp.Data != nil {
+		if dResp.Data.ID != "" {
+			dResp.Data.ID = info.PublicTaskID
+		}
+		if dResp.Data.TaskID != "" {
+			dResp.Data.TaskID = info.PublicTaskID
+		}
+	}
 	c.JSON(http.StatusOK, dResp)
 	return upstreamID, responseBody, nil
 }
@@ -398,6 +432,26 @@ func (a *TaskAdaptor) ConvertToOpenAIVideo(task *model.Task) ([]byte, error) {
 	var err error
 	if data, err = sjson.SetBytes(data, "id", task.TaskID); err != nil {
 		return nil, errors.Wrap(err, "set id failed")
+	}
+	if !isGrokVideoGenerationsPlatform(task.Platform) {
+		return data, nil
+	}
+
+	if data, err = sjson.SetBytes(data, "task_id", task.TaskID); err != nil {
+		return nil, errors.Wrap(err, "set task_id failed")
+	}
+	if data, err = sjson.SetBytes(data, "status", task.Status.ToVideoStatus()); err != nil {
+		return nil, errors.Wrap(err, "set status failed")
+	}
+	if task.Status == model.TaskStatusSuccess {
+		if resultURL := strings.TrimSpace(task.GetResultURL()); resultURL != "" {
+			if data, err = sjson.SetBytes(data, "video_url", resultURL); err != nil {
+				return nil, errors.Wrap(err, "set video_url failed")
+			}
+		}
+		if data, err = sjson.SetBytes(data, "url", taskcommon.BuildProxyURL(task.TaskID)); err != nil {
+			return nil, errors.Wrap(err, "set proxy url failed")
+		}
 	}
 	return data, nil
 }

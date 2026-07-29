@@ -42,9 +42,11 @@ type ClaudeConvertInfo struct {
 	Done             bool
 
 	ToolCallBaseIndex int
-	ToolCallCount     int
-	ToolCallIndexMap  map[int]int
-	ToolCallIDs       map[int]string
+	// Kept for compatibility with the deployed NewAPI conversion service.
+	ToolCallMaxIndexOffset int
+	ToolCallCount          int
+	ToolCallIndexMap       map[int]int
+	ToolCallIDs            map[int]string
 }
 
 type RerankerInfo struct {
@@ -715,6 +717,7 @@ func (t *TaskSubmitReq) UnmarshalJSON(data []byte) error {
 	aux := &struct {
 		Metadata json.RawMessage `json:"metadata,omitempty"`
 		Duration json.RawMessage `json:"duration,omitempty"`
+		Seconds  json.RawMessage `json:"seconds,omitempty"`
 		*Alias
 	}{
 		Alias: (*Alias)(t),
@@ -735,6 +738,19 @@ func (t *TaskSubmitReq) UnmarshalJSON(data []byte) error {
 					t.Duration = v
 				}
 			}
+		}
+	}
+
+	if len(aux.Seconds) > 0 {
+		var secondsStr string
+		if err := common.Unmarshal(aux.Seconds, &secondsStr); err == nil {
+			t.Seconds = secondsStr
+		} else {
+			var secondsNumber json.Number
+			if err := common.Unmarshal(aux.Seconds, &secondsNumber); err != nil {
+				return err
+			}
+			t.Seconds = secondsNumber.String()
 		}
 	}
 

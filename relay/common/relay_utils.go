@@ -85,8 +85,14 @@ const MaxTaskDurationSeconds = 3600
 
 func validateTaskDurationBounds(req TaskSubmitReq) *dto.TaskError {
 	seconds := req.Duration
-	if seconds == 0 && req.Seconds != "" {
-		seconds, _ = strconv.Atoi(req.Seconds)
+	if req.Seconds != "" {
+		parsedSeconds, err := strconv.Atoi(req.Seconds)
+		if err != nil {
+			return createTaskError(fmt.Errorf("seconds must be an integer"), "invalid_seconds", http.StatusBadRequest, true)
+		}
+		if seconds == 0 {
+			seconds = parsedSeconds
+		}
 	}
 	if seconds < 0 || seconds > MaxTaskDurationSeconds {
 		return createTaskError(fmt.Errorf("seconds must be between 1 and %d", MaxTaskDurationSeconds), "invalid_seconds", http.StatusBadRequest, true)
