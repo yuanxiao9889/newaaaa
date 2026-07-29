@@ -62,6 +62,16 @@ export const CHANNEL_TYPE_CONFIGS: Record<number, ChannelTypeConfig> = {
       keyMinLength: 20,
     },
   },
+  59: {
+    id: 59,
+    name: CHANNEL_TYPES[59],
+    icon: 'xai',
+    hints: {
+      baseUrl: 'Grok video provider base URL',
+      key: 'Provider API key',
+      models: 'Grok video model IDs',
+    },
+  },
   3: {
     id: 3,
     name: CHANNEL_TYPES[3],

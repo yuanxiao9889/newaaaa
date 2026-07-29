@@ -70,6 +70,15 @@ func TestTaskDurationBounds(t *testing.T) {
 			name: "normal duration is accepted",
 			body: `{"model":"sora-2","prompt":"a cat","seconds":"8"}`,
 		},
+		{
+			name: "numeric seconds is accepted",
+			body: `{"model":"ok-video-1.5-preview","prompt":"a cat","seconds":8}`,
+		},
+		{
+			name:    "decimal seconds is rejected",
+			body:    `{"model":"ok-video-1.5-preview","prompt":"a cat","seconds":8.5}`,
+			wantErr: true,
+		},
 	}
 
 	for _, tt := range tests {
