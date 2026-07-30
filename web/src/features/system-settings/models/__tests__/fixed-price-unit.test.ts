@@ -1,0 +1,133 @@
+/*
+Copyright (C) 2023-2026 QuantumNous
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU Affero General Public License as
+published by the Free Software Foundation, either version 3 of the
+License, or (at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+GNU Affero General Public License for more details.
+
+You should have received a copy of the GNU Affero General Public License
+along with this program. If not, see <https://www.gnu.org/licenses/>.
+
+For commercial licensing, please contact support@quantumnous.com
+*/
+import assert from 'node:assert/strict'
+import { describe, test } from 'node:test'
+
+import { applyFixedPriceUnitForModel } from '../model-pricing-core'
+import {
+  buildModelSnapshots,
+  getModeLabel,
+  getPriceDetail,
+  getPriceSummary,
+  type ModelPricingSnapshotInput,
+} from '../model-pricing-snapshots'
+import {
+  applyResolutionRemovalPlan,
+  applyResolutionSelection,
+  type RatioDifferenceEntry,
+} from '../upstream-ratio-sync-helpers'
+
+const emptySnapshotInput: ModelPricingSnapshotInput = {
+  modelPrice: '{}',
+  modelRatio: '{}',
+  cacheRatio: '{}',
+  createCacheRatio: '{}',
+  completionRatio: '{}',
+  imageRatio: '{}',
+  audioRatio: '{}',
+  audioCompletionRatio: '{}',
+  billingMode: '{}',
+  billingExpr: '{}',
+  fixedPriceUnit: '{}',
+}
+
+describe('model pricing fixed price units', () => {
+  test('snapshot loading prefers explicit units and infers unmigrated video models', () => {
+    const rows = buildModelSnapshots({
+      ...emptySnapshotInput,
+      modelPrice: '{"sora-video":0.45,"legacy-video":0.3,"image-model":0.1}',
+      fixedPriceUnit: '{"sora-video":"request"}',
+    })
+    const byName = new Map(rows.map((row) => [row.name, row]))
+
+    assert.equal(byName.get('sora-video')?.fixedPriceUnit, 'request')
+    assert.equal(byName.get('legacy-video')?.fixedPriceUnit, 'second')
+    assert.equal(byName.get('image-model')?.fixedPriceUnit, 'request')
+  })
+
+  test('fixed unit map is written for fixed prices and cleared for other modes', () => {
+    const units = { video: 'second' as const }
+
+    applyFixedPriceUnitForModel(
+      units,
+      'video',
+      'per-request',
+      '0.45',
+      'request'
+    )
+    assert.deepEqual(units, { video: 'request' })
+
+    applyFixedPriceUnitForModel(units, 'video', 'per-token', '0.45', 'second')
+    assert.deepEqual(units, {})
+
+    units.video = 'second'
+    applyFixedPriceUnitForModel(units, 'video', 'tiered_expr', '0.45', 'second')
+    assert.deepEqual(units, {})
+  })
+
+  test('table summaries identify per-second fixed prices', () => {
+    const [row] = buildModelSnapshots({
+      ...emptySnapshotInput,
+      modelPrice: '{"video":0.45}',
+      fixedPriceUnit: '{"video":"second"}',
+    })
+    const t = (key: string) => key
+
+    assert.equal(
+      getModeLabel(row.billingMode, row.fixedPriceUnit),
+      'Per second'
+    )
+    assert.equal(getPriceSummary(row, t), '$0.45 / second')
+    assert.equal(getPriceDetail(row, t), 'Fixed per second')
+  })
+
+  test('upstream price selection and removal keep price and unit paired', () => {
+    const price: RatioDifferenceEntry = {
+      current: 0.2,
+      upstreams: { upstream: 0.45 },
+      confidence: { upstream: true },
+    }
+    const unit: RatioDifferenceEntry = {
+      current: 'request',
+      upstreams: { upstream: 'second' },
+      confidence: { upstream: true },
+    }
+    const selected = applyResolutionSelection(
+      {},
+      { video: { model_price: price, fixed_price_unit: unit } },
+      {
+        model: 'video',
+        ratioType: 'model_price',
+        value: 0.45,
+        sourceName: 'upstream',
+      }
+    )
+
+    assert.deepEqual(selected.video, {
+      model_price: 0.45,
+      fixed_price_unit: 'second',
+    })
+
+    const removed = applyResolutionRemovalPlan(
+      selected,
+      new Map([['video', new Set(['fixed_price_unit' as const])]])
+    )
+    assert.deepEqual(removed, {})
+  })
+})

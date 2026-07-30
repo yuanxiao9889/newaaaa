@@ -111,7 +111,9 @@ export function buildModelRatioColumns({
       ),
       cell: ({ row }) => (
         <StatusBadge
-          label={t(getModeLabel(row.original.billingMode))}
+          label={t(
+            getModeLabel(row.original.billingMode, row.original.fixedPriceUnit)
+          )}
           variant={getModeVariant(row.original.billingMode)}
           copyable={false}
           showDot={false}

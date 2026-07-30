@@ -19,6 +19,8 @@ import (
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
 	"github.com/QuantumNous/new-api/relay/helper"
 	"github.com/QuantumNous/new-api/service"
+	"github.com/QuantumNous/new-api/setting/billing_setting"
+	hosttypes "github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
 )
 
@@ -28,6 +30,48 @@ type TaskSubmitResult struct {
 	Platform       constant.TaskPlatform
 	Quota          int
 	//PerCallPrice   types.PriceData
+}
+
+func normalizeTaskBillingRatios(info *relaycommon.RelayInfo, ratios map[string]float64) (map[string]float64, *dto.TaskError) {
+	normalized := hosttypes.PriceData{}
+	normalized.ReplaceOtherRatios(ratios)
+	if info == nil || !info.PriceData.UsePrice {
+		return normalized.OtherRatios(), nil
+	}
+
+	unit := info.PriceData.FixedPriceUnit
+	if unit == "" {
+		legacySecond := normalized.HasOtherRatio("seconds") || model.LegacySecondBasedFixedPriceModel(
+			info.OriginModelName,
+			model.GetModelSupportEndpointTypes(info.OriginModelName),
+		)
+		unit = billing_setting.ResolveFixedPriceUnit(info.OriginModelName, legacySecond)
+		info.PriceData.FixedPriceUnit = unit
+	}
+	if !billing_setting.IsValidFixedPriceUnit(unit) {
+		err := fmt.Errorf("model %s has invalid fixed price unit %q", info.OriginModelName, unit)
+		return nil, service.TaskErrorWrapperLocal(err, "model_price_error", http.StatusBadRequest)
+	}
+	if unit == billing_setting.FixedPriceUnitRequest {
+		normalized.RemoveOtherRatio("seconds")
+		return normalized.OtherRatios(), nil
+	}
+	if !normalized.HasOtherRatio("seconds") {
+		err := fmt.Errorf("model %s is configured for per-second billing but no valid video duration was provided", info.OriginModelName)
+		return nil, service.TaskErrorWrapperLocal(err, "model_price_error", http.StatusBadRequest)
+	}
+	return normalized.OtherRatios(), nil
+}
+
+func mergeTaskBillingRatios(preserved, estimated map[string]float64) map[string]float64 {
+	merged := make(map[string]float64, len(preserved)+len(estimated))
+	for name, ratio := range preserved {
+		merged[name] = ratio
+	}
+	for name, ratio := range estimated {
+		merged[name] = ratio
+	}
+	return merged
 }
 
 // ResolveOriginTask 处理基于已有任务的提交（remix / continuation）：
@@ -179,6 +223,7 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (*TaskSubmitRe
 
 	// 4. 价格计算：基础模型价格
 	info.OriginModelName = modelName
+	preservedRatios := info.PriceData.OtherRatios()
 	priceData, err := helper.ModelPriceHelperPerCall(c, info)
 	if err != nil {
 		return nil, service.TaskErrorWrapper(err, "model_price_error", http.StatusBadRequest)
@@ -188,14 +233,16 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (*TaskSubmitRe
 	// 5. 计费估算：让适配器根据用户请求提供 OtherRatios（时长、分辨率等）
 	//    必须在 ModelPriceHelperPerCall 之后调用（它会重建 PriceData）。
 	//    ResolveOriginTask 可能已在 remix 路径中预设了 OtherRatios，此处合并。
-	if estimatedRatios := adaptor.EstimateBilling(c, info); len(estimatedRatios) > 0 {
-		for k, v := range estimatedRatios {
-			info.PriceData.AddOtherRatio(k, v)
-		}
+	combinedRatios := mergeTaskBillingRatios(preservedRatios, adaptor.EstimateBilling(c, info))
+	normalizedRatios, ratioErr := normalizeTaskBillingRatios(info, combinedRatios)
+	if ratioErr != nil {
+		return nil, ratioErr
 	}
+	info.PriceData.ReplaceOtherRatios(normalizedRatios)
 
 	// 6. 将 OtherRatios 应用到基础额度（饱和转换，防止溢出成负数）
-	if !common.StringsContains(constant.TaskPricePatches, modelName) {
+	legacyPricePatch := common.StringsContains(constant.TaskPricePatches, modelName) && !info.PriceData.UsePrice
+	if !legacyPricePatch {
 		quotaWithRatios := info.PriceData.ApplyOtherRatiosToFloat(float64(info.PriceData.Quota))
 		quota, clamp := common.QuotaFromFloatChecked(quotaWithRatios)
 		info.PriceData.Quota = quota
@@ -243,10 +290,14 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (*TaskSubmitRe
 	// 11. 提交后计费调整：让适配器根据上游实际返回调整 OtherRatios
 	finalQuota := info.PriceData.Quota
 	if adjustedRatios := adaptor.AdjustBillingOnSubmit(info, taskData); len(adjustedRatios) > 0 {
-		if adjustedQuota, ok := recalcQuotaFromRatios(info, adjustedRatios); ok {
+		normalizedAdjustedRatios, ratioErr := normalizeTaskBillingRatios(info, adjustedRatios)
+		if ratioErr != nil {
+			return nil, ratioErr
+		}
+		if adjustedQuota, ok := recalcQuotaFromRatios(info, normalizedAdjustedRatios); ok {
 			// 基于调整后的 ratios 重新计算 quota
 			finalQuota = adjustedQuota
-			info.PriceData.ReplaceOtherRatios(adjustedRatios)
+			info.PriceData.ReplaceOtherRatios(normalizedAdjustedRatios)
 			info.PriceData.Quota = finalQuota
 		}
 	}
@@ -410,6 +461,17 @@ func videoFetchByIDRespBodyBuilder(c *gin.Context) (respBody []byte, taskResp *d
 			return
 		}
 		taskResp = service.TaskErrorWrapperLocal(fmt.Errorf("not_implemented:%s", originTask.Platform), "not_implemented", http.StatusNotImplemented)
+		return
+	}
+
+	adaptor := GetTaskAdaptor(originTask.Platform)
+	if converter, ok := adaptor.(channel.VideoGenerationConverter); ok {
+		videoGenerationData, err := converter.ConvertToVideoGeneration(originTask)
+		if err != nil {
+			taskResp = service.TaskErrorWrapper(err, "convert_to_video_generation_failed", http.StatusInternalServerError)
+			return
+		}
+		respBody = videoGenerationData
 		return
 	}
 

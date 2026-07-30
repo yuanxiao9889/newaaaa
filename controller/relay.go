@@ -644,6 +644,7 @@ func RelayTask(c *gin.Context) {
 		task.PrivateData.BillingUpdatedAt = time.Now().Unix()
 		task.PrivateData.BillingContext = &model.TaskBillingContext{
 			ModelPrice:      relayInfo.PriceData.ModelPrice,
+			FixedPriceUnit:  relayInfo.PriceData.FixedPriceUnit,
 			GroupRatio:      relayInfo.PriceData.GroupRatioInfo.GroupRatio,
 			ModelRatio:      relayInfo.PriceData.ModelRatio,
 			OtherRatios:     relayInfo.PriceData.OtherRatios(),

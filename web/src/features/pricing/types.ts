@@ -40,6 +40,7 @@ export type PricingModel = {
   model_ratio: number
   completion_ratio: number
   model_price?: number
+  fixed_price_unit?: FixedPriceUnit
   cache_ratio?: number | null
   create_cache_ratio?: number | null
   image_ratio?: number | null
@@ -69,6 +70,8 @@ export type PricingModel = {
   output_modalities?: Modality[]
   capabilities?: ModelCapability[]
 }
+
+export type FixedPriceUnit = 'request' | 'second'
 
 /** Input/output modalities supported by a model. */
 export type Modality = 'text' | 'image' | 'audio' | 'video' | 'file'
@@ -108,4 +111,4 @@ export type PriceType =
   | 'image'
   | 'audio_input'
   | 'audio_output'
-export type QuotaType = 0 | 1 // 0: token-based, 1: per-request
+export type QuotaType = 0 | 1 // 0: token-based, 1: fixed price

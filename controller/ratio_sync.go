@@ -72,6 +72,7 @@ var pricingSyncFields = []string{
 	"model_price",
 	billing_setting.BillingModeField,
 	billing_setting.BillingExprField,
+	billing_setting.FixedPriceUnitField,
 }
 
 var numericPricingSyncFields = map[string]bool{
@@ -391,6 +392,7 @@ func FetchUpstreamRatios(c *gin.Context) {
 				AudioCompletionRatio *float64 `json:"audio_completion_ratio"`
 				BillingMode          string   `json:"billing_mode"`
 				BillingExpr          string   `json:"billing_expr"`
+				FixedPriceUnit       string   `json:"fixed_price_unit"`
 			}
 			if err := common.Unmarshal(body.Data, &pricingItems); err != nil {
 				logger.LogWarn(c.Request.Context(), "unrecognized data format from "+chItem.Name+": "+err.Error())
@@ -408,6 +410,7 @@ func FetchUpstreamRatios(c *gin.Context) {
 			modelPriceMap := make(map[string]float64)
 			billingModeMap := make(map[string]string)
 			billingExprMap := make(map[string]string)
+			fixedPriceUnitMap := make(map[string]string)
 
 			for _, item := range pricingItems {
 				if item.ModelName == "" {
@@ -416,6 +419,9 @@ func FetchUpstreamRatios(c *gin.Context) {
 				if item.BillingMode == billing_setting.BillingModeTieredExpr && strings.TrimSpace(item.BillingExpr) != "" {
 					billingModeMap[item.ModelName] = billing_setting.BillingModeTieredExpr
 					billingExprMap[item.ModelName] = item.BillingExpr
+				}
+				if billing_setting.IsValidFixedPriceUnit(item.FixedPriceUnit) {
+					fixedPriceUnitMap[item.ModelName] = item.FixedPriceUnit
 				}
 				if item.QuotaType == 1 {
 					modelPriceMap[item.ModelName] = item.ModelPrice
@@ -486,6 +492,9 @@ func FetchUpstreamRatios(c *gin.Context) {
 			}
 			if len(billingExprMap) > 0 {
 				converted[billing_setting.BillingExprField] = valueMap(billingExprMap)
+			}
+			if len(fixedPriceUnitMap) > 0 {
+				converted[billing_setting.FixedPriceUnitField] = valueMap(fixedPriceUnitMap)
 			}
 
 			ch <- upstreamResult{Name: uniqueName, Data: converted}

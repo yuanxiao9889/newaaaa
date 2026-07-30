@@ -61,6 +61,8 @@ import {
   SheetTitle,
 } from '@/components/ui/sheet'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
+import type { FixedPriceUnit } from '@/features/pricing/types'
 import { cn } from '@/lib/utils'
 
 import {
@@ -155,6 +157,8 @@ export const ModelPricingEditorPanel = forwardRef<
   })
   const [billingExpr, setBillingExpr] = useState('')
   const [requestRuleExpr, setRequestRuleExpr] = useState('')
+  const [fixedPriceUnit, setFixedPriceUnit] =
+    useState<FixedPriceUnit>('request')
   const [editorReloadToken, setEditorReloadToken] = useState(0)
   const isEditMode = !!editData
 
@@ -188,15 +192,16 @@ export const ModelPricingEditorPanel = forwardRef<
         audioRatio: editData.audioRatio || '',
         audioCompletionRatio: editData.audioCompletionRatio || '',
       })
-      setPricingMode(
-        editData.billingMode === 'tiered_expr'
-          ? 'tiered_expr'
-          : editData.price
-            ? 'per-request'
-            : 'per-token'
-      )
+      let nextPricingMode: PricingMode = 'per-token'
+      if (editData.billingMode === 'tiered_expr') {
+        nextPricingMode = 'tiered_expr'
+      } else if (editData.price) {
+        nextPricingMode = 'per-request'
+      }
+      setPricingMode(nextPricingMode)
       setBillingExpr(editData.billingExpr || '')
       setRequestRuleExpr(editData.requestRuleExpr || '')
+      setFixedPriceUnit(editData.fixedPriceUnit || 'request')
     } else {
       form.reset({
         name: '',
@@ -212,6 +217,7 @@ export const ModelPricingEditorPanel = forwardRef<
       setPricingMode('per-token')
       setBillingExpr('')
       setRequestRuleExpr('')
+      setFixedPriceUnit('request')
     }
 
     setPromptPrice(nextLaneState.promptPrice)
@@ -346,6 +352,7 @@ export const ModelPricingEditorPanel = forwardRef<
       buildPreviewRows(
         watchedValues,
         pricingMode,
+        fixedPriceUnit,
         billingExpr,
         requestRuleExpr,
         promptPrice,
@@ -355,6 +362,7 @@ export const ModelPricingEditorPanel = forwardRef<
       ),
     [
       billingExpr,
+      fixedPriceUnit,
       laneEnabled,
       lanePrices,
       pricingMode,
@@ -443,6 +451,7 @@ export const ModelPricingEditorPanel = forwardRef<
       const data: ModelRatioData = {
         name: values.name.trim(),
         billingMode: pricingMode,
+        fixedPriceUnit,
         price: values.price || '',
         ratio: values.ratio || '',
         cacheRatio: values.cacheRatio || '',
@@ -460,7 +469,7 @@ export const ModelPricingEditorPanel = forwardRef<
 
       return data
     },
-    [billingExpr, pricingMode, requestRuleExpr]
+    [billingExpr, fixedPriceUnit, pricingMode, requestRuleExpr]
   )
 
   useImperativeHandle(
@@ -549,7 +558,7 @@ export const ModelPricingEditorPanel = forwardRef<
                       {t('Per-token')}
                     </TabsTrigger>
                     <TabsTrigger value='per-request'>
-                      {t('Per-request')}
+                      {t('Fixed price')}
                     </TabsTrigger>
                     <TabsTrigger value='tiered_expr'>
                       {t('Expression')}
@@ -600,6 +609,28 @@ export const ModelPricingEditorPanel = forwardRef<
 
                   <TabsContent value='per-request' className='pt-0'>
                     <FieldGroup className='gap-5'>
+                      <Field>
+                        <FieldLabel id='fixed-price-unit-label'>
+                          {t('Billing unit')}
+                        </FieldLabel>
+                        <ToggleGroup
+                          aria-labelledby='fixed-price-unit-label'
+                          value={[fixedPriceUnit]}
+                          onValueChange={(value) => {
+                            const unit = value[0] as FixedPriceUnit | undefined
+                            if (unit) setFixedPriceUnit(unit)
+                          }}
+                          variant='outline'
+                          className='grid w-full grid-cols-2'
+                        >
+                          <ToggleGroupItem value='request' className='w-full'>
+                            {t('Per-request')}
+                          </ToggleGroupItem>
+                          <ToggleGroupItem value='second' className='w-full'>
+                            {t('Per second')}
+                          </ToggleGroupItem>
+                        </ToggleGroup>
+                      </Field>
                       <FormField
                         control={form.control}
                         name='price'
@@ -622,13 +653,19 @@ export const ModelPricingEditorPanel = forwardRef<
                                     }}
                                   />
                                   <InputGroupAddon align='inline-end'>
-                                    {t('per request')}
+                                    {t(
+                                      fixedPriceUnit === 'second'
+                                        ? 'per second'
+                                        : 'per request'
+                                    )}
                                   </InputGroupAddon>
                                 </InputGroup>
                               </FormControl>
                               <FieldDescription>
                                 {t(
-                                  'Cost in USD per request, regardless of tokens used.'
+                                  fixedPriceUnit === 'second'
+                                    ? 'Cost in USD per generated video second.'
+                                    : 'Cost in USD per request, regardless of tokens used.'
                                 )}
                               </FieldDescription>
                               <FormMessage />

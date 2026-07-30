@@ -19,6 +19,7 @@ For commercial licensing, please contact support@quantumnous.com
 import * as z from 'zod'
 
 import { combineBillingExpr } from '@/features/pricing/lib/billing-expr'
+import type { FixedPriceUnit } from '@/features/pricing/types'
 
 import { formatPricingNumber } from './pricing-format'
 
@@ -60,6 +61,7 @@ export type ModelRatioData = {
   audioRatio?: string
   audioCompletionRatio?: string
   billingMode?: PricingMode
+  fixedPriceUnit?: FixedPriceUnit
   billingExpr?: string
   requestRuleExpr?: string
 }
@@ -150,6 +152,19 @@ export function hasValue(value: unknown): boolean {
   )
 }
 
+export function applyFixedPriceUnitForModel(
+  units: Record<string, FixedPriceUnit>,
+  modelName: string,
+  mode: PricingMode,
+  price: string | undefined,
+  unit: FixedPriceUnit
+): void {
+  delete units[modelName]
+  if (mode === 'per-request' && hasValue(price)) {
+    units[modelName] = unit
+  }
+}
+
 export function toNumberOrNull(value: unknown): number | null {
   if (!hasValue(value) && value !== 0) return null
   const num = Number(value)
@@ -210,6 +225,7 @@ export function createInitialLaneState(data?: ModelRatioData | null) {
 export function buildPreviewRows(
   values: ModelPricingFormValues,
   mode: PricingMode,
+  fixedPriceUnit: FixedPriceUnit,
   billingExpr: string,
   requestRuleExpr: string,
   promptPrice: string,
@@ -235,7 +251,14 @@ export function buildPreviewRows(
       {
         key: 'price',
         label: 'ModelPrice',
-        value: values.price || t('Empty'),
+        value: values.price
+          ? `$${values.price} / ${t(fixedPriceUnit === 'second' ? 'second' : 'request')}`
+          : t('Empty'),
+      },
+      {
+        key: 'fixedPriceUnit',
+        label: t('Fixed price unit'),
+        value: t(fixedPriceUnit === 'second' ? 'second' : 'request'),
       },
     ]
   }

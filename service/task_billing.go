@@ -32,7 +32,7 @@ func LogTaskConsumption(c *gin.Context, info *relaycommon.RelayInfo) error {
 	tokenName := c.GetString("token_name")
 	logContent := fmt.Sprintf("操作 %s", info.Action)
 	// 支持任务仅按次计费
-	if common.StringsContains(constant.TaskPricePatches, info.OriginModelName) {
+	if common.StringsContains(constant.TaskPricePatches, info.OriginModelName) && !info.PriceData.UsePrice {
 		logContent = fmt.Sprintf("%s，按次计费", logContent)
 	} else {
 		if otherRatios := info.PriceData.OtherRatios(); len(otherRatios) > 0 {
@@ -51,6 +51,9 @@ func LogTaskConsumption(c *gin.Context, info *relaycommon.RelayInfo) error {
 	other["is_task"] = true
 	other["request_path"] = c.Request.URL.Path
 	other["model_price"] = info.PriceData.ModelPrice
+	if info.PriceData.FixedPriceUnit != "" {
+		other["fixed_price_unit"] = info.PriceData.FixedPriceUnit
+	}
 	if info.PriceData.ModelRatio > 0 {
 		other["model_ratio"] = info.PriceData.ModelRatio
 	}
@@ -135,6 +138,9 @@ func taskBillingOther(task *model.Task) map[string]interface{} {
 	other := make(map[string]interface{})
 	if bc := task.PrivateData.BillingContext; bc != nil {
 		other["model_price"] = bc.ModelPrice
+		if bc.FixedPriceUnit != "" {
+			other["fixed_price_unit"] = bc.FixedPriceUnit
+		}
 		if bc.ModelRatio > 0 {
 			other["model_ratio"] = bc.ModelRatio
 		}

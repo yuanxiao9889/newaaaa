@@ -73,6 +73,7 @@ func NewMidjourneyAsyncTask(mjTask *model.Midjourney, relayInfo *relaycommon.Rel
 			BillingUpdatedAt:    now,
 			BillingContext: &model.TaskBillingContext{
 				ModelPrice:      priceData.ModelPrice,
+				FixedPriceUnit:  priceData.FixedPriceUnit,
 				GroupRatio:      priceData.GroupRatioInfo.GroupRatio,
 				ModelRatio:      priceData.ModelRatio,
 				OtherRatios:     cloneFloatRatios(priceData.OtherRatios()),

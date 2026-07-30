@@ -330,6 +330,11 @@ var defaultModelPrice = map[string]float64{
 	"veo-3.0-fast-generate-001":      0.15,
 	"veo-3.1-generate-preview":       0.4,
 	"veo-3.1-fast-generate-preview":  0.15,
+	"hj-2.0-fast-480p":               0.36,
+	"hj-2.0-fast-720p":               0.41,
+	"hj-2.0-480p":                    0.45,
+	"hj-2.0-720p":                    0.68,
+	"hj-2.0-1080p":                   0.80,
 }
 
 var defaultAudioRatio = map[string]float64{

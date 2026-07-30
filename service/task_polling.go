@@ -476,20 +476,28 @@ func updateVideoSingleTask(ctx context.Context, adaptor TaskPollingAdaptor, ch *
 
 	snap := task.Snapshot()
 
-	taskResult := &relaycommon.TaskInfo{}
-	// try parse as New API response format
-	var responseItems taskdto.TaskResponse[model.Task]
-	if err = common.Unmarshal(responseBody, &responseItems); err == nil && responseItems.IsSuccess() {
-		logger.LogDebug(ctx, "updateVideoSingleTask parsed as new api response format: %+v", responseItems)
-		t := responseItems.Data
-		taskResult.TaskID = t.TaskID
-		taskResult.Status = string(t.Status)
-		taskResult.Url = t.GetResultURL()
-		taskResult.Progress = t.Progress
-		taskResult.Reason = t.FailReason
-		task.Data = t.Data
-	} else if taskResult, err = adaptor.ParseTaskResult(responseBody); err != nil {
-		return fmt.Errorf("parseTaskResult failed for task %s: %w", taskId, err)
+	taskResult, parseErr := adaptor.ParseTaskResult(responseBody)
+	if parseErr == nil && taskResult != nil && taskResult.Status != "" {
+		logger.LogDebug(ctx, "updateVideoSingleTask parsed by task adaptor: %+v", taskResult)
+	} else {
+		// Fall back to the generic New API task envelope for older upstreams.
+		var responseItems taskdto.TaskResponse[model.Task]
+		if err = common.Unmarshal(responseBody, &responseItems); err == nil && responseItems.IsSuccess() {
+			logger.LogDebug(ctx, "updateVideoSingleTask parsed as new api response format: %+v", responseItems)
+			t := responseItems.Data
+			taskResult = &relaycommon.TaskInfo{
+				TaskID:   t.TaskID,
+				Status:   string(t.Status),
+				Url:      t.GetResultURL(),
+				Progress: t.Progress,
+				Reason:   t.FailReason,
+			}
+			task.Data = t.Data
+		} else if parseErr != nil {
+			return fmt.Errorf("parseTaskResult failed for task %s: %w", taskId, parseErr)
+		} else {
+			taskResult = &relaycommon.TaskInfo{}
+		}
 	}
 
 	task.Data = redactVideoResponseBody(responseBody)

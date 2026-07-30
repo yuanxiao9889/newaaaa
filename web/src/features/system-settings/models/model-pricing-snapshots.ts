@@ -17,6 +17,8 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { splitBillingExprAndRequestRules } from '@/features/pricing/lib/billing-expr'
+import { resolveFixedPriceUnit } from '@/features/pricing/lib/model-helpers'
+import type { FixedPriceUnit } from '@/features/pricing/types'
 
 import { safeJsonParse } from '../utils/json-parser'
 import { formatPricingNumber } from './pricing-format'
@@ -32,6 +34,7 @@ export type ModelPricingSnapshotInput = {
   audioCompletionRatio: string
   billingMode: string
   billingExpr: string
+  fixedPriceUnit: string
 }
 
 export type ModelPricingSnapshot = {
@@ -45,6 +48,7 @@ export type ModelPricingSnapshot = {
   audioRatio?: string
   audioCompletionRatio?: string
   billingMode?: string
+  fixedPriceUnit?: FixedPriceUnit
   billingExpr?: string
   requestRuleExpr?: string
   hasConflict: boolean
@@ -80,8 +84,13 @@ const ratioToPrice = (ratio?: string, denominator?: string) => {
   return formatPricingNumber(ratioNumber * denominatorNumber)
 }
 
-export const getModeLabel = (mode?: string) => {
-  if (mode === 'per-request') return 'Per-request'
+export const getModeLabel = (
+  mode?: string,
+  fixedPriceUnit?: FixedPriceUnit
+) => {
+  if (mode === 'per-request') {
+    return fixedPriceUnit === 'second' ? 'Per second' : 'Per-request'
+  }
   if (mode === 'tiered_expr') return 'Expression'
   return 'Per-token'
 }
@@ -113,7 +122,8 @@ export const getPriceSummary = (
     return getExpressionSummary(row, t)
   }
   if (row.billingMode === 'per-request') {
-    return row.price ? `$${row.price} / ${t('request')}` : t('Unset price')
+    const unit = row.fixedPriceUnit === 'second' ? 'second' : 'request'
+    return row.price ? `$${row.price} / ${t(unit)}` : t('Unset price')
   }
 
   const inputPrice = ratioToPrice(row.ratio)
@@ -143,7 +153,9 @@ export const getPriceDetail = (
       : t('Expression based')
   }
   if (row.billingMode === 'per-request') {
-    return t('Fixed request price')
+    return row.fixedPriceUnit === 'second'
+      ? t('Fixed per second')
+      : t('Fixed request price')
   }
 
   const inputPrice = ratioToPrice(row.ratio)
@@ -174,6 +186,7 @@ export const buildModelSnapshots = ({
   audioCompletionRatio,
   billingMode,
   billingExpr,
+  fixedPriceUnit,
 }: ModelPricingSnapshotInput): ModelPricingSnapshot[] => {
   const priceMap = safeJsonParse<Record<string, number>>(modelPrice, {
     fallback: {},
@@ -215,6 +228,10 @@ export const buildModelSnapshots = ({
     fallback: {},
     context: 'billing expression',
   })
+  const fixedPriceUnitMap = safeJsonParse<Record<string, FixedPriceUnit>>(
+    fixedPriceUnit,
+    { fallback: {}, context: 'fixed price units' }
+  )
 
   const modelNames = new Set([
     ...Object.keys(priceMap),
@@ -227,9 +244,10 @@ export const buildModelSnapshots = ({
     ...Object.keys(audioCompletionMap),
     ...Object.keys(billingModeMap),
     ...Object.keys(billingExprMap),
+    ...Object.keys(fixedPriceUnitMap),
   ])
 
-  return Array.from(modelNames).map((name) => {
+  return [...modelNames].map((name) => {
     const price = priceMap[name]?.toString() || ''
     const ratio = ratioMap[name]?.toString() || ''
     const cache = cacheMap[name]?.toString() || ''
@@ -272,6 +290,13 @@ export const buildModelSnapshots = ({
       audioRatio: audio,
       audioCompletionRatio: audioCompletion,
       billingMode: price !== '' ? 'per-request' : 'per-token',
+      fixedPriceUnit:
+        price !== ''
+          ? resolveFixedPriceUnit({
+              model_name: name,
+              fixed_price_unit: fixedPriceUnitMap[name],
+            })
+          : undefined,
       hasConflict:
         price !== '' &&
         (ratio !== '' ||
@@ -297,6 +322,7 @@ export const getSnapshotSignature = (snapshot?: ModelPricingSnapshot) => {
     audioRatio: snapshot.audioRatio || '',
     audioCompletionRatio: snapshot.audioCompletionRatio || '',
     billingMode: snapshot.billingMode || 'per-token',
+    fixedPriceUnit: snapshot.fixedPriceUnit || 'request',
     billingExpr: snapshot.billingExpr || '',
     requestRuleExpr: snapshot.requestRuleExpr || '',
   })

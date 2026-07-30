@@ -2,7 +2,9 @@ package billing_setting
 
 import (
 	"fmt"
+	"strings"
 
+	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/pkg/billingexpr"
 	"github.com/QuantumNous/new-api/setting/config"
 	"github.com/samber/lo"
@@ -13,18 +15,24 @@ const (
 	BillingModeTieredExpr = "tiered_expr"
 	BillingModeField      = "billing_mode"
 	BillingExprField      = "billing_expr"
+	FixedPriceUnitField   = "fixed_price_unit"
+	FixedPriceUnitRequest = "request"
+	FixedPriceUnitSecond  = "second"
 )
 
 // BillingSetting is managed by config.GlobalConfig.Register.
-// DB keys: billing_setting.billing_mode, billing_setting.billing_expr
+// DB keys: billing_setting.billing_mode, billing_setting.billing_expr,
+// billing_setting.fixed_price_unit
 type BillingSetting struct {
-	BillingMode map[string]string `json:"billing_mode"`
-	BillingExpr map[string]string `json:"billing_expr"`
+	BillingMode    map[string]string `json:"billing_mode"`
+	BillingExpr    map[string]string `json:"billing_expr"`
+	FixedPriceUnit map[string]string `json:"fixed_price_unit"`
 }
 
 var billingSetting = BillingSetting{
-	BillingMode: make(map[string]string),
-	BillingExpr: make(map[string]string),
+	BillingMode:    make(map[string]string),
+	BillingExpr:    make(map[string]string),
+	FixedPriceUnit: make(map[string]string),
 }
 
 func init() {
@@ -47,6 +55,24 @@ func GetBillingExpr(model string) (string, bool) {
 	return expr, ok
 }
 
+func GetFixedPriceUnit(model string) (string, bool) {
+	unit, ok := billingSetting.FixedPriceUnit[model]
+	if !ok || !IsValidFixedPriceUnit(unit) {
+		return "", false
+	}
+	return unit, true
+}
+
+func ResolveFixedPriceUnit(model string, legacySecond bool) string {
+	if unit, ok := GetFixedPriceUnit(model); ok {
+		return unit
+	}
+	if legacySecond {
+		return FixedPriceUnitSecond
+	}
+	return FixedPriceUnitRequest
+}
+
 func GetBillingModeCopy() map[string]string {
 	return lo.Assign(billingSetting.BillingMode)
 }
@@ -55,15 +81,45 @@ func GetBillingExprCopy() map[string]string {
 	return lo.Assign(billingSetting.BillingExpr)
 }
 
+func GetFixedPriceUnitCopy() map[string]string {
+	return lo.Assign(billingSetting.FixedPriceUnit)
+}
+
 func GetPricingSyncData(base map[string]any) map[string]any {
-	extra := make(map[string]any, 2)
+	extra := make(map[string]any, 3)
 	if modes := GetBillingModeCopy(); len(modes) > 0 {
 		extra[BillingModeField] = modes
 	}
 	if exprs := GetBillingExprCopy(); len(exprs) > 0 {
 		extra[BillingExprField] = exprs
 	}
+	if units := GetFixedPriceUnitCopy(); len(units) > 0 {
+		extra[FixedPriceUnitField] = units
+	}
 	return lo.Assign(base, extra)
+}
+
+func IsValidFixedPriceUnit(unit string) bool {
+	return unit == FixedPriceUnitRequest || unit == FixedPriceUnitSecond
+}
+
+func ValidateFixedPriceUnitJSON(value string) error {
+	var units map[string]string
+	if err := common.Unmarshal([]byte(value), &units); err != nil {
+		return fmt.Errorf("invalid fixed price unit map: %w", err)
+	}
+	if units == nil {
+		return fmt.Errorf("fixed price unit must be a JSON object")
+	}
+	for model, unit := range units {
+		if strings.TrimSpace(model) == "" {
+			return fmt.Errorf("fixed price unit model name cannot be empty")
+		}
+		if !IsValidFixedPriceUnit(unit) {
+			return fmt.Errorf("invalid fixed price unit %q for model %q", unit, model)
+		}
+	}
+	return nil
 }
 
 // ---------------------------------------------------------------------------

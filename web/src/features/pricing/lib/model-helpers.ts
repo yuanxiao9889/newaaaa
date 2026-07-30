@@ -17,7 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { EXCLUDED_GROUPS, FILTER_ALL, QUOTA_TYPE_VALUES } from '../constants'
-import type { PricingModel } from '../types'
+import type { FixedPriceUnit, PricingModel } from '../types'
 
 // ----------------------------------------------------------------------------
 // Model Helper Utilities
@@ -108,12 +108,20 @@ export function isTokenBasedModel(model: PricingModel): boolean {
   return model.quota_type === QUOTA_TYPE_VALUES.TOKEN
 }
 
-/**
- * Check if a fixed-price model should present its unit as seconds.
- */
-export function isSecondBasedFixedPriceModel(model: PricingModel): boolean {
-  if (isTokenBasedModel(model)) return false
+type FixedPriceUnitModel = Pick<
+  PricingModel,
+  'model_name' | 'fixed_price_unit'
+> &
+  Partial<
+    Pick<
+      PricingModel,
+      'quota_type' | 'output_modalities' | 'supported_endpoint_types'
+    >
+  >
 
+function isLegacySecondBasedFixedPriceModel(
+  model: FixedPriceUnitModel
+): boolean {
   const modelName = model.model_name || ''
   const normalizedModelName = modelName.toLowerCase()
   if (normalizedModelName === 'ok-video') return false
@@ -127,4 +135,23 @@ export function isSecondBasedFixedPriceModel(model: PricingModel): boolean {
   if (endpoints.includes('openai-video')) return true
 
   return /video|sora|veo|kling|pika/i.test(modelName)
+}
+
+export function resolveFixedPriceUnit(
+  model: FixedPriceUnitModel
+): FixedPriceUnit {
+  if (
+    model.fixed_price_unit === 'request' ||
+    model.fixed_price_unit === 'second'
+  ) {
+    return model.fixed_price_unit
+  }
+  return isLegacySecondBasedFixedPriceModel(model) ? 'second' : 'request'
+}
+
+/**
+ * Check if a fixed-price model should present its unit as seconds.
+ */
+export function isSecondBasedFixedPriceModel(model: PricingModel): boolean {
+  return !isTokenBasedModel(model) && resolveFixedPriceUnit(model) === 'second'
 }

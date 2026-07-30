@@ -132,6 +132,7 @@ func SubmitInternalAsyncImageTask(c *gin.Context, info *relaycommon.RelayInfo, r
 	task.PrivateData.BillingUpdatedAt = time.Now().Unix()
 	task.PrivateData.BillingContext = &model.TaskBillingContext{
 		ModelPrice:      info.PriceData.ModelPrice,
+		FixedPriceUnit:  info.PriceData.FixedPriceUnit,
 		GroupRatio:      info.PriceData.GroupRatioInfo.GroupRatio,
 		ModelRatio:      info.PriceData.ModelRatio,
 		OtherRatios:     info.PriceData.OtherRatios(),
@@ -215,6 +216,7 @@ func SubmitInternalAsyncGeminiImageTask(c *gin.Context, info *relaycommon.RelayI
 	task.PrivateData.BillingUpdatedAt = time.Now().Unix()
 	task.PrivateData.BillingContext = &model.TaskBillingContext{
 		ModelPrice:      info.PriceData.ModelPrice,
+		FixedPriceUnit:  info.PriceData.FixedPriceUnit,
 		GroupRatio:      info.PriceData.GroupRatioInfo.GroupRatio,
 		ModelRatio:      info.PriceData.ModelRatio,
 		OtherRatios:     info.PriceData.OtherRatios(),

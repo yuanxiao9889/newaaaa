@@ -39,7 +39,7 @@ const STATUS_RELATED_KEYS = new Set([
   'oidc.display_name',
 ])
 
-const PRICING_RELATED_KEYS = [
+const PRICING_RELATED_KEYS = new Set([
   'ModelPrice',
   'ModelRatio',
   'CompletionRatio',
@@ -53,7 +53,8 @@ const PRICING_RELATED_KEYS = [
   'UserUsableGroups',
   'billing_setting.billing_mode',
   'billing_setting.billing_expr',
-]
+  'billing_setting.fixed_price_unit',
+])
 
 export function useUpdateOption() {
   const queryClient = useQueryClient()
@@ -75,7 +76,7 @@ export function useUpdateOption() {
           }
         }
 
-        if (PRICING_RELATED_KEYS.includes(variables.key)) {
+        if (PRICING_RELATED_KEYS.has(variables.key)) {
           queryClient.invalidateQueries({ queryKey: ['pricing'] })
         }
 

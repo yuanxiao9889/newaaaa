@@ -51,6 +51,11 @@ import {
   FormMessage,
 } from '@/components/ui/form'
 import { Input } from '@/components/ui/input'
+import {
+  InputGroup,
+  InputGroupAddon,
+  InputGroupInput,
+} from '@/components/ui/input-group'
 import { Label } from '@/components/ui/label'
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
 import {
@@ -72,11 +77,15 @@ import {
 } from '@/components/ui/sheet'
 import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
+import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
+import { resolveFixedPriceUnit } from '@/features/pricing/lib/model-helpers'
+import type { FixedPriceUnit } from '@/features/pricing/types'
 import {
   useSystemOptions,
   getOptionValue,
 } from '@/features/system-settings/hooks/use-system-options'
 import { useUpdateOption } from '@/features/system-settings/hooks/use-update-option'
+import { applyFixedPriceUnitForModel } from '@/features/system-settings/models/model-pricing-core'
 import { normalizeJsonString } from '@/features/system-settings/models/utils'
 import type { ModelSettings } from '@/features/system-settings/types'
 import { safeJsonParse } from '@/features/system-settings/utils/json-parser'
@@ -126,6 +135,7 @@ type PricingFields = Pick<
 // Form state describing the pricing currently configured for one model name.
 type PricingConfig = {
   mode: PricingMode
+  fixedPriceUnit: FixedPriceUnit
   fields: PricingFields
   promptPrice: string
   completionPrice: string
@@ -144,6 +154,7 @@ const EMPTY_PRICING_FIELDS: PricingFields = {
 
 const EMPTY_PRICING_CONFIG: PricingConfig = {
   mode: 'per-token',
+  fixedPriceUnit: 'request',
   fields: EMPTY_PRICING_FIELDS,
   promptPrice: '',
   completionPrice: '',
@@ -185,9 +196,17 @@ function readPricingConfig(
   // GetModelRatioOrPrice), so a name that has one is shown, and saved back, as
   // price-only: the ratios alongside it are dead weight.
   if (price !== undefined && price !== null) {
+    const unitMap = safeJsonParse<Record<string, FixedPriceUnit>>(
+      settings['billing_setting.fixed_price_unit'],
+      { fallback: {}, silent: true }
+    )
     return {
       ...EMPTY_PRICING_CONFIG,
       mode: 'per-request',
+      fixedPriceUnit: resolveFixedPriceUnit({
+        model_name: modelName,
+        fixed_price_unit: unitMap[modelName],
+      }),
       fields: { ...EMPTY_PRICING_FIELDS, price: price.toString() },
     }
   }
@@ -204,6 +223,7 @@ function readPricingConfig(
 
   return {
     mode: 'per-token',
+    fixedPriceUnit: 'request',
     fields: {
       price: '',
       ratio: ratio?.toString() || '',
@@ -243,6 +263,8 @@ export function ModelMutateDrawer({
   const isEditing = Boolean(currentModelId)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [pricingMode, setPricingMode] = useState<PricingMode>('per-token')
+  const [fixedPriceUnit, setFixedPriceUnit] =
+    useState<FixedPriceUnit>('request')
   const [pricingSubMode, setPricingSubMode] = useState<PricingSubMode>('ratio')
   const [advancedOpen, setAdvancedOpen] = useState(false)
   const [promptPrice, setPromptPrice] = useState('')
@@ -313,6 +335,7 @@ export function ModelMutateDrawer({
       ExposeRatioEnabled: false,
       'billing_setting.billing_mode': '{}',
       'billing_setting.billing_expr': '{}',
+      'billing_setting.fixed_price_unit': '{}',
       'tool_price_setting.prices': '{}',
       TopupGroupRatio: '',
       GroupRatio: '',
@@ -422,6 +445,7 @@ export function ModelMutateDrawer({
       )
       setLoadedPricingName(model.model_name)
       setPricingMode(pricing.mode)
+      setFixedPriceUnit(pricing.fixedPriceUnit)
       setPromptPrice(pricing.promptPrice)
       setCompletionPrice(pricing.completionPrice)
       setAdvancedOpen(pricing.advancedOpen)
@@ -448,6 +472,7 @@ export function ModelMutateDrawer({
       setLoadedPricingName(modelName)
       setPricingSubMode('ratio')
       setPricingMode(pricing.mode)
+      setFixedPriceUnit(pricing.fixedPriceUnit)
       setPromptPrice(pricing.promptPrice)
       setCompletionPrice(pricing.completionPrice)
       setAdvancedOpen(pricing.advancedOpen)
@@ -542,6 +567,12 @@ export function ModelMutateDrawer({
               modelSettings.AudioCompletionRatio,
               { fallback: {}, silent: true }
             )
+            const fixedPriceUnitMap = safeJsonParse<
+              Record<string, FixedPriceUnit>
+            >(modelSettings['billing_setting.fixed_price_unit'], {
+              fallback: {},
+              silent: true,
+            })
 
             // Remove old model name entries if model name changed (always, even if no new config)
             if (isEditing && oldModelName && oldModelName !== finalModelName) {
@@ -552,6 +583,7 @@ export function ModelMutateDrawer({
               delete imageMap[oldModelName]
               delete audioMap[oldModelName]
               delete audioCompletionMap[oldModelName]
+              delete fixedPriceUnitMap[oldModelName]
             }
 
             // Rebuild this model name's entries from the form, but only when
@@ -571,10 +603,18 @@ export function ModelMutateDrawer({
               delete imageMap[finalModelName]
               delete audioMap[finalModelName]
               delete audioCompletionMap[finalModelName]
+              delete fixedPriceUnitMap[finalModelName]
             }
 
             // Only add new entries if user provided new configuration
             if (hasRatioConfig) {
+              applyFixedPriceUnitForModel(
+                fixedPriceUnitMap,
+                finalModelName,
+                pricingMode,
+                values.price,
+                fixedPriceUnit
+              )
               if (
                 pricingMode === 'per-request' &&
                 values.price &&
@@ -680,6 +720,21 @@ export function ModelMutateDrawer({
               })
             }
 
+            const newFixedPriceUnit = normalizeJsonString(
+              JSON.stringify(fixedPriceUnitMap)
+            )
+            if (
+              newFixedPriceUnit !==
+              normalizeJsonString(
+                modelSettings['billing_setting.fixed_price_unit']
+              )
+            ) {
+              updates.push({
+                key: 'billing_setting.fixed_price_unit',
+                value: newFixedPriceUnit,
+              })
+            }
+
             // Apply all updates (including deletions when clearing fields)
             for (const update of updates) {
               await updateOption.mutateAsync(update)
@@ -709,6 +764,7 @@ export function ModelMutateDrawer({
       queryClient,
       onOpenChange,
       pricingMode,
+      fixedPriceUnit,
       oldModelName,
       loadedPricingName,
       modelSettings,
@@ -1001,41 +1057,77 @@ export function ModelMutateDrawer({
                   <div className='flex items-center space-x-2'>
                     <RadioGroupItem value='per-request' id='per-request' />
                     <Label htmlFor='per-request' className='font-normal'>
-                      {t('Per-request (fixed price)')}
+                      {t('Fixed price')}
                     </Label>
                   </div>
                 </RadioGroup>
               </div>
 
               {pricingMode === 'per-request' ? (
-                <FormField
-                  control={form.control}
-                  name='price'
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>{t('Fixed price (USD)')}</FormLabel>
-                      <FormControl>
-                        <Input
-                          type='text'
-                          placeholder='0.01'
-                          {...field}
-                          onChange={(e) => {
-                            const value = e.target.value
-                            if (validateNumber(value)) {
-                              field.onChange(value)
-                            }
-                          }}
-                        />
-                      </FormControl>
-                      <FormDescription>
-                        {t(
-                          'Cost in USD per request, regardless of tokens used.'
-                        )}
-                      </FormDescription>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
+                <div className='space-y-4'>
+                  <div className='space-y-2'>
+                    <Label id='model-fixed-price-unit-label'>
+                      {t('Billing unit')}
+                    </Label>
+                    <ToggleGroup
+                      aria-labelledby='model-fixed-price-unit-label'
+                      value={[fixedPriceUnit]}
+                      onValueChange={(value) => {
+                        const unit = value[0] as FixedPriceUnit | undefined
+                        if (unit) setFixedPriceUnit(unit)
+                      }}
+                      variant='outline'
+                      className='grid w-full grid-cols-2'
+                    >
+                      <ToggleGroupItem value='request' className='w-full'>
+                        {t('Per-request')}
+                      </ToggleGroupItem>
+                      <ToggleGroupItem value='second' className='w-full'>
+                        {t('Per second')}
+                      </ToggleGroupItem>
+                    </ToggleGroup>
+                  </div>
+                  <FormField
+                    control={form.control}
+                    name='price'
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>{t('Fixed price (USD)')}</FormLabel>
+                        <FormControl>
+                          <InputGroup>
+                            <InputGroupAddon>$</InputGroupAddon>
+                            <InputGroupInput
+                              inputMode='decimal'
+                              placeholder='0.01'
+                              {...field}
+                              onChange={(e) => {
+                                const value = e.target.value
+                                if (validateNumber(value)) {
+                                  field.onChange(value)
+                                }
+                              }}
+                            />
+                            <InputGroupAddon align='inline-end'>
+                              {t(
+                                fixedPriceUnit === 'second'
+                                  ? 'per second'
+                                  : 'per request'
+                              )}
+                            </InputGroupAddon>
+                          </InputGroup>
+                        </FormControl>
+                        <FormDescription>
+                          {t(
+                            fixedPriceUnit === 'second'
+                              ? 'Cost in USD per generated video second.'
+                              : 'Cost in USD per request, regardless of tokens used.'
+                          )}
+                        </FormDescription>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                </div>
               ) : (
                 <>
                   <div className='space-y-4'>

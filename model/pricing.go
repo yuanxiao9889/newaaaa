@@ -35,6 +35,7 @@ type Pricing struct {
 	SupportedEndpointTypes []constant.EndpointType `json:"supported_endpoint_types"`
 	BillingMode            string                  `json:"billing_mode,omitempty"`
 	BillingExpr            string                  `json:"billing_expr,omitempty"`
+	FixedPriceUnit         string                  `json:"fixed_price_unit,omitempty"`
 	PricingVersion         string                  `json:"pricing_version,omitempty"`
 }
 
@@ -175,6 +176,32 @@ func appendPricingEndpoint(endpoints []string, endpoint string) []string {
 		return endpoints
 	}
 	return append(endpoints, endpoint)
+}
+
+// LegacySecondBasedFixedPriceModel identifies fixed-price video models that
+// predate explicit unit configuration.
+func LegacySecondBasedFixedPriceModel(modelName string, endpoints []constant.EndpointType) bool {
+	normalizedName := strings.ToLower(modelName)
+	if normalizedName == "ok-video" {
+		return false
+	}
+	if normalizedName == "ok-video-1.5-preview" {
+		return true
+	}
+	if strings.HasPrefix(normalizedName, "ok-") && strings.Contains(normalizedName[3:], "video") {
+		return true
+	}
+	for _, endpoint := range endpoints {
+		if endpoint == constant.EndpointTypeOpenAIVideo {
+			return true
+		}
+	}
+	for _, marker := range []string{"video", "sora", "veo", "kling", "pika"} {
+		if strings.Contains(normalizedName, marker) {
+			return true
+		}
+	}
+	return false
 }
 
 func updatePricing() {
@@ -377,6 +404,10 @@ func updatePricing() {
 		if findPrice {
 			pricing.ModelPrice = modelPrice
 			pricing.QuotaType = 1
+			pricing.FixedPriceUnit = billing_setting.ResolveFixedPriceUnit(
+				model,
+				LegacySecondBasedFixedPriceModel(model, pricing.SupportedEndpointTypes),
+			)
 		} else {
 			modelRatio, _, _ := ratio_setting.GetModelRatio(model)
 			pricing.ModelRatio = modelRatio
@@ -411,7 +442,7 @@ func updatePricing() {
 
 	// 防止大更新后数据不通用
 	if len(pricingMap) > 0 {
-		pricingMap[0].PricingVersion = "5a90f2b86c08bd983a9a2e6d66c255f4eaef9c4bc934386d2b6ae84ef0ff1f1f"
+		pricingMap[0].PricingVersion = "f784f3deb29a0162ec91db73a0abcf1bcebc774a02f9bc88a96b8d2143267c49"
 	}
 
 	// 刷新缓存映射，供高并发快速查询

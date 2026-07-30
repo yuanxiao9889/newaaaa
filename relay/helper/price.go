@@ -175,6 +175,7 @@ func ModelPriceHelper(c *gin.Context, info *relaycommon.RelayInfo, promptTokens 
 		QuotaToPreConsume:    preConsumedQuota,
 	}
 	if usePrice {
+		priceData.FixedPriceUnit, _ = billing_setting.GetFixedPriceUnit(info.OriginModelName)
 		for name, ratio := range meta.BillingRatios {
 			priceData.AddOtherRatio(name, ratio)
 		}
@@ -277,6 +278,9 @@ func ModelPriceHelperPerCall(c *gin.Context, info *relaycommon.RelayInfo) (hostt
 		UsePrice:       usePrice,
 		Quota:          quota,
 		GroupRatioInfo: groupRatioInfo,
+	}
+	if usePrice {
+		priceData.FixedPriceUnit, _ = billing_setting.GetFixedPriceUnit(info.OriginModelName)
 	}
 	return priceData, nil
 }

@@ -71,6 +71,7 @@ export const RATIO_SYNC_FIELDS: RatioType[] = [
 export const SYNC_FIELD_ORDER: RatioType[] = [
   ...RATIO_SYNC_FIELDS,
   'model_price',
+  'fixed_price_unit',
   'billing_mode',
   'billing_expr',
 ]
@@ -151,7 +152,9 @@ export function getAlignedRatioTypes(
 export function getBillingCategory(
   ratioType: string
 ): 'price' | 'ratio' | 'tiered' {
-  if (ratioType === 'model_price') return 'price'
+  if (ratioType === 'model_price' || ratioType === 'fixed_price_unit') {
+    return 'price'
+  }
   if (ratioType === 'billing_mode' || ratioType === 'billing_expr') {
     return 'tiered'
   }
@@ -273,6 +276,22 @@ function applyResolutionSelectionToDraft(
     }
     if (exprVal !== undefined && exprVal !== null && exprVal !== 'same') {
       newModelRes['billing_expr'] = exprVal
+    }
+  }
+  if (category === 'price' && modelDiffs) {
+    const unitValue =
+      modelDiffs.fixed_price_unit?.upstreams?.[selection.sourceName]
+    const priceValue = modelDiffs.model_price?.upstreams?.[selection.sourceName]
+    if (unitValue !== undefined && unitValue !== null && unitValue !== 'same') {
+      newModelRes.fixed_price_unit = unitValue
+    }
+    if (
+      finalType === 'fixed_price_unit' &&
+      priceValue !== undefined &&
+      priceValue !== null &&
+      priceValue !== 'same'
+    ) {
+      newModelRes.model_price = priceValue
     }
   }
 }
@@ -397,6 +416,8 @@ export function applyResolutionRemovalPlan(
       delete draft[ratioType]
       if (ratioType === 'billing_expr') delete draft['billing_mode']
       if (ratioType === 'billing_mode') delete draft['billing_expr']
+      if (ratioType === 'model_price') delete draft['fixed_price_unit']
+      if (ratioType === 'fixed_price_unit') delete draft['model_price']
     })
     if (Object.keys(draft).length === 0) {
       delete next[model]

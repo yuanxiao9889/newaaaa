@@ -116,6 +116,7 @@ const createModelSchema = (t: Translate) =>
     ExposeRatioEnabled: z.boolean(),
     BillingMode: createJsonStringField(t),
     BillingExpr: createJsonStringField(t),
+    FixedPriceUnit: createJsonStringField(t),
   })
 
 const createGroupSchema = (t: Translate) =>
@@ -193,6 +194,7 @@ export function RatioSettingsCard({
     ExposeRatioEnabled: modelDefaults.ExposeRatioEnabled,
     BillingMode: normalizeJsonString(modelDefaults.BillingMode),
     BillingExpr: normalizeJsonString(modelDefaults.BillingExpr),
+    FixedPriceUnit: normalizeJsonString(modelDefaults.FixedPriceUnit),
   })
   const [savedModelValues, setSavedModelValues] = useState(
     modelNormalizedDefaults.current
@@ -229,6 +231,7 @@ export function RatioSettingsCard({
       ),
       BillingMode: formatJsonForTextarea(modelDefaults.BillingMode),
       BillingExpr: formatJsonForTextarea(modelDefaults.BillingExpr),
+      FixedPriceUnit: formatJsonForTextarea(modelDefaults.FixedPriceUnit),
     },
   })
 
@@ -263,6 +266,7 @@ export function RatioSettingsCard({
       ExposeRatioEnabled: modelDefaults.ExposeRatioEnabled,
       BillingMode: normalizeJsonString(modelDefaults.BillingMode),
       BillingExpr: normalizeJsonString(modelDefaults.BillingExpr),
+      FixedPriceUnit: normalizeJsonString(modelDefaults.FixedPriceUnit),
     }
     setSavedModelValues(modelNormalizedDefaults.current)
 
@@ -280,6 +284,7 @@ export function RatioSettingsCard({
       ),
       BillingMode: formatJsonForTextarea(modelDefaults.BillingMode),
       BillingExpr: formatJsonForTextarea(modelDefaults.BillingExpr),
+      FixedPriceUnit: formatJsonForTextarea(modelDefaults.FixedPriceUnit),
     })
   }, [modelDefaults, modelForm])
 
@@ -323,11 +328,13 @@ export function RatioSettingsCard({
         ExposeRatioEnabled: values.ExposeRatioEnabled,
         BillingMode: normalizeJsonString(values.BillingMode),
         BillingExpr: normalizeJsonString(values.BillingExpr),
+        FixedPriceUnit: normalizeJsonString(values.FixedPriceUnit),
       }
 
       const apiKeyMap: Record<string, string> = {
         BillingMode: 'billing_setting.billing_mode',
         BillingExpr: 'billing_setting.billing_expr',
+        FixedPriceUnit: 'billing_setting.fixed_price_unit',
       }
 
       const updates = (
@@ -451,6 +458,7 @@ export function RatioSettingsCard({
           AudioCompletionRatio: modelDefaults.AudioCompletionRatio,
           'billing_setting.billing_mode': modelDefaults.BillingMode,
           'billing_setting.billing_expr': modelDefaults.BillingExpr,
+          'billing_setting.fixed_price_unit': modelDefaults.FixedPriceUnit,
         }}
       />
     )
