@@ -75,37 +75,49 @@ func GetProfitCostPricePrefill(c *gin.Context) {
 
 func SaveProfitCostPrice(c *gin.Context) {
 	var req struct {
-		ChannelId      int     `json:"channel_id"`
-		ModelName      string  `json:"model_name"`
-		PriceType      string  `json:"price_type"`
-		PriceValue     string  `json:"price_value"`
-		FixedUnit      string  `json:"fixed_unit"`
-		FixedAmount    float64 `json:"fixed_amount"`
-		InputPrice     float64 `json:"input_price"`
-		CacheReadPrice float64 `json:"cache_read_price"`
-		OutputPrice    float64 `json:"output_price"`
-		RequestPrice   float64 `json:"request_price"`
-		SecondPrice    float64 `json:"second_price"`
-		EffectiveFrom  int64   `json:"effective_from"`
+		ChannelId            int     `json:"channel_id"`
+		ModelName            string  `json:"model_name"`
+		PriceType            string  `json:"price_type"`
+		PriceValue           string  `json:"price_value"`
+		FixedUnit            string  `json:"fixed_unit"`
+		FixedAmount          float64 `json:"fixed_amount"`
+		InputPrice           float64 `json:"input_price"`
+		CacheReadPrice       float64 `json:"cache_read_price"`
+		CacheCreationPrice   float64 `json:"cache_creation_price"`
+		CacheCreation1hPrice float64 `json:"cache_creation_1h_price"`
+		ImageInputPrice      float64 `json:"image_input_price"`
+		ImageOutputPrice     float64 `json:"image_output_price"`
+		AudioInputPrice      float64 `json:"audio_input_price"`
+		AudioOutputPrice     float64 `json:"audio_output_price"`
+		OutputPrice          float64 `json:"output_price"`
+		RequestPrice         float64 `json:"request_price"`
+		SecondPrice          float64 `json:"second_price"`
+		EffectiveFrom        int64   `json:"effective_from"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		common.ApiError(c, err)
 		return
 	}
 	version, err := model.UpsertProfitCostPrice(model.ProfitCostPriceInput{
-		ChannelId:      req.ChannelId,
-		ModelName:      req.ModelName,
-		PriceType:      req.PriceType,
-		PriceValue:     req.PriceValue,
-		FixedUnit:      req.FixedUnit,
-		FixedAmount:    req.FixedAmount,
-		InputPrice:     req.InputPrice,
-		CacheReadPrice: req.CacheReadPrice,
-		OutputPrice:    req.OutputPrice,
-		RequestPrice:   req.RequestPrice,
-		SecondPrice:    req.SecondPrice,
-		EffectiveFrom:  req.EffectiveFrom,
-		CreatedBy:      c.GetInt("id"),
+		ChannelId:            req.ChannelId,
+		ModelName:            req.ModelName,
+		PriceType:            req.PriceType,
+		PriceValue:           req.PriceValue,
+		FixedUnit:            req.FixedUnit,
+		FixedAmount:          req.FixedAmount,
+		InputPrice:           req.InputPrice,
+		CacheReadPrice:       req.CacheReadPrice,
+		CacheCreationPrice:   req.CacheCreationPrice,
+		CacheCreation1hPrice: req.CacheCreation1hPrice,
+		ImageInputPrice:      req.ImageInputPrice,
+		ImageOutputPrice:     req.ImageOutputPrice,
+		AudioInputPrice:      req.AudioInputPrice,
+		AudioOutputPrice:     req.AudioOutputPrice,
+		OutputPrice:          req.OutputPrice,
+		RequestPrice:         req.RequestPrice,
+		SecondPrice:          req.SecondPrice,
+		EffectiveFrom:        req.EffectiveFrom,
+		CreatedBy:            c.GetInt("id"),
 	})
 	if err != nil {
 		common.ApiError(c, err)

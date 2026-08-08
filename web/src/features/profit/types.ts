@@ -58,6 +58,12 @@ export type ProfitCostPrice = {
   price_summary?: string
   input_price?: number
   cache_read_price?: number
+  cache_creation_price?: number
+  cache_creation_1h_price?: number
+  image_input_price?: number
+  image_output_price?: number
+  audio_input_price?: number
+  audio_output_price?: number
   output_price?: number
   request_price?: number
   second_price?: number
@@ -70,6 +76,12 @@ export type ProfitCostPricePrefill = {
   pricing_mode: 'simple_token' | 'tiered_expr' | 'fixed_price' | ''
   input_price: number
   cache_read_price: number
+  cache_creation_price: number
+  cache_creation_1h_price: number
+  image_input_price: number
+  image_output_price: number
+  audio_input_price: number
+  audio_output_price: number
   output_price: number
   request_price: number
   second_price: number
@@ -97,6 +109,12 @@ export type SaveProfitCostPricePayload = {
   fixed_amount?: number
   input_price?: number
   cache_read_price?: number
+  cache_creation_price?: number
+  cache_creation_1h_price?: number
+  image_input_price?: number
+  image_output_price?: number
+  audio_input_price?: number
+  audio_output_price?: number
   output_price?: number
   request_price?: number
   second_price?: number

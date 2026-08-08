@@ -397,9 +397,20 @@ function TokenBreakdown(props: { log: UsageLog; other: LogOtherData }) {
     })
   }
 
-  if (other.image && other.image_output) {
+  const hasExplicitImageInput = other.image_input !== undefined
+  const legacyImageInput =
+    other.image && !hasExplicitImageInput ? other.image_output : 0
+  const imageInput = other.image_input || legacyImageInput
+  if (imageInput) {
     rows.push({
-      label: t('Image Tokens'),
+      label: t('Image input'),
+      value: imageInput.toLocaleString(),
+    })
+  }
+
+  if (hasExplicitImageInput && other.image_output) {
+    rows.push({
+      label: t('Image Output'),
       value: other.image_output.toLocaleString(),
     })
   }

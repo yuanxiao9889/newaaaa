@@ -6,6 +6,8 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/setting/billing_setting"
+	"github.com/QuantumNous/new-api/setting/config"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -135,6 +137,108 @@ func TestProfitReport_FixedCostAndUnpricedCoverage(t *testing.T) {
 	assert.InDelta(t, 0.5, report.Summary.Cost, 0.000001)
 	assert.InDelta(t, 0.5, report.Summary.Profit, 0.000001)
 	assert.InDelta(t, 0.5, report.Summary.CoverageRate, 0.000001)
+}
+
+func TestProfitReport_FullTaskRefundRemovesRevenueAndCost(t *testing.T) {
+	truncateProfitTestTables(t)
+	originalQuotaPerUnit := common.QuotaPerUnit
+	originalCryptoSecret := common.CryptoSecret
+	common.QuotaPerUnit = 500000
+	common.CryptoSecret = "profit-test-secret"
+	t.Cleanup(func() {
+		common.QuotaPerUnit = originalQuotaPerUnit
+		common.CryptoSecret = originalCryptoSecret
+	})
+
+	insertProfitTestChannel(t, 24, "refunded-video")
+	now := time.Now().Unix()
+	_, err := model.UpsertProfitCostPrice(model.ProfitCostPriceInput{
+		ChannelId:     24,
+		ModelName:     "refunded-video-model",
+		PriceType:     model.ProfitPriceTypeFixedPrice,
+		FixedUnit:     model.ProfitFixedUnitRequest,
+		FixedAmount:   0.4,
+		EffectiveFrom: now - 10,
+		CreatedBy:     1,
+	})
+	require.NoError(t, err)
+
+	for id := 1; id <= 4; id++ {
+		insertProfitTestLog(t, id, now, 24, "refunded-video-model", 650000, 0, 0, "")
+	}
+	require.NoError(t, model.LOG_DB.Create(&model.Log{
+		Id:        5,
+		CreatedAt: now,
+		Type:      model.LogTypeRefund,
+		ChannelId: 24,
+		ModelName: "refunded-video-model",
+		Quota:     650000,
+		Other:     `{"task_id":"task_refunded"}`,
+	}).Error)
+
+	report, err := GetProfitReport(ProfitQuery{
+		Range:          ProfitRangeDay,
+		StartTimestamp: now - 1,
+		EndTimestamp:   now + 1,
+	})
+	require.NoError(t, err)
+
+	assert.Equal(t, int64(3), report.Summary.RequestCount)
+	assert.Equal(t, int64(3), report.Summary.PricedCount)
+	assert.InDelta(t, 3.9, report.Summary.Revenue, 0.000001)
+	assert.InDelta(t, 3.9, report.Summary.PricedRevenue, 0.000001)
+	assert.InDelta(t, 1.2, report.Summary.Cost, 0.000001)
+	assert.InDelta(t, 2.7, report.Summary.Profit, 0.000001)
+	assert.Equal(t, 1.0, report.Summary.CoverageRate)
+}
+
+func TestProfitReport_PartialRefundOnlyAdjustsRevenue(t *testing.T) {
+	truncateProfitTestTables(t)
+	originalQuotaPerUnit := common.QuotaPerUnit
+	originalCryptoSecret := common.CryptoSecret
+	common.QuotaPerUnit = 500000
+	common.CryptoSecret = "profit-test-secret"
+	t.Cleanup(func() {
+		common.QuotaPerUnit = originalQuotaPerUnit
+		common.CryptoSecret = originalCryptoSecret
+	})
+
+	insertProfitTestChannel(t, 28, "adjusted-video")
+	now := time.Now().Unix()
+	_, err := model.UpsertProfitCostPrice(model.ProfitCostPriceInput{
+		ChannelId:     28,
+		ModelName:     "adjusted-video-model",
+		PriceType:     model.ProfitPriceTypeFixedPrice,
+		FixedUnit:     model.ProfitFixedUnitRequest,
+		FixedAmount:   0.4,
+		EffectiveFrom: now - 10,
+		CreatedBy:     1,
+	})
+	require.NoError(t, err)
+
+	insertProfitTestLog(t, 1, now, 28, "adjusted-video-model", 650000, 0, 0, "")
+	require.NoError(t, model.LOG_DB.Create(&model.Log{
+		Id:        2,
+		CreatedAt: now,
+		Type:      model.LogTypeRefund,
+		ChannelId: 28,
+		ModelName: "adjusted-video-model",
+		Quota:     150000,
+		Other:     `{"task_id":"task_adjusted","pre_consumed_quota":650000,"actual_quota":500000}`,
+	}).Error)
+
+	report, err := GetProfitReport(ProfitQuery{
+		Range:          ProfitRangeDay,
+		StartTimestamp: now - 1,
+		EndTimestamp:   now + 1,
+	})
+	require.NoError(t, err)
+
+	assert.Equal(t, int64(1), report.Summary.RequestCount)
+	assert.Equal(t, int64(1), report.Summary.PricedCount)
+	assert.InDelta(t, 1.0, report.Summary.Revenue, 0.000001)
+	assert.InDelta(t, 0.4, report.Summary.Cost, 0.000001)
+	assert.InDelta(t, 0.6, report.Summary.Profit, 0.000001)
 }
 
 func TestProfitReport_SecondRevenueCanUseRequestCost(t *testing.T) {
@@ -294,34 +398,149 @@ func TestProfitReport_SimpleTokenCacheReadCostExcludesCachedInput(t *testing.T) 
 	assert.InDelta(t, 0.9983, report.Summary.Profit, 0.000001)
 }
 
+func TestCalculateSimpleTokenCostUSDIncludesAllUsageDimensionsWithoutDoubleCharging(t *testing.T) {
+	price := model.ProfitSimpleTokenPrice{
+		InputPrice:         1,
+		CacheReadPrice:     0.1,
+		CacheCreationPrice: 2,
+		ImageInputPrice:    3,
+		AudioInputPrice:    4,
+		OutputPrice:        5,
+		ImageOutputPrice:   6,
+		AudioOutputPrice:   7,
+	}
+	log := model.Log{
+		PromptTokens:     1000,
+		CompletionTokens: 500,
+		Other: `{
+			"cache_tokens":100,
+			"cache_creation_tokens":200,
+			"image_input":150,
+			"audio_input":50,
+			"image_output":80,
+			"audio_output":20
+		}`,
+	}
+
+	cost := calculateSimpleTokenCostUSD(log, price)
+
+	// Text input = 1000 - 100 - 200 - 150 - 50 = 500.
+	// Text output = 500 - 80 - 20 = 400.
+	assert.InDelta(t, 0.00418, cost, 0.000000001)
+}
+
+func TestCalculateSimpleTokenCostUSDUsesClaudeCacheSemanticsAndSplitCreationPrices(t *testing.T) {
+	price := model.ProfitSimpleTokenPrice{
+		InputPrice:           1,
+		CacheReadPrice:       0.1,
+		CacheCreationPrice:   2,
+		CacheCreation1hPrice: 3,
+	}
+	log := model.Log{
+		PromptTokens: 1000,
+		Other: `{
+			"claude":true,
+			"cache_tokens":200,
+			"cache_creation_tokens":500,
+			"cache_creation_tokens_5m":300,
+			"cache_creation_tokens_1h":200
+		}`,
+	}
+
+	cost := calculateSimpleTokenCostUSD(log, price)
+
+	// Claude prompt_tokens is already text-only and must not have cache removed again.
+	assert.InDelta(t, 0.00222, cost, 0.000000001)
+}
+
+func TestCalculateSimpleTokenCostUSDReadsLegacyImageAndTaskUsageDetails(t *testing.T) {
+	price := model.ProfitSimpleTokenPrice{
+		InputPrice:       1,
+		ImageInputPrice:  3,
+		OutputPrice:      5,
+		ImageOutputPrice: 6,
+	}
+
+	t.Run("legacy image_output is treated as prompt image input", func(t *testing.T) {
+		log := model.Log{
+			PromptTokens: 1000,
+			Other:        `{"image":true,"image_output":200}`,
+		}
+
+		assert.InDelta(t, 0.0014, calculateSimpleTokenCostUSD(log, price), 0.000000001)
+	})
+
+	t.Run("async task usage details preserve input and output image tokens", func(t *testing.T) {
+		log := model.Log{
+			PromptTokens:     1000,
+			CompletionTokens: 500,
+			Other: `{
+				"usage_details":{
+					"prompt_tokens":1000,
+					"completion_tokens":500,
+					"prompt_tokens_details":{"image_tokens":200},
+					"completion_tokens_details":{"image_tokens":100}
+				}
+			}`,
+		}
+
+		// Text input 800 + image input 600 + text output 2000 + image output 600.
+		assert.InDelta(t, 0.004, calculateSimpleTokenCostUSD(log, price), 0.000000001)
+	})
+}
+
+func TestCalculateSimpleTokenCostUSDKeepsLegacyCostPayloadCompatible(t *testing.T) {
+	var price model.ProfitSimpleTokenPrice
+	require.NoError(t, common.UnmarshalJsonStr(`{"input_price":1,"output_price":2}`, &price))
+	log := model.Log{PromptTokens: 1000, CompletionTokens: 500}
+
+	assert.InDelta(t, 0.002, calculateSimpleTokenCostUSD(log, price), 0.000000001)
+}
+
 func TestProfitCostPricePrefillUsesChannelModelsAndCurrentPricing(t *testing.T) {
 	truncateProfitTestTables(t)
 	originalQuotaPerUnit := common.QuotaPerUnit
 	originalModelRatio := ratio_setting.ModelRatio2JSONString()
 	originalCompletionRatio := ratio_setting.CompletionRatio2JSONString()
 	originalModelPrice := ratio_setting.ModelPrice2JSONString()
+	originalFixedPriceUnits := billing_setting.GetFixedPriceUnitCopy()
+	originalFixedPriceUnitsJSON, err := common.Marshal(originalFixedPriceUnits)
+	require.NoError(t, err)
 	common.QuotaPerUnit = 500000
 	t.Cleanup(func() {
 		common.QuotaPerUnit = originalQuotaPerUnit
 		require.NoError(t, ratio_setting.UpdateModelRatioByJSONString(originalModelRatio))
 		require.NoError(t, ratio_setting.UpdateCompletionRatioByJSONString(originalCompletionRatio))
 		require.NoError(t, ratio_setting.UpdateModelPriceByJSONString(originalModelPrice))
+		require.NoError(t, config.UpdateConfigFromMap(config.GlobalConfig.Get("billing_setting"), map[string]string{
+			billing_setting.FixedPriceUnitField: string(originalFixedPriceUnitsJSON),
+		}))
 	})
 	require.NoError(t, ratio_setting.UpdateModelRatioByJSONString(`{"profit-prefill-model":1.25}`))
 	require.NoError(t, ratio_setting.UpdateCompletionRatioByJSONString(`{"profit-prefill-model":4}`))
-	require.NoError(t, ratio_setting.UpdateModelPriceByJSONString(`{"profit-fixed-model":0.07,"sora-profit-video":0.2}`))
+	require.NoError(t, ratio_setting.UpdateModelPriceByJSONString(`{"ok-video-1.5-preview":1.3,"profit-fixed-model":0.07,"sora-profit-video":0.2}`))
+	require.NoError(t, config.UpdateConfigFromMap(config.GlobalConfig.Get("billing_setting"), map[string]string{
+		billing_setting.FixedPriceUnitField: `{"ok-video-1.5-preview":"request"}`,
+	}))
 	require.NoError(t, model.DB.Create(&model.Channel{
 		Id:     26,
 		Name:   "prefill",
-		Models: "profit-fixed-model, profit-prefill-model,profit-prefill-model,sora-profit-video",
+		Models: "ok-video-1.5-preview,profit-fixed-model, profit-prefill-model,profit-prefill-model,sora-profit-video",
 	}).Error)
 
 	prefill, err := GetProfitCostPricePrefill(26, "profit-prefill-model")
 	require.NoError(t, err)
-	require.Equal(t, []string{"profit-fixed-model", "profit-prefill-model", "sora-profit-video"}, prefill.Models)
+	require.Equal(t, []string{"ok-video-1.5-preview", "profit-fixed-model", "profit-prefill-model", "sora-profit-video"}, prefill.Models)
 	require.Equal(t, model.ProfitPriceTypeSimpleToken, prefill.PricingMode)
 	require.True(t, prefill.HasPricing)
 	assert.InDelta(t, 2.5, prefill.InputPrice, 0.000001)
+	assert.InDelta(t, 2.5, prefill.CacheReadPrice, 0.000001)
+	assert.InDelta(t, 3.125, prefill.CacheCreationPrice, 0.000001)
+	assert.InDelta(t, 5.0, prefill.CacheCreation1hPrice, 0.000001)
+	assert.InDelta(t, 2.5, prefill.ImageInputPrice, 0.000001)
+	assert.InDelta(t, 10.0, prefill.ImageOutputPrice, 0.000001)
+	assert.InDelta(t, 2.5, prefill.AudioInputPrice, 0.000001)
+	assert.InDelta(t, 2.5, prefill.AudioOutputPrice, 0.000001)
 	assert.InDelta(t, 10.0, prefill.OutputPrice, 0.000001)
 
 	fixedPrefill, err := GetProfitCostPricePrefill(26, "profit-fixed-model")
@@ -334,6 +553,12 @@ func TestProfitCostPricePrefillUsesChannelModelsAndCurrentPricing(t *testing.T) 
 	require.Equal(t, model.ProfitPriceTypeFixedPrice, videoPrefill.PricingMode)
 	assert.InDelta(t, 0.2, videoPrefill.SecondPrice, 0.000001)
 	assert.Zero(t, videoPrefill.RequestPrice)
+
+	okVideoPrefill, err := GetProfitCostPricePrefill(26, "ok-video-1.5-preview")
+	require.NoError(t, err)
+	require.Equal(t, model.ProfitPriceTypeFixedPrice, okVideoPrefill.PricingMode)
+	assert.InDelta(t, 1.3, okVideoPrefill.RequestPrice, 0.000001)
+	assert.Zero(t, okVideoPrefill.SecondPrice)
 }
 
 func TestProfitCostPriceEncryptionDoesNotStorePlaintext(t *testing.T) {
@@ -361,6 +586,67 @@ func TestProfitCostPriceEncryptionDoesNotStorePlaintext(t *testing.T) {
 	revealed, err := common.DecryptString(stored.CipherText, stored.Nonce, stored.EncryptionVer)
 	require.NoError(t, err)
 	assert.Equal(t, plain, revealed)
+}
+
+func TestProfitCostPricePersistsAndListsEverySimpleTokenDimension(t *testing.T) {
+	truncateProfitTestTables(t)
+	originalCryptoSecret := common.CryptoSecret
+	common.CryptoSecret = "profit-test-secret"
+	t.Cleanup(func() { common.CryptoSecret = originalCryptoSecret })
+
+	insertProfitTestChannel(t, 31, "multimodal-cost")
+	input := model.ProfitCostPriceInput{
+		ChannelId:            31,
+		ModelName:            "multimodal-cost-model",
+		PriceType:            model.ProfitPriceTypeSimpleToken,
+		InputPrice:           1,
+		CacheReadPrice:       2,
+		CacheCreationPrice:   3,
+		CacheCreation1hPrice: 4,
+		ImageInputPrice:      5,
+		ImageOutputPrice:     6,
+		AudioInputPrice:      7,
+		AudioOutputPrice:     8,
+		OutputPrice:          9,
+		RequestPrice:         10,
+		SecondPrice:          11,
+		EffectiveFrom:        time.Now().Unix(),
+		CreatedBy:            1,
+	}
+
+	version, err := model.UpsertProfitCostPrice(input)
+	require.NoError(t, err)
+	assert.Equal(t, input.CacheCreationPrice, version.CacheCreationPrice)
+	assert.Equal(t, input.CacheCreation1hPrice, version.CacheCreation1hPrice)
+	assert.Equal(t, input.ImageInputPrice, version.ImageInputPrice)
+	assert.Equal(t, input.ImageOutputPrice, version.ImageOutputPrice)
+	assert.Equal(t, input.AudioInputPrice, version.AudioInputPrice)
+	assert.Equal(t, input.AudioOutputPrice, version.AudioOutputPrice)
+
+	items, err := model.ListProfitCostPrices(true)
+	require.NoError(t, err)
+	require.Len(t, items, 1)
+	item := items[0]
+	assert.Equal(t, input.InputPrice, item.InputPrice)
+	assert.Equal(t, input.CacheReadPrice, item.CacheReadPrice)
+	assert.Equal(t, input.CacheCreationPrice, item.CacheCreationPrice)
+	assert.Equal(t, input.CacheCreation1hPrice, item.CacheCreation1hPrice)
+	assert.Equal(t, input.ImageInputPrice, item.ImageInputPrice)
+	assert.Equal(t, input.ImageOutputPrice, item.ImageOutputPrice)
+	assert.Equal(t, input.AudioInputPrice, item.AudioInputPrice)
+	assert.Equal(t, input.AudioOutputPrice, item.AudioOutputPrice)
+	assert.Equal(t, input.OutputPrice, item.OutputPrice)
+	assert.Equal(t, input.RequestPrice, item.RequestPrice)
+	assert.Equal(t, input.SecondPrice, item.SecondPrice)
+	assert.Contains(t, item.PriceSummary, "cache create 1h $4")
+	assert.Contains(t, item.PriceSummary, "image input $5")
+	assert.Contains(t, item.PriceSummary, "audio output $8")
+
+	var payload model.ProfitSimpleTokenPrice
+	require.NoError(t, common.UnmarshalJsonStr(item.PriceValue, &payload))
+	assert.Equal(t, input.CacheCreationPrice, payload.CacheCreationPrice)
+	assert.Equal(t, input.ImageOutputPrice, payload.ImageOutputPrice)
+	assert.Equal(t, input.AudioInputPrice, payload.AudioInputPrice)
 }
 
 func TestProfitReport_DisabledCostPriceKeepsHistoricalOnly(t *testing.T) {

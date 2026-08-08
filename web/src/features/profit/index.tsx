@@ -179,6 +179,12 @@ type FormState = {
   cost_mode: 'token' | 'request' | 'second'
   input_price: string
   cache_read_price: string
+  cache_creation_price: string
+  cache_creation_1h_price: string
+  image_input_price: string
+  image_output_price: string
+  audio_input_price: string
+  audio_output_price: string
   output_price: string
   request_price: string
   second_price: string
@@ -191,6 +197,12 @@ const emptyForm = (): FormState => ({
   cost_mode: 'token',
   input_price: '',
   cache_read_price: '',
+  cache_creation_price: '',
+  cache_creation_1h_price: '',
+  image_input_price: '',
+  image_output_price: '',
+  audio_input_price: '',
+  audio_output_price: '',
   output_price: '',
   request_price: '',
   second_price: '',
@@ -357,6 +369,12 @@ export function Profit() {
       cost_mode: 'token',
       input_price: '',
       cache_read_price: '',
+      cache_creation_price: '',
+      cache_creation_1h_price: '',
+      image_input_price: '',
+      image_output_price: '',
+      audio_input_price: '',
+      audio_output_price: '',
       output_price: '',
       request_price: '',
       second_price: '',
@@ -370,6 +388,12 @@ export function Profit() {
       cost_mode: 'token',
       input_price: '',
       cache_read_price: '',
+      cache_creation_price: '',
+      cache_creation_1h_price: '',
+      image_input_price: '',
+      image_output_price: '',
+      audio_input_price: '',
+      audio_output_price: '',
       output_price: '',
       request_price: '',
       second_price: '',
@@ -379,6 +403,12 @@ export function Profit() {
   const submitCostPrice = async () => {
     const inputPrice = toOptionalNumber(form.input_price)
     const cacheReadPrice = toOptionalNumber(form.cache_read_price)
+    const cacheCreationPrice = toOptionalNumber(form.cache_creation_price)
+    const cacheCreation1hPrice = toOptionalNumber(form.cache_creation_1h_price)
+    const imageInputPrice = toOptionalNumber(form.image_input_price)
+    const imageOutputPrice = toOptionalNumber(form.image_output_price)
+    const audioInputPrice = toOptionalNumber(form.audio_input_price)
+    const audioOutputPrice = toOptionalNumber(form.audio_output_price)
     const outputPrice = toOptionalNumber(form.output_price)
     const requestPrice = toOptionalNumber(form.request_price)
     const secondPrice = toOptionalNumber(form.second_price)
@@ -391,6 +421,12 @@ export function Profit() {
     if (form.cost_mode === 'token') {
       payload.input_price = displayMoneyToUSD(inputPrice, profitMoneyUnit.rate)
       payload.cache_read_price = displayMoneyToUSD(cacheReadPrice, profitMoneyUnit.rate)
+      payload.cache_creation_price = displayMoneyToUSD(cacheCreationPrice, profitMoneyUnit.rate)
+      payload.cache_creation_1h_price = displayMoneyToUSD(cacheCreation1hPrice, profitMoneyUnit.rate)
+      payload.image_input_price = displayMoneyToUSD(imageInputPrice, profitMoneyUnit.rate)
+      payload.image_output_price = displayMoneyToUSD(imageOutputPrice, profitMoneyUnit.rate)
+      payload.audio_input_price = displayMoneyToUSD(audioInputPrice, profitMoneyUnit.rate)
+      payload.audio_output_price = displayMoneyToUSD(audioOutputPrice, profitMoneyUnit.rate)
       payload.output_price = displayMoneyToUSD(outputPrice, profitMoneyUnit.rate)
     } else if (form.cost_mode === 'request') {
       payload.fixed_unit = 'request'
@@ -405,7 +441,17 @@ export function Profit() {
     }
     let activePrices = [secondPrice]
     if (form.cost_mode === 'token') {
-      activePrices = [inputPrice, cacheReadPrice, outputPrice]
+      activePrices = [
+        inputPrice,
+        cacheReadPrice,
+        cacheCreationPrice,
+        cacheCreation1hPrice,
+        imageInputPrice,
+        imageOutputPrice,
+        audioInputPrice,
+        audioOutputPrice,
+        outputPrice,
+      ]
     } else if (form.cost_mode === 'request') {
       activePrices = [requestPrice]
     }
@@ -457,16 +503,40 @@ export function Profit() {
     const formHasNoPrices =
       form.input_price === '' &&
       form.cache_read_price === '' &&
+      form.cache_creation_price === '' &&
+      form.cache_creation_1h_price === '' &&
+      form.image_input_price === '' &&
+      form.image_output_price === '' &&
+      form.audio_input_price === '' &&
+      form.audio_output_price === '' &&
       form.output_price === '' &&
       form.request_price === '' &&
       form.second_price === ''
     if (matchesCurrentForm && formHasNoPrices && prefill.has_pricing) {
       const nextInputPrice = formatPriceInput(usdToDisplayMoney(prefill.input_price, profitMoneyUnit.rate))
       const nextCacheReadPrice = formatPriceInput(usdToDisplayMoney(prefill.cache_read_price, profitMoneyUnit.rate))
+      const nextCacheCreationPrice = formatPriceInput(usdToDisplayMoney(prefill.cache_creation_price, profitMoneyUnit.rate))
+      const nextCacheCreation1hPrice = formatPriceInput(usdToDisplayMoney(prefill.cache_creation_1h_price, profitMoneyUnit.rate))
+      const nextImageInputPrice = formatPriceInput(usdToDisplayMoney(prefill.image_input_price, profitMoneyUnit.rate))
+      const nextImageOutputPrice = formatPriceInput(usdToDisplayMoney(prefill.image_output_price, profitMoneyUnit.rate))
+      const nextAudioInputPrice = formatPriceInput(usdToDisplayMoney(prefill.audio_input_price, profitMoneyUnit.rate))
+      const nextAudioOutputPrice = formatPriceInput(usdToDisplayMoney(prefill.audio_output_price, profitMoneyUnit.rate))
       const nextOutputPrice = formatPriceInput(usdToDisplayMoney(prefill.output_price, profitMoneyUnit.rate))
       const nextRequestPrice = formatPriceInput(usdToDisplayMoney(prefill.request_price, profitMoneyUnit.rate))
       const nextSecondPrice = formatPriceInput(usdToDisplayMoney(prefill.second_price, profitMoneyUnit.rate))
-      if (!nextInputPrice && !nextCacheReadPrice && !nextOutputPrice && !nextRequestPrice && !nextSecondPrice) {
+      if (
+        !nextInputPrice &&
+        !nextCacheReadPrice &&
+        !nextCacheCreationPrice &&
+        !nextCacheCreation1hPrice &&
+        !nextImageInputPrice &&
+        !nextImageOutputPrice &&
+        !nextAudioInputPrice &&
+        !nextAudioOutputPrice &&
+        !nextOutputPrice &&
+        !nextRequestPrice &&
+        !nextSecondPrice
+      ) {
         return
       }
       setForm((prev) => {
@@ -483,6 +553,12 @@ export function Profit() {
           cost_mode: nextCostMode,
           input_price: nextInputPrice,
           cache_read_price: nextCacheReadPrice,
+          cache_creation_price: nextCacheCreationPrice,
+          cache_creation_1h_price: nextCacheCreation1hPrice,
+          image_input_price: nextImageInputPrice,
+          image_output_price: nextImageOutputPrice,
+          audio_input_price: nextAudioInputPrice,
+          audio_output_price: nextAudioOutputPrice,
           output_price: nextOutputPrice,
           request_price: nextRequestPrice,
           second_price: nextSecondPrice,
@@ -491,7 +567,13 @@ export function Profit() {
     }
   }, [
     form.channel_id,
+    form.audio_input_price,
+    form.audio_output_price,
     form.cache_read_price,
+    form.cache_creation_price,
+    form.cache_creation_1h_price,
+    form.image_input_price,
+    form.image_output_price,
     form.input_price,
     form.model_name,
     form.output_price,
@@ -810,6 +892,60 @@ export function Profit() {
                       onChange={(e) => setForm((prev) => ({ ...prev, cache_read_price: e.target.value }))}
                     />
                   </Field>
+                  <Field label={t('Cache create price ({{currency}} / 1M tokens)', { currency: profitMoneyUnit.label })}>
+                    <Input
+                      type='number'
+                      step='0.000001'
+                      min='0'
+                      value={form.cache_creation_price}
+                      onChange={(e) => setForm((prev) => ({ ...prev, cache_creation_price: e.target.value }))}
+                    />
+                  </Field>
+                  <Field label={t('Cache create (1h) price ({{currency}} / 1M tokens)', { currency: profitMoneyUnit.label })}>
+                    <Input
+                      type='number'
+                      step='0.000001'
+                      min='0'
+                      value={form.cache_creation_1h_price}
+                      onChange={(e) => setForm((prev) => ({ ...prev, cache_creation_1h_price: e.target.value }))}
+                    />
+                  </Field>
+                  <Field label={t('Image input price ({{currency}} / 1M tokens)', { currency: profitMoneyUnit.label })}>
+                    <Input
+                      type='number'
+                      step='0.000001'
+                      min='0'
+                      value={form.image_input_price}
+                      onChange={(e) => setForm((prev) => ({ ...prev, image_input_price: e.target.value }))}
+                    />
+                  </Field>
+                  <Field label={t('Image output price ({{currency}} / 1M tokens)', { currency: profitMoneyUnit.label })}>
+                    <Input
+                      type='number'
+                      step='0.000001'
+                      min='0'
+                      value={form.image_output_price}
+                      onChange={(e) => setForm((prev) => ({ ...prev, image_output_price: e.target.value }))}
+                    />
+                  </Field>
+                  <Field label={t('Audio input price ({{currency}} / 1M tokens)', { currency: profitMoneyUnit.label })}>
+                    <Input
+                      type='number'
+                      step='0.000001'
+                      min='0'
+                      value={form.audio_input_price}
+                      onChange={(e) => setForm((prev) => ({ ...prev, audio_input_price: e.target.value }))}
+                    />
+                  </Field>
+                  <Field label={t('Audio output price ({{currency}} / 1M tokens)', { currency: profitMoneyUnit.label })}>
+                    <Input
+                      type='number'
+                      step='0.000001'
+                      min='0'
+                      value={form.audio_output_price}
+                      onChange={(e) => setForm((prev) => ({ ...prev, audio_output_price: e.target.value }))}
+                    />
+                  </Field>
                   <Field label={t('Output price ({{currency}} / 1M tokens)', { currency: profitMoneyUnit.label })}>
                     <Input
                       type='number'
@@ -885,11 +1021,39 @@ function priceTypeLabel(type: ProfitCostPrice['price_type'], t: (key: string) =>
 function priceSummary(item: ProfitCostPrice, t: (key: string) => string) {
   if (item.price_type !== 'simple_token') return item.price_summary || '-'
   const parts: string[] = []
-  if ((item.input_price ?? 0) > 0) parts.push(`${t('Input')} ${formatMoney(item.input_price ?? 0)}`)
-  if ((item.cache_read_price ?? 0) > 0) parts.push(`${t('Cache Read')} ${formatMoney(item.cache_read_price ?? 0)}`)
-  if ((item.output_price ?? 0) > 0) parts.push(`${t('Output')} ${formatMoney(item.output_price ?? 0)}`)
-  if ((item.request_price ?? 0) > 0) parts.push(`${t('Per request')} ${formatMoney(item.request_price ?? 0)}`)
-  if ((item.second_price ?? 0) > 0) parts.push(`${t('Per second')} ${formatMoney(item.second_price ?? 0)}`)
+  if ((item.input_price ?? 0) > 0) {
+    parts.push(`${t('Input')} ${formatMoney(item.input_price ?? 0)}`)
+  }
+  if ((item.cache_read_price ?? 0) > 0) {
+    parts.push(`${t('Cache Read')} ${formatMoney(item.cache_read_price ?? 0)}`)
+  }
+  if ((item.cache_creation_price ?? 0) > 0) {
+    parts.push(`${t('Cache Creation')} ${formatMoney(item.cache_creation_price ?? 0)}`)
+  }
+  if ((item.cache_creation_1h_price ?? 0) > 0) {
+    parts.push(`${t('Cache Creation (1h)')} ${formatMoney(item.cache_creation_1h_price ?? 0)}`)
+  }
+  if ((item.image_input_price ?? 0) > 0) {
+    parts.push(`${t('Image input')} ${formatMoney(item.image_input_price ?? 0)}`)
+  }
+  if ((item.image_output_price ?? 0) > 0) {
+    parts.push(`${t('Image Output')} ${formatMoney(item.image_output_price ?? 0)}`)
+  }
+  if ((item.audio_input_price ?? 0) > 0) {
+    parts.push(`${t('Audio Input')} ${formatMoney(item.audio_input_price ?? 0)}`)
+  }
+  if ((item.audio_output_price ?? 0) > 0) {
+    parts.push(`${t('Audio Output')} ${formatMoney(item.audio_output_price ?? 0)}`)
+  }
+  if ((item.output_price ?? 0) > 0) {
+    parts.push(`${t('Output')} ${formatMoney(item.output_price ?? 0)}`)
+  }
+  if ((item.request_price ?? 0) > 0) {
+    parts.push(`${t('Per request')} ${formatMoney(item.request_price ?? 0)}`)
+  }
+  if ((item.second_price ?? 0) > 0) {
+    parts.push(`${t('Per second')} ${formatMoney(item.second_price ?? 0)}`)
+  }
   return parts.join(' / ') || '-'
 }
 
@@ -899,12 +1063,40 @@ function sellingPriceReference(
 ) {
   const parts: string[] = []
   if (prefill.pricing_mode === 'simple_token') {
-    if (prefill.input_price > 0) parts.push(`${t('Input')} ${formatMoney(prefill.input_price)} / 1M tokens`)
-    if (prefill.cache_read_price > 0) parts.push(`${t('Cache Read')} ${formatMoney(prefill.cache_read_price)} / 1M tokens`)
-    if (prefill.output_price > 0) parts.push(`${t('Output')} ${formatMoney(prefill.output_price)} / 1M tokens`)
+    if (prefill.input_price > 0) {
+      parts.push(`${t('Input')} ${formatMoney(prefill.input_price)} / 1M tokens`)
+    }
+    if (prefill.cache_read_price > 0) {
+      parts.push(`${t('Cache Read')} ${formatMoney(prefill.cache_read_price)} / 1M tokens`)
+    }
+    if (prefill.cache_creation_price > 0) {
+      parts.push(`${t('Cache Creation')} ${formatMoney(prefill.cache_creation_price)} / 1M tokens`)
+    }
+    if (prefill.cache_creation_1h_price > 0) {
+      parts.push(`${t('Cache Creation (1h)')} ${formatMoney(prefill.cache_creation_1h_price)} / 1M tokens`)
+    }
+    if (prefill.image_input_price > 0) {
+      parts.push(`${t('Image input')} ${formatMoney(prefill.image_input_price)} / 1M tokens`)
+    }
+    if (prefill.image_output_price > 0) {
+      parts.push(`${t('Image Output')} ${formatMoney(prefill.image_output_price)} / 1M tokens`)
+    }
+    if (prefill.audio_input_price > 0) {
+      parts.push(`${t('Audio Input')} ${formatMoney(prefill.audio_input_price)} / 1M tokens`)
+    }
+    if (prefill.audio_output_price > 0) {
+      parts.push(`${t('Audio Output')} ${formatMoney(prefill.audio_output_price)} / 1M tokens`)
+    }
+    if (prefill.output_price > 0) {
+      parts.push(`${t('Output')} ${formatMoney(prefill.output_price)} / 1M tokens`)
+    }
   }
-  if (prefill.request_price > 0) parts.push(`${t('Per request')} ${formatMoney(prefill.request_price)}`)
-  if (prefill.second_price > 0) parts.push(`${t('Per second')} ${formatMoney(prefill.second_price)}`)
+  if (prefill.request_price > 0) {
+    parts.push(`${t('Per request')} ${formatMoney(prefill.request_price)}`)
+  }
+  if (prefill.second_price > 0) {
+    parts.push(`${t('Per second')} ${formatMoney(prefill.second_price)}`)
+  }
   return parts.join(' / ') || '-'
 }
 

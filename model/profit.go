@@ -31,50 +31,68 @@ type ProfitCostPrice struct {
 }
 
 type ProfitCostPriceVersion struct {
-	Id              int     `json:"id"`
-	CostPriceId     int     `json:"cost_price_id" gorm:"type:int;not null;index"`
-	ChannelId       int     `json:"channel_id" gorm:"type:int;not null;index:idx_profit_cost_version_lookup,priority:1"`
-	ModelName       string  `json:"model_name" gorm:"type:varchar(255);not null;index:idx_profit_cost_version_lookup,priority:2"`
-	PriceType       string  `json:"price_type" gorm:"type:varchar(32);not null"`
-	FixedUnit       string  `json:"fixed_unit" gorm:"type:varchar(32);not null;default:''"`
-	CipherText      string  `json:"-" gorm:"type:text;not null"`
-	Nonce           string  `json:"-" gorm:"type:varchar(255);not null"`
-	EncryptionVer   string  `json:"encryption_version" gorm:"type:varchar(32);not null"`
-	EffectiveFrom   int64   `json:"effective_from" gorm:"not null;index:idx_profit_cost_version_lookup,priority:3"`
-	CreatedBy       int     `json:"created_by" gorm:"type:int;not null;default:0"`
-	CreatedAt       int64   `json:"created_at" gorm:"autoCreateTime;index"`
-	PriceConfigured bool    `json:"price_configured" gorm:"-"`
-	PriceValue      string  `json:"price_value,omitempty" gorm:"-"`
-	FixedAmount     float64 `json:"fixed_amount,omitempty" gorm:"-"`
-	InputPrice      float64 `json:"input_price,omitempty" gorm:"-"`
-	CacheReadPrice  float64 `json:"cache_read_price,omitempty" gorm:"-"`
-	OutputPrice     float64 `json:"output_price,omitempty" gorm:"-"`
-	RequestPrice    float64 `json:"request_price,omitempty" gorm:"-"`
-	SecondPrice     float64 `json:"second_price,omitempty" gorm:"-"`
+	Id                   int     `json:"id"`
+	CostPriceId          int     `json:"cost_price_id" gorm:"type:int;not null;index"`
+	ChannelId            int     `json:"channel_id" gorm:"type:int;not null;index:idx_profit_cost_version_lookup,priority:1"`
+	ModelName            string  `json:"model_name" gorm:"type:varchar(255);not null;index:idx_profit_cost_version_lookup,priority:2"`
+	PriceType            string  `json:"price_type" gorm:"type:varchar(32);not null"`
+	FixedUnit            string  `json:"fixed_unit" gorm:"type:varchar(32);not null;default:''"`
+	CipherText           string  `json:"-" gorm:"type:text;not null"`
+	Nonce                string  `json:"-" gorm:"type:varchar(255);not null"`
+	EncryptionVer        string  `json:"encryption_version" gorm:"type:varchar(32);not null"`
+	EffectiveFrom        int64   `json:"effective_from" gorm:"not null;index:idx_profit_cost_version_lookup,priority:3"`
+	CreatedBy            int     `json:"created_by" gorm:"type:int;not null;default:0"`
+	CreatedAt            int64   `json:"created_at" gorm:"autoCreateTime;index"`
+	PriceConfigured      bool    `json:"price_configured" gorm:"-"`
+	PriceValue           string  `json:"price_value,omitempty" gorm:"-"`
+	FixedAmount          float64 `json:"fixed_amount,omitempty" gorm:"-"`
+	InputPrice           float64 `json:"input_price,omitempty" gorm:"-"`
+	CacheReadPrice       float64 `json:"cache_read_price,omitempty" gorm:"-"`
+	CacheCreationPrice   float64 `json:"cache_creation_price,omitempty" gorm:"-"`
+	CacheCreation1hPrice float64 `json:"cache_creation_1h_price,omitempty" gorm:"-"`
+	ImageInputPrice      float64 `json:"image_input_price,omitempty" gorm:"-"`
+	ImageOutputPrice     float64 `json:"image_output_price,omitempty" gorm:"-"`
+	AudioInputPrice      float64 `json:"audio_input_price,omitempty" gorm:"-"`
+	AudioOutputPrice     float64 `json:"audio_output_price,omitempty" gorm:"-"`
+	OutputPrice          float64 `json:"output_price,omitempty" gorm:"-"`
+	RequestPrice         float64 `json:"request_price,omitempty" gorm:"-"`
+	SecondPrice          float64 `json:"second_price,omitempty" gorm:"-"`
 }
 
 type ProfitCostPriceInput struct {
-	ChannelId      int     `json:"channel_id"`
-	ModelName      string  `json:"model_name"`
-	PriceType      string  `json:"price_type"`
-	PriceValue     string  `json:"price_value"`
-	FixedUnit      string  `json:"fixed_unit"`
-	FixedAmount    float64 `json:"fixed_amount"`
-	InputPrice     float64 `json:"input_price"`
-	CacheReadPrice float64 `json:"cache_read_price"`
-	OutputPrice    float64 `json:"output_price"`
-	RequestPrice   float64 `json:"request_price"`
-	SecondPrice    float64 `json:"second_price"`
-	EffectiveFrom  int64   `json:"effective_from"`
-	CreatedBy      int     `json:"created_by"`
+	ChannelId            int     `json:"channel_id"`
+	ModelName            string  `json:"model_name"`
+	PriceType            string  `json:"price_type"`
+	PriceValue           string  `json:"price_value"`
+	FixedUnit            string  `json:"fixed_unit"`
+	FixedAmount          float64 `json:"fixed_amount"`
+	InputPrice           float64 `json:"input_price"`
+	CacheReadPrice       float64 `json:"cache_read_price"`
+	CacheCreationPrice   float64 `json:"cache_creation_price"`
+	CacheCreation1hPrice float64 `json:"cache_creation_1h_price"`
+	ImageInputPrice      float64 `json:"image_input_price"`
+	ImageOutputPrice     float64 `json:"image_output_price"`
+	AudioInputPrice      float64 `json:"audio_input_price"`
+	AudioOutputPrice     float64 `json:"audio_output_price"`
+	OutputPrice          float64 `json:"output_price"`
+	RequestPrice         float64 `json:"request_price"`
+	SecondPrice          float64 `json:"second_price"`
+	EffectiveFrom        int64   `json:"effective_from"`
+	CreatedBy            int     `json:"created_by"`
 }
 
 type ProfitSimpleTokenPrice struct {
-	InputPrice     float64 `json:"input_price"`
-	CacheReadPrice float64 `json:"cache_read_price"`
-	OutputPrice    float64 `json:"output_price"`
-	RequestPrice   float64 `json:"request_price"`
-	SecondPrice    float64 `json:"second_price"`
+	InputPrice           float64 `json:"input_price"`
+	CacheReadPrice       float64 `json:"cache_read_price"`
+	CacheCreationPrice   float64 `json:"cache_creation_price"`
+	CacheCreation1hPrice float64 `json:"cache_creation_1h_price"`
+	ImageInputPrice      float64 `json:"image_input_price"`
+	ImageOutputPrice     float64 `json:"image_output_price"`
+	AudioInputPrice      float64 `json:"audio_input_price"`
+	AudioOutputPrice     float64 `json:"audio_output_price"`
+	OutputPrice          float64 `json:"output_price"`
+	RequestPrice         float64 `json:"request_price"`
+	SecondPrice          float64 `json:"second_price"`
 }
 
 func validateProfitCostPriceInput(input ProfitCostPriceInput) error {
@@ -86,10 +104,32 @@ func validateProfitCostPriceInput(input ProfitCostPriceInput) error {
 	}
 	switch input.PriceType {
 	case ProfitPriceTypeSimpleToken:
-		if input.InputPrice < 0 || input.CacheReadPrice < 0 || input.OutputPrice < 0 || input.RequestPrice < 0 || input.SecondPrice < 0 {
-			return errors.New("cost price cannot be negative")
+		prices := []float64{
+			input.InputPrice,
+			input.CacheReadPrice,
+			input.CacheCreationPrice,
+			input.CacheCreation1hPrice,
+			input.ImageInputPrice,
+			input.ImageOutputPrice,
+			input.AudioInputPrice,
+			input.AudioOutputPrice,
+			input.OutputPrice,
+			input.RequestPrice,
+			input.SecondPrice,
 		}
-		if input.InputPrice == 0 && input.CacheReadPrice == 0 && input.OutputPrice == 0 && input.RequestPrice == 0 && input.SecondPrice == 0 {
+		for _, price := range prices {
+			if price < 0 {
+				return errors.New("cost price cannot be negative")
+			}
+		}
+		configured := false
+		for _, price := range prices {
+			if price > 0 {
+				configured = true
+				break
+			}
+		}
+		if !configured {
 			return errors.New("at least one cost price is required")
 		}
 	case ProfitPriceTypeTieredExpr:
@@ -121,11 +161,17 @@ func UpsertProfitCostPrice(input ProfitCostPriceInput) (*ProfitCostPriceVersion,
 	switch input.PriceType {
 	case ProfitPriceTypeSimpleToken:
 		plainValue = common.GetJsonString(ProfitSimpleTokenPrice{
-			InputPrice:     input.InputPrice,
-			CacheReadPrice: input.CacheReadPrice,
-			OutputPrice:    input.OutputPrice,
-			RequestPrice:   input.RequestPrice,
-			SecondPrice:    input.SecondPrice,
+			InputPrice:           input.InputPrice,
+			CacheReadPrice:       input.CacheReadPrice,
+			CacheCreationPrice:   input.CacheCreationPrice,
+			CacheCreation1hPrice: input.CacheCreation1hPrice,
+			ImageInputPrice:      input.ImageInputPrice,
+			ImageOutputPrice:     input.ImageOutputPrice,
+			AudioInputPrice:      input.AudioInputPrice,
+			AudioOutputPrice:     input.AudioOutputPrice,
+			OutputPrice:          input.OutputPrice,
+			RequestPrice:         input.RequestPrice,
+			SecondPrice:          input.SecondPrice,
 		})
 	case ProfitPriceTypeFixedPrice:
 		plainValue = common.GetJsonString(map[string]interface{}{
@@ -186,6 +232,12 @@ func UpsertProfitCostPrice(input ProfitCostPriceInput) (*ProfitCostPriceVersion,
 	case ProfitPriceTypeSimpleToken:
 		createdVersion.InputPrice = input.InputPrice
 		createdVersion.CacheReadPrice = input.CacheReadPrice
+		createdVersion.CacheCreationPrice = input.CacheCreationPrice
+		createdVersion.CacheCreation1hPrice = input.CacheCreation1hPrice
+		createdVersion.ImageInputPrice = input.ImageInputPrice
+		createdVersion.ImageOutputPrice = input.ImageOutputPrice
+		createdVersion.AudioInputPrice = input.AudioInputPrice
+		createdVersion.AudioOutputPrice = input.AudioOutputPrice
 		createdVersion.OutputPrice = input.OutputPrice
 		createdVersion.RequestPrice = input.RequestPrice
 		createdVersion.SecondPrice = input.SecondPrice
@@ -209,26 +261,32 @@ func DisableProfitCostPrice(id int, updatedBy int) error {
 }
 
 type ProfitCostPriceListItem struct {
-	Id               int     `json:"id"`
-	ChannelId        int     `json:"channel_id"`
-	ChannelName      string  `json:"channel_name"`
-	ModelName        string  `json:"model_name"`
-	CurrentVersionId int     `json:"current_version_id"`
-	PriceType        string  `json:"price_type"`
-	FixedUnit        string  `json:"fixed_unit"`
-	EffectiveFrom    int64   `json:"effective_from"`
-	CreatedAt        int64   `json:"created_at"`
-	UpdatedAt        int64   `json:"updated_at"`
-	Disabled         bool    `json:"disabled"`
-	DisabledAt       int64   `json:"disabled_at"`
-	PriceConfigured  bool    `json:"price_configured"`
-	PriceValue       string  `json:"price_value,omitempty"`
-	PriceSummary     string  `json:"price_summary,omitempty"`
-	InputPrice       float64 `json:"input_price,omitempty"`
-	CacheReadPrice   float64 `json:"cache_read_price,omitempty"`
-	OutputPrice      float64 `json:"output_price,omitempty"`
-	RequestPrice     float64 `json:"request_price,omitempty"`
-	SecondPrice      float64 `json:"second_price,omitempty"`
+	Id                   int     `json:"id"`
+	ChannelId            int     `json:"channel_id"`
+	ChannelName          string  `json:"channel_name"`
+	ModelName            string  `json:"model_name"`
+	CurrentVersionId     int     `json:"current_version_id"`
+	PriceType            string  `json:"price_type"`
+	FixedUnit            string  `json:"fixed_unit"`
+	EffectiveFrom        int64   `json:"effective_from"`
+	CreatedAt            int64   `json:"created_at"`
+	UpdatedAt            int64   `json:"updated_at"`
+	Disabled             bool    `json:"disabled"`
+	DisabledAt           int64   `json:"disabled_at"`
+	PriceConfigured      bool    `json:"price_configured"`
+	PriceValue           string  `json:"price_value,omitempty"`
+	PriceSummary         string  `json:"price_summary,omitempty"`
+	InputPrice           float64 `json:"input_price,omitempty"`
+	CacheReadPrice       float64 `json:"cache_read_price,omitempty"`
+	CacheCreationPrice   float64 `json:"cache_creation_price,omitempty"`
+	CacheCreation1hPrice float64 `json:"cache_creation_1h_price,omitempty"`
+	ImageInputPrice      float64 `json:"image_input_price,omitempty"`
+	ImageOutputPrice     float64 `json:"image_output_price,omitempty"`
+	AudioInputPrice      float64 `json:"audio_input_price,omitempty"`
+	AudioOutputPrice     float64 `json:"audio_output_price,omitempty"`
+	OutputPrice          float64 `json:"output_price,omitempty"`
+	RequestPrice         float64 `json:"request_price,omitempty"`
+	SecondPrice          float64 `json:"second_price,omitempty"`
 }
 
 func ListProfitCostPrices(reveal bool) ([]ProfitCostPriceListItem, error) {
@@ -280,6 +338,12 @@ func ListProfitCostPrices(reveal bool) ([]ProfitCostPriceListItem, error) {
 						if err := common.UnmarshalJsonStr(plain, &payload); err == nil {
 							item.InputPrice = payload.InputPrice
 							item.CacheReadPrice = payload.CacheReadPrice
+							item.CacheCreationPrice = payload.CacheCreationPrice
+							item.CacheCreation1hPrice = payload.CacheCreation1hPrice
+							item.ImageInputPrice = payload.ImageInputPrice
+							item.ImageOutputPrice = payload.ImageOutputPrice
+							item.AudioInputPrice = payload.AudioInputPrice
+							item.AudioOutputPrice = payload.AudioOutputPrice
 							item.OutputPrice = payload.OutputPrice
 							item.RequestPrice = payload.RequestPrice
 							item.SecondPrice = payload.SecondPrice
@@ -321,12 +385,30 @@ func FindProfitCostPriceVersion(channelId int, modelName string, ts int64) (*Pro
 }
 
 func formatProfitSimpleTokenSummary(payload ProfitSimpleTokenPrice) string {
-	parts := make([]string, 0, 4)
+	parts := make([]string, 0, 11)
 	if payload.InputPrice > 0 {
 		parts = append(parts, "input $"+strconvFormatProfitFloat(payload.InputPrice))
 	}
 	if payload.CacheReadPrice > 0 {
 		parts = append(parts, "cache read $"+strconvFormatProfitFloat(payload.CacheReadPrice))
+	}
+	if payload.CacheCreationPrice > 0 {
+		parts = append(parts, "cache create $"+strconvFormatProfitFloat(payload.CacheCreationPrice))
+	}
+	if payload.CacheCreation1hPrice > 0 {
+		parts = append(parts, "cache create 1h $"+strconvFormatProfitFloat(payload.CacheCreation1hPrice))
+	}
+	if payload.ImageInputPrice > 0 {
+		parts = append(parts, "image input $"+strconvFormatProfitFloat(payload.ImageInputPrice))
+	}
+	if payload.ImageOutputPrice > 0 {
+		parts = append(parts, "image output $"+strconvFormatProfitFloat(payload.ImageOutputPrice))
+	}
+	if payload.AudioInputPrice > 0 {
+		parts = append(parts, "audio input $"+strconvFormatProfitFloat(payload.AudioInputPrice))
+	}
+	if payload.AudioOutputPrice > 0 {
+		parts = append(parts, "audio output $"+strconvFormatProfitFloat(payload.AudioOutputPrice))
 	}
 	if payload.OutputPrice > 0 {
 		parts = append(parts, "output $"+strconvFormatProfitFloat(payload.OutputPrice))

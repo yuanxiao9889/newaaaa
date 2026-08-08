@@ -238,6 +238,31 @@ func TestTaskBillingOtherUsesStoredFixedPriceUnit(t *testing.T) {
 	assert.Equal(t, "second", other["fixed_price_unit"])
 }
 
+func TestTaskBillingOtherFlattensUsageDimensionsForProfitLogs(t *testing.T) {
+	task := makeTask(1, 1, 100, 0, BillingSourceWallet, 0)
+	task.PrivateData.UsageDetails = &dto.TaskUsageDetails{
+		PromptTokensDetails: dto.InputTokenDetails{
+			CachedTokens:         10,
+			CachedCreationTokens: 20,
+			ImageTokens:          30,
+			AudioTokens:          40,
+		},
+		CompletionTokenDetails: dto.OutputTokenDetails{
+			ImageTokens: 50,
+			AudioTokens: 60,
+		},
+	}
+
+	other := taskBillingOther(task)
+
+	assert.Equal(t, 10, other["cache_tokens"])
+	assert.Equal(t, 20, other["cache_creation_tokens"])
+	assert.Equal(t, 30, other["image_input"])
+	assert.Equal(t, 50, other["image_output"])
+	assert.Equal(t, 40, other["audio_input"])
+	assert.Equal(t, 60, other["audio_output"])
+}
+
 func TestTaskBillingContextPriceDataFiltersMultiplier(t *testing.T) {
 	priceData := taskBillingContextPriceData(&model.TaskBillingContext{
 		OtherRatios: map[string]float64{
@@ -389,6 +414,11 @@ func TestRefundTaskQuota_Wallet(t *testing.T) {
 	assert.Equal(t, preConsumed, log.Quota)
 	assert.Equal(t, "test-model", log.ModelName)
 	assert.Equal(t, 32, log.UseTime)
+	var other map[string]interface{}
+	require.NoError(t, common.UnmarshalJsonStr(log.Other, &other))
+	assert.Equal(t, TaskBillingStateRefunded, other["billing_state"])
+	assert.EqualValues(t, preConsumed, other["pre_consumed_quota"])
+	assert.EqualValues(t, 0, other["actual_quota"])
 }
 
 func TestRefundTaskQuota_FinalAccountingRecordsRollbackOnly(t *testing.T) {
@@ -1614,7 +1644,8 @@ func TestLogTaskConsumptionBypassesBatchUpdaterForForcedPreConsume(t *testing.T)
 			ChannelId: channelID,
 		},
 		TaskRelayInfo: &relaycommon.TaskRelayInfo{
-			Action: "video",
+			Action:       "video",
+			PublicTaskID: "task_usage_accounting",
 		},
 	}
 
@@ -1629,6 +1660,9 @@ func TestLogTaskConsumptionBypassesBatchUpdaterForForcedPreConsume(t *testing.T)
 	assert.Equal(t, model.LogTypeConsume, log.Type)
 	assert.Equal(t, quota, log.Quota)
 	assert.Equal(t, tokenID, log.TokenId)
+	var other map[string]interface{}
+	require.NoError(t, common.UnmarshalJsonStr(log.Other, &other))
+	assert.Equal(t, "task_usage_accounting", other["task_id"])
 }
 
 func TestConfirmTaskBillingSettledSubmitModeDoesNotDoubleAccount(t *testing.T) {

@@ -1,7 +1,6 @@
 package service
 
 import (
-	"encoding/base64"
 	"errors"
 	"math"
 	"sort"
@@ -12,6 +11,8 @@ import (
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/pkg/billingexpr"
+	"github.com/QuantumNous/new-api/setting/billing_setting"
+	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/shopspring/decimal"
 )
@@ -75,36 +76,49 @@ type ProfitReport struct {
 }
 
 type ProfitCostPricePrefill struct {
-	ChannelId       int      `json:"channel_id"`
-	ModelName       string   `json:"model_name"`
-	Models          []string `json:"models"`
-	PricingMode     string   `json:"pricing_mode"`
-	InputPrice      float64  `json:"input_price"`
-	CacheReadPrice  float64  `json:"cache_read_price"`
-	OutputPrice     float64  `json:"output_price"`
-	RequestPrice    float64  `json:"request_price"`
-	SecondPrice     float64  `json:"second_price"`
-	ModelRatio      float64  `json:"model_ratio,omitempty"`
-	CompletionRatio float64  `json:"completion_ratio,omitempty"`
-	ModelPrice      float64  `json:"model_price,omitempty"`
-	HasPricing      bool     `json:"has_pricing"`
-	Note            string   `json:"note,omitempty"`
+	ChannelId            int      `json:"channel_id"`
+	ModelName            string   `json:"model_name"`
+	Models               []string `json:"models"`
+	PricingMode          string   `json:"pricing_mode"`
+	InputPrice           float64  `json:"input_price"`
+	CacheReadPrice       float64  `json:"cache_read_price"`
+	CacheCreationPrice   float64  `json:"cache_creation_price"`
+	CacheCreation1hPrice float64  `json:"cache_creation_1h_price"`
+	ImageInputPrice      float64  `json:"image_input_price"`
+	ImageOutputPrice     float64  `json:"image_output_price"`
+	AudioInputPrice      float64  `json:"audio_input_price"`
+	AudioOutputPrice     float64  `json:"audio_output_price"`
+	OutputPrice          float64  `json:"output_price"`
+	RequestPrice         float64  `json:"request_price"`
+	SecondPrice          float64  `json:"second_price"`
+	ModelRatio           float64  `json:"model_ratio,omitempty"`
+	CompletionRatio      float64  `json:"completion_ratio,omitempty"`
+	ModelPrice           float64  `json:"model_price,omitempty"`
+	HasPricing           bool     `json:"has_pricing"`
+	Note                 string   `json:"note,omitempty"`
 }
 
 type profitLogOther struct {
-	BillingMode             string  `json:"billing_mode"`
-	ExprB64                 string  `json:"expr_b64"`
-	Seconds                 float64 `json:"seconds"`
-	CacheTokens             int     `json:"cache_tokens"`
-	CacheCreationTokens     int     `json:"cache_creation_tokens"`
-	CacheCreationTokens5m   int     `json:"cache_creation_tokens_5m"`
-	CacheCreationTokens1h   int     `json:"cache_creation_tokens_1h"`
-	ImageOutput             int     `json:"image_output"`
-	AudioInput              int     `json:"audio_input"`
-	AudioOutput             int     `json:"audio_output"`
-	AudioInputTokenCount    int     `json:"audio_input_token_count"`
-	ImageGenerationCall     bool    `json:"image_generation_call"`
-	ImageGenerationCallCost float64 `json:"image_generation_call_price"`
+	UsageSemantic           string                `json:"usage_semantic"`
+	Claude                  bool                  `json:"claude"`
+	BillingState            string                `json:"billing_state"`
+	TaskID                  string                `json:"task_id"`
+	PreConsumedQuota        *int                  `json:"pre_consumed_quota"`
+	ActualQuota             *int                  `json:"actual_quota"`
+	Seconds                 float64               `json:"seconds"`
+	CacheTokens             int                   `json:"cache_tokens"`
+	CacheCreationTokens     int                   `json:"cache_creation_tokens"`
+	CacheCreationTokens5m   int                   `json:"cache_creation_tokens_5m"`
+	CacheCreationTokens1h   int                   `json:"cache_creation_tokens_1h"`
+	Image                   bool                  `json:"image"`
+	ImageInput              *int                  `json:"image_input"`
+	ImageOutput             int                   `json:"image_output"`
+	AudioInput              int                   `json:"audio_input"`
+	AudioOutput             int                   `json:"audio_output"`
+	AudioInputTokenCount    int                   `json:"audio_input_token_count"`
+	ImageGenerationCall     bool                  `json:"image_generation_call"`
+	ImageGenerationCallCost float64               `json:"image_generation_call_price"`
+	UsageDetails            *dto.TaskUsageDetails `json:"usage_details"`
 }
 
 type profitCostPriceResolver struct {
@@ -137,7 +151,11 @@ func GetProfitCostPricePrefill(channelId int, modelName string) (*ProfitCostPric
 	}
 	if modelPrice, ok := ratio_setting.GetModelPrice(modelName, false); ok {
 		result.PricingMode = model.ProfitPriceTypeFixedPrice
-		if isProfitSecondBasedFixedModel(modelName) {
+		unit := billing_setting.ResolveFixedPriceUnit(
+			modelName,
+			model.LegacySecondBasedFixedPriceModel(modelName, model.GetModelSupportEndpointTypes(modelName)),
+		)
+		if unit == billing_setting.FixedPriceUnitSecond {
 			result.SecondPrice = modelPrice
 		} else {
 			result.RequestPrice = modelPrice
@@ -158,10 +176,20 @@ func GetProfitCostPricePrefill(channelId int, modelName string) (*ProfitCostPric
 	}
 	result.PricingMode = model.ProfitPriceTypeSimpleToken
 	result.InputPrice = modelRatio * multiplier
-	if cacheRatio, ok := ratio_setting.GetCacheRatio(modelName); ok {
-		result.CacheReadPrice = result.InputPrice * cacheRatio
-	}
+	cacheRatio, _ := ratio_setting.GetCacheRatio(modelName)
+	result.CacheReadPrice = result.InputPrice * cacheRatio
+	cacheCreationRatio, _ := ratio_setting.GetCreateCacheRatio(modelName)
+	result.CacheCreationPrice = result.InputPrice * cacheCreationRatio
+	result.CacheCreation1hPrice = result.CacheCreationPrice * (6.0 / 3.75)
+	imageRatio, _ := ratio_setting.GetImageRatio(modelName)
+	result.ImageInputPrice = result.InputPrice * imageRatio
 	result.OutputPrice = modelRatio * completionRatio * multiplier
+	result.ImageOutputPrice = result.OutputPrice
+	result.AudioInputPrice = result.InputPrice * ratio_setting.GetAudioRatio(modelName)
+	if configuredAudioInputPrice := operation_setting.GetGeminiInputAudioPricePerMillionTokens(modelName); configuredAudioInputPrice > 0 {
+		result.AudioInputPrice = configuredAudioInputPrice
+	}
+	result.AudioOutputPrice = result.InputPrice * ratio_setting.GetAudioRatio(modelName) * ratio_setting.GetAudioCompletionRatio(modelName)
 	result.ModelRatio = modelRatio
 	result.CompletionRatio = completionRatio
 	result.HasPricing = true
@@ -181,25 +209,6 @@ func normalizeProfitChannelModels(models []string) []string {
 	}
 	sort.Strings(result)
 	return result
-}
-
-func isProfitSecondBasedFixedModel(modelName string) bool {
-	lowerName := strings.ToLower(strings.TrimSpace(modelName))
-	if lowerName == "" {
-		return false
-	}
-	if lowerName == "ok-video-1.5-preview" {
-		return true
-	}
-	if strings.HasPrefix(lowerName, "ok-") && strings.Contains(lowerName, "video") {
-		return true
-	}
-	for _, marker := range []string{"video", "sora", "veo", "kling", "pika", "grok"} {
-		if strings.Contains(lowerName, marker) {
-			return true
-		}
-	}
-	return false
 }
 
 func NormalizeProfitQuery(q ProfitQuery) ProfitQuery {
@@ -296,7 +305,7 @@ func GetProfitReport(q ProfitQuery) (*ProfitReport, error) {
 }
 
 func queryProfitLogs(q ProfitQuery) ([]model.Log, error) {
-	tx := model.LOG_DB.Where("type = ?", model.LogTypeConsume)
+	tx := model.LOG_DB.Where("type IN ?", []int{model.LogTypeConsume, model.LogTypeRefund})
 	tx = tx.Where("created_at >= ? AND created_at <= ?", q.StartTimestamp, q.EndTimestamp)
 	if q.ChannelId != 0 {
 		tx = tx.Where("channel_id = ?", q.ChannelId)
@@ -406,6 +415,36 @@ func loadProfitChannelNames(logs []model.Log) (map[int]string, error) {
 
 func calculateLogProfit(log model.Log, resolver *profitCostPriceResolver) ProfitMetric {
 	revenue := quotaToUSD(log.Quota)
+	if log.Type == model.LogTypeRefund {
+		revenue = -revenue
+		metric := ProfitMetric{Revenue: revenue, Profit: revenue}
+		if !profitRefundReversesUsage(log) {
+			if _, priced := resolver.find(log); priced {
+				metric.PricedRevenue = revenue
+			} else {
+				metric.UnpricedRevenue = revenue
+			}
+			return metric
+		}
+
+		metric.RequestCount = -1
+		metric.PromptTokens = -int64(log.PromptTokens)
+		metric.CompletionTokens = -int64(log.CompletionTokens)
+		cost, priced, err := calculateLogCostUSD(log, resolver)
+		if err != nil {
+			metric.ErrorCount = 1
+		}
+		if priced {
+			metric.PricedRevenue = revenue
+			metric.PricedCount = -1
+			metric.Cost = -cost
+			metric.Profit = revenue + cost
+		} else {
+			metric.UnpricedRevenue = revenue
+			metric.UnpricedCount = -1
+		}
+		return metric
+	}
 	metric := ProfitMetric{
 		Revenue:          revenue,
 		RequestCount:     1,
@@ -426,6 +465,20 @@ func calculateLogProfit(log model.Log, resolver *profitCostPriceResolver) Profit
 	metric.Cost = cost
 	metric.Profit = revenue - cost
 	return metric
+}
+
+func profitRefundReversesUsage(log model.Log) bool {
+	if log.Type != model.LogTypeRefund {
+		return false
+	}
+	other := profitLogOther{}
+	if err := common.UnmarshalJsonStr(log.Other, &other); err != nil {
+		return false
+	}
+	if other.BillingState == TaskBillingStateRefunded {
+		return true
+	}
+	return other.TaskID != "" && other.PreConsumedQuota == nil && other.ActualQuota == nil
 }
 
 func calculateLogCostUSD(log model.Log, resolver *profitCostPriceResolver) (float64, bool, error) {
@@ -476,15 +529,27 @@ func calculateLogCostUSD(log model.Log, resolver *profitCostPriceResolver) (floa
 }
 
 func calculateSimpleTokenCostUSD(log model.Log, payload model.ProfitSimpleTokenPrice) float64 {
-	promptTokens := math.Max(float64(log.PromptTokens), 0)
-	if payload.CacheReadPrice <= 0 {
-		return (promptTokens*payload.InputPrice + float64(log.CompletionTokens)*payload.OutputPrice) / 1_000_000
+	usage, isClaude := profitTokenUsageFromLog(log)
+	usedVars := map[string]bool{
+		"cr":    payload.CacheReadPrice > 0,
+		"cc":    payload.CacheCreationPrice > 0,
+		"cc1h":  payload.CacheCreation1hPrice > 0,
+		"img":   payload.ImageInputPrice > 0,
+		"img_o": payload.ImageOutputPrice > 0,
+		"ai":    payload.AudioInputPrice > 0,
+		"ao":    payload.AudioOutputPrice > 0,
 	}
-	other := profitLogOther{}
-	_ = common.UnmarshalJsonStr(log.Other, &other)
-	cacheTokens := math.Min(math.Max(float64(other.CacheTokens), 0), promptTokens)
-	inputTokens := promptTokens - cacheTokens
-	return (inputTokens*payload.InputPrice + cacheTokens*payload.CacheReadPrice + float64(log.CompletionTokens)*payload.OutputPrice) / 1_000_000
+	params := BuildTieredTokenParams(usage, isClaude, usedVars)
+	cost := math.Max(params.P, 0)*payload.InputPrice +
+		math.Max(params.CR, 0)*payload.CacheReadPrice +
+		math.Max(params.CC, 0)*payload.CacheCreationPrice +
+		math.Max(params.CC1h, 0)*payload.CacheCreation1hPrice +
+		math.Max(params.Img, 0)*payload.ImageInputPrice +
+		math.Max(params.C, 0)*payload.OutputPrice +
+		math.Max(params.ImgO, 0)*payload.ImageOutputPrice +
+		math.Max(params.AI, 0)*payload.AudioInputPrice +
+		math.Max(params.AO, 0)*payload.AudioOutputPrice
+	return cost / 1_000_000
 }
 
 func profitLogBillableSeconds(log model.Log) float64 {
@@ -497,44 +562,78 @@ func profitLogBillableSeconds(log model.Log) float64 {
 }
 
 func buildProfitTokenParams(log model.Log, expr string) billingexpr.TokenParams {
-	other := profitLogOther{}
-	_ = common.UnmarshalJsonStr(log.Other, &other)
-
-	usage := &dto.Usage{
-		PromptTokens:     log.PromptTokens,
-		CompletionTokens: log.CompletionTokens,
-		TotalTokens:      log.PromptTokens + log.CompletionTokens,
-		PromptTokensDetails: dto.InputTokenDetails{
-			CachedTokens:         other.CacheTokens,
-			CachedCreationTokens: other.CacheCreationTokens,
-			AudioTokens:          firstNonZero(other.AudioInput, other.AudioInputTokenCount),
-		},
-		CompletionTokenDetails: dto.OutputTokenDetails{
-			AudioTokens: other.AudioOutput,
-			ImageTokens: other.ImageOutput,
-		},
-		ClaudeCacheCreation5mTokens: other.CacheCreationTokens5m,
-		ClaudeCacheCreation1hTokens: other.CacheCreationTokens1h,
-	}
-	if usage.PromptTokensDetails.CachedCreationTokens == 0 {
-		usage.PromptTokensDetails.CachedCreationTokens = other.CacheCreationTokens5m
-	}
-	if other.ExprB64 != "" {
-		if decoded, err := base64.StdEncoding.DecodeString(other.ExprB64); err == nil && strings.TrimSpace(string(decoded)) != "" {
-			other.BillingMode = "tiered_expr"
-		}
-	}
-	isClaude := other.BillingMode == "tiered_expr" && strings.Contains(strings.ToLower(log.Other), `"claude":true`)
+	usage, isClaude := profitTokenUsageFromLog(log)
 	return BuildTieredTokenParams(usage, isClaude, billingexpr.UsedVars(expr))
 }
 
-func firstNonZero(values ...int) int {
-	for _, value := range values {
-		if value != 0 {
-			return value
+func profitTokenUsageFromLog(log model.Log) (*dto.Usage, bool) {
+	other := profitLogOther{}
+	_ = common.UnmarshalJsonStr(log.Other, &other)
+
+	promptTokens := max(log.PromptTokens, 0)
+	completionTokens := max(log.CompletionTokens, 0)
+	promptDetails := dto.InputTokenDetails{
+		CachedTokens:         max(other.CacheTokens, 0),
+		CachedCreationTokens: max(other.CacheCreationTokens, 0),
+		AudioTokens:          max(other.AudioInput, other.AudioInputTokenCount, 0),
+	}
+	completionDetails := dto.OutputTokenDetails{
+		AudioTokens: max(other.AudioOutput, 0),
+		ImageTokens: max(other.ImageOutput, 0),
+	}
+	if other.ImageInput != nil {
+		promptDetails.ImageTokens = max(*other.ImageInput, 0)
+	} else if other.Image && other.ImageOutput > 0 {
+		// Historical text logs stored prompt image tokens under image_output.
+		promptDetails.ImageTokens = other.ImageOutput
+		completionDetails.ImageTokens = 0
+	}
+	if other.UsageDetails != nil {
+		if other.UsageDetails.PromptTokens > 0 {
+			promptTokens = other.UsageDetails.PromptTokens
+		}
+		if other.UsageDetails.CompletionTokens > 0 {
+			completionTokens = other.UsageDetails.CompletionTokens
+		}
+		promptDetails = other.UsageDetails.PromptTokensDetails
+		completionDetails = other.UsageDetails.CompletionTokenDetails
+	}
+	promptDetails.CachedTokens = max(promptDetails.CachedTokens, 0)
+	promptDetails.CachedCreationTokens = max(promptDetails.CachedCreationTokens, 0)
+	promptDetails.CacheWriteTokens = max(promptDetails.CacheWriteTokens, 0)
+	promptDetails.TextTokens = max(promptDetails.TextTokens, 0)
+	promptDetails.AudioTokens = max(promptDetails.AudioTokens, 0)
+	promptDetails.ImageTokens = max(promptDetails.ImageTokens, 0)
+	completionDetails.TextTokens = max(completionDetails.TextTokens, 0)
+	completionDetails.AudioTokens = max(completionDetails.AudioTokens, 0)
+	completionDetails.ImageTokens = max(completionDetails.ImageTokens, 0)
+	completionDetails.ReasoningTokens = max(completionDetails.ReasoningTokens, 0)
+
+	isClaude := other.Claude || strings.EqualFold(other.UsageSemantic, "anthropic")
+	cacheCreation1h := max(other.CacheCreationTokens1h, 0)
+	cacheCreation5m := max(other.CacheCreationTokens5m, 0)
+	if isClaude {
+		remainingCacheCreation := promptDetails.CacheCreationTokensTotal() - cacheCreation5m - cacheCreation1h
+		if remainingCacheCreation > 0 {
+			cacheCreation5m += remainingCacheCreation
 		}
 	}
-	return 0
+	usage := &dto.Usage{
+		PromptTokens:                promptTokens,
+		CompletionTokens:            completionTokens,
+		TotalTokens:                 promptTokens + completionTokens,
+		PromptTokensDetails:         promptDetails,
+		CompletionTokenDetails:      completionDetails,
+		ClaudeCacheCreation5mTokens: cacheCreation5m,
+		ClaudeCacheCreation1hTokens: cacheCreation1h,
+	}
+	if usage.PromptTokensDetails.CachedCreationTokens == 0 && (other.CacheCreationTokens5m > 0 || other.CacheCreationTokens1h > 0) {
+		usage.PromptTokensDetails.CachedCreationTokens = max(other.CacheCreationTokens5m, 0) + max(other.CacheCreationTokens1h, 0)
+	}
+	if isClaude {
+		usage.UsageSemantic = "anthropic"
+	}
+	return usage, isClaude
 }
 
 func quotaToUSD(quota int) float64 {

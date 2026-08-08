@@ -64,8 +64,8 @@ func TestRechargeEpay_GrantsAffiliateRewardFromPaymentMoney(t *testing.T) {
 	require.NoError(t, RechargeEpay("epay-aff-1", "alipay", "127.0.0.1"))
 
 	inviter := getAffiliateUser(t, 1)
-	assert.Equal(t, 617, inviter.AffQuota)
-	assert.Equal(t, 617, inviter.AffHistoryQuota)
+	assert.Equal(t, 1234, inviter.AffQuota)
+	assert.Equal(t, 1234, inviter.AffHistoryQuota)
 	assert.Equal(t, int64(1), countAffiliateRewards(t, 2))
 	assert.Equal(t, 20000, getAffiliateUser(t, 2).Quota)
 }
@@ -84,12 +84,12 @@ func TestRechargeEpay_AffiliateRewardIsIdempotent(t *testing.T) {
 	require.NoError(t, RechargeEpay("epay-aff-idempotent", "alipay", "127.0.0.1"))
 
 	inviter := getAffiliateUser(t, 1)
-	assert.Equal(t, 500, inviter.AffQuota)
-	assert.Equal(t, 500, inviter.AffHistoryQuota)
+	assert.Equal(t, 1000, inviter.AffQuota)
+	assert.Equal(t, 1000, inviter.AffHistoryQuota)
 	assert.Equal(t, int64(1), countAffiliateRewards(t, 2))
 }
 
-func TestRechargeEpay_AffiliateRewardLimitedToFirstThreeTopUpsPerInvitee(t *testing.T) {
+func TestRechargeEpay_AffiliateRewardLimitedToFirstFiveTopUpsPerInvitee(t *testing.T) {
 	truncateTables(t)
 	originalQuotaPerUnit := common.QuotaPerUnit
 	common.QuotaPerUnit = 1000
@@ -97,16 +97,16 @@ func TestRechargeEpay_AffiliateRewardLimitedToFirstThreeTopUpsPerInvitee(t *test
 
 	insertAffiliateUser(t, 1, "inviter", 0)
 	insertAffiliateUser(t, 2, "invitee", 1)
-	for i := 1; i <= 4; i++ {
+	for i := 1; i <= 6; i++ {
 		tradeNo := fmt.Sprintf("epay-aff-limit-%d", i)
 		insertAffiliateTopUp(t, tradeNo, 2, int64(i), 10, PaymentProviderEpay)
 		require.NoError(t, RechargeEpay(tradeNo, "alipay", "127.0.0.1"))
 	}
 
 	inviter := getAffiliateUser(t, 1)
-	assert.Equal(t, 1500, inviter.AffQuota)
-	assert.Equal(t, 1500, inviter.AffHistoryQuota)
-	assert.Equal(t, int64(3), countAffiliateRewards(t, 2))
+	assert.Equal(t, 5000, inviter.AffQuota)
+	assert.Equal(t, 5000, inviter.AffHistoryQuota)
+	assert.Equal(t, int64(5), countAffiliateRewards(t, 2))
 }
 
 func TestRechargeEpay_AffiliateRewardSkippedWithoutInviterOrPositiveReward(t *testing.T) {
@@ -118,7 +118,7 @@ func TestRechargeEpay_AffiliateRewardSkippedWithoutInviterOrPositiveReward(t *te
 	insertAffiliateUser(t, 1, "inviter", 0)
 	insertAffiliateUser(t, 2, "invitee", 1)
 	insertAffiliateUser(t, 3, "solo", 0)
-	insertAffiliateTopUp(t, "epay-aff-zero", 2, 1, 0.01, PaymentProviderEpay)
+	insertAffiliateTopUp(t, "epay-aff-zero", 2, 1, 0.001, PaymentProviderEpay)
 	insertAffiliateTopUp(t, "epay-aff-no-inviter", 3, 1, 10, PaymentProviderEpay)
 
 	require.NoError(t, RechargeEpay("epay-aff-zero", "alipay", "127.0.0.1"))
@@ -194,8 +194,8 @@ func TestWalletRechargePaths_GrantAffiliateRewardFromPaymentMoney(t *testing.T) 
 			require.NoError(t, tc.complete(tc.tradeNo))
 
 			inviter := getAffiliateUser(t, 1)
-			assert.Equal(t, 617, inviter.AffQuota)
-			assert.Equal(t, 617, inviter.AffHistoryQuota)
+			assert.Equal(t, 1234, inviter.AffQuota)
+			assert.Equal(t, 1234, inviter.AffHistoryQuota)
 			assert.Equal(t, int64(1), countAffiliateRewards(t, 2))
 		})
 	}

@@ -47,6 +47,7 @@ type textQuotaSummary struct {
 	CacheCreationTokens5m  int
 	CacheCreationTokens1h  int
 	ImageTokens            int
+	ImageOutputTokens      int
 	AudioTokens            int
 	ModelName              string
 	TokenName              string
@@ -262,6 +263,7 @@ func calculateTextQuotaSummary(ctx *gin.Context, relayInfo *relaycommon.RelayInf
 	summary.CacheCreationTokens5m = usage.ClaudeCacheCreation5mTokens
 	summary.CacheCreationTokens1h = usage.ClaudeCacheCreation1hTokens
 	summary.ImageTokens = usage.PromptTokensDetails.ImageTokens
+	summary.ImageOutputTokens = usage.CompletionTokenDetails.ImageTokens
 	summary.AudioTokens = usage.PromptTokensDetails.AudioTokens
 	legacyClaudeDerived := isLegacyClaudeDerivedOpenAIUsage(relayInfo, usage)
 	isOpenRouterClaudeBilling := relayInfo.ChannelMeta != nil &&
@@ -480,10 +482,13 @@ func PostTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, us
 	if adminRejectReason != "" {
 		other["reject_reason"] = adminRejectReason
 	}
-	if summary.ImageTokens != 0 {
+	if summary.ImageTokens != 0 || summary.ImageOutputTokens != 0 {
 		other["image"] = true
 		other["image_ratio"] = summary.ImageRatio
-		other["image_output"] = summary.ImageTokens
+		other["image_input"] = summary.ImageTokens
+	}
+	if summary.ImageOutputTokens != 0 {
+		other["image_output"] = summary.ImageOutputTokens
 	}
 	appendToolSurchargeLogInfo(other, summary.ToolSurchargeItems)
 	if summary.AudioInputPrice > 0 && summary.AudioTokens > 0 {

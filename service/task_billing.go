@@ -49,6 +49,9 @@ func LogTaskConsumption(c *gin.Context, info *relaycommon.RelayInfo) error {
 	}
 	other := make(map[string]interface{})
 	other["is_task"] = true
+	if info.TaskRelayInfo != nil && info.TaskRelayInfo.PublicTaskID != "" {
+		other["task_id"] = info.TaskRelayInfo.PublicTaskID
+	}
 	other["request_path"] = c.Request.URL.Path
 	other["model_price"] = info.PriceData.ModelPrice
 	if info.PriceData.FixedPriceUnit != "" {
@@ -173,7 +176,27 @@ func taskBillingOther(task *model.Task) map[string]interface{} {
 		other["total_tokens"] = task.PrivateData.TotalTokens
 	}
 	if task.PrivateData.UsageDetails != nil {
-		other["usage_details"] = task.PrivateData.UsageDetails
+		usageDetails := task.PrivateData.UsageDetails
+		other["usage_details"] = usageDetails
+		if usageDetails.PromptTokensDetails.CachedTokens > 0 {
+			other["cache_tokens"] = usageDetails.PromptTokensDetails.CachedTokens
+		}
+		if cacheCreationTokens := usageDetails.PromptTokensDetails.CacheCreationTokensTotal(); cacheCreationTokens > 0 {
+			other["cache_creation_tokens"] = cacheCreationTokens
+		}
+		if usageDetails.PromptTokensDetails.ImageTokens > 0 || usageDetails.CompletionTokenDetails.ImageTokens > 0 {
+			other["image"] = true
+			other["image_input"] = usageDetails.PromptTokensDetails.ImageTokens
+		}
+		if usageDetails.CompletionTokenDetails.ImageTokens > 0 {
+			other["image_output"] = usageDetails.CompletionTokenDetails.ImageTokens
+		}
+		if usageDetails.PromptTokensDetails.AudioTokens > 0 {
+			other["audio_input"] = usageDetails.PromptTokensDetails.AudioTokens
+		}
+		if usageDetails.CompletionTokenDetails.AudioTokens > 0 {
+			other["audio_output"] = usageDetails.CompletionTokenDetails.AudioTokens
+		}
 	}
 	return other
 }
@@ -406,6 +429,9 @@ func RefundTaskQuota(ctx context.Context, task *model.Task, reason string) error
 	other := taskBillingOther(task)
 	other["task_id"] = task.TaskID
 	other["reason"] = reason
+	other["billing_state"] = TaskBillingStateRefunded
+	other["pre_consumed_quota"] = quota
+	other["actual_quota"] = 0
 	logType := model.LogTypeRefund
 	usedQuotaDelta := -quota
 	if task.PrivateData.GetUsageAccountingMode() == model.TaskUsageAccountingFinal {

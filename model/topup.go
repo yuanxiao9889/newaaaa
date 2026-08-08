@@ -51,8 +51,8 @@ var (
 )
 
 const (
-	affiliateTopUpRewardRate  = 0.05
-	affiliateTopUpRewardLimit = 3
+	affiliateTopUpRewardRate  = 0.10
+	affiliateTopUpRewardLimit = 5
 )
 
 func (topUp *TopUp) Insert() error {
@@ -92,10 +92,13 @@ func grantAffiliateTopUpRewardTx(tx *gorm.DB, topUp *TopUp) error {
 		return nil
 	}
 
-	rewardQuota := int(decimal.NewFromFloat(topUp.Money).
+	rewardQuota, quotaClamp := common.QuotaFromDecimalChecked(decimal.NewFromFloat(topUp.Money).
 		Mul(decimal.NewFromFloat(affiliateTopUpRewardRate)).
 		Mul(decimal.NewFromFloat(common.QuotaPerUnit)).
-		IntPart())
+		Truncate(0))
+	if quotaClamp != nil {
+		return quotaClamp
+	}
 	if rewardQuota <= 0 {
 		return nil
 	}
