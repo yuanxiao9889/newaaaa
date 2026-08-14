@@ -24,7 +24,13 @@ import {
   CHANNEL_TYPE_OPTIONS,
   MODEL_FETCHABLE_TYPES,
 } from '../../constants'
-import { CHANNEL_FORM_DEFAULT_VALUES, channelFormSchema } from '../channel-form'
+import type { Channel } from '../../types'
+import {
+  buildSettingJSON,
+  CHANNEL_FORM_DEFAULT_VALUES,
+  channelFormSchema,
+  transformChannelToFormDefaults,
+} from '../channel-form'
 import { getChannelTypeConfig } from '../channel-type-config'
 import { getChannelTypeIcon, getKeyPromptForType } from '../channel-utils'
 
@@ -62,6 +68,45 @@ describe('New API channel', () => {
       'Enter API key for this channel'
     )
     assert.equal(getChannelTypeConfig(CHANNEL_TYPE_NEW_API).icon, 'NewAPI')
+  })
+
+  test('defaults multi-image references to disabled', () => {
+    assert.equal(
+      CHANNEL_FORM_DEFAULT_VALUES.multi_image_reference_enabled,
+      false
+    )
+  })
+
+  test('serializes and restores the multi-image reference setting', () => {
+    const setting = buildSettingJSON({
+      ...newAPIForm('https://new-api.example'),
+      multi_image_reference_enabled: true,
+    })
+    assert.equal(JSON.parse(setting).multi_image_reference_enabled, true)
+
+    const channel = {
+      id: 109,
+      type: CHANNEL_TYPE_NEW_API,
+      key: '',
+      status: 1,
+      name: 'New API upstream',
+      created_time: 0,
+      test_time: 0,
+      response_time: 0,
+      balance_updated_time: 0,
+      setting,
+      channel_info: {
+        is_multi_key: false,
+        multi_key_size: 0,
+        multi_key_polling_index: 0,
+        multi_key_mode: 'random',
+      },
+    } as Channel
+
+    assert.equal(
+      transformChannelToFormDefaults(channel).multi_image_reference_enabled,
+      true
+    )
   })
 
   test('requires a non-blank Base URL', () => {

@@ -17,6 +17,16 @@ var (
 		"flux-",
 		"flux.1-",
 	}
+	OopiiImageGenerationModels = map[string]struct{}{
+		"all-image-2":            {},
+		"all-image-2-dd":         {},
+		"all-image-2-h":          {},
+		"gpt-image-2":            {},
+		"grok-imagine-image-pro": {},
+		"grok-imagine-image-2.0": {},
+		"monkey-image-pro":       {},
+		"monkey-image-flash 2":   {},
+	}
 	OpenAITextModels = []string{
 		"gpt-",
 		"o1",
@@ -36,7 +46,10 @@ func IsOpenAIResponseOnlyModel(modelName string) bool {
 }
 
 func IsImageGenerationModel(modelName string) bool {
-	modelName = strings.ToLower(modelName)
+	modelName = strings.ToLower(strings.TrimSpace(modelName))
+	if _, ok := OopiiImageGenerationModels[modelName]; ok {
+		return true
+	}
 	for _, m := range ImageGenerationModels {
 		if strings.Contains(modelName, m) {
 			return true

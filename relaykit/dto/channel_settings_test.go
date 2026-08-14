@@ -578,3 +578,18 @@ func TestChannelSettingsValidateHTTPTransport(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "http2_connection_shards")
 }
+
+func TestChannelSettingsMultiImageReferenceJSONContract(t *testing.T) {
+	enabled := ChannelSettings{MultiImageReferenceEnabled: true}
+	encoded, err := json.Marshal(enabled)
+	require.NoError(t, err)
+	assert.Contains(t, string(encoded), `"multi_image_reference_enabled":true`)
+
+	var decoded ChannelSettings
+	require.NoError(t, json.Unmarshal(encoded, &decoded))
+	assert.True(t, decoded.MultiImageReferenceEnabled)
+
+	encoded, err = json.Marshal(ChannelSettings{})
+	require.NoError(t, err)
+	assert.NotContains(t, string(encoded), "multi_image_reference_enabled")
+}

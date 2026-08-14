@@ -1,4 +1,4 @@
-﻿/*
+/*
 Copyright (C) 2023-2026 QuantumNous
 
 This program is free software: you can redistribute it and/or modify
@@ -32,75 +32,133 @@ import {
   Upload,
   Workflow,
   X,
-} from "lucide-react";
-import { useMemo, useState } from "react";
-import { useTranslation } from "react-i18next";
+} from 'lucide-react'
+import { useMemo, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 
-import { PublicLayout } from "@/components/layout";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area";
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { useStatus } from "@/hooks/use-status";
-import { cn } from "@/lib/utils";
+import { PublicLayout } from '@/components/layout'
+import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import { ScrollArea, ScrollBar } from '@/components/ui/scroll-area'
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { useStatus } from '@/hooks/use-status'
+import { cn } from '@/lib/utils'
 
-import { CodeExample, type CodeSamples } from "./code-example";
-import { type ImageModelDoc, imageModels, sizeRows } from "./data";
-import { MidjourneyDocs } from "./midjourney-docs";
-import { midjourneyNavItems } from "./midjourney-data";
+import { CodeExample, type CodeSamples } from './code-example'
+import {
+  type ImageModelDoc,
+  imageModels,
+  oopiiModelGroups,
+  sizeRows,
+} from './data'
+import { midjourneyNavItems } from './midjourney-data'
+import { MidjourneyDocs } from './midjourney-docs'
 
-type ModelOperation = "generate" | "edit";
+type ModelOperation = 'generate' | 'edit'
+
+const oopiiReferenceItems = [
+  ['oopii-model-catalog', 'Current upstream model list'],
+  ['text-api', 'Text and multimodal API routes'],
+  ['video-api', 'Video task API'],
+] as const
 
 const referenceItems = [
-  ["models-api", "Query available models"],
-  ["async-images", "Asynchronous image tasks"],
-  ["image-compression", "Image compression and upload"],
-  ["size-mapping", "Size mapping"],
-  ["response-format", "Response format"],
-  ["errors", "Errors and status codes"],
-] as const;
+  ['models-api', 'Query available models'],
+  ['async-images', 'Asynchronous image tasks'],
+  ['image-compression', 'Image compression and upload'],
+  ['size-mapping', 'Size mapping'],
+  ['response-format', 'Response format'],
+  ['errors', 'Errors and status codes'],
+] as const
+
+const textApiRoutes = [
+  {
+    name: 'OpenAI-compatible chat',
+    method: 'POST',
+    path: '/v1/chat/completions',
+    models:
+      'gpt-5.4, gpt-5.5, gpt-5.6-sol, gpt-5.6-terra, gpt-5.6-luna, Claude and Gemini OpenAI-compatible routes',
+  },
+  {
+    name: 'OpenAI Responses',
+    method: 'POST',
+    path: '/v1/responses',
+    models: 'gpt-5.4, gpt-5.5, gpt-5.6-sol, gpt-5.6-terra, gpt-5.6-luna',
+  },
+  {
+    name: 'Anthropic Messages',
+    method: 'POST',
+    path: '/v1/messages',
+    models:
+      'claude-fable-5, claude-opus-4-6, claude-opus-4-7, claude-opus-4-8, claude-sonnet-5',
+  },
+  {
+    name: 'Gemini generateContent',
+    method: 'POST',
+    path: '/v1beta/models/{model}:generateContent',
+    models:
+      'gemini-3.1-pro-preview, gemini-3.1-pro-preview-c, gemini-3.5-flash, gemini-3.5-flash-c',
+  },
+] as const
+
+const videoModelRows = [
+  [
+    'MiniMax-H3',
+    '5-15',
+    '21:9, 16:9, 4:3, 1:1, 3:4, 9:16',
+    '1440P',
+    'Up to 5 images and up to 3 reference audio URLs; no reference video. Prompt limit: 2,000 Unicode characters.',
+  ],
+  [
+    'MiniMax-H3-C',
+    '10, 15',
+    '21:9, 16:9, 4:3, 1:1, 3:4, 9:16',
+    '2k',
+    'firstFrame requires 1 image; reference requires 2-5 images. No reference audio or video. Upstream model: MiniMax H3.',
+  ],
+  [
+    'ok-video-1.5-preview',
+    '10, 15',
+    '16:9, 9:16',
+    '720p',
+    'A reference image is required; reference video and audio are not supported.',
+  ],
+  [
+    'ok-imagine-video',
+    '10, 16, 20',
+    '16:9, 9:16, 1:1',
+    '480p, 720p, 1080p',
+    'textToVideo accepts no image; firstFrame requires 1 image; reference accepts one or more images.',
+  ],
+] as const
 
 function resolveBaseUrl(status: unknown) {
-  const source = status as Record<string, unknown> | null;
-  const nested = source?.data as Record<string, unknown> | undefined;
+  const source = status as Record<string, unknown> | null
+  const nested = source?.data as Record<string, unknown> | undefined
   const candidate =
     source?.server_address ??
     source?.serverAddress ??
     nested?.server_address ??
-    nested?.serverAddress;
+    nested?.serverAddress
 
-  if (typeof candidate === "string" && candidate.trim()) {
-    return candidate.trim().replace(/\/+$/, "");
+  if (typeof candidate === 'string' && candidate.trim()) {
+    return candidate.trim().replace(/\/+$/, '')
   }
-  if (typeof window !== "undefined") return window.location.origin;
-  return "https://api.example.com";
+  if (typeof window !== 'undefined') return window.location.origin
+  return 'https://api.example.com'
 }
 
 function endpointFor(model: ImageModelDoc) {
-  if (model.family === "openai") return "/v1/images/generations";
-  return `/v1beta/models/${encodeURIComponent(model.model)}:generateContent`;
+  if (model.family === 'openai') return '/v1/images/generations'
+  return `/v1beta/models/${encodeURIComponent(model.model)}:generateContent`
 }
 
 function buildOpenAISamples(
   model: ImageModelDoc,
   baseUrl: string,
-  operation: ModelOperation,
+  operation: ModelOperation
 ): CodeSamples {
-  const usesAspectRatio = model.model !== "gpt-image-2";
-  const aspectRatioJson = usesAspectRatio
-    ? ',\n    "aspect_ratio": "16:9"'
-    : "";
-  const aspectRatioForm = usesAspectRatio
-    ? " \\\n  -F 'aspect_ratio=16:9'"
-    : "";
-  const aspectRatioPython = usesAspectRatio
-    ? ',\n        "aspect_ratio": "16:9",'
-    : "";
-  const aspectRatioJs = usesAspectRatio
-    ? "\nform.append('aspect_ratio', '16:9')"
-    : "";
-
-  if (operation === "edit") {
+  if (operation === 'edit') {
     return {
       curl: `curl '${baseUrl}/v1/images/edits' \\
   -H 'Authorization: Bearer $NEW_API_KEY' \\
@@ -109,94 +167,97 @@ function buildOpenAISamples(
   -F 'n=1' \\
   -F 'image[]=@reference-1.png' \\
   -F 'image[]=@reference-2.png' \\
-  -F 'size=2048x1152'${aspectRatioForm} \\
+  -F 'size=2048x1152' \\
   -F 'quality=medium'`,
-      python: `import os\n\nimport requests\n\nwith open("reference-1.png", "rb") as first, open("reference-2.png", "rb") as second:\n    response = requests.post(\n        "${baseUrl}/v1/images/edits",\n        headers={"Authorization": f"Bearer {os.environ['NEW_API_KEY']}"},\n        data={\n            "model": "${model.model}",\n            "prompt": "Keep the character identity and change the scene to sunrise",\n            "n": "1",\n            "size": "2048x1152",${aspectRatioPython}\n            "quality": "medium",\n        },\n        files=[\n            ("image[]", ("reference-1.png", first, "image/png")),\n            ("image[]", ("reference-2.png", second, "image/png")),\n        ],\n        timeout=180,\n    )\n\nresponse.raise_for_status()\nprint(response.json())`,
-      javascript: `import { readFile } from 'node:fs/promises'\n\nconst form = new FormData()\nform.append('model', '${model.model}')\nform.append('prompt', 'Keep the character identity and change the scene to sunrise')\nform.append('n', '1')\nform.append('size', '2048x1152')${aspectRatioJs}\nform.append('quality', 'medium')\nform.append('image[]', new Blob([await readFile('reference-1.png')], { type: 'image/png' }), 'reference-1.png')\nform.append('image[]', new Blob([await readFile('reference-2.png')], { type: 'image/png' }), 'reference-2.png')\n\nconst response = await fetch('${baseUrl}/v1/images/edits', {\n  method: 'POST',\n  headers: { Authorization: \`Bearer \${process.env.NEW_API_KEY}\` },\n  body: form,\n})\n\nif (!response.ok) throw new Error(await response.text())\nconsole.log(await response.json())`,
-    };
+      python: `import os\n\nimport requests\n\nwith open("reference-1.png", "rb") as first, open("reference-2.png", "rb") as second:\n    response = requests.post(\n        "${baseUrl}/v1/images/edits",\n        headers={"Authorization": f"Bearer {os.environ['NEW_API_KEY']}"},\n        data={\n            "model": "${model.model}",\n            "prompt": "Keep the character identity and change the scene to sunrise",\n            "n": "1",\n            "size": "2048x1152",\n            "quality": "medium",\n        },\n        files=[\n            ("image[]", ("reference-1.png", first, "image/png")),\n            ("image[]", ("reference-2.png", second, "image/png")),\n        ],\n        timeout=180,\n    )\n\nresponse.raise_for_status()\nprint(response.json())`,
+      javascript: `import { readFile } from 'node:fs/promises'\n\nconst form = new FormData()\nform.append('model', '${model.model}')\nform.append('prompt', 'Keep the character identity and change the scene to sunrise')\nform.append('n', '1')\nform.append('size', '2048x1152')\nform.append('quality', 'medium')\nform.append('image[]', new Blob([await readFile('reference-1.png')], { type: 'image/png' }), 'reference-1.png')\nform.append('image[]', new Blob([await readFile('reference-2.png')], { type: 'image/png' }), 'reference-2.png')\n\nconst response = await fetch('${baseUrl}/v1/images/edits', {\n  method: 'POST',\n  headers: { Authorization: \`Bearer \${process.env.NEW_API_KEY}\` },\n  body: form,\n})\n\nif (!response.ok) throw new Error(await response.text())\nconsole.log(await response.json())`,
+    }
   }
 
   return {
     curl: `curl '${baseUrl}/v1/images/generations' \\
   -H 'Authorization: Bearer $NEW_API_KEY' \\
   -H 'Content-Type: application/json' \\
-  -d '{\n    "model": "${model.model}",\n    "prompt": "Cinematic storyboard frame of a detective in a rainy neon alley",\n    "n": 1,\n    "size": "2048x1152"${aspectRatioJson},\n    "quality": "medium"\n  }'`,
-    python: `import os\n\nimport requests\n\npayload = {\n    "model": "${model.model}",\n    "prompt": "Cinematic storyboard frame of a detective in a rainy neon alley",\n    "n": 1,\n    "size": "2048x1152",${aspectRatioPython}\n    "quality": "medium",\n}\nresponse = requests.post(\n    "${baseUrl}/v1/images/generations",\n    headers={"Authorization": f"Bearer {os.environ['NEW_API_KEY']}"},\n    json=payload,\n    timeout=180,\n)\nresponse.raise_for_status()\nprint(response.json())`,
-    javascript: `const response = await fetch('${baseUrl}/v1/images/generations', {\n  method: 'POST',\n  headers: {\n    Authorization: \`Bearer \${process.env.NEW_API_KEY}\`,\n    'Content-Type': 'application/json',\n  },\n  body: JSON.stringify({\n    model: '${model.model}',\n    prompt: 'Cinematic storyboard frame of a detective in a rainy neon alley',\n    n: 1,\n    size: '2048x1152',${usesAspectRatio ? "\n    aspect_ratio: '16:9'," : ""}\n    quality: 'medium',\n  }),\n})\n\nif (!response.ok) throw new Error(await response.text())\nconsole.log(await response.json())`,
-  };
+  -d '{\n    "model": "${model.model}",\n    "prompt": "Cinematic storyboard frame of a detective in a rainy neon alley",\n    "n": 1,\n    "size": "2048x1152",\n    "quality": "medium"\n  }'`,
+    python: `import os\n\nimport requests\n\npayload = {\n    "model": "${model.model}",\n    "prompt": "Cinematic storyboard frame of a detective in a rainy neon alley",\n    "n": 1,\n    "size": "2048x1152",\n    "quality": "medium",\n}\nresponse = requests.post(\n    "${baseUrl}/v1/images/generations",\n    headers={"Authorization": f"Bearer {os.environ['NEW_API_KEY']}"},\n    json=payload,\n    timeout=180,\n)\nresponse.raise_for_status()\nprint(response.json())`,
+    javascript: `const response = await fetch('${baseUrl}/v1/images/generations', {\n  method: 'POST',\n  headers: {\n    Authorization: \`Bearer \${process.env.NEW_API_KEY}\`,\n    'Content-Type': 'application/json',\n  },\n  body: JSON.stringify({\n    model: '${model.model}',\n    prompt: 'Cinematic storyboard frame of a detective in a rainy neon alley',\n    n: 1,\n    size: '2048x1152',\n    quality: 'medium',\n  }),\n})\n\nif (!response.ok) throw new Error(await response.text())\nconsole.log(await response.json())`,
+  }
 }
 
 function buildGrokSamples(
+  model: ImageModelDoc,
   baseUrl: string,
-  operation: ModelOperation,
+  operation: ModelOperation
 ): CodeSamples {
+  const isGrokImage2 = model.model === 'grok-imagine-image-2.0'
+  const requestPath =
+    operation === 'edit'
+      ? '/v1/images/generations'
+      : '/v1/images/generations?async=true'
   const prompt =
-    operation === "edit"
-      ? "Keep the character identity and change the scene to sunrise \u6bd4\u4f8b16:9"
-      : "Cinematic storyboard frame of a detective in a rainy neon alley \u6bd4\u4f8b16:9";
-  const requestSize = operation === "edit" ? "16:9" : "1280x720";
+    operation === 'edit'
+      ? 'Keep the character identity and change the scene to sunrise'
+      : 'Cinematic storyboard frame of a detective in a rainy neon alley'
+  const qualityJson = isGrokImage2 ? ',\n    "quality": "medium"' : ''
+  const qualityPython = isGrokImage2 ? '\n    "quality": "medium",' : ''
+  const qualityJavaScript = isGrokImage2 ? "\n    quality: 'medium'," : ''
   const referenceJson =
-    operation === "edit"
-      ? ',\n    "reference_images": ["data:image/png;base64,BASE64_REFERENCE_IMAGE"],\n    "output_resolution": "1K",\n    "resolution": "1K",\n    "image_size": "1K",\n    "aspectRatio": "16:9",\n    "generationConfig": {\n      "imageConfig": {\n        "imageSize": "1K",\n        "aspectRatio": "16:9",\n        "size": "16:9"\n      }\n    }'
-      : "";
+    operation === 'edit'
+      ? ',\n    "image": {\n      "url": "data:image/png;base64,BASE64_REFERENCE_IMAGE"\n    }'
+      : ''
   const pythonReference =
-    operation === "edit"
+    operation === 'edit'
       ? `\nimport base64\n\nwith open("reference.png", "rb") as file:\n    reference = "data:image/png;base64," + base64.b64encode(file.read()).decode("ascii")\n`
-      : "";
-  const pythonFields =
-    operation === "edit"
-      ? `\n    "reference_images": [reference],\n    "output_resolution": "1K",\n    "resolution": "1K",\n    "image_size": "1K",\n    "aspectRatio": "16:9",\n    "generationConfig": {\n        "imageConfig": {\n            "imageSize": "1K",\n            "aspectRatio": "16:9",\n            "size": "16:9",\n        }\n    },`
-      : "";
+      : ''
+  const pythonImage =
+    operation === 'edit' ? '\n    "image": {"url": reference},' : ''
   const jsReference =
-    operation === "edit"
+    operation === 'edit'
       ? `import { readFile } from 'node:fs/promises'\n\nconst reference = 'data:image/png;base64,' + (await readFile('reference.png')).toString('base64')\n\n`
-      : "";
-  const jsFields =
-    operation === "edit"
-      ? `\n    reference_images: [reference],\n    output_resolution: '1K',\n    resolution: '1K',\n    image_size: '1K',\n    aspectRatio: '16:9',\n    generationConfig: {\n      imageConfig: { imageSize: '1K', aspectRatio: '16:9', size: '16:9' },\n    },`
-      : "";
+      : ''
+  const jsImage = operation === 'edit' ? '\n    image: { url: reference },' : ''
 
   return {
-    curl: `curl '${baseUrl}/v1/images/generations?async=true' \\
+    curl: `curl '${baseUrl}${requestPath}' \\
   -H 'Authorization: Bearer $NEW_API_KEY' \\
   -H 'Content-Type: application/json' \\
-  -d '{\n    "model": "grok-imagine-image-pro",\n    "prompt": "${prompt}",\n    "n": 1,\n    "response_format": "b64_json",\n    "size": "${requestSize}",\n    "aspect_ratio": "16:9"${referenceJson}\n  }'`,
-    python: `import os\n\nimport requests\n${pythonReference}\npayload = {\n    "model": "grok-imagine-image-pro",\n    "prompt": "${prompt}",\n    "n": 1,\n    "response_format": "b64_json",\n    "size": "${requestSize}",\n    "aspect_ratio": "16:9",${pythonFields}\n}\nresponse = requests.post(\n    "${baseUrl}/v1/images/generations?async=true",\n    headers={"Authorization": f"Bearer {os.environ['NEW_API_KEY']}"},\n    json=payload,\n    timeout=180,\n)\nresponse.raise_for_status()\nprint(response.json())`,
-    javascript: `${jsReference}const response = await fetch('${baseUrl}/v1/images/generations?async=true', {\n  method: 'POST',\n  headers: {\n    Authorization: \`Bearer \${process.env.NEW_API_KEY}\`,\n    'Content-Type': 'application/json',\n  },\n  body: JSON.stringify({\n    model: 'grok-imagine-image-pro',\n    prompt: '${prompt}',\n    n: 1,\n    response_format: 'b64_json',\n    size: '${requestSize}',\n    aspect_ratio: '16:9',${jsFields}\n  }),\n})\n\nif (!response.ok) throw new Error(await response.text())\nconsole.log(await response.json())`,
-  };
+  -d '{\n    "model": "${model.model}",\n    "prompt": "${prompt}",\n    "n": 1,\n    "response_format": "b64_json",\n    "resolution": "2k",\n    "aspect_ratio": "16:9"${qualityJson}${referenceJson}\n  }'`,
+    python: `import os\n\nimport requests\n${pythonReference}\npayload = {\n    "model": "${model.model}",\n    "prompt": "${prompt}",\n    "n": 1,\n    "response_format": "b64_json",\n    "resolution": "2k",\n    "aspect_ratio": "16:9",${qualityPython}${pythonImage}\n}\nresponse = requests.post(\n    "${baseUrl}${requestPath}",\n    headers={"Authorization": f"Bearer {os.environ['NEW_API_KEY']}"},\n    json=payload,\n    timeout=180,\n)\nresponse.raise_for_status()\nprint(response.json())`,
+    javascript: `${jsReference}const response = await fetch('${baseUrl}${requestPath}', {\n  method: 'POST',\n  headers: {\n    Authorization: \`Bearer \${process.env.NEW_API_KEY}\`,\n    'Content-Type': 'application/json',\n  },\n  body: JSON.stringify({\n    model: '${model.model}',\n    prompt: '${prompt}',\n    n: 1,\n    response_format: 'b64_json',\n    resolution: '2k',\n    aspect_ratio: '16:9',${qualityJavaScript}${jsImage}\n  }),\n})\n\nif (!response.ok) throw new Error(await response.text())\nconsole.log(await response.json())`,
+  }
 }
 
 function buildGeminiSamples(
   model: ImageModelDoc,
   baseUrl: string,
-  operation: ModelOperation,
+  operation: ModelOperation
 ): CodeSamples {
-  const url = `${baseUrl}${endpointFor(model)}`;
+  const url = `${baseUrl}${endpointFor(model)}`
   const referencePart =
-    operation === "edit"
+    operation === 'edit'
       ? ',\n          {\n            "inlineData": {\n              "mimeType": "image/png",\n              "data": "BASE64_REFERENCE_IMAGE"\n            }\n          }'
-      : "";
+      : ''
   const pythonReference =
-    operation === "edit"
+    operation === 'edit'
       ? `\nimport base64\n\nwith open("reference.png", "rb") as file:\n    reference = base64.b64encode(file.read()).decode("utf-8")\n`
-      : "";
+      : ''
   const pythonPart =
-    operation === "edit"
+    operation === 'edit'
       ? `,\n                    {\n                        "inlineData": {\n                            "mimeType": "image/png",\n                            "data": reference,\n                        }\n                    }`
-      : "";
+      : ''
   const jsReference =
-    operation === "edit"
+    operation === 'edit'
       ? `import { readFile } from 'node:fs/promises'\n\nconst reference = (await readFile('reference.png')).toString('base64')\n\n`
-      : "";
+      : ''
   const jsPart =
-    operation === "edit"
+    operation === 'edit'
       ? `,\n          {\n            inlineData: { mimeType: 'image/png', data: reference },\n          }`
-      : "";
+      : ''
   const basePrompt =
-    operation === "edit"
-      ? "Keep the character identity and change the scene to sunrise"
-      : "Cinematic storyboard frame of a detective in a rainy neon alley";
-  const prompt = `${basePrompt} [size: 2K, aspect ratio: 16:9]`;
+    operation === 'edit'
+      ? 'Keep the character identity and change the scene to sunrise'
+      : 'Cinematic storyboard frame of a detective in a rainy neon alley'
+  const prompt = `${basePrompt} [size: 2K, aspect ratio: 16:9]`
 
   return {
     curl: `curl '${url}' \\
@@ -205,7 +266,7 @@ function buildGeminiSamples(
   -d '{\n    "contents": [{\n      "role": "user",\n      "parts": [\n        { "text": "${prompt}" }${referencePart}\n      ]\n    }],\n    "generationConfig": {\n      "topP": 0.95,\n      "responseModalities": ["IMAGE"],\n      "imageConfig": {\n        "aspectRatio": "16:9",\n        "imageSize": "2K"\n      }\n    }\n  }'`,
     python: `import os\n\nimport requests\n${pythonReference}\npayload = {\n    "contents": [\n        {\n            "role": "user",\n            "parts": [\n                {"text": "${prompt}"}${pythonPart}\n            ],\n        }\n    ],\n    "generationConfig": {\n        "topP": 0.95,\n        "responseModalities": ["IMAGE"],\n        "imageConfig": {"aspectRatio": "16:9", "imageSize": "2K"},\n    },\n}\n\nresponse = requests.post(\n    "${url}",\n    headers={"Authorization": f"Bearer {os.environ['NEW_API_KEY']}"},\n    json=payload,\n    timeout=180,\n)\nresponse.raise_for_status()\nimage_base64 = response.json()["candidates"][0]["content"]["parts"][0]["inlineData"]["data"]`,
     javascript: `${jsReference}const response = await fetch('${url}', {\n  method: 'POST',\n  headers: {\n    Authorization: \`Bearer \${process.env.NEW_API_KEY}\`,\n    'Content-Type': 'application/json',\n  },\n  body: JSON.stringify({\n    contents: [{\n      role: 'user',\n      parts: [\n        { text: '${prompt}' }${jsPart}\n      ],\n    }],\n    generationConfig: {\n      topP: 0.95,\n      responseModalities: ['IMAGE'],\n      imageConfig: { aspectRatio: '16:9', imageSize: '2K' },\n    },\n  }),\n})\n\nif (!response.ok) throw new Error(await response.text())\nconst result = await response.json()\nconst imageBase64 = result.candidates[0].content.parts[0].inlineData.data`,
-  };
+  }
 }
 
 function buildAsyncImageSamples(baseUrl: string): CodeSamples {
@@ -221,7 +282,6 @@ submit=$(curl -sS '${baseUrl}/v1/images/generations?async=true' \\
     "prompt": "Cinematic storyboard frame at sunrise",
     "n": 1,
     "size": "2048x1152",
-    "aspect_ratio": "16:9",
     "quality": "medium"
   }')
 
@@ -272,7 +332,6 @@ submit = requests.post(
         "prompt": "Cinematic storyboard frame at sunrise",
         "n": 1,
         "size": "2048x1152",
-        "aspect_ratio": "16:9",
         "quality": "medium",
     },
     timeout=60,
@@ -332,7 +391,6 @@ const submitResponse = await fetch(
       prompt: 'Cinematic storyboard frame at sunrise',
       n: 1,
       size: '2048x1152',
-      aspect_ratio: '16:9',
       quality: 'medium',
     }),
   },
@@ -372,7 +430,110 @@ while (Date.now() < deadline) {
 }
 
 if (Date.now() >= deadline) throw new Error('Task polling timed out')`,
-  };
+  }
+}
+
+function buildVideoSamples(baseUrl: string): CodeSamples {
+  const curl = [
+    `curl '${baseUrl}/v1/videos' \\`,
+    "  -H 'Authorization: Bearer $NEW_API_KEY' \\",
+    "  -H 'Content-Type: application/json' \\",
+    "  -d '{",
+    '    "model": "MiniMax-H3",',
+    '    "prompt": "A cinematic aerial shot crossing a misty mountain ridge at sunrise",',
+    '    "duration": 10,',
+    '    "aspect_ratio": "16:9",',
+    '    "resolution": "1440P"',
+    "  }'",
+    '',
+    `curl '${baseUrl}/v1/videos/{task_id}' \\`,
+    "  -H 'Authorization: Bearer $NEW_API_KEY'",
+    '',
+    `curl '${baseUrl}/v1/videos/{task_id}/content' \\`,
+    "  -H 'Authorization: Bearer $NEW_API_KEY' \\",
+    '  --output result.mp4',
+  ].join('\n')
+
+  return {
+    curl,
+    python: `import os
+import time
+from pathlib import Path
+
+import requests
+
+base_url = "${baseUrl}"
+headers = {"Authorization": f"Bearer {os.environ['NEW_API_KEY']}"}
+response = requests.post(
+    f"{base_url}/v1/videos",
+    headers=headers,
+    json={
+        "model": "MiniMax-H3",
+        "prompt": "A cinematic aerial shot crossing a misty mountain ridge at sunrise",
+        "duration": 10,
+        "aspect_ratio": "16:9",
+        "resolution": "1440P",
+    },
+    timeout=120,
+)
+response.raise_for_status()
+task_id = response.json().get("task_id") or response.json()["id"]
+
+while True:
+    task = requests.get(f"{base_url}/v1/videos/{task_id}", headers=headers, timeout=30)
+    task.raise_for_status()
+    status = task.json().get("status", "").lower()
+    if status in {"completed", "succeeded", "success", "done"}:
+        content = requests.get(
+            f"{base_url}/v1/videos/{task_id}/content",
+            headers=headers,
+            timeout=300,
+        )
+        content.raise_for_status()
+        Path("result.mp4").write_bytes(content.content)
+        break
+    if status in {"failed", "error", "cancelled", "expired"}:
+        raise RuntimeError(task.text)
+    time.sleep(5)`,
+    javascript: `import { writeFile } from 'node:fs/promises'
+
+const baseURL = '${baseUrl}'
+const headers = {
+  Authorization: \`Bearer \${process.env.NEW_API_KEY}\`,
+  'Content-Type': 'application/json',
+}
+const submitted = await fetch(\`\${baseURL}/v1/videos\`, {
+  method: 'POST',
+  headers,
+  body: JSON.stringify({
+    model: 'MiniMax-H3',
+    prompt: 'A cinematic aerial shot crossing a misty mountain ridge at sunrise',
+    duration: 10,
+    aspect_ratio: '16:9',
+    resolution: '1440P',
+  }),
+})
+if (!submitted.ok) throw new Error(await submitted.text())
+const body = await submitted.json()
+const taskId = body.task_id ?? body.id
+
+while (true) {
+  const response = await fetch(\`\${baseURL}/v1/videos/\${taskId}\`, { headers })
+  if (!response.ok) throw new Error(await response.text())
+  const task = await response.json()
+  const status = String(task.status ?? '').toLowerCase()
+  if (['completed', 'succeeded', 'success', 'done'].includes(status)) {
+    const content = await fetch(\`\${baseURL}/v1/videos/\${taskId}/content\`, { headers })
+    if (!content.ok) throw new Error(await content.text())
+    await writeFile('result.mp4', Buffer.from(await content.arrayBuffer()))
+    break
+  }
+  if (['failed', 'error', 'cancelled', 'expired'].includes(status)) {
+    throw new Error(JSON.stringify(task))
+  }
+  await new Promise((resolve) => setTimeout(resolve, 5000))
+}`,
+  }
 }
 
 function buildCompressionSamples(): CodeSamples {
@@ -392,7 +553,7 @@ curl '$NEW_API_BASE/v1/images/edits' \\
   -F 'prompt=Keep the character identity' \\
   -F 'image[]=@reference-compressed.jpg;type=image/jpeg' \\
   -F 'size=2048x1152' \\
-  -F 'aspect_ratio=16:9'`,
+  -F 'quality=medium'`,
     python: `from io import BytesIO
 from pathlib import Path
 
@@ -430,7 +591,7 @@ await sharp('reference.png')
   })
   .jpeg({ quality: 85, progressive: true })
   .toFile('reference-compressed.jpg')`,
-  };
+  }
 }
 
 function SectionHeading({
@@ -439,146 +600,151 @@ function SectionHeading({
   title,
   description,
 }: {
-  id: string;
-  eyebrow: string;
-  title: string;
-  description?: string;
+  id: string
+  eyebrow: string
+  title: string
+  description?: string
 }) {
   return (
-    <div id={id} className="scroll-mt-24 pt-4">
-      <div className="text-primary mb-2 text-xs font-semibold tracking-[0.14em] uppercase">
+    <div id={id} className='scroll-mt-24 pt-4'>
+      <div className='text-primary mb-2 text-xs font-semibold tracking-[0.14em] uppercase'>
         {eyebrow}
       </div>
-      <h2 className="text-2xl font-semibold tracking-tight sm:text-3xl">
+      <h2 className='text-2xl font-semibold tracking-tight sm:text-3xl'>
         {title}
       </h2>
       {description && (
-        <p className="text-muted-foreground mt-2 max-w-3xl text-sm leading-7">
+        <p className='text-muted-foreground mt-2 max-w-3xl text-sm leading-7'>
           {description}
         </p>
       )}
     </div>
-  );
+  )
 }
 
 function ParameterTable({ model }: { model: ImageModelDoc }) {
-  const { t } = useTranslation();
+  const { t } = useTranslation()
   return (
-    <div className="border-border/70 mt-4 overflow-hidden rounded-xl border">
-      <ScrollArea className="w-full">
-        <table className="min-w-[860px] w-full text-left text-sm">
-          <thead className="bg-muted/45 text-muted-foreground">
+    <div className='border-border/70 mt-4 overflow-hidden rounded-xl border'>
+      <ScrollArea className='w-full'>
+        <table className='w-full min-w-[860px] text-left text-sm'>
+          <thead className='bg-muted/45 text-muted-foreground'>
             <tr>
               {[
-                "Parameter",
-                "Type",
-                "Required",
-                "Allowed values",
-                "Description",
+                'Parameter',
+                'Type',
+                'Required',
+                'Allowed values',
+                'Description',
               ].map((label) => (
-                <th key={label} className="px-4 py-3 font-medium">
+                <th key={label} className='px-4 py-3 font-medium'>
                   {t(label)}
                 </th>
               ))}
             </tr>
           </thead>
-          <tbody className="divide-border divide-y">
+          <tbody className='divide-border divide-y'>
             {model.parameters.map((parameter) => (
-              <tr key={parameter.name} className="align-top">
-                <td className="px-4 py-3">
-                  <code className="text-primary">{parameter.name}</code>
+              <tr key={parameter.name} className='align-top'>
+                <td className='px-4 py-3'>
+                  <code className='text-primary'>{parameter.name}</code>
                 </td>
-                <td className="px-4 py-3">
+                <td className='px-4 py-3'>
                   <code>{parameter.type}</code>
                 </td>
-                <td className="px-4 py-3">{t(parameter.required)}</td>
-                <td className="px-4 py-3">
+                <td className='px-4 py-3'>{t(parameter.required)}</td>
+                <td className='px-4 py-3'>
                   <code>{parameter.values}</code>
                 </td>
-                <td className="text-muted-foreground max-w-sm px-4 py-3 leading-6">
+                <td className='text-muted-foreground max-w-sm px-4 py-3 leading-6'>
                   {t(parameter.description)}
                 </td>
               </tr>
             ))}
           </tbody>
         </table>
-        <ScrollBar orientation="horizontal" />
+        <ScrollBar orientation='horizontal' />
       </ScrollArea>
     </div>
-  );
+  )
 }
 
 function DocsNavigation({ onNavigate }: { onNavigate?: () => void }) {
-  const { t } = useTranslation();
+  const { t } = useTranslation()
   const groups = [
     {
-      label: "Get started",
+      label: 'Get started',
       icon: Sparkles,
       items: [
-        ["overview", "Overview"],
-        ["authentication", "Authentication"],
+        ['overview', 'Overview'],
+        ['authentication', 'Authentication'],
       ],
     },
     {
-      label: "OpenAI Images models",
+      label: 'OOpii upstream model catalog',
+      icon: FileJson,
+      items: oopiiReferenceItems,
+    },
+    {
+      label: 'OpenAI Images models',
       icon: ImageIcon,
       items: imageModels
-        .filter((model) => model.family === "openai")
+        .filter((model) => model.family === 'openai')
         .map((model) => [`model-${model.id}`, model.model]),
     },
     {
-      label: "Gemini image models",
+      label: 'Gemini image models',
       icon: Layers3,
       items: imageModels
-        .filter((model) => model.family === "gemini")
+        .filter((model) => model.family === 'gemini')
         .map((model) => [`model-${model.id}`, model.model]),
     },
     {
-      label: "Midjourney task API",
+      label: 'Midjourney task API',
       icon: Workflow,
       items: midjourneyNavItems,
     },
     {
-      label: "API reference",
+      label: 'API reference',
       icon: Code2,
       items: referenceItems,
     },
-  ];
+  ]
 
   return (
     <nav
-      className="space-y-6 px-4 py-5"
-      aria-label={t("API documentation navigation")}
+      className='space-y-6 px-4 py-5'
+      aria-label={t('API documentation navigation')}
     >
       {groups.map((group) => {
-        const Icon = group.icon;
+        const Icon = group.icon
         return (
           <div key={group.label}>
-            <div className="text-muted-foreground mb-2 flex items-center gap-2 px-2 text-[11px] font-semibold tracking-[0.12em] uppercase">
-              <Icon className="size-3.5" />
+            <div className='text-muted-foreground mb-2 flex items-center gap-2 px-2 text-[11px] font-semibold tracking-[0.12em] uppercase'>
+              <Icon className='size-3.5' />
               {t(group.label)}
             </div>
-            <div className="grid gap-0.5">
+            <div className='grid gap-0.5'>
               {group.items.map(([id, label]) => (
                 <a
                   key={id}
                   href={`#${id}`}
                   onClick={onNavigate}
                   className={cn(
-                    "text-muted-foreground hover:bg-muted hover:text-foreground flex min-w-0 items-center gap-2 rounded-lg px-2 py-2 text-sm transition-colors",
-                    id.startsWith("model-") && "font-mono text-xs",
+                    'text-muted-foreground hover:bg-muted hover:text-foreground flex min-w-0 items-center gap-2 rounded-lg px-2 py-2 text-sm transition-colors',
+                    id.startsWith('model-') && 'font-mono text-xs'
                   )}
                 >
-                  <ChevronRight className="size-3 shrink-0 opacity-50" />
-                  <span className="truncate">{t(label)}</span>
+                  <ChevronRight className='size-3 shrink-0 opacity-50' />
+                  <span className='truncate'>{t(label)}</span>
                 </a>
               ))}
             </div>
           </div>
-        );
+        )
       })}
     </nav>
-  );
+  )
 }
 
 function ModelSection({
@@ -586,75 +752,78 @@ function ModelSection({
   baseUrl,
   index,
 }: {
-  model: ImageModelDoc;
-  baseUrl: string;
-  index: number;
+  model: ImageModelDoc
+  baseUrl: string
+  index: number
 }) {
-  const { t } = useTranslation();
-  const [operation, setOperation] = useState<ModelOperation>("generate");
+  const { t } = useTranslation()
+  const [operation, setOperation] = useState<ModelOperation>('generate')
   const samples = useMemo(() => {
-    if (model.model === "grok-imagine-image-pro") {
-      return buildGrokSamples(baseUrl, operation);
+    if (model.model.startsWith('grok-imagine-image-')) {
+      return buildGrokSamples(model, baseUrl, operation)
     }
-    if (model.family === "openai") {
-      return buildOpenAISamples(model, baseUrl, operation);
+    if (model.family === 'openai') {
+      return buildOpenAISamples(model, baseUrl, operation)
     }
-    return buildGeminiSamples(model, baseUrl, operation);
-  }, [baseUrl, model, operation]);
+    return buildGeminiSamples(model, baseUrl, operation)
+  }, [baseUrl, model, operation])
   let resolutionNote = t(
-    "Use the size mapping reference below when the OpenAI-compatible route requires exact pixels.",
-  );
-  if (model.model === "gpt-image-2") {
+    'Use the size mapping reference below when the OpenAI-compatible route requires exact pixels.'
+  )
+  if (
+    model.family === 'openai' &&
+    !model.model.startsWith('grok-imagine-image-')
+  ) {
     resolutionNote = t(
-      "gpt-image-2 derives the canvas ratio from the exact pixel size. Do not send aspect_ratio.",
-    );
-  } else if (model.model === "grok-imagine-image-pro") {
+      'The canvas ratio is derived from the exact pixel size. Do not send aspect_ratio, image_backend, or response_format.'
+    )
+  } else if (model.model.startsWith('grok-imagine-image-')) {
     resolutionNote = t(
-      "This model exposes automatic resolution selection. Storyboard Copilot maps 16:9 to size=1280x720 and uses 1K compatibility aliases for reference-image requests.",
-    );
+      'Both Grok routes use resolution=1k|2k and aspect_ratio. grok-imagine-image-2.0 additionally sends quality=low|medium.'
+    )
   }
 
   return (
     <section
       id={`model-${model.id}`}
-      className="scroll-mt-20 border-border/70 border-t pt-12"
+      className='border-border/70 scroll-mt-20 border-t pt-12'
     >
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div className="min-w-0">
-          <div className="mb-3 flex flex-wrap items-center gap-2">
-            <Badge variant="secondary">{model.protocol}</Badge>
-            <span className="text-muted-foreground text-xs">
-              {t("Model reference")} {String(index + 1).padStart(2, "0")}
+      <div className='flex flex-wrap items-start justify-between gap-4'>
+        <div className='min-w-0'>
+          <div className='mb-3 flex flex-wrap items-center gap-2'>
+            <Badge variant='secondary'>{model.protocol}</Badge>
+            <span className='text-muted-foreground text-xs'>
+              {t('Model reference')} {String(index + 1).padStart(2, '0')}
             </span>
           </div>
-          <h2 className="break-all font-mono text-2xl font-semibold tracking-tight sm:text-3xl">
+          <h2 className='font-mono text-2xl font-semibold tracking-tight break-all sm:text-3xl'>
             {model.model}
           </h2>
-          <p className="text-muted-foreground mt-3 max-w-3xl text-sm leading-7">
+          <p className='text-muted-foreground mt-3 max-w-3xl text-sm leading-7'>
             {t(model.summary)}
           </p>
         </div>
-        <Badge variant="outline" className="shrink-0">
-          {model.family === "openai" ? "OpenAI Images" : "Gemini API"}
+        <Badge variant='outline' className='shrink-0'>
+          {model.family === 'openai' ? 'OpenAI Images' : 'Gemini API'}
         </Badge>
       </div>
 
-      <div className="mt-6 grid gap-4 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
-        <div className="border-border/70 bg-card rounded-xl border p-5">
-          <div className="text-sm font-semibold">{t("Recommended for")}</div>
-          <p className="text-muted-foreground mt-2 text-sm leading-6">
+      <div className='mt-6 grid gap-4 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]'>
+        <div className='border-border/70 bg-card rounded-xl border p-5'>
+          <div className='text-sm font-semibold'>{t('Recommended for')}</div>
+          <p className='text-muted-foreground mt-2 text-sm leading-6'>
             {t(model.recommendedFor)}
           </p>
         </div>
-        <div className="border-border/70 bg-card rounded-xl border p-5">
-          <div className="text-sm font-semibold">{t("Capabilities")}</div>
-          <div className="mt-3 flex flex-wrap gap-2">
-            <Badge variant="outline">{t("Text to image")}</Badge>
+        <div className='border-border/70 bg-card rounded-xl border p-5'>
+          <div className='text-sm font-semibold'>{t('Capabilities')}</div>
+          <div className='mt-3 flex flex-wrap gap-2'>
+            <Badge variant='outline'>{t('Text to image')}</Badge>
             {model.supportsEditing && (
-              <Badge variant="outline">{t("Reference image editing")}</Badge>
+              <Badge variant='outline'>{t('Reference image editing')}</Badge>
             )}
             {model.resolutions.map((resolution) => (
-              <Badge key={resolution} variant="outline">
+              <Badge key={resolution} variant='outline'>
                 {resolution}
               </Badge>
             ))}
@@ -662,58 +831,58 @@ function ModelSection({
         </div>
       </div>
 
-      <h3 className="mt-8 text-lg font-semibold">{t("Endpoints")}</h3>
-      <div className="mt-4 grid gap-3">
+      <h3 className='mt-8 text-lg font-semibold'>{t('Endpoints')}</h3>
+      <div className='mt-4 grid gap-3'>
         {model.endpoints.map((endpoint) => (
           <div
             key={endpoint.path}
-            className="border-border/70 bg-card grid gap-3 rounded-xl border p-4 lg:grid-cols-[70px_minmax(0,1fr)_180px] lg:items-center"
+            className='border-border/70 bg-card grid gap-3 rounded-xl border p-4 lg:grid-cols-[70px_minmax(0,1fr)_180px] lg:items-center'
           >
-            <Badge className="w-fit bg-emerald-600 text-white hover:bg-emerald-600">
+            <Badge className='w-fit bg-emerald-600 text-white hover:bg-emerald-600'>
               {endpoint.method}
             </Badge>
-            <div className="min-w-0">
-              <code className="block overflow-x-auto text-sm">
+            <div className='min-w-0'>
+              <code className='block overflow-x-auto text-sm'>
                 {endpoint.path.replace(
-                  "{model}",
-                  encodeURIComponent(model.model),
+                  '{model}',
+                  encodeURIComponent(model.model)
                 )}
               </code>
-              <p className="text-muted-foreground mt-1 text-xs leading-5">
+              <p className='text-muted-foreground mt-1 text-xs leading-5'>
                 {t(endpoint.purpose)}
               </p>
             </div>
-            <code className="text-muted-foreground text-xs">
+            <code className='text-muted-foreground text-xs'>
               {endpoint.contentType}
             </code>
           </div>
         ))}
       </div>
 
-      <h3 className="mt-8 text-lg font-semibold">{t("Request parameters")}</h3>
+      <h3 className='mt-8 text-lg font-semibold'>{t('Request parameters')}</h3>
       <ParameterTable model={model} />
 
-      <div className="border-primary/20 bg-primary/5 mt-5 rounded-xl border p-4">
-        <div className="text-sm font-semibold">
-          {t("Verified request behavior")}
+      <div className='border-primary/20 bg-primary/5 mt-5 rounded-xl border p-4'>
+        <div className='text-sm font-semibold'>
+          {t('Verified request behavior')}
         </div>
-        <ul className="text-muted-foreground mt-2 space-y-2 pl-5 text-sm leading-6 list-disc">
+        <ul className='text-muted-foreground mt-2 list-disc space-y-2 pl-5 text-sm leading-6'>
           {model.requestNotes.map((note) => (
             <li key={note}>{t(note)}</li>
           ))}
         </ul>
       </div>
 
-      <div className="mt-8 grid gap-5 lg:grid-cols-2">
+      <div className='mt-8 grid gap-5 lg:grid-cols-2'>
         <div>
-          <h3 className="text-lg font-semibold">
-            {t("Supported aspect ratios")}
+          <h3 className='text-lg font-semibold'>
+            {t('Supported aspect ratios')}
           </h3>
-          <div className="mt-3 flex flex-wrap gap-2">
+          <div className='mt-3 flex flex-wrap gap-2'>
             {model.ratios.map((ratio) => (
               <code
                 key={ratio}
-                className="bg-muted rounded-md px-2 py-1 text-xs"
+                className='bg-muted rounded-md px-2 py-1 text-xs'
               >
                 {ratio}
               </code>
@@ -721,152 +890,153 @@ function ModelSection({
           </div>
         </div>
         <div>
-          <h3 className="text-lg font-semibold">
-            {t("Supported resolutions")}
+          <h3 className='text-lg font-semibold'>
+            {t('Supported resolutions')}
           </h3>
-          <div className="mt-3 flex flex-wrap gap-2">
+          <div className='mt-3 flex flex-wrap gap-2'>
             {model.resolutions.map((resolution) => (
               <code
                 key={resolution}
-                className="bg-muted rounded-md px-2 py-1 text-xs"
+                className='bg-muted rounded-md px-2 py-1 text-xs'
               >
                 {resolution}
               </code>
             ))}
           </div>
-          <p className="text-muted-foreground mt-3 text-xs leading-5">
+          <p className='text-muted-foreground mt-3 text-xs leading-5'>
             {resolutionNote}
           </p>
         </div>
       </div>
 
-      <div className="mt-8 flex flex-wrap items-center justify-between gap-3">
-        <h3 className="text-lg font-semibold">
-          {t("Complete request examples")}
+      <div className='mt-8 flex flex-wrap items-center justify-between gap-3'>
+        <h3 className='text-lg font-semibold'>
+          {t('Complete request examples')}
         </h3>
         <Tabs
           value={operation}
           onValueChange={(value) => setOperation(value as ModelOperation)}
         >
           <TabsList>
-            <TabsTrigger value="generate">{t("Text to image")}</TabsTrigger>
-            <TabsTrigger value="edit">
-              {t("Reference image editing")}
+            <TabsTrigger value='generate'>{t('Text to image')}</TabsTrigger>
+            <TabsTrigger value='edit'>
+              {t('Reference image editing')}
             </TabsTrigger>
           </TabsList>
         </Tabs>
       </div>
-      <div className="mt-4">
+      <div className='mt-4'>
         <CodeExample
           samples={samples}
-          title={`${model.model} · ${t(operation === "generate" ? "Generate image" : "Edit image")}`}
+          title={`${model.model} ? ${t(operation === 'generate' ? 'Generate image' : 'Edit image')}`}
         />
       </div>
-      <div className="border-primary/20 bg-primary/5 mt-4 rounded-xl border px-4 py-3 text-sm">
-        <span className="font-medium">{t("Image response path")}:</span>{" "}
-        <code className="break-all">{model.responsePath}</code>
+      <div className='border-primary/20 bg-primary/5 mt-4 rounded-xl border px-4 py-3 text-sm'>
+        <span className='font-medium'>{t('Image response path')}:</span>{' '}
+        <code className='break-all'>{model.responsePath}</code>
       </div>
     </section>
-  );
+  )
 }
 
 export function ApiDocs() {
-  const { t } = useTranslation();
-  const { status } = useStatus();
-  const [mobileNavOpen, setMobileNavOpen] = useState(false);
-  const baseUrl = useMemo(() => resolveBaseUrl(status), [status]);
+  const { t } = useTranslation()
+  const { status } = useStatus()
+  const [mobileNavOpen, setMobileNavOpen] = useState(false)
+  const baseUrl = useMemo(() => resolveBaseUrl(status), [status])
   const modelSamples = useMemo<CodeSamples>(
     () => ({
       curl: `curl '${baseUrl}/v1/models' \\\n  -H 'Authorization: Bearer $NEW_API_KEY'`,
       python: `import os\n\nfrom openai import OpenAI\n\nclient = OpenAI(\n    base_url="${baseUrl}/v1",\n    api_key=os.environ["NEW_API_KEY"],\n)\n\nfor model in client.models.list().data:\n    print(model.id)`,
       javascript: `import OpenAI from 'openai'\n\nconst client = new OpenAI({\n  baseURL: '${baseUrl}/v1',\n  apiKey: process.env.NEW_API_KEY,\n})\n\nconst models = await client.models.list()\nconsole.log(models.data.map((model) => model.id))`,
     }),
-    [baseUrl],
-  );
+    [baseUrl]
+  )
   const asyncImageSamples = useMemo(
     () => buildAsyncImageSamples(baseUrl),
-    [baseUrl],
-  );
-  const compressionSamples = useMemo(() => buildCompressionSamples(), []);
+    [baseUrl]
+  )
+  const compressionSamples = useMemo(() => buildCompressionSamples(), [])
+  const videoSamples = useMemo(() => buildVideoSamples(baseUrl), [baseUrl])
 
   return (
     <PublicLayout>
-      <div className="bg-background min-h-[calc(100svh-4rem)]">
-        <div className="border-border/70 bg-background/95 sticky top-16 z-30 border-b backdrop-blur lg:hidden">
-          <div className="flex h-12 items-center justify-between px-4">
-            <div className="flex items-center gap-2 text-sm font-semibold">
-              <Code2 className="text-primary size-4" />
-              {t("Image API documentation")}
+      <div className='bg-background min-h-[calc(100svh-4rem)]'>
+        <div className='border-border/70 bg-background/95 sticky top-16 z-30 border-b backdrop-blur lg:hidden'>
+          <div className='flex h-12 items-center justify-between px-4'>
+            <div className='flex items-center gap-2 text-sm font-semibold'>
+              <Code2 className='text-primary size-4' />
+              {t('Image API documentation')}
             </div>
             <Button
-              variant="ghost"
-              size="icon-sm"
+              variant='ghost'
+              size='icon-sm'
               onClick={() => setMobileNavOpen((open) => !open)}
-              aria-label={t("Toggle documentation navigation")}
+              aria-label={t('Toggle documentation navigation')}
             >
               {mobileNavOpen ? (
-                <X className="size-4" />
+                <X className='size-4' />
               ) : (
-                <Menu className="size-4" />
+                <Menu className='size-4' />
               )}
             </Button>
           </div>
           {mobileNavOpen && (
-            <div className="bg-background border-t shadow-xl">
-              <ScrollArea className="max-h-[70svh]">
+            <div className='bg-background border-t shadow-xl'>
+              <ScrollArea className='max-h-[70svh]'>
                 <DocsNavigation onNavigate={() => setMobileNavOpen(false)} />
               </ScrollArea>
             </div>
           )}
         </div>
 
-        <div className="mx-auto grid max-w-[1600px] lg:grid-cols-[286px_minmax(0,1fr)]">
-          <aside className="border-border/70 bg-muted/10 sticky top-16 hidden h-[calc(100svh-4rem)] border-r lg:block">
-            <div className="border-border/70 flex h-16 items-center gap-3 border-b px-6">
-              <div className="bg-primary/10 text-primary grid size-9 place-items-center rounded-xl">
-                <Code2 className="size-4" />
+        <div className='mx-auto grid max-w-[1600px] lg:grid-cols-[286px_minmax(0,1fr)]'>
+          <aside className='border-border/70 bg-muted/10 sticky top-16 hidden h-[calc(100svh-4rem)] border-r lg:block'>
+            <div className='border-border/70 flex h-16 items-center gap-3 border-b px-6'>
+              <div className='bg-primary/10 text-primary grid size-9 place-items-center rounded-xl'>
+                <Code2 className='size-4' />
               </div>
               <div>
-                <div className="text-sm font-semibold">{t("Image API")}</div>
-                <div className="text-muted-foreground text-xs">
-                  OOpii · new-api
+                <div className='text-sm font-semibold'>{t('Image API')}</div>
+                <div className='text-muted-foreground text-xs'>
+                  OOpii ? new-api
                 </div>
               </div>
             </div>
-            <ScrollArea className="h-[calc(100%-4rem)]">
+            <ScrollArea className='h-[calc(100%-4rem)]'>
               <DocsNavigation />
             </ScrollArea>
           </aside>
 
-          <main className="min-w-0 px-4 py-10 sm:px-8 lg:px-10 xl:px-14">
-            <div className="mx-auto max-w-5xl">
-              <section id="overview" className="scroll-mt-24">
-                <div className="flex flex-wrap items-center gap-2">
-                  <Badge variant="secondary">OOpii</Badge>
-                  <Badge variant="outline">OpenAI Images</Badge>
-                  <Badge variant="outline">Gemini generateContent</Badge>
-                  <Badge variant="outline">Midjourney</Badge>
+          <main className='min-w-0 px-4 py-10 sm:px-8 lg:px-10 xl:px-14'>
+            <div className='mx-auto max-w-5xl'>
+              <section id='overview' className='scroll-mt-24'>
+                <div className='flex flex-wrap items-center gap-2'>
+                  <Badge variant='secondary'>OOpii</Badge>
+                  <Badge variant='outline'>OpenAI Images</Badge>
+                  <Badge variant='outline'>Gemini generateContent</Badge>
+                  <Badge variant='outline'>Midjourney</Badge>
                 </div>
-                <h1 className="mt-5 max-w-4xl text-3xl font-semibold tracking-tight sm:text-5xl">
-                  {t("Image generation API reference")}
+                <h1 className='mt-5 max-w-4xl text-3xl font-semibold tracking-tight sm:text-5xl'>
+                  {t('Image generation API reference')}
                 </h1>
-                <p className="text-muted-foreground mt-5 max-w-3xl text-base leading-8">
+                <p className='text-muted-foreground mt-5 max-w-3xl text-base leading-8'>
                   {t(
-                    "Model-level reference for the OOpii routes used by Storyboard Copilot, including endpoints, parameters, aspect ratios, resolutions, editing workflows, and production-ready examples.",
+                    'Model-level reference for the OOpii routes used by Storyboard Copilot, including endpoints, parameters, aspect ratios, resolutions, editing workflows, and production-ready examples.'
                   )}
                 </p>
-                <div className="mt-8 grid gap-4 sm:grid-cols-3">
+                <div className='mt-8 grid gap-4 sm:grid-cols-3'>
                   {[
-                    [String(imageModels.length), "Documented models"],
-                    ["3", "Compatible protocols"],
-                    ["3", "Example languages"],
+                    [String(imageModels.length), 'Documented models'],
+                    ['3', 'Compatible protocols'],
+                    ['3', 'Example languages'],
                   ].map(([value, label]) => (
                     <div
                       key={label}
-                      className="border-border/70 bg-card rounded-xl border p-5"
+                      className='border-border/70 bg-card rounded-xl border p-5'
                     >
-                      <div className="text-2xl font-semibold">{value}</div>
-                      <div className="text-muted-foreground mt-1 text-xs">
+                      <div className='text-2xl font-semibold'>{value}</div>
+                      <div className='text-muted-foreground mt-1 text-xs'>
                         {t(label)}
                       </div>
                     </div>
@@ -874,28 +1044,28 @@ export function ApiDocs() {
                 </div>
               </section>
 
-              <section className="mt-14">
+              <section className='mt-14'>
                 <SectionHeading
-                  id="authentication"
-                  eyebrow="01 · GET STARTED"
-                  title={t("Authentication")}
+                  id='authentication'
+                  eyebrow='01 ? GET STARTED'
+                  title={t('Authentication')}
                   description={t(
-                    "Send a new-api token in the Authorization header for model discovery and every image request. Keep the token on the server and never expose it in browser code.",
+                    'Send a new-api token in the Authorization header for model discovery and every image request. Keep the token on the server and never expose it in browser code.'
                   )}
                 />
-                <div className="border-border/70 bg-card mt-6 rounded-xl border p-5">
-                  <div className="flex items-start gap-3">
-                    <div className="bg-primary/10 text-primary mt-0.5 grid size-9 shrink-0 place-items-center rounded-lg">
-                      <KeyRound className="size-4" />
+                <div className='border-border/70 bg-card mt-6 rounded-xl border p-5'>
+                  <div className='flex items-start gap-3'>
+                    <div className='bg-primary/10 text-primary mt-0.5 grid size-9 shrink-0 place-items-center rounded-lg'>
+                      <KeyRound className='size-4' />
                     </div>
-                    <div className="min-w-0">
-                      <div className="font-semibold">Authorization: Bearer</div>
-                      <code className="bg-muted mt-3 block overflow-x-auto rounded-lg px-4 py-3 text-sm">
+                    <div className='min-w-0'>
+                      <div className='font-semibold'>Authorization: Bearer</div>
+                      <code className='bg-muted mt-3 block overflow-x-auto rounded-lg px-4 py-3 text-sm'>
                         Authorization: Bearer $NEW_API_KEY
                       </code>
-                      <p className="text-muted-foreground mt-3 text-sm leading-6">
+                      <p className='text-muted-foreground mt-3 text-sm leading-6'>
                         {t(
-                          "The API base URL shown in examples is detected from the current new-api deployment.",
+                          'The API base URL shown in examples is detected from the current new-api deployment.'
                         )}
                       </p>
                     </div>
@@ -903,7 +1073,250 @@ export function ApiDocs() {
                 </div>
               </section>
 
-              <div className="mt-16 space-y-16">
+              <section className='border-border/70 mt-16 border-t pt-12'>
+                <SectionHeading
+                  id='oopii-model-catalog'
+                  eyebrow='OOpii'
+                  title={t('Current OOpii catalog snapshot')}
+                  description={t(
+                    '50 models returned by OOpii /v1/models during the latest compatibility sync. Text, image, video, and Midjourney families are grouped below; endpoint labels describe the upstream model-list metadata and do not replace new-api channel abilities.'
+                  )}
+                />
+                <div className='mt-6 grid gap-6'>
+                  {(
+                    [
+                      ['text', 'Text models'],
+                      ['image', 'Image models'],
+                      ['video', 'Video models'],
+                      ['midjourney', 'Midjourney models'],
+                    ] as const
+                  ).map(([group, label]) => (
+                    <div
+                      key={group}
+                      className='border-border/70 bg-card overflow-hidden rounded-xl border'
+                    >
+                      <div className='border-border/70 bg-muted/25 flex items-center justify-between gap-3 border-b px-4 py-3'>
+                        <h3 className='font-semibold'>{t(label)}</h3>
+                        <Badge variant='secondary'>
+                          {oopiiModelGroups[group].length}
+                        </Badge>
+                      </div>
+                      <ScrollArea className='w-full'>
+                        <table className='w-full min-w-[720px] text-left text-sm'>
+                          <thead className='bg-muted/35 text-muted-foreground'>
+                            <tr>
+                              {[
+                                'Model',
+                                'Owner',
+                                'Supported endpoint types',
+                              ].map((heading) => (
+                                <th
+                                  key={heading}
+                                  className='px-4 py-3 font-medium'
+                                >
+                                  {t(heading)}
+                                </th>
+                              ))}
+                            </tr>
+                          </thead>
+                          <tbody className='divide-border divide-y'>
+                            {oopiiModelGroups[group].map((model) => (
+                              <tr key={model.id} className='align-top'>
+                                <td className='px-4 py-3'>
+                                  <code className='text-primary break-all'>
+                                    {model.id}
+                                  </code>
+                                </td>
+                                <td className='px-4 py-3'>{model.owner}</td>
+                                <td className='px-4 py-3'>
+                                  <div className='flex flex-wrap gap-1.5'>
+                                    {model.endpoints.map((endpoint) => (
+                                      <Badge key={endpoint} variant='outline'>
+                                        {endpoint}
+                                      </Badge>
+                                    ))}
+                                  </div>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                        <ScrollBar orientation='horizontal' />
+                      </ScrollArea>
+                    </div>
+                  ))}
+                </div>
+                <div className='border-border/70 bg-muted/20 mt-4 rounded-xl border p-4 text-sm leading-6'>
+                  {t(
+                    'OOpii model IDs are exact and case-sensitive where shown. The list includes legacy compatibility entries returned by the upstream catalog; configure only the families enabled in your channel.'
+                  )}
+                </div>
+              </section>
+
+              <section className='mt-16'>
+                <SectionHeading
+                  id='text-api'
+                  eyebrow='OOpii'
+                  title={t('Text and multimodal API routes')}
+                  description={t(
+                    'The OOpii text catalog currently includes OpenAI-compatible chat models, Responses-compatible models, Claude models with Anthropic and OpenAI routes, and Gemini models with Gemini and OpenAI routes.'
+                  )}
+                />
+                <div className='border-border/70 mt-6 overflow-hidden rounded-xl border'>
+                  <ScrollArea className='w-full'>
+                    <table className='w-full min-w-[820px] text-left text-sm'>
+                      <thead className='bg-muted/45 text-muted-foreground'>
+                        <tr>
+                          {['Protocol', 'Method', 'Endpoint', 'Models'].map(
+                            (heading) => (
+                              <th
+                                key={heading}
+                                className='px-4 py-3 font-medium'
+                              >
+                                {t(heading)}
+                              </th>
+                            )
+                          )}
+                        </tr>
+                      </thead>
+                      <tbody className='divide-border divide-y'>
+                        {textApiRoutes.map((route) => (
+                          <tr key={route.path} className='align-top'>
+                            <td className='px-4 py-3 font-medium'>
+                              {t(route.name)}
+                            </td>
+                            <td className='px-4 py-3'>
+                              <Badge>{route.method}</Badge>
+                            </td>
+                            <td className='px-4 py-3'>
+                              <code>{route.path}</code>
+                            </td>
+                            <td className='text-muted-foreground px-4 py-3 leading-6'>
+                              {route.models}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                    <ScrollBar orientation='horizontal' />
+                  </ScrollArea>
+                </div>
+                <div className='mt-4 grid gap-4 sm:grid-cols-2'>
+                  <div className='border-border/70 bg-card rounded-xl border p-4 text-sm leading-6'>
+                    <strong>{t('Default')}:</strong> <code>gpt-5.4</code>{' '}
+                    <span aria-hidden='true'>-&gt;</span>{' '}
+                    <code>openai-responses</code>
+                    <div className='text-muted-foreground mt-2'>
+                      <code>gpt-5.4</code>, <code>gpt-5.5</code>,{' '}
+                      <code>gpt-5.6-sol</code>, <code>gpt-5.6-terra</code>,{' '}
+                      <code>gpt-5.6-luna</code>
+                    </div>
+                  </div>
+                  <div className='border-border/70 bg-card rounded-xl border p-4 text-sm leading-6'>
+                    <strong>{t('Notes')}:</strong> <code>all-5.4</code>{' '}
+                    <span aria-hidden='true'>-&gt;</span> <code>gpt-5.4</code>
+                    <br />
+                    <code>all-5.5</code> <span aria-hidden='true'>-&gt;</span>{' '}
+                    <code>gpt-5.5</code>
+                  </div>
+                </div>
+              </section>
+
+              <section className='mt-16'>
+                <SectionHeading
+                  id='video-api'
+                  eyebrow='OOpii'
+                  title={t('Video task API')}
+                  description={t(
+                    'OOpii video tasks are asynchronous. Submit to /v1/videos, poll /v1/videos/{task_id}, and download completed bytes from /v1/videos/{task_id}/content. new-api exposes the public task ID and keeps the upstream task ID internal.'
+                  )}
+                />
+                <div className='mt-6 grid gap-3'>
+                  {[
+                    ['POST', '/v1/videos', 'Submit video task'],
+                    ['GET', '/v1/videos/{task_id}', 'Poll video task'],
+                    [
+                      'GET',
+                      '/v1/videos/{task_id}/content',
+                      'Download video content',
+                    ],
+                  ].map(([method, path, purpose]) => (
+                    <div
+                      key={path}
+                      className='border-border/70 bg-card grid gap-3 rounded-xl border p-4 sm:grid-cols-[70px_minmax(0,1fr)_220px] sm:items-center'
+                    >
+                      <Badge className='w-fit'>{method}</Badge>
+                      <code className='overflow-x-auto'>{path}</code>
+                      <span className='text-muted-foreground text-sm'>
+                        {t(purpose)}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+                <div className='border-border/70 mt-6 overflow-hidden rounded-xl border'>
+                  <ScrollArea className='w-full'>
+                    <table className='w-full min-w-[980px] text-left text-sm'>
+                      <thead className='bg-muted/45 text-muted-foreground'>
+                        <tr>
+                          {[
+                            'Model',
+                            'Duration / seconds',
+                            'Ratio / aspect_ratio',
+                            'Resolution',
+                            'References and modes',
+                          ].map((heading) => (
+                            <th key={heading} className='px-4 py-3 font-medium'>
+                              {t(heading)}
+                            </th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody className='divide-border divide-y'>
+                        {videoModelRows.map(
+                          ([
+                            model,
+                            duration,
+                            ratio,
+                            resolution,
+                            references,
+                          ]) => (
+                            <tr key={model} className='align-top'>
+                              <td className='px-4 py-3'>
+                                <code className='text-primary'>{model}</code>
+                              </td>
+                              <td className='px-4 py-3'>{duration}</td>
+                              <td className='px-4 py-3'>
+                                <code>{ratio}</code>
+                              </td>
+                              <td className='px-4 py-3'>
+                                <code>{resolution}</code>
+                              </td>
+                              <td className='text-muted-foreground px-4 py-3 leading-6'>
+                                {t(references)}
+                              </td>
+                            </tr>
+                          )
+                        )}
+                      </tbody>
+                    </table>
+                    <ScrollBar orientation='horizontal' />
+                  </ScrollArea>
+                </div>
+                <div className='mt-6'>
+                  <CodeExample
+                    samples={videoSamples}
+                    title={t('Submit video task')}
+                  />
+                </div>
+                <div className='mt-4 rounded-xl border border-amber-500/25 bg-amber-500/5 p-4 text-sm leading-6'>
+                  <strong>{t('Legacy compatibility model')}:</strong>{' '}
+                  {t(
+                    'OK-video is retained for compatibility but is not present in the current OOpii /v1/models response.'
+                  )}
+                </div>
+              </section>
+
+              <div className='mt-16 space-y-16'>
                 {imageModels.map((model, index) => (
                   <ModelSection
                     key={model.id}
@@ -916,113 +1329,113 @@ export function ApiDocs() {
 
               <MidjourneyDocs baseUrl={baseUrl} />
 
-              <section className="mt-16 border-border/70 border-t pt-12">
+              <section className='border-border/70 mt-16 border-t pt-12'>
                 <SectionHeading
-                  id="models-api"
-                  eyebrow="API REFERENCE"
-                  title={t("Query available models")}
+                  id='models-api'
+                  eyebrow='API REFERENCE'
+                  title={t('Query available models')}
                   description={t(
-                    "Call this endpoint after adding an OOpii channel to confirm which model IDs are currently exposed to clients. A successful response follows the OpenAI model-list format.",
+                    'Call this endpoint after adding an OOpii channel to confirm which model IDs are currently exposed to clients. A successful response follows the OpenAI model-list format.'
                   )}
                 />
-                <div className="mt-5 grid gap-3 sm:grid-cols-[70px_minmax(0,1fr)_180px] sm:items-center border-border/70 bg-card rounded-xl border p-4">
-                  <Badge className="w-fit bg-sky-600 text-white hover:bg-sky-600">
+                <div className='border-border/70 bg-card mt-5 grid gap-3 rounded-xl border p-4 sm:grid-cols-[70px_minmax(0,1fr)_180px] sm:items-center'>
+                  <Badge className='w-fit bg-sky-600 text-white hover:bg-sky-600'>
                     GET
                   </Badge>
-                  <code className="overflow-x-auto">/v1/models</code>
-                  <code className="text-muted-foreground text-xs">
+                  <code className='overflow-x-auto'>/v1/models</code>
+                  <code className='text-muted-foreground text-xs'>
                     application/json
                   </code>
                 </div>
-                <div className="mt-4">
+                <div className='mt-4'>
                   <CodeExample
                     samples={modelSamples}
-                    title={t("List models")}
+                    title={t('List models')}
                   />
                 </div>
-                <div className="border-amber-500/25 bg-amber-500/5 mt-4 rounded-xl border p-4 text-sm leading-6">
-                  <strong>{t("Channel configuration note")}:</strong>{" "}
+                <div className='mt-4 rounded-xl border border-amber-500/25 bg-amber-500/5 p-4 text-sm leading-6'>
+                  <strong>{t('Channel configuration note')}:</strong>{' '}
                   {t(
-                    "The channel base URL may include or omit a trailing slash. new-api normalizes it before requesting /v1/models so OOpii does not receive a double-slash path.",
+                    'The channel base URL may include or omit a trailing slash. new-api normalizes it before requesting /v1/models so OOpii does not receive a double-slash path.'
                   )}
                 </div>
-                <div className="border-border/70 bg-muted/20 mt-3 rounded-xl border p-4 text-sm leading-6">
-                  <strong>{t("Why a configured model may be missing")}:</strong>{" "}
+                <div className='border-border/70 bg-muted/20 mt-3 rounded-xl border p-4 text-sm leading-6'>
+                  <strong>{t('Why a configured model may be missing')}:</strong>{' '}
                   {t(
-                    "The client-facing /v1/models response is filtered by the token model limit, user or token group abilities, enabled channel models, and billing configuration. Unless self-use mode or Accept unset ratio model is enabled, models without billing configuration are omitted.",
+                    'The client-facing /v1/models response is filtered by the token model limit, user or token group abilities, enabled channel models, and billing configuration. Unless self-use mode or Accept unset ratio model is enabled, models without billing configuration are omitted.'
                   )}
                 </div>
               </section>
 
-              <section className="mt-16">
+              <section className='mt-16'>
                 <SectionHeading
-                  id="async-images"
-                  eyebrow="API REFERENCE"
-                  title={t("Asynchronous image tasks")}
+                  id='async-images'
+                  eyebrow='API REFERENCE'
+                  title={t('Asynchronous image tasks')}
                   description={t(
-                    "Use asynchronous mode for slow, high-resolution, or reference-heavy generations. Submit once, save the task ID, poll the status endpoint, and download the completed image.",
+                    'Use asynchronous mode for slow, high-resolution, or reference-heavy generations. Submit once, save the task ID, poll the status endpoint, and download the completed image.'
                   )}
                 />
 
-                <div className="border-primary/20 bg-primary/5 mt-6 rounded-xl border p-4 text-sm leading-6">
-                  <strong>{t("Storyboard Copilot behavior")}:</strong>{" "}
+                <div className='border-primary/20 bg-primary/5 mt-6 rounded-xl border p-4 text-sm leading-6'>
+                  <strong>{t('Storyboard Copilot behavior')}:</strong>{' '}
                   {t(
-                    "The built-in OOpii provider enables async_image_task for all six documented image models. Its normal submit path appends async=true; Grok reference-image requests intentionally keep the plain generations URL because OOpii async submission can discard embedded references.",
+                    'The built-in OOpii provider enables async_image_task for all eight documented image models. Its normal submit path appends async=true; Grok reference-image requests intentionally keep the plain generations URL because OOpii async submission can discard embedded references.'
                   )}
                 </div>
 
-                <div className="mt-6 grid gap-3">
+                <div className='mt-6 grid gap-3'>
                   {[
                     [
-                      "POST",
-                      "/v1/images/generations?async=true",
-                      "Submit an OpenAI-compatible generation task.",
+                      'POST',
+                      '/v1/images/generations?async=true',
+                      'Submit an OpenAI-compatible generation task.',
                     ],
                     [
-                      "POST",
-                      "/v1/images/edits?async=true",
-                      "Submit a multipart reference-image editing task.",
+                      'POST',
+                      '/v1/images/edits?async=true',
+                      'Submit a multipart reference-image editing task.',
                     ],
                     [
-                      "POST",
-                      "/v1beta/models/{model}:generateContent?async=true",
-                      "Submit a Gemini-compatible image task.",
+                      'POST',
+                      '/v1beta/models/{model}:generateContent?async=true',
+                      'Submit a Gemini-compatible image task.',
                     ],
                     [
-                      "GET",
-                      "/v1/images/tasks/{task_id}",
-                      "Read status, error, expiration, and result URLs.",
+                      'GET',
+                      '/v1/images/tasks/{task_id}',
+                      'Read status, error, expiration, and result URLs.',
                     ],
                     [
-                      "GET",
-                      "/v1/images/tasks/{task_id}/content",
-                      "Download completed content with API authentication.",
+                      'GET',
+                      '/v1/images/tasks/{task_id}/content',
+                      'Download completed content with API authentication.',
                     ],
                     [
-                      "GET",
-                      "/v1/images/tasks/{task_id}/signed-content?token={signed_token}",
-                      "Download completed content without Authorization by using the temporary signed URL returned by the status response.",
+                      'GET',
+                      '/v1/images/tasks/{task_id}/signed-content?token={signed_token}',
+                      'Download completed content without Authorization by using the temporary signed URL returned by the status response.',
                     ],
                   ].map(([method, path, purpose]) => (
                     <div
                       key={path}
-                      className="border-border/70 bg-card grid gap-3 rounded-xl border p-4 sm:grid-cols-[70px_minmax(0,1fr)] sm:items-center"
+                      className='border-border/70 bg-card grid gap-3 rounded-xl border p-4 sm:grid-cols-[70px_minmax(0,1fr)] sm:items-center'
                     >
                       <Badge
                         className={cn(
-                          "w-fit text-white",
-                          method === "GET"
-                            ? "bg-sky-600 hover:bg-sky-600"
-                            : "bg-emerald-600 hover:bg-emerald-600",
+                          'w-fit text-white',
+                          method === 'GET'
+                            ? 'bg-sky-600 hover:bg-sky-600'
+                            : 'bg-emerald-600 hover:bg-emerald-600'
                         )}
                       >
                         {method}
                       </Badge>
-                      <div className="min-w-0">
-                        <code className="block overflow-x-auto text-sm">
+                      <div className='min-w-0'>
+                        <code className='block overflow-x-auto text-sm'>
                           {path}
                         </code>
-                        <p className="text-muted-foreground mt-1 text-xs leading-5">
+                        <p className='text-muted-foreground mt-1 text-xs leading-5'>
                           {t(purpose)}
                         </p>
                       </div>
@@ -1030,457 +1443,457 @@ export function ApiDocs() {
                   ))}
                 </div>
 
-                <div className="mt-6 grid gap-4 md:grid-cols-3">
+                <div className='mt-6 grid gap-4 md:grid-cols-3'>
                   {[
                     [
-                      "1",
-                      "Submit once",
-                      "Append async=true and store task_id. For compatibility, clients may fall back to id.",
+                      '1',
+                      'Submit once',
+                      'Append async=true and store task_id. For compatibility, clients may fall back to id.',
                     ],
                     [
-                      "2",
-                      "Poll safely",
-                      "Wait 3 seconds before the first query, then poll every 3 to 5 seconds for up to 10 to 15 minutes.",
+                      '2',
+                      'Poll safely',
+                      'Wait 3 seconds before the first query, then poll every 3 to 5 seconds for up to 10 to 15 minutes.',
                     ],
                     [
-                      "3",
-                      "Download promptly",
-                      "After success, download with authentication or use the signed URL returned in url before it expires.",
+                      '3',
+                      'Download promptly',
+                      'After success, download with authentication or use the signed URL returned in url before it expires.',
                     ],
                   ].map(([step, title, description]) => (
                     <div
                       key={step}
-                      className="border-border/70 bg-card rounded-xl border p-5"
+                      className='border-border/70 bg-card rounded-xl border p-5'
                     >
-                      <div className="bg-primary/10 text-primary grid size-8 place-items-center rounded-full text-sm font-semibold">
+                      <div className='bg-primary/10 text-primary grid size-8 place-items-center rounded-full text-sm font-semibold'>
                         {step}
                       </div>
-                      <h3 className="mt-4 font-semibold">{t(title)}</h3>
-                      <p className="text-muted-foreground mt-2 text-sm leading-6">
+                      <h3 className='mt-4 font-semibold'>{t(title)}</h3>
+                      <p className='text-muted-foreground mt-2 text-sm leading-6'>
                         {t(description)}
                       </p>
                     </div>
                   ))}
                 </div>
 
-                <div className="mt-6 overflow-hidden rounded-xl border border-border/70">
-                  <ScrollArea className="w-full">
-                    <table className="min-w-[760px] w-full text-left text-sm">
-                      <thead className="bg-muted/45 text-muted-foreground">
+                <div className='border-border/70 mt-6 overflow-hidden rounded-xl border'>
+                  <ScrollArea className='w-full'>
+                    <table className='w-full min-w-[760px] text-left text-sm'>
+                      <thead className='bg-muted/45 text-muted-foreground'>
                         <tr>
                           {[
-                            "Task phase",
-                            "Canonical status",
-                            "Compatible status values",
-                            "Client action",
+                            'Task phase',
+                            'Canonical status',
+                            'Compatible status values',
+                            'Client action',
                           ].map((label) => (
-                            <th key={label} className="px-4 py-3 font-medium">
+                            <th key={label} className='px-4 py-3 font-medium'>
                               {t(label)}
                             </th>
                           ))}
                         </tr>
                       </thead>
-                      <tbody className="divide-border divide-y">
+                      <tbody className='divide-border divide-y'>
                         {[
                           [
-                            "Submitted",
-                            "submitted / queued",
-                            "pending, waiting",
-                            "Continue polling.",
+                            'Submitted',
+                            'submitted / queued',
+                            'pending, waiting',
+                            'Continue polling.',
                           ],
                           [
-                            "Processing",
-                            "processing",
-                            "running, in_progress, generating",
-                            "Continue polling without creating another task.",
+                            'Processing',
+                            'processing',
+                            'running, in_progress, generating',
+                            'Continue polling without creating another task.',
                           ],
                           [
-                            "Succeeded",
-                            "succeeded",
-                            "success, completed, done",
-                            "Download and persist the image immediately.",
+                            'Succeeded',
+                            'succeeded',
+                            'success, completed, done',
+                            'Download and persist the image immediately.',
                           ],
                           [
-                            "Failed",
-                            "failed / expired",
-                            "failure, error, cancelled",
-                            "Stop polling and record the status plus error body.",
+                            'Failed',
+                            'failed / expired',
+                            'failure, error, cancelled',
+                            'Stop polling and record the status plus error body.',
                           ],
                         ].map(([phase, canonical, aliases, action]) => (
-                          <tr key={phase} className="align-top">
-                            <td className="px-4 py-3 font-medium">
+                          <tr key={phase} className='align-top'>
+                            <td className='px-4 py-3 font-medium'>
                               {t(phase)}
                             </td>
-                            <td className="px-4 py-3">
+                            <td className='px-4 py-3'>
                               <code>{canonical}</code>
                             </td>
-                            <td className="px-4 py-3">
+                            <td className='px-4 py-3'>
                               <code>{aliases}</code>
                             </td>
-                            <td className="text-muted-foreground px-4 py-3 leading-6">
+                            <td className='text-muted-foreground px-4 py-3 leading-6'>
                               {t(action)}
                             </td>
                           </tr>
                         ))}
                       </tbody>
                     </table>
-                    <ScrollBar orientation="horizontal" />
+                    <ScrollBar orientation='horizontal' />
                   </ScrollArea>
                 </div>
 
-                <div className="mt-6">
+                <div className='mt-6'>
                   <CodeExample
                     samples={asyncImageSamples}
-                    title={t("Submit, poll, and download")}
+                    title={t('Submit, poll, and download')}
                   />
                 </div>
 
-                <div className="border-amber-500/25 bg-amber-500/5 mt-4 flex gap-3 rounded-xl border p-4 text-sm leading-6">
-                  <ShieldAlert className="mt-0.5 size-4 shrink-0 text-amber-600" />
+                <div className='mt-4 flex gap-3 rounded-xl border border-amber-500/25 bg-amber-500/5 p-4 text-sm leading-6'>
+                  <ShieldAlert className='mt-0.5 size-4 shrink-0 text-amber-600' />
                   <p>
-                    <strong>{t("Important polling rule")}:</strong>{" "}
+                    <strong>{t('Important polling rule')}:</strong>{' '}
                     {t(
-                      "After a task is accepted, do not submit the same generation again. Keep querying the existing task ID. High-frequency polling can trigger rate limits, and 4K tasks may require a longer deadline.",
+                      'After a task is accepted, do not submit the same generation again. Keep querying the existing task ID. High-frequency polling can trigger rate limits, and 4K tasks may require a longer deadline.'
                     )}
                   </p>
                 </div>
 
-                <div className="border-border/70 bg-muted/20 mt-4 rounded-xl border p-4 text-sm leading-6">
-                  <strong>{t("Download authentication")}:</strong>{" "}
+                <div className='border-border/70 bg-muted/20 mt-4 rounded-xl border p-4 text-sm leading-6'>
+                  <strong>{t('Download authentication')}:</strong>{' '}
                   {t(
-                    "The content_url endpoint normally requires Authorization. A successful task may also return a temporary signed URL in url with url_expires_at; signed-content URLs must be used before expiration.",
+                    'The content_url endpoint normally requires Authorization. A successful task may also return a temporary signed URL in url with url_expires_at; signed-content URLs must be used before expiration.'
                   )}
                 </div>
               </section>
 
-              <section className="mt-16">
+              <section className='mt-16'>
                 <SectionHeading
-                  id="image-compression"
-                  eyebrow="UPLOAD GUIDE"
-                  title={t("Image compression and upload")}
+                  id='image-compression'
+                  eyebrow='UPLOAD GUIDE'
+                  title={t('Image compression and upload')}
                   description={t(
-                    "Compress reference images before multipart or Base64 upload to reduce 413 responses, request timeouts, memory pressure, and upstream decoding failures.",
+                    'Compress reference images before multipart or Base64 upload to reduce 413 responses, request timeouts, memory pressure, and upstream decoding failures.'
                   )}
                 />
 
-                <div className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                <div className='mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4'>
                   {[
-                    ["2048 px", "Recommended longest edge"],
-                    ["2-4 MB", "Recommended size per image"],
-                    ["80-88%", "JPEG quality range"],
-                    ["+33%", "Approximate Base64 overhead"],
+                    ['2048 px', 'Recommended longest edge'],
+                    ['2-4 MB', 'Recommended size per image'],
+                    ['80-88%', 'JPEG quality range'],
+                    ['+33%', 'Approximate Base64 overhead'],
                   ].map(([value, label]) => (
                     <div
                       key={label}
-                      className="border-border/70 bg-card rounded-xl border p-5"
+                      className='border-border/70 bg-card rounded-xl border p-5'
                     >
-                      <div className="text-2xl font-semibold">{value}</div>
-                      <div className="text-muted-foreground mt-2 text-xs leading-5">
+                      <div className='text-2xl font-semibold'>{value}</div>
+                      <div className='text-muted-foreground mt-2 text-xs leading-5'>
                         {t(label)}
                       </div>
                     </div>
                   ))}
                 </div>
 
-                <div className="mt-6 grid gap-4 lg:grid-cols-3">
+                <div className='mt-6 grid gap-4 lg:grid-cols-3'>
                   {[
                     [
                       FileImage,
-                      "JPEG for photographs",
-                      "Use quality 80 to 88 for photographic references without transparency. Convert oversized PNG photographs to JPEG before Base64 encoding.",
+                      'JPEG for photographs',
+                      'Use quality 80 to 88 for photographic references without transparency. Convert oversized PNG photographs to JPEG before Base64 encoding.',
                     ],
                     [
                       Upload,
-                      "WebP for smaller files",
-                      "Use quality 80 to 85 when the client and upstream route accept WebP. It often reduces upload size while preserving visual detail.",
+                      'WebP for smaller files',
+                      'Use quality 80 to 85 when the client and upstream route accept WebP. It often reduces upload size while preserving visual detail.',
                     ],
                     [
                       Layers3,
-                      "PNG for transparency",
-                      "Keep PNG for masks, line art, logos, alpha channels, or pixel-exact assets. Resize and strip metadata even when PNG must be preserved.",
+                      'PNG for transparency',
+                      'Keep PNG for masks, line art, logos, alpha channels, or pixel-exact assets. Resize and strip metadata even when PNG must be preserved.',
                     ],
                   ].map(([Icon, title, description]) => (
                     <div
                       key={title as string}
-                      className="border-border/70 bg-card rounded-xl border p-5"
+                      className='border-border/70 bg-card rounded-xl border p-5'
                     >
-                      <Icon className="text-primary size-5" />
-                      <h3 className="mt-4 font-semibold">
+                      <Icon className='text-primary size-5' />
+                      <h3 className='mt-4 font-semibold'>
                         {t(title as string)}
                       </h3>
-                      <p className="text-muted-foreground mt-2 text-sm leading-6">
+                      <p className='text-muted-foreground mt-2 text-sm leading-6'>
                         {t(description as string)}
                       </p>
                     </div>
                   ))}
                 </div>
 
-                <div className="mt-6 overflow-hidden rounded-xl border border-border/70">
-                  <ScrollArea className="w-full">
-                    <table className="min-w-[820px] w-full text-left text-sm">
-                      <thead className="bg-muted/45 text-muted-foreground">
+                <div className='border-border/70 mt-6 overflow-hidden rounded-xl border'>
+                  <ScrollArea className='w-full'>
+                    <table className='w-full min-w-[820px] text-left text-sm'>
+                      <thead className='bg-muted/45 text-muted-foreground'>
                         <tr>
                           {[
-                            "Upload method",
-                            "Image field",
-                            "Required encoding",
-                            "Common mistake",
+                            'Upload method',
+                            'Image field',
+                            'Required encoding',
+                            'Common mistake',
                           ].map((label) => (
-                            <th key={label} className="px-4 py-3 font-medium">
+                            <th key={label} className='px-4 py-3 font-medium'>
                               {t(label)}
                             </th>
                           ))}
                         </tr>
                       </thead>
-                      <tbody className="divide-border divide-y">
+                      <tbody className='divide-border divide-y'>
                         {[
                           [
-                            "OpenAI image edits",
-                            "image / image[]",
-                            "multipart/form-data file",
-                            "Do not set a fixed multipart boundary manually.",
+                            'OpenAI image edits',
+                            'image / image[]',
+                            'multipart/form-data file',
+                            'Do not set a fixed multipart boundary manually.',
                           ],
                           [
-                            "Gemini inlineData",
-                            "inlineData.data",
-                            "Raw Base64 only",
-                            "Remove the data:image/png;base64, prefix.",
+                            'Gemini inlineData',
+                            'inlineData.data',
+                            'Raw Base64 only',
+                            'Remove the data:image/png;base64, prefix.',
                           ],
                           [
-                            "Grok reference images",
-                            "reference_images[]",
-                            "Complete data URL",
-                            "Include the correct MIME prefix for each image.",
+                            'Grok reference images',
+                            'image / images',
+                            'Complete data URL',
+                            'Include the correct MIME prefix for each image.',
                           ],
                           [
-                            "Public image URL",
-                            "image_url or provider field",
-                            "Publicly reachable HTTPS URL",
-                            "Private, localhost, expiring, or login-only URLs cannot be fetched upstream.",
+                            'Public image URL',
+                            'image_url or provider field',
+                            'Publicly reachable HTTPS URL',
+                            'Private, localhost, expiring, or login-only URLs cannot be fetched upstream.',
                           ],
                         ].map(([method, field, encoding, mistake]) => (
-                          <tr key={method} className="align-top">
-                            <td className="px-4 py-3 font-medium">
+                          <tr key={method} className='align-top'>
+                            <td className='px-4 py-3 font-medium'>
                               {t(method)}
                             </td>
-                            <td className="px-4 py-3">
+                            <td className='px-4 py-3'>
                               <code>{field}</code>
                             </td>
-                            <td className="px-4 py-3">{t(encoding)}</td>
-                            <td className="text-muted-foreground px-4 py-3 leading-6">
+                            <td className='px-4 py-3'>{t(encoding)}</td>
+                            <td className='text-muted-foreground px-4 py-3 leading-6'>
                               {t(mistake)}
                             </td>
                           </tr>
                         ))}
                       </tbody>
                     </table>
-                    <ScrollBar orientation="horizontal" />
+                    <ScrollBar orientation='horizontal' />
                   </ScrollArea>
                 </div>
 
-                <div className="mt-6">
+                <div className='mt-6'>
                   <CodeExample
                     samples={compressionSamples}
-                    title={t("Compress a reference image")}
+                    title={t('Compress a reference image')}
                   />
                 </div>
 
-                <div className="mt-6 grid gap-3 sm:grid-cols-2">
+                <div className='mt-6 grid gap-3 sm:grid-cols-2'>
                   {[
                     [
-                      "413 - Payload too large",
-                      "Reduce the number of references, resize the longest edge, convert photographic PNG files to JPEG or WebP, and lower quality gradually.",
+                      '413 - Payload too large',
+                      'Reduce the number of references, resize the longest edge, convert photographic PNG files to JPEG or WebP, and lower quality gradually.',
                     ],
                     [
-                      "400 - Invalid image data",
-                      "Verify the MIME type, Base64 prefix rule, file integrity, and whether the selected endpoint expects JSON or multipart data.",
+                      '400 - Invalid image data',
+                      'Verify the MIME type, Base64 prefix rule, file integrity, and whether the selected endpoint expects JSON or multipart data.',
                     ],
                     [
-                      "502 / 504 - Upstream timeout",
-                      "Compress the images, reduce 4K reference inputs, use asynchronous mode, and retry with a bounded backoff.",
+                      '502 / 504 - Upstream timeout',
+                      'Compress the images, reduce 4K reference inputs, use asynchronous mode, and retry with a bounded backoff.',
                     ],
                     [
-                      "Memory or Base64 failures",
-                      "Account for about 33 percent Base64 expansion and avoid holding multiple uncompressed 4K or 8K images in memory at once.",
+                      'Memory or Base64 failures',
+                      'Account for about 33 percent Base64 expansion and avoid holding multiple uncompressed 4K or 8K images in memory at once.',
                     ],
                   ].map(([title, description]) => (
                     <div
                       key={title}
-                      className="border-border/70 bg-muted/20 rounded-xl border p-4"
+                      className='border-border/70 bg-muted/20 rounded-xl border p-4'
                     >
-                      <div className="flex items-center gap-2 font-semibold">
-                        <Download className="text-primary size-4" />
+                      <div className='flex items-center gap-2 font-semibold'>
+                        <Download className='text-primary size-4' />
                         {t(title)}
                       </div>
-                      <p className="text-muted-foreground mt-2 text-sm leading-6">
+                      <p className='text-muted-foreground mt-2 text-sm leading-6'>
                         {t(description)}
                       </p>
                     </div>
                   ))}
                 </div>
 
-                <p className="text-muted-foreground mt-4 text-xs leading-6">
+                <p className='text-muted-foreground mt-4 text-xs leading-6'>
                   {t(
-                    "These values are production recommendations rather than fixed provider limits. For identity, style, or composition references, 1536 px is often sufficient; avoid uploading original 4K or 8K files unless fine detail is essential.",
+                    'These values are production recommendations rather than fixed provider limits. For identity, style, or composition references, 1536 px is often sufficient; avoid uploading original 4K or 8K files unless fine detail is essential.'
                   )}
                 </p>
               </section>
 
-              <section className="mt-16">
+              <section className='mt-16'>
                 <SectionHeading
-                  id="size-mapping"
-                  eyebrow="API REFERENCE"
-                  title={t("Size mapping")}
+                  id='size-mapping'
+                  eyebrow='API REFERENCE'
+                  title={t('Size mapping')}
                   description={t(
-                    "Use these common Storyboard Copilot mappings when an OpenAI-compatible model accepts exact width and height through the size parameter.",
+                    'Use these common Storyboard Copilot mappings when an OpenAI-compatible model accepts exact width and height through the size parameter.'
                   )}
                 />
-                <div className="border-border/70 mt-6 overflow-hidden rounded-xl border">
-                  <ScrollArea className="w-full">
-                    <table className="min-w-[520px] w-full text-left text-sm">
-                      <thead className="bg-muted/45 text-muted-foreground">
+                <div className='border-border/70 mt-6 overflow-hidden rounded-xl border'>
+                  <ScrollArea className='w-full'>
+                    <table className='w-full min-w-[520px] text-left text-sm'>
+                      <thead className='bg-muted/45 text-muted-foreground'>
                         <tr>
-                          {["Resolution", "Aspect ratio", "Pixel size"].map(
+                          {['Resolution', 'Aspect ratio', 'Pixel size'].map(
                             (label) => (
-                              <th key={label} className="px-4 py-3 font-medium">
+                              <th key={label} className='px-4 py-3 font-medium'>
                                 {t(label)}
                               </th>
-                            ),
+                            )
                           )}
                         </tr>
                       </thead>
-                      <tbody className="divide-border divide-y">
+                      <tbody className='divide-border divide-y'>
                         {sizeRows.map(([resolution, ratio, size]) => (
                           <tr key={`${resolution}-${ratio}`}>
-                            <td className="px-4 py-3">
+                            <td className='px-4 py-3'>
                               <code>{resolution}</code>
                             </td>
-                            <td className="px-4 py-3">
+                            <td className='px-4 py-3'>
                               <code>{ratio}</code>
                             </td>
-                            <td className="px-4 py-3">
+                            <td className='px-4 py-3'>
                               <code>{size}</code>
                             </td>
                           </tr>
                         ))}
                       </tbody>
                     </table>
-                    <ScrollBar orientation="horizontal" />
+                    <ScrollBar orientation='horizontal' />
                   </ScrollArea>
                 </div>
               </section>
 
-              <section className="mt-16">
+              <section className='mt-16'>
                 <SectionHeading
-                  id="response-format"
-                  eyebrow="API REFERENCE"
-                  title={t("Response format")}
+                  id='response-format'
+                  eyebrow='API REFERENCE'
+                  title={t('Response format')}
                   description={t(
-                    "Read the image URL or base64 field that matches the selected compatibility protocol.",
+                    'Read the image URL or base64 field that matches the selected compatibility protocol.'
                   )}
                 />
-                <div className="mt-6 grid gap-4 lg:grid-cols-2">
-                  <div className="border-border/70 bg-card rounded-xl border p-5">
-                    <div className="flex items-center gap-2 font-semibold">
-                      <ImageIcon className="text-primary size-4" /> OpenAI
+                <div className='mt-6 grid gap-4 lg:grid-cols-2'>
+                  <div className='border-border/70 bg-card rounded-xl border p-5'>
+                    <div className='flex items-center gap-2 font-semibold'>
+                      <ImageIcon className='text-primary size-4' /> OpenAI
                       Images
                     </div>
-                    <p className="text-muted-foreground mt-2 text-xs">
-                      {t("URL response")}
+                    <p className='text-muted-foreground mt-2 text-xs'>
+                      {t('URL response')}
                     </p>
-                    <pre className="bg-muted/45 mt-4 overflow-x-auto rounded-lg p-4 text-xs leading-6">{`{\n  "created": 1710000000,\n  "data": [{\n    "url": "https://.../image.png"\n  }]\n}`}</pre>
+                    <pre className='bg-muted/45 mt-4 overflow-x-auto rounded-lg p-4 text-xs leading-6'>{`{\n  "created": 1710000000,\n  "data": [{\n    "url": "https://.../image.png"\n  }]\n}`}</pre>
                   </div>
-                  <div className="border-border/70 bg-card rounded-xl border p-5">
-                    <div className="flex items-center gap-2 font-semibold">
-                      <FileJson className="text-primary size-4" /> Gemini
+                  <div className='border-border/70 bg-card rounded-xl border p-5'>
+                    <div className='flex items-center gap-2 font-semibold'>
+                      <FileJson className='text-primary size-4' /> Gemini
                     </div>
-                    <p className="text-muted-foreground mt-2 text-xs">
-                      {t("Inline base64 response")}
+                    <p className='text-muted-foreground mt-2 text-xs'>
+                      {t('Inline base64 response')}
                     </p>
-                    <pre className="bg-muted/45 mt-4 overflow-x-auto rounded-lg p-4 text-xs leading-6">{`{\n  "candidates": [{\n    "content": {\n      "parts": [{\n        "inlineData": {\n          "mimeType": "image/png",\n          "data": "...base64..."\n        }\n      }]\n    }\n  }]\n}`}</pre>
+                    <pre className='bg-muted/45 mt-4 overflow-x-auto rounded-lg p-4 text-xs leading-6'>{`{\n  "candidates": [{\n    "content": {\n      "parts": [{\n        "inlineData": {\n          "mimeType": "image/png",\n          "data": "...base64..."\n        }\n      }]\n    }\n  }]\n}`}</pre>
                   </div>
                 </div>
               </section>
 
-              <section className="mt-16 pb-16">
+              <section className='mt-16 pb-16'>
                 <SectionHeading
-                  id="errors"
-                  eyebrow="API REFERENCE"
-                  title={t("Errors and status codes")}
+                  id='errors'
+                  eyebrow='API REFERENCE'
+                  title={t('Errors and status codes')}
                   description={t(
-                    "Handle authentication, validation, quota, and upstream failures explicitly. Error bodies may include a message, type, parameter, and request identifier.",
+                    'Handle authentication, validation, quota, and upstream failures explicitly. Error bodies may include a message, type, parameter, and request identifier.'
                   )}
                 />
-                <div className="border-border/70 mt-6 overflow-hidden rounded-xl border">
-                  <ScrollArea className="w-full">
-                    <table className="min-w-[700px] w-full text-left text-sm">
-                      <thead className="bg-muted/45 text-muted-foreground">
+                <div className='border-border/70 mt-6 overflow-hidden rounded-xl border'>
+                  <ScrollArea className='w-full'>
+                    <table className='w-full min-w-[700px] text-left text-sm'>
+                      <thead className='bg-muted/45 text-muted-foreground'>
                         <tr>
-                          {["Status", "Meaning", "Recommended action"].map(
+                          {['Status', 'Meaning', 'Recommended action'].map(
                             (label) => (
-                              <th key={label} className="px-4 py-3 font-medium">
+                              <th key={label} className='px-4 py-3 font-medium'>
                                 {t(label)}
                               </th>
-                            ),
+                            )
                           )}
                         </tr>
                       </thead>
-                      <tbody className="divide-border divide-y">
+                      <tbody className='divide-border divide-y'>
                         {[
                           [
-                            "400",
-                            "Invalid request parameters",
-                            "Check model ID, ratio, size, content type, and required fields.",
+                            '400',
+                            'Invalid request parameters',
+                            'Check model ID, ratio, size, content type, and required fields.',
                           ],
                           [
-                            "401",
-                            "Invalid or missing API token",
-                            "Confirm the Bearer token and the token status.",
+                            '401',
+                            'Invalid or missing API token',
+                            'Confirm the Bearer token and the token status.',
                           ],
                           [
-                            "403",
-                            "Model or channel access denied",
-                            "Check token model permissions and channel group access.",
+                            '403',
+                            'Model or channel access denied',
+                            'Check token model permissions and channel group access.',
                           ],
                           [
-                            "429",
-                            "Rate limit or insufficient quota",
-                            "Retry with backoff or add quota before retrying.",
+                            '429',
+                            'Rate limit or insufficient quota',
+                            'Retry with backoff or add quota before retrying.',
                           ],
                           [
-                            "500 / 502",
-                            "Gateway or upstream processing error",
-                            "Log the request ID and retry only idempotent generation tasks.",
+                            '500 / 502',
+                            'Gateway or upstream processing error',
+                            'Log the request ID and retry only idempotent generation tasks.',
                           ],
                           [
-                            "503 / 504",
-                            "Upstream unavailable or timed out",
-                            "Retry with exponential backoff and a bounded attempt count.",
+                            '503 / 504',
+                            'Upstream unavailable or timed out',
+                            'Retry with exponential backoff and a bounded attempt count.',
                           ],
                         ].map(([statusCode, meaning, action]) => (
-                          <tr key={statusCode} className="align-top">
-                            <td className="px-4 py-3">
-                              <Badge variant="outline">{statusCode}</Badge>
+                          <tr key={statusCode} className='align-top'>
+                            <td className='px-4 py-3'>
+                              <Badge variant='outline'>{statusCode}</Badge>
                             </td>
-                            <td className="px-4 py-3 font-medium">
+                            <td className='px-4 py-3 font-medium'>
                               {t(meaning)}
                             </td>
-                            <td className="text-muted-foreground px-4 py-3 leading-6">
+                            <td className='text-muted-foreground px-4 py-3 leading-6'>
                               {t(action)}
                             </td>
                           </tr>
                         ))}
                       </tbody>
                     </table>
-                    <ScrollBar orientation="horizontal" />
+                    <ScrollBar orientation='horizontal' />
                   </ScrollArea>
                 </div>
-                <div className="border-border/70 bg-muted/20 mt-6 flex gap-3 rounded-xl border p-4 text-sm leading-6">
-                  <Search className="text-primary mt-0.5 size-4 shrink-0" />
+                <div className='border-border/70 bg-muted/20 mt-6 flex gap-3 rounded-xl border p-4 text-sm leading-6'>
+                  <Search className='text-primary mt-0.5 size-4 shrink-0' />
                   <p>
-                    <strong>{t("Troubleshooting order")}:</strong>{" "}
+                    <strong>{t('Troubleshooting order')}:</strong>{' '}
                     {t(
-                      "first call /v1/models, then verify the exact model ID, endpoint family, request Content-Type, and the response path documented for that model.",
+                      'first call /v1/models, then verify the exact model ID, endpoint family, request Content-Type, and the response path documented for that model.'
                     )}
                   </p>
                 </div>
@@ -1490,5 +1903,5 @@ export function ApiDocs() {
         </div>
       </div>
     </PublicLayout>
-  );
+  )
 }

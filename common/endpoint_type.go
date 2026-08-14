@@ -6,23 +6,26 @@ import (
 	"github.com/QuantumNous/new-api/constant"
 )
 
-// GetEndpointTypesByChannelType 获取渠道最优先端点类型（所有的渠道都支持 OpenAI 端点）
+// GetEndpointTypesByChannelType returns the endpoint types supported by a channel/model pair.
 func GetEndpointTypesByChannelType(channelType int, modelName string) []constant.EndpointType {
-	if channelType == constant.ChannelTypeNewAPI && strings.HasPrefix(strings.ToLower(strings.TrimSpace(modelName)), "hj-2.0-") {
-		return []constant.EndpointType{constant.EndpointTypeOpenAIVideo}
+	if channelType == constant.ChannelTypeNewAPI {
+		normalizedModel := strings.TrimSpace(modelName)
+		switch {
+		case strings.HasPrefix(strings.ToLower(normalizedModel), "hj-2.0-"):
+			return []constant.EndpointType{constant.EndpointTypeOpenAIVideo}
+		case normalizedModel == "MiniMax-H3",
+			normalizedModel == "MiniMax-H3-C",
+			normalizedModel == "MiniMax-H3-933-1440P-GF",
+			strings.EqualFold(normalizedModel, "OK-video"),
+			normalizedModel == "ok-video-1.5-preview",
+			normalizedModel == "ok-imagine-video":
+			return []constant.EndpointType{constant.EndpointTypeOpenAIVideo}
+		}
 	}
 	var endpointTypes []constant.EndpointType
 	switch channelType {
 	case constant.ChannelTypeJina:
 		endpointTypes = []constant.EndpointType{constant.EndpointTypeJinaRerank}
-	//case constant.ChannelTypeMidjourney, constant.ChannelTypeMidjourneyPlus:
-	//	endpointTypes = []constant.EndpointType{constant.EndpointTypeMidjourney}
-	//case constant.ChannelTypeSunoAPI:
-	//	endpointTypes = []constant.EndpointType{constant.EndpointTypeSuno}
-	//case constant.ChannelTypeKling:
-	//	endpointTypes = []constant.EndpointType{constant.EndpointTypeKling}
-	//case constant.ChannelTypeJimeng:
-	//	endpointTypes = []constant.EndpointType{constant.EndpointTypeJimeng}
 	case constant.ChannelTypeAws:
 		fallthrough
 	case constant.ChannelTypeAnthropic:
@@ -31,7 +34,7 @@ func GetEndpointTypesByChannelType(channelType int, modelName string) []constant
 		fallthrough
 	case constant.ChannelTypeGemini:
 		endpointTypes = []constant.EndpointType{constant.EndpointTypeGemini, constant.EndpointTypeOpenAI}
-	case constant.ChannelTypeOpenRouter: // OpenRouter 只支持 OpenAI 端点
+	case constant.ChannelTypeOpenRouter:
 		endpointTypes = []constant.EndpointType{constant.EndpointTypeOpenAI}
 	case constant.ChannelTypeXai:
 		endpointTypes = []constant.EndpointType{constant.EndpointTypeOpenAI, constant.EndpointTypeOpenAIResponse}
@@ -60,7 +63,6 @@ func GetEndpointTypesByChannelType(channelType int, modelName string) []constant
 		}
 	}
 	if IsImageGenerationModel(modelName) {
-		// add to first
 		endpointTypes = append([]constant.EndpointType{constant.EndpointTypeImageGeneration}, endpointTypes...)
 	}
 	return endpointTypes
