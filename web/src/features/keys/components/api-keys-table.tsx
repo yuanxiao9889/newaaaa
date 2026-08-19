@@ -452,6 +452,7 @@ export function ApiKeysTable() {
       applyHeaderSize
       toolbarProps={{
         searchPlaceholder: t('Filter by name...'),
+        searchDebounceMs: 500,
         additionalSearch: (
           <div className='flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center'>
             <Input

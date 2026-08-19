@@ -61,7 +61,9 @@ func TestRechargeEpay_GrantsAffiliateRewardFromPaymentMoney(t *testing.T) {
 	insertAffiliateUser(t, 2, "invitee", 1)
 	insertAffiliateTopUp(t, "epay-aff-1", 2, 20, 12.34, PaymentProviderEpay)
 
-	require.NoError(t, RechargeEpay("epay-aff-1", "alipay", "127.0.0.1"))
+	alreadyDone, err := RechargeEpay("epay-aff-1", "alipay", "127.0.0.1")
+	require.NoError(t, err)
+	assert.False(t, alreadyDone)
 
 	inviter := getAffiliateUser(t, 1)
 	assert.Equal(t, 1234, inviter.AffQuota)
@@ -80,8 +82,12 @@ func TestRechargeEpay_AffiliateRewardIsIdempotent(t *testing.T) {
 	insertAffiliateUser(t, 2, "invitee", 1)
 	insertAffiliateTopUp(t, "epay-aff-idempotent", 2, 10, 10, PaymentProviderEpay)
 
-	require.NoError(t, RechargeEpay("epay-aff-idempotent", "alipay", "127.0.0.1"))
-	require.NoError(t, RechargeEpay("epay-aff-idempotent", "alipay", "127.0.0.1"))
+	alreadyDone, err := RechargeEpay("epay-aff-idempotent", "alipay", "127.0.0.1")
+	require.NoError(t, err)
+	assert.False(t, alreadyDone)
+	alreadyDone, err = RechargeEpay("epay-aff-idempotent", "alipay", "127.0.0.1")
+	require.NoError(t, err)
+	assert.True(t, alreadyDone)
 
 	inviter := getAffiliateUser(t, 1)
 	assert.Equal(t, 1000, inviter.AffQuota)
@@ -100,7 +106,9 @@ func TestRechargeEpay_AffiliateRewardLimitedToFirstFiveTopUpsPerInvitee(t *testi
 	for i := 1; i <= 6; i++ {
 		tradeNo := fmt.Sprintf("epay-aff-limit-%d", i)
 		insertAffiliateTopUp(t, tradeNo, 2, int64(i), 10, PaymentProviderEpay)
-		require.NoError(t, RechargeEpay(tradeNo, "alipay", "127.0.0.1"))
+		alreadyDone, err := RechargeEpay(tradeNo, "alipay", "127.0.0.1")
+		require.NoError(t, err)
+		assert.False(t, alreadyDone)
 	}
 
 	inviter := getAffiliateUser(t, 1)
@@ -121,8 +129,12 @@ func TestRechargeEpay_AffiliateRewardSkippedWithoutInviterOrPositiveReward(t *te
 	insertAffiliateTopUp(t, "epay-aff-zero", 2, 1, 0.001, PaymentProviderEpay)
 	insertAffiliateTopUp(t, "epay-aff-no-inviter", 3, 1, 10, PaymentProviderEpay)
 
-	require.NoError(t, RechargeEpay("epay-aff-zero", "alipay", "127.0.0.1"))
-	require.NoError(t, RechargeEpay("epay-aff-no-inviter", "alipay", "127.0.0.1"))
+	alreadyDone, err := RechargeEpay("epay-aff-zero", "alipay", "127.0.0.1")
+	require.NoError(t, err)
+	assert.False(t, alreadyDone)
+	alreadyDone, err = RechargeEpay("epay-aff-no-inviter", "alipay", "127.0.0.1")
+	require.NoError(t, err)
+	assert.False(t, alreadyDone)
 
 	inviter := getAffiliateUser(t, 1)
 	assert.Equal(t, 0, inviter.AffQuota)

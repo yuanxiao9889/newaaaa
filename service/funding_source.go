@@ -1,6 +1,7 @@
 package service
 
 import (
+	"errors"
 	"time"
 
 	"github.com/QuantumNous/new-api/model"
@@ -26,10 +27,15 @@ type FundingSource interface {
 // WalletFunding — 钱包资金来源实现
 // ---------------------------------------------------------------------------
 
+// ErrInsufficientWalletQuota 钱包原子预扣失败（余额不足），未发生任何扣减。
+// BillingSession 据此映射为 ErrorCodeInsufficientUserQuota，
+// 使 wallet_first 等计费偏好可以回退到订阅。
+var ErrInsufficientWalletQuota = errors.New("wallet quota insufficient")
+
 type WalletFunding struct {
 	userId    int
 	consumed  int  // 实际预扣的用户额度
-	immediate bool // 异步任务关键路径绕过批量更新，确保预扣与补偿已落主库
+	immediate bool // bypass batch persistence for async task billing
 }
 
 func (w *WalletFunding) Source() string { return BillingSourceWallet }
@@ -38,14 +44,18 @@ func (w *WalletFunding) PreConsume(amount int) error {
 	if amount <= 0 {
 		return nil
 	}
+	var reserved bool
 	var err error
 	if w.immediate {
-		err = model.AdjustUserQuotaImmediately(w.userId, -amount)
+		reserved, err = model.TryReserveUserQuotaImmediately(w.userId, amount)
 	} else {
-		err = model.DecreaseUserQuota(w.userId, amount, false)
+		reserved, err = model.TryReserveUserQuota(w.userId, amount)
 	}
 	if err != nil {
 		return err
+	}
+	if !reserved {
+		return ErrInsufficientWalletQuota
 	}
 	w.consumed = amount
 	return nil
@@ -68,11 +78,11 @@ func (w *WalletFunding) Refund() error {
 	if w.consumed <= 0 {
 		return nil
 	}
+	// IncreaseUserQuota 是 quota += N 的非幂等操作，不能重试，否则会多退额度。
+	// 订阅的 RefundSubscriptionPreConsume 有 requestId 幂等保护所以可以重试。
 	if w.immediate {
 		return model.AdjustUserQuotaImmediately(w.userId, w.consumed)
 	}
-	// IncreaseUserQuota 是 quota += N 的非幂等操作，不能重试，否则会多退额度。
-	// 订阅的 RefundSubscriptionPreConsume 有 requestId 幂等保护所以可以重试。
 	return model.IncreaseUserQuota(w.userId, w.consumed, false)
 }
 

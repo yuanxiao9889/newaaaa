@@ -62,9 +62,9 @@ func TestBackfillAdminQuotaTopUps(t *testing.T) {
 		DB.Where(commonKeyCol+" = ?", adminQuotaTopUpBackfillOptionKey).Delete(&Option{})
 	})
 
-	oldCreatedAt := int64(1_700_000_000)
-	namedAdminCreatedAt := int64(1_700_000_050)
-	structuredCreatedAt := int64(1_700_000_100)
+	oldCreatedAt := common.GetTimestamp() - 3*24*60*60
+	namedAdminCreatedAt := oldCreatedAt + 50
+	structuredCreatedAt := oldCreatedAt + 100
 	logs := []*Log{
 		{
 			UserId:    811,

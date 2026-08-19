@@ -4,22 +4,25 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/require"
 )
 
-func TestValidateAnnouncementsAllowsLongContent(t *testing.T) {
-	longContent := strings.Repeat("公告", 300)
-	payload := `[{"content":"` + longContent + `","publishDate":"` + time.Now().Format(time.RFC3339) + `","type":"default"}]`
+func TestValidateAnnouncementsContentLimit(t *testing.T) {
+	publishDate := time.Now().Format(time.RFC3339)
 
-	if err := validateAnnouncements(payload); err != nil {
-		t.Fatalf("expected long announcement content to be valid, got %v", err)
-	}
+	validContent := strings.Repeat("??", 250)
+	validPayload := `[{"content":"` + validContent + `","publishDate":"` + publishDate + `","type":"default"}]`
+	require.NoError(t, validateAnnouncements(validPayload))
+
+	overlongContent := strings.Repeat("??", 251)
+	overlongPayload := `[{"content":"` + overlongContent + `","publishDate":"` + publishDate + `","type":"default"}]`
+	require.Error(t, validateAnnouncements(overlongPayload))
 }
 
 func TestValidateAnnouncementsStillLimitsExtra(t *testing.T) {
 	extra := strings.Repeat("x", 201)
 	payload := `[{"content":"ok","publishDate":"` + time.Now().Format(time.RFC3339) + `","type":"default","extra":"` + extra + `"}]`
 
-	if err := validateAnnouncements(payload); err == nil {
-		t.Fatal("expected overlong announcement extra to be rejected")
-	}
+	require.Error(t, validateAnnouncements(payload))
 }

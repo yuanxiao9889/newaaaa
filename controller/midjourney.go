@@ -221,7 +221,7 @@ func runMidjourneyTaskUpdateOnce(ctx context.Context, report func(processed, tot
 							logger.LogError(ctx, fmt.Sprintf("refund Midjourney async task %s failed: %v", asyncTask.TaskID, err))
 						}
 					} else if !asyncTaskExists {
-						refundLegacyMidjourneyTask(ctx, task)
+						service.RefundMidjourneyQuota(ctx, task, "构图失败")
 					}
 				}
 			}

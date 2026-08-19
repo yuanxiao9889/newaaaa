@@ -94,6 +94,20 @@ func LogTaskConsumption(c *gin.Context, info *relaycommon.RelayInfo) error {
 // 异步任务计费辅助函数
 // ---------------------------------------------------------------------------
 
+// resolveTokenKey obtains a token key at runtime for legacy task accounting.
+// Token keys are intentionally not persisted in task private data.
+func resolveTokenKey(ctx context.Context, tokenId int, taskID string) string {
+	if tokenId <= 0 {
+		return ""
+	}
+	token, err := model.GetTokenById(tokenId)
+	if err != nil {
+		logger.LogWarn(ctx, fmt.Sprintf("get token key failed (tokenId=%d, task=%s): %s", tokenId, taskID, err.Error()))
+		return ""
+	}
+	return token.Key
+}
+
 // taskIsSubscription 判断任务是否通过订阅计费。
 func taskIsSubscription(task *model.Task) bool {
 	return task.PrivateData.BillingSource == BillingSourceSubscription && task.PrivateData.SubscriptionId > 0
