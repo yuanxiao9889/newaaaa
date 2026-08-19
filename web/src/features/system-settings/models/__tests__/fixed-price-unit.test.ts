@@ -16,8 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import assert from 'node:assert/strict'
-import { describe, test } from 'node:test'
+import { assert, describe, expect, test } from 'vitest'
 
 import { applyFixedPriceUnitForModel } from '../model-pricing-core'
 import {
@@ -71,14 +70,14 @@ describe('model pricing fixed price units', () => {
       '0.45',
       'request'
     )
-    assert.deepEqual(units, { video: 'request' })
+    expect(units).toEqual({ video: 'request' })
 
     applyFixedPriceUnitForModel(units, 'video', 'per-token', '0.45', 'second')
-    assert.deepEqual(units, {})
+    expect(units).toEqual({})
 
     units.video = 'second'
     applyFixedPriceUnitForModel(units, 'video', 'tiered_expr', '0.45', 'second')
-    assert.deepEqual(units, {})
+    expect(units).toEqual({})
   })
 
   test('table summaries identify per-second fixed prices', () => {
@@ -119,7 +118,7 @@ describe('model pricing fixed price units', () => {
       }
     )
 
-    assert.deepEqual(selected.video, {
+    expect(selected.video).toEqual({
       model_price: 0.45,
       fixed_price_unit: 'second',
     })
@@ -128,6 +127,6 @@ describe('model pricing fixed price units', () => {
       selected,
       new Map([['video', new Set(['fixed_price_unit' as const])]])
     )
-    assert.deepEqual(removed, {})
+    expect(removed).toEqual({})
   })
 })
