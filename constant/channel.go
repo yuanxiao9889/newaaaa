@@ -63,6 +63,15 @@ const (
 
 )
 
+func ChannelTypeSupportsMultiImageReferences(channelType int) bool {
+	switch channelType {
+	case ChannelTypeOpenAI, ChannelTypeNewAPI:
+		return true
+	default:
+		return false
+	}
+}
+
 var ChannelBaseURLs = []string{
 	"",                                    // 0
 	"https://api.openai.com",              // 1

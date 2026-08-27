@@ -2,6 +2,7 @@ package relay
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -51,7 +52,14 @@ func ImageHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *type
 		if err != nil {
 			return types.NewErrorWithStatusCode(err, types.ErrorCodeReadRequestBodyFailed, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
 		}
-		requestBody = common.NewReplayableBodyReader(storage)
+		if info.IsModelMapped && strings.Contains(strings.ToLower(c.Request.Header.Get("Content-Type")), "application/json") {
+			requestBody, err = mappedImageJSONBody(storage, request.Model)
+			if err != nil {
+				return types.NewErrorWithStatusCode(err, types.ErrorCodeConvertRequestFailed, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
+			}
+		} else {
+			requestBody = common.NewReplayableBodyReader(storage)
+		}
 	} else {
 		convertedRequest, err := adaptor.ConvertImageRequest(c, info, *request)
 		if err != nil {
@@ -152,6 +160,28 @@ func ImageHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *type
 		service.PostTextConsumeQuota(c, info, usageDto, logContent)
 	}
 	return nil
+}
+
+// mappedImageJSONBody preserves the original JSON payload while replacing only
+// the public model alias with the channel's mapped upstream model.
+func mappedImageJSONBody(storage common.BodyStorage, modelName string) (io.Reader, error) {
+	raw, err := storage.Bytes()
+	if err != nil {
+		return nil, fmt.Errorf("read image request body failed: %w", err)
+	}
+	var payload map[string]json.RawMessage
+	if err = common.Unmarshal(raw, &payload); err != nil {
+		return nil, fmt.Errorf("decode image request body failed: %w", err)
+	}
+	payload["model"], err = common.Marshal(modelName)
+	if err != nil {
+		return nil, fmt.Errorf("encode mapped image model failed: %w", err)
+	}
+	mapped, err := common.Marshal(payload)
+	if err != nil {
+		return nil, fmt.Errorf("encode mapped image request body failed: %w", err)
+	}
+	return bytes.NewReader(mapped), nil
 }
 
 func preConsumeAsyncImageBilling(c *gin.Context, info *relaycommon.RelayInfo) *types.NewAPIError {

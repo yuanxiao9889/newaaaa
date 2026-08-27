@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/QuantumNous/new-api/constant"
+	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -75,6 +76,88 @@ func TestValidateMultipartDirectNormalizesImageField(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, []string{"https://example.com/first.png"}, storedReq.Images)
 	require.Equal(t, constant.TaskActionGenerate, info.Action)
+}
+
+func TestValidateMultipartDirectKeepsSingleInputReferenceEnabledByDefault(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	body := strings.NewReader(`{"model":"MiniMax-H3-C","prompt":"animate","input_reference":"https://example.com/first.png"}`)
+	request := httptest.NewRequest(http.MethodPost, "/v1/videos", body)
+	request.Header.Set("Content-Type", "application/json")
+	context, _ := gin.CreateTestContext(httptest.NewRecorder())
+	context.Request = request
+	info := &RelayInfo{
+		ChannelMeta:   &ChannelMeta{ChannelType: constant.ChannelTypeOpenAI},
+		TaskRelayInfo: &TaskRelayInfo{},
+	}
+
+	require.Nil(t, ValidateMultipartDirect(context, info))
+	storedReq, err := GetTaskRequest(context)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"https://example.com/first.png"}, storedReq.Images)
+	assert.Equal(t, constant.TaskActionGenerate, info.Action)
+}
+
+func TestValidateMultipartDirectControlsMultiImageReferencesByChannelTypeAndSetting(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	body := `{"model":"MiniMax-H3-C","prompt":"animate","input_reference":["https://example.com/one.png","https://example.com/two.png"]}`
+
+	tests := []struct {
+		name        string
+		channelType int
+		enabled     bool
+		wantCode    string
+	}{
+		{
+			name:        "OpenAI channel disabled",
+			channelType: constant.ChannelTypeOpenAI,
+			wantCode:    "multi_reference_disabled",
+		},
+		{
+			name:        "OpenAI channel enabled",
+			channelType: constant.ChannelTypeOpenAI,
+			enabled:     true,
+		},
+		{
+			name:        "unsupported channel type",
+			channelType: constant.ChannelTypeSora,
+			enabled:     true,
+			wantCode:    "multi_reference_disabled",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			request := httptest.NewRequest(http.MethodPost, "/v1/videos", strings.NewReader(body))
+			request.Header.Set("Content-Type", "application/json")
+			context, _ := gin.CreateTestContext(httptest.NewRecorder())
+			context.Request = request
+			info := &RelayInfo{
+				ChannelMeta: &ChannelMeta{
+					ChannelType: tt.channelType,
+					ChannelSetting: dto.ChannelSettings{
+						MultiImageReferenceEnabled: tt.enabled,
+					},
+				},
+				TaskRelayInfo: &TaskRelayInfo{},
+			}
+
+			taskErr := ValidateMultipartDirect(context, info)
+			if tt.wantCode != "" {
+				require.NotNil(t, taskErr)
+				assert.Equal(t, tt.wantCode, taskErr.Code)
+				return
+			}
+
+			require.Nil(t, taskErr)
+			storedReq, err := GetTaskRequest(context)
+			require.NoError(t, err)
+			assert.Equal(t, []string{
+				"https://example.com/one.png",
+				"https://example.com/two.png",
+			}, storedReq.Images)
+			assert.Equal(t, constant.TaskActionGenerate, info.Action)
+		})
+	}
 }
 
 // TestTaskDurationBounds guards the billing invariant that user-supplied

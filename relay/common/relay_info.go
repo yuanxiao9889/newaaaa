@@ -866,16 +866,18 @@ type TaskRelayInfo struct {
 }
 
 type TaskSubmitReq struct {
-	Prompt         string                 `json:"prompt"`
-	Model          string                 `json:"model,omitempty"`
-	Mode           string                 `json:"mode,omitempty"`
-	Image          string                 `json:"image,omitempty"`
-	Images         []string               `json:"images,omitempty"`
-	Size           string                 `json:"size,omitempty"`
-	Duration       int                    `json:"duration,omitempty"`
-	Seconds        string                 `json:"seconds,omitempty"`
-	InputReference string                 `json:"input_reference,omitempty"`
-	Metadata       map[string]interface{} `json:"metadata,omitempty"`
+	Prompt                string   `json:"prompt"`
+	Model                 string   `json:"model,omitempty"`
+	Mode                  string   `json:"mode,omitempty"`
+	Image                 string   `json:"image,omitempty"`
+	Images                []string `json:"images,omitempty"`
+	Size                  string   `json:"size,omitempty"`
+	Duration              int      `json:"duration,omitempty"`
+	Seconds               string   `json:"seconds,omitempty"`
+	InputReference        string   `json:"input_reference,omitempty"`
+	inputReferences       []string
+	inputReferenceIsArray bool
+	Metadata              map[string]interface{} `json:"metadata,omitempty"`
 }
 
 func (t *TaskSubmitReq) GetPrompt() string {
@@ -889,9 +891,10 @@ func (t *TaskSubmitReq) HasImage() bool {
 func (t *TaskSubmitReq) UnmarshalJSON(data []byte) error {
 	type Alias TaskSubmitReq
 	aux := &struct {
-		Metadata json.RawMessage `json:"metadata,omitempty"`
-		Duration json.RawMessage `json:"duration,omitempty"`
-		Seconds  json.RawMessage `json:"seconds,omitempty"`
+		Metadata       json.RawMessage `json:"metadata,omitempty"`
+		Duration       json.RawMessage `json:"duration,omitempty"`
+		Seconds        json.RawMessage `json:"seconds,omitempty"`
+		InputReference json.RawMessage `json:"input_reference,omitempty"`
 		*Alias
 	}{
 		Alias: (*Alias)(t),
@@ -899,6 +902,23 @@ func (t *TaskSubmitReq) UnmarshalJSON(data []byte) error {
 
 	if err := common.Unmarshal(data, &aux); err != nil {
 		return err
+	}
+
+	t.InputReference = ""
+	t.inputReferences = nil
+	t.inputReferenceIsArray = false
+	if len(aux.InputReference) > 0 {
+		var inputReference string
+		if err := common.Unmarshal(aux.InputReference, &inputReference); err == nil {
+			t.InputReference = inputReference
+		} else {
+			var inputReferences []string
+			if err := common.Unmarshal(aux.InputReference, &inputReferences); err != nil {
+				return fmt.Errorf("input_reference must be a string or string array")
+			}
+			t.inputReferences = inputReferences
+			t.inputReferenceIsArray = true
+		}
 	}
 
 	if len(aux.Duration) > 0 {

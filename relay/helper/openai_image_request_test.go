@@ -72,6 +72,60 @@ func TestGetAndValidOpenAIImageRequestMultipartStream(t *testing.T) {
 	})
 }
 
+func TestGetAndValidOpenAIImageRequestMultipartModelValidation(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	tests := []struct {
+		name      string
+		writeBody func(t *testing.T, writer *multipart.Writer)
+		wantError string
+	}{
+		{
+			name: "missing model",
+			writeBody: func(t *testing.T, writer *multipart.Writer) {
+				require.NoError(t, writer.WriteField("prompt", "edit this image"))
+			},
+			wantError: "model is required",
+		},
+		{
+			name: "empty model",
+			writeBody: func(t *testing.T, writer *multipart.Writer) {
+				require.NoError(t, writer.WriteField("model", "   "))
+			},
+			wantError: "model is required",
+		},
+		{
+			name: "model is a file part",
+			writeBody: func(t *testing.T, writer *multipart.Writer) {
+				part, err := writer.CreateFormFile("model", "model.txt")
+				require.NoError(t, err)
+				_, err = part.Write([]byte("gpt-image-1"))
+				require.NoError(t, err)
+			},
+			wantError: "multipart field model must be a text field",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var body bytes.Buffer
+			writer := multipart.NewWriter(&body)
+			tt.writeBody(t, writer)
+			require.NoError(t, writer.Close())
+
+			c, _ := gin.CreateTestContext(httptest.NewRecorder())
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/images/edits", bytes.NewReader(body.Bytes()))
+			c.Request.Header.Set("Content-Type", writer.FormDataContentType())
+
+			_, err := GetAndValidOpenAIImageRequest(c, relayconstant.RelayModeImagesEdits)
+			require.EqualError(t, err, tt.wantError)
+			if c.Request.MultipartForm != nil {
+				c.Request.MultipartForm.RemoveAll()
+			}
+		})
+	}
+}
+
 // TestGetAndValidOpenAIImageRequestNBounds guards the billing invariant that
 // the image generation count can never reach quota calculation with a value
 // large enough to overflow int64 into a negative charge.

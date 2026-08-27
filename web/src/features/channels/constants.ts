@@ -21,7 +21,13 @@ For commercial licensing, please contact support@quantumnous.com
 // All label/name values are i18n keys; use t(value) when displaying.
 // ============================================================================
 
+export const CHANNEL_TYPE_OPENAI = 1
 export const CHANNEL_TYPE_NEW_API = 60
+
+export const MULTI_IMAGE_REFERENCE_SUPPORTED_TYPES = new Set<number>([
+  CHANNEL_TYPE_OPENAI,
+  CHANNEL_TYPE_NEW_API,
+])
 
 export const CHANNEL_TYPES = {
   0: 'Unknown',

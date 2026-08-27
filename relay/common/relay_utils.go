@@ -221,11 +221,8 @@ func ValidateMultipartDirect(c *gin.Context, info *RelayInfo) *dto.TaskError {
 	if seconds == 0 {
 		seconds = req.Duration
 	}
-	if req.InputReference != "" {
-		req.Images = []string{req.InputReference}
-	} else if len(req.Images) == 0 && strings.TrimSpace(req.Image) != "" {
-		// 兼容单图上传
-		req.Images = []string{strings.TrimSpace(req.Image)}
+	if taskErr := normalizeTaskInputReferences(&req, info); taskErr != nil {
+		return taskErr
 	}
 
 	if strings.TrimSpace(req.Model) == "" {
@@ -272,6 +269,49 @@ func ValidateMultipartDirect(c *gin.Context, info *RelayInfo) *dto.TaskError {
 	return nil
 }
 
+func normalizeTaskInputReferences(req *TaskSubmitReq, info *RelayInfo) *dto.TaskError {
+	if req.inputReferenceIsArray {
+		if !constant.ChannelTypeSupportsMultiImageReferences(info.GetChannelType()) ||
+			info.ChannelMeta == nil ||
+			!info.ChannelSetting.MultiImageReferenceEnabled {
+			return createTaskError(
+				fmt.Errorf("multi-image references are disabled for this channel"),
+				"multi_reference_disabled",
+				http.StatusBadRequest,
+				true,
+			)
+		}
+
+		images := make([]string, 0, len(req.inputReferences))
+		for _, image := range req.inputReferences {
+			image = strings.TrimSpace(image)
+			if image == "" {
+				return createTaskError(
+					fmt.Errorf("input_reference array must contain non-empty strings"),
+					"invalid_references",
+					http.StatusBadRequest,
+					true,
+				)
+			}
+			images = append(images, image)
+		}
+		req.Images = images
+		return nil
+	}
+
+	if inputReference := strings.TrimSpace(req.InputReference); inputReference != "" {
+		req.InputReference = inputReference
+		req.Images = []string{inputReference}
+		return nil
+	}
+
+	if len(req.Images) == 0 && strings.TrimSpace(req.Image) != "" {
+		// 兼容单图上传
+		req.Images = []string{strings.TrimSpace(req.Image)}
+	}
+	return nil
+}
+
 func isKnownTaskField(field string) bool {
 	knownFields := map[string]bool{
 		"prompt":          true,
@@ -309,9 +349,8 @@ func ValidateBasicTaskRequest(c *gin.Context, info *RelayInfo, action string) *d
 		return taskErr
 	}
 
-	if len(req.Images) == 0 && strings.TrimSpace(req.Image) != "" {
-		// 兼容单图上传
-		req.Images = []string{req.Image}
+	if taskErr := normalizeTaskInputReferences(&req, info); taskErr != nil {
+		return taskErr
 	}
 
 	storeTaskRequest(c, info, action, req)

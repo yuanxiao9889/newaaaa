@@ -6,6 +6,7 @@ import {
   Calculator,
   DollarSign,
   Percent,
+  Pencil,
   Plus,
   Save,
   ShieldCheck,
@@ -211,6 +212,8 @@ const emptyForm = (): FormState => ({
 
 type ProfitPasswordMode = 'verify' | 'setup'
 
+type CostPriceSheetMode = 'create' | 'edit'
+
 export function Profit() {
   const { t } = useTranslation()
   const queryClient = useQueryClient()
@@ -231,6 +234,7 @@ export function Profit() {
   const [channelId, setChannelId] = useState('')
   const [modelName, setModelName] = useState('')
   const [sheetOpen, setSheetOpen] = useState(false)
+  const [sheetMode, setSheetMode] = useState<CostPriceSheetMode>('create')
   const [form, setForm] = useState<FormState>(emptyForm)
   const [passwordOpen, setPasswordOpen] = useState(false)
   const [passwordMode, setPasswordMode] = useState<ProfitPasswordMode>('verify')
@@ -355,7 +359,38 @@ export function Profit() {
   }
 
   const openCreateSheet = () => {
+    setSheetMode('create')
     setForm(emptyForm())
+    setSheetOpen(true)
+  }
+
+  const openEditSheet = (item: ProfitCostPrice) => {
+    if (item.price_type === 'tiered_expr') {
+      toast.error(t('Advanced expression cost prices cannot be edited here'))
+      return
+    }
+    let costMode: FormState['cost_mode'] = 'token'
+    if (item.price_type === 'fixed_price') {
+      costMode = item.fixed_unit === 'second' ? 'second' : 'request'
+    }
+    setSheetMode('edit')
+    setForm({
+      channel_id: String(item.channel_id),
+      model_name: item.model_name,
+      cost_mode: costMode,
+      input_price: formatPriceInput(usdToDisplayMoney(item.input_price ?? 0, profitMoneyUnit.rate)),
+      cache_read_price: formatPriceInput(usdToDisplayMoney(item.cache_read_price ?? 0, profitMoneyUnit.rate)),
+      cache_creation_price: formatPriceInput(usdToDisplayMoney(item.cache_creation_price ?? 0, profitMoneyUnit.rate)),
+      cache_creation_1h_price: formatPriceInput(usdToDisplayMoney(item.cache_creation_1h_price ?? 0, profitMoneyUnit.rate)),
+      image_input_price: formatPriceInput(usdToDisplayMoney(item.image_input_price ?? 0, profitMoneyUnit.rate)),
+      image_output_price: formatPriceInput(usdToDisplayMoney(item.image_output_price ?? 0, profitMoneyUnit.rate)),
+      audio_input_price: formatPriceInput(usdToDisplayMoney(item.audio_input_price ?? 0, profitMoneyUnit.rate)),
+      audio_output_price: formatPriceInput(usdToDisplayMoney(item.audio_output_price ?? 0, profitMoneyUnit.rate)),
+      output_price: formatPriceInput(usdToDisplayMoney(item.output_price ?? 0, profitMoneyUnit.rate)),
+      request_price: formatPriceInput(usdToDisplayMoney(item.request_price ?? 0, profitMoneyUnit.rate)),
+      second_price: formatPriceInput(usdToDisplayMoney(item.second_price ?? 0, profitMoneyUnit.rate)),
+      effective_date: toDateInput(item.effective_from) || toDateInput(nowSeconds()),
+    })
     setSheetOpen(true)
   }
 
@@ -647,7 +682,10 @@ export function Profit() {
               <div className='flex flex-col gap-1'>
                 <Label>{t('Model')}</Label>
                 <Input
+                  id='profit-model-filter'
+                  name='profit-model-filter'
                   className='h-8 w-56'
+                  autoComplete='off'
                   placeholder={t('Model name')}
                   value={modelName}
                   onChange={(e) => setModelName(e.target.value)}
@@ -762,9 +800,26 @@ export function Profit() {
                       <TableCell>{toDateInput(item.effective_from)}</TableCell>
                       <TableCell>{item.disabled ? t('Disabled') : t('Active')}</TableCell>
                       <TableCell>
-                        <Button variant='ghost' size='icon-sm' onClick={() => void removeCostPrice(item)}>
-                          <Trash2 className='size-4' />
-                        </Button>
+                        <div className='flex items-center justify-end gap-1'>
+                          <Button
+                            variant='ghost'
+                            size='icon-sm'
+                            title={t('Edit')}
+                            aria-label={t('Edit')}
+                            onClick={() => openEditSheet(item)}
+                          >
+                            <Pencil className='size-4' />
+                          </Button>
+                          <Button
+                            variant='ghost'
+                            size='icon-sm'
+                            title={t('Delete')}
+                            aria-label={t('Delete')}
+                            onClick={() => void removeCostPrice(item)}
+                          >
+                            <Trash2 className='size-4' />
+                          </Button>
+                        </div>
                       </TableCell>
                     </TableRow>
                   ))}
@@ -775,10 +830,16 @@ export function Profit() {
         </SectionPageLayout.Content>
       </SectionPageLayout>
 
-      <Sheet open={sheetOpen} onOpenChange={setSheetOpen}>
+      <Sheet
+        open={sheetOpen}
+        onOpenChange={(open) => {
+          setSheetOpen(open)
+          if (!open) setSheetMode('create')
+        }}
+      >
         <SheetContent className='sm:max-w-xl'>
           <SheetHeader>
-            <SheetTitle>{t('Cost price')}</SheetTitle>
+            <SheetTitle>{sheetMode === 'edit' ? t('Edit model pricing') : t('Cost price')}</SheetTitle>
             <SheetDescription>
               {t('Configure simple encrypted upstream cost pricing by channel and model.')}
             </SheetDescription>
@@ -789,6 +850,7 @@ export function Profit() {
                 <Select
                   value={form.channel_id}
                   onValueChange={(v) => updateCostPriceChannel(v ?? '')}
+                  disabled={sheetMode === 'edit'}
                 >
                   <SelectTrigger className='w-full'>
                     <SelectValue placeholder={t('Select channel')} />
@@ -806,7 +868,7 @@ export function Profit() {
                 <Select
                   value={form.model_name}
                   onValueChange={(v) => updateCostPriceModel(v ?? '')}
-                  disabled={!form.channel_id || formModels.length === 0}
+                  disabled={sheetMode === 'edit' || !form.channel_id || formModels.length === 0}
                 >
                   <SelectTrigger className='w-full'>
                     <SelectValue

@@ -4,7 +4,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"mime/multipart"
 	"net/http"
+	"net/url"
 	"slices"
 	"strconv"
 	"strings"
@@ -14,6 +16,7 @@ import (
 	"github.com/QuantumNous/new-api/constant"
 	taskdto "github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/i18n"
+	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/model"
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
 	"github.com/QuantumNous/new-api/relaykit/dto"
@@ -198,6 +201,32 @@ func getModelFromRequest(c *gin.Context) (*ModelRequest, error) {
 		return modelRequest, nil
 	}
 
+	if strings.Contains(strings.ToLower(c.Request.Header.Get("Content-Type")), gin.MIMEMultipartPOSTForm) {
+		form, err := common.ParseMultipartFormReusable(c)
+		if err != nil {
+			return nil, errors.New(i18n.T(c, i18n.MsgDistributorInvalidRequest, map[string]any{"Error": err.Error()}))
+		}
+
+		c.Request.MultipartForm = form
+		c.Request.PostForm = url.Values(form.Value)
+		modelValues, hasModel := form.Value["model"]
+		fileModel := len(form.File["model"]) > 0
+		modelName := ""
+		if len(modelValues) > 0 {
+			modelName = strings.TrimSpace(modelValues[0])
+		}
+		if fileModel {
+			logger.LogWarn(c.Request.Context(), fmt.Sprintf("multipart model field has file part: path=%s content_type=%s fields=%v", c.Request.URL.Path, c.Request.Header.Get("Content-Type"), sortedMultipartFieldNames(form)))
+			return nil, errors.New("multipart field model must be a text field")
+		}
+		if !hasModel || modelName == "" {
+			logger.LogWarn(c.Request.Context(), fmt.Sprintf("multipart model field missing or empty: path=%s content_type=%s has_model=%t model_values=%d fields=%v", c.Request.URL.Path, c.Request.Header.Get("Content-Type"), hasModel, len(modelValues), sortedMultipartFieldNames(form)))
+			return nil, errors.New("multipart field model is required")
+		}
+
+		return &ModelRequest{Model: modelName}, nil
+	}
+
 	var modelRequest ModelRequest
 	err := common.UnmarshalBodyReusable(c, &modelRequest)
 	if err != nil {
@@ -372,9 +401,10 @@ func getModelRequest(c *gin.Context) (*ModelRequest, bool, error) {
 		contentType := c.ContentType()
 		if slices.Contains([]string{gin.MIMEPOSTForm, gin.MIMEMultipartPOSTForm}, contentType) {
 			req, err := getModelFromRequest(c)
-			if err == nil && req.Model != "" {
-				modelRequest.Model = req.Model
+			if err != nil {
+				return nil, false, err
 			}
+			modelRequest.Model = req.Model
 		}
 	}
 	if strings.HasPrefix(c.Request.URL.Path, "/v1/audio") {
@@ -411,6 +441,23 @@ func getModelRequest(c *gin.Context) (*ModelRequest, bool, error) {
 	}
 
 	return &modelRequest, shouldSelectChannel, nil
+}
+
+func sortedMultipartFieldNames(form *multipart.Form) []string {
+	fieldNames := make([]string, 0, len(form.Value)+len(form.File))
+	seen := make(map[string]struct{}, len(form.Value)+len(form.File))
+	for fieldName := range form.Value {
+		seen[fieldName] = struct{}{}
+		fieldNames = append(fieldNames, fieldName)
+	}
+	for fieldName := range form.File {
+		if _, ok := seen[fieldName]; ok {
+			continue
+		}
+		fieldNames = append(fieldNames, fieldName)
+	}
+	slices.Sort(fieldNames)
+	return fieldNames
 }
 
 // 修复 #4834: GET /v1/video/generations/:task_id && /v1/video/:task_id 此前不解析 model，

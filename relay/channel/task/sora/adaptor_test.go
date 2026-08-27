@@ -1,10 +1,56 @@
 package sora
 
 import (
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 
+	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/model"
+	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/relaykit/dto"
+	"github.com/gin-gonic/gin"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
+
+func TestOpenAIChannelPassesEnabledMultiImageReferenceArray(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	body := `{"model":"MiniMax-H3-C","prompt":"Keep both subjects","duration":10,"input_reference":["https://example.com/one.png","https://example.com/two.png"]}`
+	request := httptest.NewRequest(http.MethodPost, "/v1/videos", strings.NewReader(body))
+	request.Header.Set("Content-Type", "application/json")
+	context, _ := gin.CreateTestContext(httptest.NewRecorder())
+	context.Request = request
+	info := &relaycommon.RelayInfo{
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelType:       constant.ChannelTypeOpenAI,
+			UpstreamModelName: "MiniMax H3",
+			ChannelSetting: dto.ChannelSettings{
+				MultiImageReferenceEnabled: true,
+			},
+		},
+		TaskRelayInfo: &relaycommon.TaskRelayInfo{},
+	}
+	adaptor := &TaskAdaptor{}
+	adaptor.Init(info)
+
+	require.Nil(t, adaptor.ValidateRequestAndSetAction(context, info))
+	requestBody, err := adaptor.BuildRequestBody(context, info)
+	require.NoError(t, err)
+	encoded, err := io.ReadAll(requestBody)
+	require.NoError(t, err)
+
+	var upstream map[string]any
+	require.NoError(t, common.Unmarshal(encoded, &upstream))
+	assert.Equal(t, "MiniMax H3", upstream["model"])
+	assert.Equal(t, []any{
+		"https://example.com/one.png",
+		"https://example.com/two.png",
+	}, upstream["input_reference"])
+}
 
 func TestParseTaskResultAcceptsStringErrorAndRunningStatus(t *testing.T) {
 	adaptor := &TaskAdaptor{}

@@ -194,7 +194,13 @@ func GetAndValidOpenAIImageRequest(c *gin.Context, relayMode int) (*dto.ImageReq
 			c.Request.MultipartForm = form
 			c.Request.PostForm = formData
 			imageRequest.Prompt = formData.Get("prompt")
-			imageRequest.Model = formData.Get("model")
+			imageRequest.Model = strings.TrimSpace(formData.Get("model"))
+			if len(form.File["model"]) > 0 {
+				return nil, errors.New("multipart field model must be a text field")
+			}
+			if imageRequest.Model == "" {
+				return nil, errors.New("model is required")
+			}
 			if nValue := strings.TrimSpace(formData.Get("n")); nValue != "" {
 				n, err := strconv.Atoi(nValue)
 				if err != nil || n < 0 || n > dto.MaxImageN {

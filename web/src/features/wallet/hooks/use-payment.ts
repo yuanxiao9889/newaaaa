@@ -73,10 +73,22 @@ export async function requestPaymentAmount(
 
   const response = await calculator({ amount: topupAmount })
   if (!isApiSuccess(response) || !response.data) {
-    return 0
+    const message =
+      typeof response.data === 'string'
+        ? response.data
+        : response.message || i18next.t('Payment request failed')
+    throw new Error(message)
   }
 
-  return Number.parseFloat(response.data)
+  const amount = Number.parseFloat(response.data)
+  if (!Number.isFinite(amount) || amount <= 0) {
+    throw new Error(i18next.t('Payment request failed'))
+  }
+  return amount
+}
+
+interface CalculatePaymentAmountOptions {
+  throwOnError?: boolean
 }
 
 export function usePayment() {
@@ -86,7 +98,11 @@ export function usePayment() {
 
   // Calculate payment amount
   const calculatePaymentAmount = useCallback(
-    async (topupAmount: number, paymentType: string) => {
+    async (
+      topupAmount: number,
+      paymentType: string,
+      options: CalculatePaymentAmountOptions = {}
+    ) => {
       try {
         setCalculating(true)
         const calculatedAmount = await requestPaymentAmount(
@@ -95,8 +111,11 @@ export function usePayment() {
         )
         setAmount(calculatedAmount)
         return calculatedAmount
-      } catch {
+      } catch (error) {
         setAmount(0)
+        if (options.throwOnError) {
+          throw error
+        }
         return 0
       } finally {
         setCalculating(false)

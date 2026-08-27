@@ -18,6 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
+import { toast } from 'sonner'
 
 import { SectionPageLayout } from '@/components/layout'
 import { useStatus } from '@/hooks/use-status'
@@ -183,7 +184,24 @@ export function Wallet(props: WalletProps) {
       }
 
       // Calculate payment amount and show confirmation dialog
-      await calculatePaymentAmount(topupAmount, method.type)
+      try {
+        const calculatedAmount = await calculatePaymentAmount(
+          topupAmount,
+          method.type,
+          { throwOnError: true }
+        )
+        if (calculatedAmount <= 0) {
+          toast.error(t('Payment request failed'))
+          return
+        }
+      } catch (error) {
+        toast.error(
+          error instanceof Error && error.message
+            ? error.message
+            : t('Payment request failed')
+        )
+        return
+      }
       setConfirmDialogOpen(true)
     } finally {
       setPaymentLoading(null)
@@ -193,6 +211,11 @@ export function Wallet(props: WalletProps) {
   // Handle payment confirmation
   const handlePaymentConfirm = async () => {
     if (!selectedPaymentMethod) return
+    if (paymentAmount <= 0) {
+      toast.error(t('Payment request failed'))
+      setConfirmDialogOpen(false)
+      return
+    }
 
     const success = await dispatchSelectedPayment(
       selectedPaymentMethod,

@@ -271,7 +271,8 @@ func (a *TaskAdaptor) ValidateRequestAndSetAction(c *gin.Context, info *relaycom
 	// MiniMax H3-C is the first New API task model that requires this channel capability.
 	if request.Model == "MiniMax-H3-C" &&
 		request.InputMode == "reference" &&
-		!info.ChannelSetting.MultiImageReferenceEnabled {
+		(!constant.ChannelTypeSupportsMultiImageReferences(info.GetChannelType()) ||
+			!info.ChannelSetting.MultiImageReferenceEnabled) {
 		return service.TaskErrorWrapperLocal(
 			fmt.Errorf("Multi-image references are disabled for this channel"),
 			"multi_reference_disabled",

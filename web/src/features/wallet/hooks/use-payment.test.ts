@@ -46,4 +46,22 @@ describe('payment amount routing', () => {
     expect(amount).toBe(18.75)
     expect(calls).toEqual(['waffo:120'])
   })
+
+  test('reports unsuccessful or invalid amount responses', async () => {
+    const failedAmount = requestPaymentAmount(120, PAYMENT_TYPES.ALIPAY, {
+      regular: async () => ({ message: 'error', data: '充值金额过低' }),
+      stripe: async () => ({ success: true, data: '2' }),
+      waffo: async () => ({ success: true, data: '3' }),
+      waffoPancake: async () => ({ success: true, data: '4' }),
+    })
+    const invalidAmount = requestPaymentAmount(120, PAYMENT_TYPES.ALIPAY, {
+      regular: async () => ({ success: true, data: 'not-a-number' }),
+      stripe: async () => ({ success: true, data: '2' }),
+      waffo: async () => ({ success: true, data: '3' }),
+      waffoPancake: async () => ({ success: true, data: '4' }),
+    })
+
+    await expect(failedAmount).rejects.toThrow('充值金额过低')
+    await expect(invalidAmount).rejects.toThrow('Payment request failed')
+  })
 })

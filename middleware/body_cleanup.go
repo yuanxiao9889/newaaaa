@@ -13,6 +13,12 @@ func BodyStorageCleanup() gin.HandlerFunc {
 		// 处理请求
 		c.Next()
 
+		if c.Request.MultipartForm != nil {
+			_ = c.Request.MultipartForm.RemoveAll()
+			c.Request.MultipartForm = nil
+			c.Request.PostForm = nil
+		}
+
 		// 请求结束后清理存储
 		common.CleanupBodyStorage(c)
 

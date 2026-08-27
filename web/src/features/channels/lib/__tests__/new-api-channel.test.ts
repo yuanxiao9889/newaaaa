@@ -20,8 +20,10 @@ import { describe, expect, test } from 'vitest'
 
 import {
   CHANNEL_TYPE_NEW_API,
+  CHANNEL_TYPE_OPENAI,
   CHANNEL_TYPE_OPTIONS,
   MODEL_FETCHABLE_TYPES,
+  MULTI_IMAGE_REFERENCE_SUPPORTED_TYPES,
 } from '../../constants'
 import type { Channel } from '../../types'
 import {
@@ -68,10 +70,17 @@ describe('New API channel', () => {
   })
 
   test('defaults multi-image references to disabled', () => {
-    assert.equal(
-      CHANNEL_FORM_DEFAULT_VALUES.multi_image_reference_enabled,
-      false
-    )
+    expect(CHANNEL_FORM_DEFAULT_VALUES.multi_image_reference_enabled).toBe(false)
+  })
+
+  test('offers multi-image references for supported channel types', () => {
+    expect(
+      MULTI_IMAGE_REFERENCE_SUPPORTED_TYPES.has(CHANNEL_TYPE_OPENAI)
+    ).toBe(true)
+    expect(
+      MULTI_IMAGE_REFERENCE_SUPPORTED_TYPES.has(CHANNEL_TYPE_NEW_API)
+    ).toBe(true)
+    expect(MULTI_IMAGE_REFERENCE_SUPPORTED_TYPES.has(55)).toBe(false)
   })
 
   test('serializes and restores the multi-image reference setting', () => {
@@ -79,7 +88,7 @@ describe('New API channel', () => {
       ...newAPIForm('https://new-api.example'),
       multi_image_reference_enabled: true,
     })
-    assert.equal(JSON.parse(setting).multi_image_reference_enabled, true)
+    expect(JSON.parse(setting).multi_image_reference_enabled).toBe(true)
 
     const channel = {
       id: 109,
@@ -100,10 +109,9 @@ describe('New API channel', () => {
       },
     } as Channel
 
-    assert.equal(
-      transformChannelToFormDefaults(channel).multi_image_reference_enabled,
-      true
-    )
+    expect(
+      transformChannelToFormDefaults(channel).multi_image_reference_enabled
+    ).toBe(true)
   })
 
   test('requires a non-blank Base URL', () => {

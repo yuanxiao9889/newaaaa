@@ -1,6 +1,7 @@
 package relay
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -13,7 +14,25 @@ import (
 	"github.com/QuantumNous/new-api/types"
 
 	"github.com/gin-gonic/gin"
+	"github.com/stretchr/testify/require"
 )
+
+func TestMappedImageJSONBodyRewritesOnlyModel(t *testing.T) {
+	storage, err := common.CreateBodyStorage([]byte(`{"model":"dou-5-0-pro","prompt":"draw","reference_image_upload":true}`))
+	require.NoError(t, err)
+	defer storage.Close()
+
+	body, err := mappedImageJSONBody(storage, "seedream-5.0-pro")
+	require.NoError(t, err)
+	var payload map[string]json.RawMessage
+	require.NoError(t, common.DecodeJson(body, &payload))
+	var modelName string
+	require.NoError(t, common.Unmarshal(payload["model"], &modelName))
+	require.Equal(t, "seedream-5.0-pro", modelName)
+	var preserved bool
+	require.NoError(t, common.Unmarshal(payload["reference_image_upload"], &preserved))
+	require.True(t, preserved)
+}
 
 func TestImageHelperConvertImageRequestErrorReturnsBadRequestAndSkipsRetry(t *testing.T) {
 	gin.SetMode(gin.TestMode)

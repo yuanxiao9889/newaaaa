@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/model"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relaykit/dto"
@@ -27,7 +28,10 @@ func newValidationContextWithSettings(body string, settings dto.ChannelSettings)
 	context, _ := gin.CreateTestContext(httptest.NewRecorder())
 	context.Request = request
 	return context, &relaycommon.RelayInfo{
-		ChannelMeta:   &relaycommon.ChannelMeta{ChannelSetting: settings},
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelType:    constant.ChannelTypeNewAPI,
+			ChannelSetting: settings,
+		},
 		TaskRelayInfo: &relaycommon.TaskRelayInfo{},
 	}
 }

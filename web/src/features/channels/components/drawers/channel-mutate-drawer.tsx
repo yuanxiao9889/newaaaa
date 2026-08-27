@@ -140,7 +140,6 @@ import {
   ADD_MODE_OPTIONS,
   CLAUDE_FIELD_PASSTHROUGH_TYPES,
   CHANNEL_STATUS_LABELS,
-  CHANNEL_TYPE_NEW_API,
   CHANNEL_TYPE_OPTIONS,
   CHANNEL_TYPE_WARNINGS,
   ERROR_MESSAGES,
@@ -148,6 +147,7 @@ import {
   FIELD_DESCRIPTIONS,
   FIELD_PLACEHOLDERS,
   MODEL_FETCHABLE_TYPES,
+  MULTI_IMAGE_REFERENCE_SUPPORTED_TYPES,
   OPENAI_FIELD_PASSTHROUGH_TYPES,
 } from '../../constants'
 import { useChannelMutateForm } from '../../hooks/use-channel-mutate-form'
@@ -4157,7 +4157,9 @@ export function ChannelMutateDrawer({
                                 )}
                               />
 
-                              {currentType === CHANNEL_TYPE_NEW_API && (
+                              {MULTI_IMAGE_REFERENCE_SUPPORTED_TYPES.has(
+                                currentType
+                              ) && (
                                 <FormField
                                   control={form.control}
                                   name='multi_image_reference_enabled'

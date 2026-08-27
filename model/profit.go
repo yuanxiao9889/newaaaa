@@ -355,6 +355,11 @@ func ListProfitCostPrices(reveal bool) ([]ProfitCostPriceListItem, error) {
 							Unit   string  `json:"unit"`
 						}
 						if err := common.UnmarshalJsonStr(plain, &payload); err == nil {
+							if payload.Unit == ProfitFixedUnitSecond {
+								item.SecondPrice = payload.Amount
+							} else {
+								item.RequestPrice = payload.Amount
+							}
 							item.PriceSummary = formatProfitFixedSummary(payload.Amount, payload.Unit)
 						}
 					}
