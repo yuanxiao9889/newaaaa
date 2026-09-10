@@ -3,6 +3,7 @@ package model
 import (
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/logger"
@@ -370,14 +371,25 @@ func Recharge(referenceId string, customerId string, callerIp string) (err error
 }
 
 // topUpQueryWindowSeconds 限制充值记录查询的时间窗口（秒）。
-const topUpQueryWindowSeconds int64 = 30 * 24 * 60 * 60
+// ErrInvalidTopUpMonth indicates that a month filter is not in YYYY-MM format.
+var ErrInvalidTopUpMonth = errors.New("invalid top-up month")
 
-// topUpQueryCutoff 返回允许查询的最早 create_time（秒级 Unix 时间戳）。
-func topUpQueryCutoff() int64 {
-	return common.GetTimestamp() - topUpQueryWindowSeconds
+func topUpMonthRange(month string) (start int64, end int64, err error) {
+	if month == "" {
+		return 0, 0, nil
+	}
+	parsed, err := time.ParseInLocation("2006-01", month, time.Local)
+	if err != nil || parsed.Format("2006-01") != month {
+		return 0, 0, ErrInvalidTopUpMonth
+	}
+	return parsed.Unix(), parsed.AddDate(0, 1, 0).Unix(), nil
 }
 
 func GetUserTopUps(userId int, pageInfo *common.PageInfo) (topups []*TopUp, total int64, err error) {
+	return GetUserTopUpsByMonth(userId, pageInfo, "")
+}
+
+func GetUserTopUpsByMonth(userId int, pageInfo *common.PageInfo, month string) (topups []*TopUp, total int64, err error) {
 	// Start transaction
 	tx := DB.Begin()
 	if tx.Error != nil {
@@ -389,17 +401,25 @@ func GetUserTopUps(userId int, pageInfo *common.PageInfo) (topups []*TopUp, tota
 		}
 	}()
 
-	cutoff := topUpQueryCutoff()
+	start, end, err := topUpMonthRange(month)
+	if err != nil {
+		tx.Rollback()
+		return nil, 0, err
+	}
+	query := tx.Model(&TopUp{}).Where("user_id = ?", userId)
+	if month != "" {
+		query = query.Where("create_time >= ? AND create_time < ?", start, end)
+	}
 
 	// Get total count within transaction
-	err = tx.Model(&TopUp{}).Where("user_id = ? AND create_time >= ?", userId, cutoff).Count(&total).Error
+	err = query.Count(&total).Error
 	if err != nil {
 		tx.Rollback()
 		return nil, 0, err
 	}
 
 	// Get paginated topups within same transaction
-	err = tx.Where("user_id = ? AND create_time >= ?", userId, cutoff).Order("id desc").Limit(pageInfo.GetPageSize()).Offset(pageInfo.GetStartIdx()).Find(&topups).Error
+	err = query.Order("id desc").Limit(pageInfo.GetPageSize()).Offset(pageInfo.GetStartIdx()).Find(&topups).Error
 	if err != nil {
 		tx.Rollback()
 		return nil, 0, err
@@ -415,6 +435,11 @@ func GetUserTopUps(userId int, pageInfo *common.PageInfo) (topups []*TopUp, tota
 
 // GetAllTopUps 获取全平台的充值记录（管理员使用，不限制时间窗口）
 func GetAllTopUps(pageInfo *common.PageInfo) (topups []*TopUp, total int64, err error) {
+	return GetAllTopUpsByMonth(pageInfo, "")
+}
+
+// GetAllTopUpsByMonth returns all top-up records, optionally restricted to a calendar month.
+func GetAllTopUpsByMonth(pageInfo *common.PageInfo, month string) (topups []*TopUp, total int64, err error) {
 	tx := DB.Begin()
 	if tx.Error != nil {
 		return nil, 0, tx.Error
@@ -425,12 +450,22 @@ func GetAllTopUps(pageInfo *common.PageInfo) (topups []*TopUp, total int64, err 
 		}
 	}()
 
-	if err = tx.Model(&TopUp{}).Count(&total).Error; err != nil {
+	start, end, err := topUpMonthRange(month)
+	if err != nil {
+		tx.Rollback()
+		return nil, 0, err
+	}
+	query := tx.Model(&TopUp{})
+	if month != "" {
+		query = query.Where("create_time >= ? AND create_time < ?", start, end)
+	}
+
+	if err = query.Count(&total).Error; err != nil {
 		tx.Rollback()
 		return nil, 0, err
 	}
 
-	if err = tx.Order("id desc").Limit(pageInfo.GetPageSize()).Offset(pageInfo.GetStartIdx()).Find(&topups).Error; err != nil {
+	if err = query.Order("id desc").Limit(pageInfo.GetPageSize()).Offset(pageInfo.GetStartIdx()).Find(&topups).Error; err != nil {
 		tx.Rollback()
 		return nil, 0, err
 	}
@@ -448,6 +483,10 @@ const searchTopUpCountHardLimit = 10000
 
 // SearchUserTopUps 按订单号搜索某用户的充值记录
 func SearchUserTopUps(userId int, keyword string, pageInfo *common.PageInfo) (topups []*TopUp, total int64, err error) {
+	return SearchUserTopUpsByMonth(userId, keyword, pageInfo, "")
+}
+
+func SearchUserTopUpsByMonth(userId int, keyword string, pageInfo *common.PageInfo, month string) (topups []*TopUp, total int64, err error) {
 	tx := DB.Begin()
 	if tx.Error != nil {
 		return nil, 0, tx.Error
@@ -458,7 +497,15 @@ func SearchUserTopUps(userId int, keyword string, pageInfo *common.PageInfo) (to
 		}
 	}()
 
-	query := tx.Model(&TopUp{}).Where("user_id = ? AND create_time >= ?", userId, topUpQueryCutoff())
+	start, end, err := topUpMonthRange(month)
+	if err != nil {
+		tx.Rollback()
+		return nil, 0, err
+	}
+	query := tx.Model(&TopUp{}).Where("user_id = ?", userId)
+	if month != "" {
+		query = query.Where("create_time >= ? AND create_time < ?", start, end)
+	}
 	if keyword != "" {
 		pattern, perr := sanitizeLikePattern(keyword)
 		if perr != nil {
@@ -488,6 +535,11 @@ func SearchUserTopUps(userId int, keyword string, pageInfo *common.PageInfo) (to
 
 // SearchAllTopUps 按订单号搜索全平台充值记录（管理员使用，不限制时间窗口）
 func SearchAllTopUps(keyword string, pageInfo *common.PageInfo) (topups []*TopUp, total int64, err error) {
+	return SearchAllTopUpsByMonth(keyword, pageInfo, "")
+}
+
+// SearchAllTopUpsByMonth searches all top-up records by order number and optional calendar month.
+func SearchAllTopUpsByMonth(keyword string, pageInfo *common.PageInfo, month string) (topups []*TopUp, total int64, err error) {
 	tx := DB.Begin()
 	if tx.Error != nil {
 		return nil, 0, tx.Error
@@ -498,7 +550,15 @@ func SearchAllTopUps(keyword string, pageInfo *common.PageInfo) (topups []*TopUp
 		}
 	}()
 
+	start, end, err := topUpMonthRange(month)
+	if err != nil {
+		tx.Rollback()
+		return nil, 0, err
+	}
 	query := tx.Model(&TopUp{})
+	if month != "" {
+		query = query.Where("create_time >= ? AND create_time < ?", start, end)
+	}
 	if keyword != "" {
 		pattern, perr := sanitizeLikePattern(keyword)
 		if perr != nil {

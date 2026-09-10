@@ -34,6 +34,27 @@ func TestMappedImageJSONBodyRewritesOnlyModel(t *testing.T) {
 	require.True(t, preserved)
 }
 
+func TestImageRequestMarshalPreservesSeedreamReferenceFields(t *testing.T) {
+	var request dto.ImageRequest
+	require.NoError(t, common.Unmarshal([]byte(`{
+		"model":"dou-5-0-pro",
+		"prompt":"change clothing",
+		"image_url":"https://relay.example/reference.png",
+		"strength":"HIGH"
+	}`), &request))
+
+	payload, err := common.Marshal(request)
+	require.NoError(t, err)
+	var body map[string]json.RawMessage
+	require.NoError(t, common.Unmarshal(payload, &body))
+
+	var imageURL, strength string
+	require.NoError(t, common.Unmarshal(body["image_url"], &imageURL))
+	require.NoError(t, common.Unmarshal(body["strength"], &strength))
+	require.Equal(t, "https://relay.example/reference.png", imageURL)
+	require.Equal(t, "HIGH", strength)
+}
+
 func TestImageHelperConvertImageRequestErrorReturnsBadRequestAndSkipsRetry(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 

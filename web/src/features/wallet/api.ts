@@ -205,7 +205,8 @@ export async function transferAffiliateQuota(
 export async function getUserBillingHistory(
   page: number,
   pageSize: number,
-  keyword?: string
+  keyword?: string,
+  month?: string
 ): Promise<ApiResponse<BillingHistoryResponse>> {
   const params = new URLSearchParams({
     p: page.toString(),
@@ -213,6 +214,9 @@ export async function getUserBillingHistory(
   })
   if (keyword) {
     params.append('keyword', keyword)
+  }
+  if (month) {
+    params.append('month', month)
   }
   const res = await api.get(`/api/user/topup/self?${params.toString()}`)
   return res.data
@@ -224,7 +228,8 @@ export async function getUserBillingHistory(
 export async function getAllBillingHistory(
   page: number,
   pageSize: number,
-  keyword?: string
+  keyword?: string,
+  month?: string
 ): Promise<ApiResponse<BillingHistoryResponse>> {
   const params = new URLSearchParams({
     p: page.toString(),
@@ -232,6 +237,9 @@ export async function getAllBillingHistory(
   })
   if (keyword) {
     params.append('keyword', keyword)
+  }
+  if (month) {
+    params.append('month', month)
   }
   const res = await api.get(`/api/user/topup?${params.toString()}`)
   return res.data

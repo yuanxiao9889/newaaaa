@@ -128,6 +128,7 @@ func main() {
 	// Subscription quota reset task (daily/weekly/monthly/custom)
 	service.StartSubscriptionQuotaResetTask()
 	service.StartAsyncImageCleanupLoop()
+	service.StartMidjourneyUploadCleanupLoop()
 	controller.StartInternalAsyncImageWorkerLoop()
 
 	// Report this process as a system instance so the System Info page can show

@@ -47,6 +47,11 @@ type ImageRequest struct {
 	WatermarkEnabled json.RawMessage `json:"watermark_enabled,omitempty"`
 	UserId           json.RawMessage `json:"user_id,omitempty"`
 	Image            json.RawMessage `json:"image,omitempty"`
+	// Seedream reference fields must be explicit because ImageRequest uses a
+	// custom MarshalJSON implementation that does not merge Extra fields.
+	ImageURL  json.RawMessage `json:"image_url,omitempty"`
+	ImageURLs json.RawMessage `json:"image_urls,omitempty"`
+	Strength  json.RawMessage `json:"strength,omitempty"`
 	// 用匿名参数接收额外参数
 	Extra map[string]json.RawMessage `json:"-"`
 }

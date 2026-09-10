@@ -512,6 +512,7 @@ func GetUserTopUps(c *gin.Context) {
 	userId := c.GetInt("id")
 	pageInfo := common.GetPageQuery(c)
 	keyword := c.Query("keyword")
+	month := c.Query("month")
 
 	var (
 		topups []*model.TopUp
@@ -519,9 +520,9 @@ func GetUserTopUps(c *gin.Context) {
 		err    error
 	)
 	if keyword != "" {
-		topups, total, err = model.SearchUserTopUps(userId, keyword, pageInfo)
+		topups, total, err = model.SearchUserTopUpsByMonth(userId, keyword, pageInfo, month)
 	} else {
-		topups, total, err = model.GetUserTopUps(userId, pageInfo)
+		topups, total, err = model.GetUserTopUpsByMonth(userId, pageInfo, month)
 	}
 	if err != nil {
 		common.ApiError(c, err)
@@ -537,6 +538,7 @@ func GetUserTopUps(c *gin.Context) {
 func GetAllTopUps(c *gin.Context) {
 	pageInfo := common.GetPageQuery(c)
 	keyword := c.Query("keyword")
+	month := c.Query("month")
 
 	var (
 		topups []*model.TopUp
@@ -544,9 +546,9 @@ func GetAllTopUps(c *gin.Context) {
 		err    error
 	)
 	if keyword != "" {
-		topups, total, err = model.SearchAllTopUps(keyword, pageInfo)
+		topups, total, err = model.SearchAllTopUpsByMonth(keyword, pageInfo, month)
 	} else {
-		topups, total, err = model.GetAllTopUps(pageInfo)
+		topups, total, err = model.GetAllTopUpsByMonth(pageInfo, month)
 	}
 	if err != nil {
 		common.ApiError(c, err)

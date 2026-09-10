@@ -79,6 +79,11 @@ func SetRelayRouter(router *gin.Engine) {
 			controller.Relay(c, types.RelayFormatOpenAIRealtime)
 		})
 	}
+	imageUploadRouter := router.Group("/v1/uploads")
+	imageUploadRouter.Use(middleware.RouteTag("relay"))
+	imageUploadRouter.Use(middleware.SystemPerformanceCheck())
+	imageUploadRouter.Use(middleware.TokenAuth())
+	imageUploadRouter.POST("/images", controller.RelayImageUpload)
 	{
 		//http router
 		httpRouter := relayV1Router.Group("")
@@ -179,6 +184,16 @@ func SetRelayRouter(router *gin.Engine) {
 		imageTaskRouter.GET("/:task_id/content", controller.GetImageTaskContent)
 	}
 
+	// Provider-native image tasks (for example Seedream) are registered in
+	// memory at submission time and polled through the relay. This route must
+	// stay outside Distribute because a GET poll has no model request body.
+	nativeImageRouter := router.Group("/v1/images/generations")
+	nativeImageRouter.Use(middleware.RouteTag("relay"))
+	nativeImageRouter.Use(middleware.SystemPerformanceCheck())
+	nativeImageRouter.Use(middleware.TokenAuth())
+	nativeImageRouter.GET("/:task_id", relay.GetNativeAsyncImageStatus)
+	nativeImageRouter.GET("/:task_id/content", relay.GetNativeAsyncImageContent)
+
 	signedImageTaskRouter := router.Group("/v1/images/tasks")
 	signedImageTaskRouter.Use(middleware.RouteTag("relay"))
 	signedImageTaskRouter.Use(middleware.SystemPerformanceCheck())
@@ -223,6 +238,8 @@ func SetRelayRouter(router *gin.Engine) {
 
 func registerMjRouterGroup(relayMjRouter *gin.RouterGroup) {
 	relayMjRouter.GET("/image/:id", relay.RelayMidjourneyImage)
+	relayMjRouter.GET("/upload/:id", controller.RelayMidjourneyUploadImage)
+	relayMjRouter.POST("/submit/upload-discord-images", middleware.TokenAuth(), controller.RelayMidjourneyUpload)
 	relayMjRouter.Use(middleware.TokenAuth(), middleware.Distribute())
 	{
 		relayMjRouter.POST("/submit/action", controller.RelayMidjourney)
@@ -240,6 +257,5 @@ func registerMjRouterGroup(relayMjRouter *gin.RouterGroup) {
 		relayMjRouter.GET("/task/:id/image-seed", controller.RelayMidjourney)
 		relayMjRouter.POST("/task/list-by-condition", controller.RelayMidjourney)
 		relayMjRouter.POST("/insight-face/swap", controller.RelayMidjourney)
-		relayMjRouter.POST("/submit/upload-discord-images", controller.RelayMidjourney)
 	}
 }

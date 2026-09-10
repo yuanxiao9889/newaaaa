@@ -51,6 +51,7 @@ export function useBillingHistory(options: UseBillingHistoryOptions = {}) {
   const [page, setPage] = useState(initialPage)
   const [pageSize, setPageSize] = useState(initialPageSize)
   const [keyword, setKeyword] = useState('')
+  const [month, setMonth] = useState('')
   const debouncedKeyword = useDebounce(keyword)
   const requestIdRef = useRef(0)
   const [loading, setLoading] = useState(false)
@@ -64,8 +65,8 @@ export function useBillingHistory(options: UseBillingHistoryOptions = {}) {
     setLoading(true)
     try {
       const response = isAdmin
-        ? await getAllBillingHistory(page, pageSize, debouncedKeyword)
-        : await getUserBillingHistory(page, pageSize, debouncedKeyword)
+        ? await getAllBillingHistory(page, pageSize, debouncedKeyword, month)
+        : await getUserBillingHistory(page, pageSize, debouncedKeyword, month)
 
       if (requestId !== requestIdRef.current) return
 
@@ -92,7 +93,7 @@ export function useBillingHistory(options: UseBillingHistoryOptions = {}) {
         setLoading(false)
       }
     }
-  }, [debouncedKeyword, isAdmin, page, pageSize])
+  }, [debouncedKeyword, isAdmin, month, page, pageSize])
 
   /**
    * Complete a pending order (admin only)
@@ -152,12 +153,18 @@ export function useBillingHistory(options: UseBillingHistoryOptions = {}) {
     setPage(1) // Reset to first page when searching
   }, [])
 
+  const handleMonthChange = useCallback((newMonth: string) => {
+    requestIdRef.current += 1
+    setMonth(newMonth)
+    setPage(1)
+  }, [])
+
   // Fetch data after the search draft has settled.
   useEffect(() => {
     if (keyword !== debouncedKeyword) return
 
     fetchBillingHistory()
-  }, [debouncedKeyword, fetchBillingHistory, keyword])
+  }, [debouncedKeyword, fetchBillingHistory, keyword, month])
 
   return {
     records,
@@ -165,12 +172,14 @@ export function useBillingHistory(options: UseBillingHistoryOptions = {}) {
     page,
     pageSize,
     keyword,
+    month,
     loading,
     completing,
     isAdmin,
     handlePageChange,
     handlePageSizeChange,
     handleSearch,
+    handleMonthChange,
     handleCompleteOrder,
     refresh: fetchBillingHistory,
   }

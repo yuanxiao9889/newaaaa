@@ -88,6 +88,7 @@ func DecompressRequestMiddleware() gin.HandlerFunc {
 		}
 
 		if decompressed {
+			c.Set("request_body_decompressed", true)
 			c.Request.Header.Del("Content-Encoding")
 		}
 

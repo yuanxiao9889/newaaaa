@@ -8,6 +8,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -275,11 +276,40 @@ func ParseMultipartFormReusable(c *gin.Context) (*multipart.Form, error) {
 	if err != nil {
 		return nil, err
 	}
+	if !c.GetBool("request_body_decompressed") &&
+		c.Request.Header.Get("Content-Encoding") == "" &&
+		c.Request.ContentLength >= 0 &&
+		storage.Size() != c.Request.ContentLength {
+		return nil, newMultipartParseError(
+			requestBody,
+			boundary,
+			fmt.Errorf("request body length mismatch: received %d bytes, declared %d bytes", storage.Size(), c.Request.ContentLength),
+		)
+	}
 
 	reader := multipart.NewReader(bytes.NewReader(requestBody), boundary)
 	form, err := reader.ReadForm(multipartMemoryLimit())
 	if err != nil {
-		return nil, err
+		if form != nil {
+			_ = form.RemoveAll()
+		}
+		parseErr := newMultipartParseError(requestBody, boundary, err)
+		if repairedBody, repairedForm, ok := tryRepairImageEditMultipartEOF(c, requestBody, boundary, parseErr); ok {
+			repairedStorage, storageErr := CreateBodyStorage(repairedBody)
+			if storageErr != nil {
+				_ = repairedForm.RemoveAll()
+				return nil, fmt.Errorf("failed to store repaired multipart request: %w", storageErr)
+			}
+			c.Set("multipart_eof_original_bytes", storage.Size())
+			storage.Close()
+			c.Set(KeyBodyStorage, repairedStorage)
+			c.Request.ContentLength = int64(len(repairedBody))
+			c.Request.Header.Set("Content-Length", strconv.FormatInt(int64(len(repairedBody)), 10))
+			c.Set("multipart_eof_repaired", true)
+			c.Request.Body = io.NopCloser(repairedStorage)
+			return repairedForm, nil
+		}
+		return nil, parseErr
 	}
 
 	// Reset request body
@@ -288,6 +318,191 @@ func ParseMultipartFormReusable(c *gin.Context) (*multipart.Form, error) {
 	}
 	c.Request.Body = io.NopCloser(storage)
 	return form, nil
+}
+
+func tryRepairImageEditMultipartEOF(c *gin.Context, body []byte, boundary string, parseErr *MultipartParseError) ([]byte, *multipart.Form, bool) {
+	if c == nil || c.Request == nil || parseErr == nil ||
+		parseErr.Kind != "body_truncated" || !errors.Is(parseErr.Cause, io.ErrUnexpectedEOF) ||
+		!isImageEditMultipartPath(c.Request.URL.Path) ||
+		c.GetBool("request_body_decompressed") ||
+		c.Request.Header.Get("Content-Encoding") != "" ||
+		c.Request.ContentLength < 0 ||
+		int64(len(body)) != c.Request.ContentLength {
+		return nil, nil, false
+	}
+
+	closingBoundary := []byte("--" + boundary + "--")
+	if bytes.Contains(body, closingBoundary) {
+		return nil, nil, false
+	}
+
+	repairedBody, ok := appendMultipartClosingBoundary(body, boundary)
+	if !ok {
+		return nil, nil, false
+	}
+
+	repairedReader := multipart.NewReader(bytes.NewReader(repairedBody), boundary)
+	form, err := repairedReader.ReadForm(multipartMemoryLimit())
+	if err != nil || !hasNonEmptyImageMultipartFile(form) {
+		if form != nil {
+			_ = form.RemoveAll()
+		}
+		return nil, nil, false
+	}
+	return repairedBody, form, true
+}
+
+func isImageEditMultipartPath(path string) bool {
+	return path == "/v1/edits" || strings.HasSuffix(path, "/images/edits")
+}
+
+func appendMultipartClosingBoundary(body []byte, boundary string) ([]byte, bool) {
+	marker := []byte("--" + boundary)
+	if len(body) == 0 || len(marker) == 0 {
+		return nil, false
+	}
+
+	lastBoundary := -1
+	searchFrom := 0
+	for searchFrom < len(body) {
+		index := bytes.Index(body[searchFrom:], marker)
+		if index < 0 {
+			break
+		}
+		index += searchFrom
+		afterMarker := index + len(marker)
+		atLineStart := index == 0 || (index >= 2 && bytes.Equal(body[index-2:index], []byte("\r\n")))
+		validDelimiter := afterMarker+2 <= len(body) &&
+			(bytes.Equal(body[afterMarker:afterMarker+2], []byte("\r\n")) ||
+				bytes.Equal(body[afterMarker:afterMarker+2], []byte("--")))
+		if atLineStart && validDelimiter && !bytes.HasPrefix(body[afterMarker:], []byte("--")) {
+			lastBoundary = index
+		}
+		searchFrom = index + len(marker)
+	}
+	if lastBoundary < 0 {
+		return nil, false
+	}
+
+	headerEndOffset := bytes.Index(body[lastBoundary:], []byte("\r\n\r\n"))
+	if headerEndOffset < 0 {
+		return nil, false
+	}
+	contentStart := lastBoundary + headerEndOffset + len("\r\n\r\n")
+	if contentStart >= len(body) {
+		return nil, false
+	}
+
+	closing := []byte("--" + boundary + "--\r\n")
+	if !bytes.HasSuffix(body, []byte("\r\n")) {
+		closing = append([]byte("\r\n"), closing...)
+	}
+	repaired := make([]byte, 0, len(body)+len(closing))
+	repaired = append(repaired, body...)
+	repaired = append(repaired, closing...)
+	return repaired, true
+}
+
+func hasNonEmptyImageMultipartFile(form *multipart.Form) bool {
+	if form == nil {
+		return false
+	}
+	for fieldName, files := range form.File {
+		if fieldName != "image" && fieldName != "image[]" && !strings.HasPrefix(fieldName, "image[") {
+			continue
+		}
+		for _, file := range files {
+			if file != nil && file.Size > 0 {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// MultipartParseError preserves the parser error while classifying malformed
+// bodies for diagnostics. Image edit requests have a narrowly scoped EOF
+// compatibility path when the declared body is complete and only the final
+// multipart delimiter is missing.
+type MultipartParseError struct {
+	Cause               error
+	ReceivedBytes       int64
+	DeclaredBytes       int64
+	BoundaryPresent     bool
+	ClosingBoundarySeen bool
+	Kind                string
+}
+
+func (e *MultipartParseError) Error() string {
+	if e == nil {
+		return "multipart request parse failed"
+	}
+	if e.Cause == nil {
+		return "multipart request parse failed"
+	}
+	if e.Kind == "body_truncated" {
+		return fmt.Sprintf("multipart request body is incomplete: %v", e.Cause)
+	}
+	return fmt.Sprintf("multipart request is invalid: %v", e.Cause)
+}
+
+func (e *MultipartParseError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.Cause
+}
+
+func newMultipartParseError(body []byte, boundary string, cause error) *MultipartParseError {
+	closingBoundary := []byte("--" + boundary + "--")
+	kind := "invalid_multipart"
+	if errors.Is(cause, io.ErrUnexpectedEOF) ||
+		strings.Contains(cause.Error(), "request body length mismatch") ||
+		!bytes.Contains(body, closingBoundary) {
+		kind = "body_truncated"
+	}
+	return &MultipartParseError{
+		Cause:               cause,
+		ReceivedBytes:       int64(len(body)),
+		DeclaredBytes:       -1,
+		BoundaryPresent:     bytes.Contains(body, []byte("--"+boundary)),
+		ClosingBoundarySeen: bytes.Contains(body, closingBoundary),
+		Kind:                kind,
+	}
+}
+
+// MultipartRequestDiagnostics returns request metadata suitable for server
+// logs. It deliberately excludes authorization headers and request contents.
+func MultipartRequestDiagnostics(c *gin.Context, err error) string {
+	var parseErr *MultipartParseError
+	if !errors.As(err, &parseErr) {
+		return fmt.Sprintf("kind=invalid_multipart error=%q", err)
+	}
+	declaredBytes := c.Request.ContentLength
+	if parseErr.DeclaredBytes >= 0 {
+		declaredBytes = parseErr.DeclaredBytes
+	}
+	transferEncoding := strings.Join(c.Request.TransferEncoding, ",")
+	if transferEncoding == "" {
+		transferEncoding = "-"
+	}
+	userAgent := c.Request.UserAgent()
+	if userAgent == "" {
+		userAgent = "-"
+	}
+	return fmt.Sprintf(
+		"kind=%s received_bytes=%d declared_bytes=%d boundary_present=%t closing_boundary=%t transfer_encoding=%s content_encoding=%q remote=%q user_agent=%q error=%q",
+		parseErr.Kind,
+		parseErr.ReceivedBytes,
+		declaredBytes,
+		parseErr.BoundaryPresent,
+		parseErr.ClosingBoundarySeen,
+		transferEncoding,
+		c.Request.Header.Get("Content-Encoding"),
+		c.ClientIP(),
+		userAgent,
+		err,
+	)
 }
 
 func processFormMap(formMap map[string]any, v any) error {

@@ -2,6 +2,7 @@ package newapi
 
 import (
 	"bytes"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -131,6 +132,57 @@ func TestMiniMaxH3RequestContract(t *testing.T) {
 	url, err := adaptor.BuildRequestURL(info)
 	require.NoError(t, err)
 	assert.Equal(t, "/v1/videos", strings.TrimPrefix(url, adaptor.baseURL))
+}
+
+func TestSecureMiniMaxH3RequestContract(t *testing.T) {
+	request, _, _, _ := validatedRequestBody(t, `{
+		"model":"minimax-h3",
+		"prompt":"A cinematic sunrise",
+		"duration":6,
+		"ratio":"9:16",
+		"resolution":"720p",
+		"prompt_optimize":false,
+		"seed":0,
+		"image_urls":["https://media.example.test/subject.png"],
+		"audio_urls":["https://media.example.test/music.mp3"]
+	}`)
+
+	assert.Equal(t, "minimax-h3", request["model"])
+	assert.Equal(t, float64(6), request["duration"])
+	assert.Equal(t, "9:16", request["ratio"])
+	assert.Equal(t, "720p", request["resolution"])
+	assert.Equal(t, false, request["prompt_optimize"])
+	assert.Equal(t, float64(0), request["seed"])
+	assert.Equal(t, []any{"https://media.example.test/subject.png"}, request["image_urls"])
+	assert.Equal(t, []any{"https://media.example.test/music.mp3"}, request["audio_urls"])
+	assert.NotContains(t, request, "seconds")
+	assert.NotContains(t, request, "reference_images")
+}
+
+func TestSecureMiniMaxH3DefaultsAndDurationBounds(t *testing.T) {
+	request, _, _, _ := validatedRequestBody(t, `{
+		"model":"minimax-h3",
+		"prompt":"Audio-led scene",
+		"audio_urls":"https://media.example.test/music.mp3"
+	}`)
+	assert.Equal(t, float64(15), request["duration"])
+	assert.Equal(t, "16:9", request["ratio"])
+	assert.Equal(t, []any{"https://media.example.test/music.mp3"}, request["audio_urls"])
+
+	for _, duration := range []int{3, 16} {
+		context, info := newValidationContext(fmt.Sprintf(`{"model":"minimax-h3","prompt":"test","duration":%d}`, duration))
+		taskErr := (&TaskAdaptor{}).ValidateRequestAndSetAction(context, info)
+		require.NotNil(t, taskErr)
+		assert.Equal(t, http.StatusBadRequest, taskErr.StatusCode)
+	}
+	context, info := newValidationContext(`{"model":"minimax-h3","prompt":"test","image_urls":["http://media.example.test/image.png"]}`)
+	taskErr := (&TaskAdaptor{}).ValidateRequestAndSetAction(context, info)
+	require.NotNil(t, taskErr)
+	assert.Equal(t, http.StatusBadRequest, taskErr.StatusCode)
+	context, info = newValidationContext(`{"model":"minimax-h3","prompt":"test","stream":true}`)
+	taskErr = (&TaskAdaptor{}).ValidateRequestAndSetAction(context, info)
+	require.NotNil(t, taskErr)
+	assert.Equal(t, http.StatusBadRequest, taskErr.StatusCode)
 }
 
 func TestMiniMaxH3Validation(t *testing.T) {
@@ -317,13 +369,14 @@ func TestFetchTaskSelectsEndpointByModel(t *testing.T) {
 	}{
 		{model: "hj-2.0-fast-720p", path: "/v1/video/generations/task_1"},
 		{model: "MiniMax-H3", path: "/v1/videos/task_2"},
-		{model: "ok-imagine-video", path: "/v1/videos/task_3"},
+		{model: "minimax-h3", path: "/v1/videos/task_3"},
+		{model: "ok-imagine-video", path: "/v1/videos/task_4"},
 	} {
 		response, err := adaptor.FetchTask(server.URL, "secret", map[string]any{"task_id": strings.TrimPrefix(test.path[strings.LastIndex(test.path, "/"):], "/"), "model": test.model}, "")
 		require.NoError(t, err)
 		_ = response.Body.Close()
 	}
-	assert.Equal(t, []string{"/v1/video/generations/task_1", "/v1/videos/task_2", "/v1/videos/task_3"}, paths)
+	assert.Equal(t, []string{"/v1/video/generations/task_1", "/v1/videos/task_2", "/v1/videos/task_3", "/v1/videos/task_4"}, paths)
 }
 
 func TestParseTaskResultSupportsOopiiEnvelopes(t *testing.T) {

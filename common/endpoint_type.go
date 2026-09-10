@@ -14,6 +14,7 @@ func GetEndpointTypesByChannelType(channelType int, modelName string) []constant
 		case strings.HasPrefix(strings.ToLower(normalizedModel), "hj-2.0-"):
 			return []constant.EndpointType{constant.EndpointTypeOpenAIVideo}
 		case normalizedModel == "MiniMax-H3",
+			normalizedModel == "minimax-h3",
 			normalizedModel == "MiniMax-H3-C",
 			normalizedModel == "MiniMax-H3-933-1440P-GF",
 			strings.EqualFold(normalizedModel, "OK-video"),

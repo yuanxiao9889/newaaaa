@@ -35,9 +35,11 @@ export type MidjourneyParameterDoc = {
 
 export const midjourneyNavItems = [
   ['midjourney-overview', 'Midjourney overview'],
+  ['midjourney-quickstart', 'Start with a text-only request'],
   ['midjourney-endpoints', 'Midjourney endpoints'],
   ['midjourney-parameters', 'Submission parameters'],
   ['midjourney-workflow', 'Submit and poll workflow'],
+  ['midjourney-actions', 'Button actions and modal editing'],
   ['midjourney-responses', 'Task responses'],
 ] as const
 
@@ -94,14 +96,6 @@ export const midjourneyEndpoints: MidjourneyEndpointDoc[] = [
   },
   {
     method: 'POST',
-    path: '/mj/submit/modal',
-    purpose:
-      'Submit an inpaint or custom-zoom modal payload for an existing task.',
-    payload: 'taskId, prompt?, maskBase64?',
-    modelKey: 'mj_modal',
-  },
-  {
-    method: 'POST',
     path: '/mj/submit/shorten',
     purpose: 'Ask a compatible Midjourney Plus channel to shorten a prompt.',
     payload: 'prompt',
@@ -113,20 +107,6 @@ export const midjourneyEndpoints: MidjourneyEndpointDoc[] = [
     purpose: 'Forward a provider-compatible Midjourney edit request.',
     payload: 'prompt and provider edit fields',
     modelKey: 'mj_edits',
-  },
-  {
-    method: 'POST',
-    path: '/mj/submit/video',
-    purpose: 'Create a video from an eligible completed Midjourney task.',
-    payload: 'taskId',
-    modelKey: 'mj_video',
-  },
-  {
-    method: 'POST',
-    path: '/mj/insight-face/swap',
-    purpose: 'Swap a source face onto a target image.',
-    payload: 'sourceBase64, targetBase64',
-    modelKey: 'swap_face',
   },
   {
     method: 'GET',

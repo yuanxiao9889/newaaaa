@@ -16,7 +16,10 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-export type ModelProtocol = 'OpenAI Images' | 'Gemini generateContent'
+export type ModelProtocol =
+  | 'OpenAI Images'
+  | 'Gemini generateContent'
+  | 'OOpii Dou 5.0 Pro'
 
 export type ParameterDoc = {
   name: string
@@ -27,7 +30,7 @@ export type ParameterDoc = {
 }
 
 export type EndpointDoc = {
-  method: 'POST'
+  method: 'GET' | 'POST'
   path: string
   contentType: string
   purpose: string
@@ -37,7 +40,7 @@ export type ImageModelDoc = {
   id: string
   model: string
   protocol: ModelProtocol
-  family: 'openai' | 'gemini'
+  family: 'openai' | 'gemini' | 'oopii'
   summary: string
   recommendedFor: string
   endpoints: EndpointDoc[]
@@ -107,6 +110,83 @@ const grokEndpoints: EndpointDoc[] = [
     contentType: 'application/json',
     purpose:
       'Generate an image or submit embedded reference images in one JSON request.',
+  },
+]
+
+const douEndpoints: EndpointDoc[] = [
+  {
+    method: 'POST',
+    path: '/v1/uploads/images',
+    contentType: 'multipart/form-data',
+    purpose: 'Upload a reference image and receive a reusable image URL.',
+  },
+  {
+    method: 'POST',
+    path: '/v1/images/generations',
+    contentType: 'application/json',
+    purpose: 'Submit a text-to-image or reference-image generation task.',
+  },
+  {
+    method: 'GET',
+    path: '/v1/images/generations/{id}',
+    contentType: 'application/json',
+    purpose: 'Poll the asynchronous task until it succeeds or fails.',
+  },
+  {
+    method: 'GET',
+    path: '/v1/images/generations/{id}/content',
+    contentType: 'image/*',
+    purpose: 'Download the completed image bytes.',
+  },
+]
+
+const douParameters: ParameterDoc[] = [
+  {
+    name: 'model',
+    type: 'string',
+    required: 'Required',
+    values: 'dou-5-0-pro',
+    description:
+      'Use the public transport model ID dou-5-0-pro. Do not send the canvas-internal oopii/dou-5-0-pro ID.',
+  },
+  {
+    name: 'prompt',
+    type: 'string',
+    required: 'Required',
+    values: 'UTF-8 text',
+    description:
+      'Describe the subject, composition, style, lighting, and constraints.',
+  },
+  {
+    name: 'image_url',
+    type: 'string',
+    required: 'Optional reference',
+    values: 'HTTPS URL',
+    description:
+      'Use for one reference image. Upload local files first with /v1/uploads/images and pass the returned URL here.',
+  },
+  {
+    name: 'image_urls',
+    type: 'string[]',
+    required: 'Optional references',
+    values: 'HTTPS URL[]',
+    description:
+      'Use for multiple reference images. Keep this as a top-level array in the generation request.',
+  },
+  {
+    name: 'strength',
+    type: 'string',
+    required: 'Optional reference',
+    values: 'HIGH',
+    description: 'Optional reference adherence setting supported by Dou 5.0 Pro.',
+  },
+  {
+    name: 'size',
+    type: 'string',
+    required: 'Required',
+    values: 'Pixel size such as 2048x1152',
+    description:
+      'Send a real width-by-height pixel value. Do not send 1K or 2K as the size.',
   },
 ]
 
@@ -451,6 +531,11 @@ export const oopiiModelGroups: Record<
       owner: 'google gemini',
       endpoints: ['gemini', 'openai'],
     },
+    {
+      id: 'dou-5-0-pro',
+      owner: 'oopii',
+      endpoints: ['openai-async'],
+    },
   ],
   video: [
     {
@@ -761,6 +846,29 @@ export const imageModels: ImageModelDoc[] = [
     requestNotes: [
       'The model ID contains a space, so the request path encodes it as monkey-image-flash%202.',
       'The first request and compatibility retries use the same topP, prompt-suffix, and reference-image rules as monkey-image-pro.',
+    ],
+  },
+  {
+    id: 'dou-5-0-pro',
+    model: 'dou-5-0-pro',
+    protocol: 'OOpii Dou 5.0 Pro',
+    family: 'oopii',
+    summary:
+      'OOpii asynchronous Dou 5.0 Pro image generation with URL-based reference images.',
+    recommendedFor:
+      'Production storyboard images that need high-fidelity text-to-image and reference-image control.',
+    endpoints: douEndpoints,
+    ratios: ['1:1', '16:9', '9:16', '4:3', '3:4', '3:2', '2:3'],
+    resolutions: ['2048x2048', '2048x1152', '1152x2048'],
+    parameters: douParameters,
+    supportsEditing: true,
+    responsePath: 'id, status, poll_url, content_url',
+    requestNotes: [
+      'The API base URL is https://www.oopii.cc. Authenticate with Authorization: Bearer <API_KEY> and optionally X-API-Key: <API_KEY>.',
+      'Generation normally returns HTTP 202 and must be polled. A 202 response means the task was accepted, not that the image is ready.',
+      'Use top-level image_url for one reference and top-level image_urls for multiple references; do not nest them under parameters.',
+      'Upload JPEG, PNG, or WebP references to /v1/uploads/images using the image multipart field (file is accepted for compatibility). Each image is limited to about 8 MiB.',
+      'The canvas may use oopii/dou-5-0-pro internally, but API requests must use dou-5-0-pro.',
     ],
   },
 ]

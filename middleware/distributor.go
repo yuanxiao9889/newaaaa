@@ -204,6 +204,7 @@ func getModelFromRequest(c *gin.Context) (*ModelRequest, error) {
 	if strings.Contains(strings.ToLower(c.Request.Header.Get("Content-Type")), gin.MIMEMultipartPOSTForm) {
 		form, err := common.ParseMultipartFormReusable(c)
 		if err != nil {
+			logger.LogWarn(c.Request.Context(), fmt.Sprintf("multipart request parse failed: %s", common.MultipartRequestDiagnostics(c, err)))
 			return nil, errors.New(i18n.T(c, i18n.MsgDistributorInvalidRequest, map[string]any{"Error": err.Error()}))
 		}
 

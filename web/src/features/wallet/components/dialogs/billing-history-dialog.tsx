@@ -16,7 +16,14 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { Search, Copy, Check, ChevronLeft, ChevronRight } from 'lucide-react'
+import {
+  Search,
+  Copy,
+  Check,
+  ChevronLeft,
+  ChevronRight,
+  X,
+} from 'lucide-react'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
@@ -71,12 +78,14 @@ export function BillingHistoryDialog({
     page,
     pageSize,
     keyword,
+    month,
     loading,
     completing,
     isAdmin,
     handlePageChange,
     handlePageSizeChange,
     handleSearch,
+    handleMonthChange,
     handleCompleteOrder,
   } = useBillingHistory()
 
@@ -109,7 +118,7 @@ export function BillingHistoryDialog({
       >
         <div className='min-h-0 space-y-3'>
           {/* Search and Filter Bar */}
-          <div className='flex items-center gap-2'>
+          <div className='flex flex-wrap items-center gap-2'>
             <div className='relative flex-1'>
               <Search className='text-muted-foreground absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2' />
               <Input
@@ -118,6 +127,28 @@ export function BillingHistoryDialog({
                 onChange={(e) => handleSearch(e.target.value)}
                 className='h-9 pl-10'
               />
+            </div>
+            <div className='flex items-center gap-1'>
+                <Input
+                  type='month'
+                  aria-label={t('Filter by month')}
+                  title={t('Filter by month')}
+                  value={month}
+                  onChange={(e) => handleMonthChange(e.target.value)}
+                  className='h-9 w-[142px]'
+                />
+                {month && (
+                  <Button
+                    variant='ghost'
+                    size='sm'
+                    onClick={() => handleMonthChange('')}
+                    aria-label={t('Clear')}
+                    title={t('Clear')}
+                    className='h-8 w-8 p-0'
+                  >
+                    <X className='h-4 w-4' />
+                  </Button>
+                )}
             </div>
             <Select
               items={[

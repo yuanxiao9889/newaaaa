@@ -11,6 +11,7 @@ func TestNewAPIVideoModelsUseVideoEndpoint(t *testing.T) {
 	models := []string{
 		"hj-2.0-fast-480p",
 		"MiniMax-H3",
+		"minimax-h3",
 		"MiniMax-H3-C",
 		"MiniMax-H3-933-1440P-GF",
 		"OK-video",

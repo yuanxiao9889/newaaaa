@@ -596,6 +596,23 @@ func GetSuccessfulImageTasksForCleanup(startIdx int, num int) []*Task {
 	return tasks
 }
 
+func GetSuccessfulImageTasksForCleanupAfter(lastFinishTime int64, lastID int64, num int) []*Task {
+	if num <= 0 {
+		num = 500
+	}
+	var tasks []*Task
+	err := DB.Where("status = ?", TaskStatusSuccess).
+		Where("action IN ?", internalAsyncImageTaskActions()).
+		Where("(finish_time > ? OR (finish_time = ? AND id > ?))", lastFinishTime, lastFinishTime, lastID).
+		Order("finish_time asc, id asc").
+		Limit(num).
+		Find(&tasks).Error
+	if err != nil {
+		return nil
+	}
+	return tasks
+}
+
 func GetFailedImageTasksForDataCleanup(cutoff int64, startIdx int, num int) []*Task {
 	if num <= 0 {
 		num = 500
@@ -609,6 +626,25 @@ func GetFailedImageTasksForDataCleanup(cutoff int64, startIdx int, num int) []*T
 		Order("finish_time asc, id asc").
 		Limit(num).
 		Offset(startIdx).
+		Find(&tasks).Error
+	if err != nil {
+		return nil
+	}
+	return tasks
+}
+
+func GetFailedImageTasksForDataCleanupAfter(cutoff int64, lastFinishTime int64, lastID int64, num int) []*Task {
+	if num <= 0 {
+		num = 500
+	}
+	var tasks []*Task
+	err := DB.Where("status = ?", TaskStatusFailure).
+		Where("platform = ?", constant.TaskPlatformInternalImage).
+		Where("action IN ?", internalAsyncImageTaskActions()).
+		Where("finish_time > 0 AND finish_time < ?", cutoff).
+		Where("(finish_time > ? OR (finish_time = ? AND id > ?))", lastFinishTime, lastFinishTime, lastID).
+		Order("finish_time asc, id asc").
+		Limit(num).
 		Find(&tasks).Error
 	if err != nil {
 		return nil

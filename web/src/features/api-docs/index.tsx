@@ -227,6 +227,158 @@ function buildGrokSamples(
   }
 }
 
+function buildDouSamples(
+  model: ImageModelDoc,
+  baseUrl: string,
+  operation: ModelOperation
+): CodeSamples {
+  const isEdit = operation === 'edit'
+  const prompt = isEdit
+    ? 'Keep the character identity and change the scene to sunrise'
+    : 'Cinematic storyboard frame of a detective in a rainy neon alley'
+  const requestFields = isEdit
+    ? `"model": "${model.model}",
+    "prompt": "${prompt}",
+    "image_urls": ["https://example.com/reference-1.png", "https://example.com/reference-2.png"],
+    "strength": "HIGH",
+    "size": "2048x1152"`
+    : `"model": "${model.model}",
+    "prompt": "${prompt}",
+    "size": "2048x1152"`
+
+  const uploadExample = isEdit
+    ? `
+# Upload a local reference first; the multipart field is image (file is also accepted).
+curl '${baseUrl}/v1/uploads/images' \\
+  -H 'Authorization: Bearer $NEW_API_KEY' \\
+  -H 'X-API-Key: $NEW_API_KEY' \\
+  -F 'image=@reference.png'`
+    : ''
+
+  return {
+    curl: `${uploadExample}
+curl '${baseUrl}/v1/images/generations' \\
+  -H 'Authorization: Bearer $NEW_API_KEY' \\
+  -H 'X-API-Key: $NEW_API_KEY' \\
+  -H 'Content-Type: application/json' \\
+  -d '{
+    ${requestFields}
+  }'
+
+# The API normally returns HTTP 202 with an id. Poll until status is succeeded.
+curl '${baseUrl}/v1/images/generations/{id}' \\
+  -H 'Authorization: Bearer $NEW_API_KEY' \\
+  -H 'X-API-Key: $NEW_API_KEY'
+
+curl -fL '${baseUrl}/v1/images/generations/{id}/content' \\
+  -H 'Authorization: Bearer $NEW_API_KEY' \\
+  -H 'X-API-Key: $NEW_API_KEY' \\
+  -o result.png`,
+    python: `import os
+import time
+from pathlib import Path
+
+import requests
+
+BASE_URL = "${baseUrl}"
+API_KEY = os.environ["NEW_API_KEY"]
+HEADERS = {"Authorization": f"Bearer {API_KEY}", "X-API-Key": API_KEY}
+
+${
+  isEdit
+    ? `with open("reference.png", "rb") as image:
+    uploaded = requests.post(
+        f"{BASE_URL}/v1/uploads/images",
+        headers=HEADERS,
+        files={"image": ("reference.png", image, "image/png")},
+        timeout=60,
+    )
+uploaded.raise_for_status()
+reference_url = uploaded.json()["url"]
+payload = {
+    "model": "${model.model}",
+    "prompt": "${prompt}",
+    "image_url": reference_url,
+    "strength": "HIGH",
+    "size": "2048x1152",
+}`
+    : `payload = {
+    "model": "${model.model}",
+    "prompt": "${prompt}",
+    "size": "2048x1152",
+}`
+}
+
+submitted = requests.post(
+    f"{BASE_URL}/v1/images/generations",
+    headers={**HEADERS, "Content-Type": "application/json"},
+    json=payload,
+    timeout=120,
+)
+submitted.raise_for_status()
+task_id = submitted.json()["id"]
+
+while True:
+    task = requests.get(f"{BASE_URL}/v1/images/generations/{task_id}", headers=HEADERS, timeout=30)
+    task.raise_for_status()
+    body = task.json()
+    status = str(body.get("status", "")).lower()
+    if status in {"succeeded", "success", "completed", "done"}:
+        content = requests.get(f"{BASE_URL}/v1/images/generations/{task_id}/content", headers=HEADERS, timeout=300)
+        content.raise_for_status()
+        Path("result.png").write_bytes(content.content)
+        break
+    if status in {"failed", "error", "expired", "cancelled"}:
+        raise RuntimeError(body)
+    time.sleep(3)`,
+    javascript: `const apiKey = process.env.NEW_API_KEY
+const headers = { Authorization: \`Bearer \${apiKey}\`, 'X-API-Key': apiKey }
+${
+  isEdit
+    ? `const { readFile, writeFile } = await import('node:fs/promises')
+const form = new FormData()
+form.append('image', new Blob([await readFile('reference.png')], { type: 'image/png' }), 'reference.png')
+const upload = await fetch('${baseUrl}/v1/uploads/images', { method: 'POST', headers, body: form })
+if (!upload.ok) throw new Error(await upload.text())
+const referenceURL = (await upload.json()).url
+const payload = {
+  model: '${model.model}',
+  prompt: '${prompt}',
+  image_url: referenceURL,
+  strength: 'HIGH',
+  size: '2048x1152',
+}`
+    : `const payload = {
+  model: '${model.model}',
+  prompt: '${prompt}',
+  size: '2048x1152',
+}`
+}
+const submitted = await fetch('${baseUrl}/v1/images/generations', {
+  method: 'POST',
+  headers: { ...headers, 'Content-Type': 'application/json' },
+  body: JSON.stringify(payload),
+})
+if (!submitted.ok) throw new Error(await submitted.text())
+const taskId = (await submitted.json()).id
+for (;;) {
+  const response = await fetch(\`${baseUrl}/v1/images/generations/\${taskId}\`, { headers })
+  if (!response.ok) throw new Error(await response.text())
+  const task = await response.json()
+  const status = String(task.status ?? '').toLowerCase()
+  if (['succeeded', 'success', 'completed', 'done'].includes(status)) {
+    const content = await fetch(\`${baseUrl}/v1/images/generations/\${taskId}/content\`, { headers })
+    if (!content.ok) throw new Error(await content.text())
+    const { writeFile } = await import('node:fs/promises')
+    await writeFile('result.png', Buffer.from(await content.arrayBuffer()))
+    break
+  }
+  if (['failed', 'error', 'expired', 'cancelled'].includes(status)) throw new Error(JSON.stringify(task))
+  await new Promise((resolve) => setTimeout(resolve, 3000))
+}`,
+  }
+}
+
 function buildGeminiSamples(
   model: ImageModelDoc,
   baseUrl: string,
@@ -693,6 +845,13 @@ function DocsNavigation({ onNavigate }: { onNavigate?: () => void }) {
         .map((model) => [`model-${model.id}`, model.model]),
     },
     {
+      label: 'OOpii image models',
+      icon: Sparkles,
+      items: imageModels
+        .filter((model) => model.family === 'oopii')
+        .map((model) => [`model-${model.id}`, model.model]),
+    },
+    {
       label: 'Gemini image models',
       icon: Layers3,
       items: imageModels
@@ -759,6 +918,9 @@ function ModelSection({
   const { t } = useTranslation()
   const [operation, setOperation] = useState<ModelOperation>('generate')
   const samples = useMemo(() => {
+    if (model.family === 'oopii') {
+      return buildDouSamples(model, baseUrl, operation)
+    }
     if (model.model.startsWith('grok-imagine-image-')) {
       return buildGrokSamples(model, baseUrl, operation)
     }
@@ -781,7 +943,14 @@ function ModelSection({
     resolutionNote = t(
       'Both Grok routes use resolution=1k|2k and aspect_ratio. grok-imagine-image-2.0 additionally sends quality=low|medium.'
     )
+  } else if (model.family === 'oopii') {
+    resolutionNote = t(
+      'Dou 5.0 Pro expects an exact pixel size such as 2048x1152. Use the upload endpoint for local references, then poll the generation ID returned with HTTP 202.'
+    )
   }
+  let protocolLabel = 'OOpii async'
+  if (model.family === 'openai') protocolLabel = 'OpenAI Images'
+  if (model.family === 'gemini') protocolLabel = 'Gemini API'
 
   return (
     <section
@@ -804,7 +973,7 @@ function ModelSection({
           </p>
         </div>
         <Badge variant='outline' className='shrink-0'>
-          {model.family === 'openai' ? 'OpenAI Images' : 'Gemini API'}
+          {protocolLabel}
         </Badge>
       </div>
 
@@ -838,7 +1007,14 @@ function ModelSection({
             key={endpoint.path}
             className='border-border/70 bg-card grid gap-3 rounded-xl border p-4 lg:grid-cols-[70px_minmax(0,1fr)_180px] lg:items-center'
           >
-            <Badge className='w-fit bg-emerald-600 text-white hover:bg-emerald-600'>
+            <Badge
+              className={cn(
+                'w-fit text-white',
+                endpoint.method === 'GET'
+                  ? 'bg-sky-600 hover:bg-sky-600'
+                  : 'bg-emerald-600 hover:bg-emerald-600'
+              )}
+            >
               {endpoint.method}
             </Badge>
             <div className='min-w-0'>
@@ -1380,7 +1556,7 @@ export function ApiDocs() {
                 <div className='border-primary/20 bg-primary/5 mt-6 rounded-xl border p-4 text-sm leading-6'>
                   <strong>{t('Storyboard Copilot behavior')}:</strong>{' '}
                   {t(
-                    'The built-in OOpii provider enables async_image_task for all eight documented image models. Its normal submit path appends async=true; Grok reference-image requests intentionally keep the plain generations URL because OOpii async submission can discard embedded references.'
+                    'The built-in OOpii provider enables async_image_task for all documented image models. Its normal submit path appends async=true; Grok reference-image requests intentionally keep the plain generations URL because OOpii async submission can discard embedded references.'
                   )}
                 </div>
 

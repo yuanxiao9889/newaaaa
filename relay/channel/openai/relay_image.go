@@ -50,7 +50,9 @@ func OpenaiImageHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.
 	}
 
 	if err = service.ValidateOpenAIImageResponseForBilling(responseBody); err != nil {
-		return nil, types.NewOpenAIError(err, types.ErrorCodeEmptyResponse, http.StatusInternalServerError)
+		// An accepted async image request must never be submitted again just
+		// because its initial response has no completed data[] item.
+		return nil, types.NewOpenAIError(err, types.ErrorCodeEmptyResponse, http.StatusInternalServerError, types.ErrOptionWithSkipRetry())
 	}
 	updateOpenAIImageCount(info, gjson.GetBytes(responseBody, "data.#").Int())
 

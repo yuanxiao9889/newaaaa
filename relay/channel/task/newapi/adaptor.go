@@ -29,6 +29,8 @@ const (
 	requestContextKey               = "newapi_video_generation_request"
 	referenceVideoBillingMultiplier = 2.0
 	miniMaxH3PromptMaxCharacters    = 2000
+	secureMiniMaxH3Model             = "minimax-h3"
+	secureMiniMaxH3PromptMaxChars    = 6000
 )
 
 var modelList = []string{
@@ -38,6 +40,7 @@ var modelList = []string{
 	"hj-2.0-720p",
 	"hj-2.0-1080p",
 	"MiniMax-H3",
+	secureMiniMaxH3Model,
 	"MiniMax-H3-C",
 	"MiniMax-H3-933-1440P-GF",
 	"OK-video",
@@ -52,6 +55,7 @@ var supportedModels = map[string]struct{}{
 	"hj-2.0-720p":             {},
 	"hj-2.0-1080p":            {},
 	"MiniMax-H3":              {},
+	secureMiniMaxH3Model:      {},
 	"MiniMax-H3-C":            {},
 	"MiniMax-H3-933-1440P-GF": {},
 	"OK-video":                {},
@@ -144,13 +148,22 @@ type generationRequest struct {
 	ImageURL        string          `json:"image_url,omitempty"`
 	InputReference  stringList      `json:"input_reference,omitempty"`
 	ReferenceImages stringList      `json:"reference_images,omitempty"`
+	ReferenceImageURLs stringList   `json:"reference_image_urls,omitempty"`
 	StartFrame      stringList      `json:"start_frame,omitempty"`
 	EndFrame        stringList      `json:"end_frame,omitempty"`
+	VideoURLs       stringList      `json:"video_urls,omitempty"`
+	Videos          stringList      `json:"videos,omitempty"`
+	VideoDurations  json.RawMessage `json:"video_durations,omitempty"`
 	ReferenceVideos stringList      `json:"reference_videos,omitempty"`
 	ReferenceAudios stringList      `json:"reference_audios,omitempty"`
 	AudioReference  stringList      `json:"audio_reference,omitempty"`
+	AudioURL        stringList      `json:"audio_url,omitempty"`
+	ImageURLs       stringList      `json:"image_urls,omitempty"`
+	AudioURLs       stringList      `json:"audio_urls,omitempty"`
 	GenerateAudio   *bool           `json:"generate_audio,omitempty"`
 	Audio           *bool           `json:"audio,omitempty"`
+	PromptOptimize  *bool           `json:"prompt_optimize,omitempty"`
+	Seed            *int            `json:"seed,omitempty"`
 	Stream          *bool           `json:"stream,omitempty"`
 	Messages        json.RawMessage `json:"messages,omitempty"`
 }
@@ -206,7 +219,17 @@ func (a *TaskAdaptor) ValidateRequestAndSetAction(c *gin.Context, info *relaycom
 	if request.Prompt == "" {
 		return service.TaskErrorWrapperLocal(fmt.Errorf("prompt is required"), "invalid_request", http.StatusBadRequest)
 	}
-	if isMiniMaxH3Model(request.Model) && utf8.RuneCountInString(request.Prompt) > miniMaxH3PromptMaxCharacters {
+	if isSecureMiniMaxH3Model(request.Model) && request.Stream != nil && *request.Stream {
+		return service.TaskErrorWrapperLocal(fmt.Errorf("MiniMax H3 does not support stream"), "invalid_request", http.StatusBadRequest)
+	}
+	if isSecureMiniMaxH3Model(request.Model) {
+		if utf8.RuneCountInString(request.Prompt) > secureMiniMaxH3PromptMaxChars {
+			return service.TaskErrorWrapperLocal(fmt.Errorf("MiniMax H3 prompt exceeds %d characters", secureMiniMaxH3PromptMaxChars), "invalid_prompt", http.StatusBadRequest)
+		}
+		if len(request.VideoURLs) > 0 || len(request.Videos) > 0 || len(request.ReferenceVideos) > 0 || len(request.VideoDurations) > 0 {
+			return service.TaskErrorWrapperLocal(fmt.Errorf("MiniMax H3 does not support reference video fields"), "invalid_references", http.StatusBadRequest)
+		}
+	} else if isMiniMaxH3Model(request.Model) && utf8.RuneCountInString(request.Prompt) > miniMaxH3PromptMaxCharacters {
 		return service.TaskErrorWrapperLocal(fmt.Errorf("MiniMax H3 prompt exceeds %d characters", miniMaxH3PromptMaxCharacters), "invalid_prompt", http.StatusBadRequest)
 	}
 
@@ -283,8 +306,15 @@ func (a *TaskAdaptor) ValidateRequestAndSetAction(c *gin.Context, info *relaycom
 	if err := validateReferences(request); err != nil {
 		return service.TaskErrorWrapperLocal(err, "invalid_references", http.StatusBadRequest)
 	}
+	if isSecureMiniMaxH3Model(request.Model) && hasDuplicateMediaURLs(request.allMediaURLsPreserveDuplicates()) {
+		return service.TaskErrorWrapperLocal(fmt.Errorf("media URLs must be unique"), "invalid_references", http.StatusBadRequest)
+	}
 	media := request.allMediaURLs()
-	if err := validatePublicMediaURLs("media", media); err != nil {
+	validateMedia := validatePublicMediaURLs
+	if isSecureMiniMaxH3Model(request.Model) {
+		validateMedia = validateSecurePublicMediaURLs
+	}
+	if err := validateMedia("media", media); err != nil {
 		return service.TaskErrorWrapperLocal(err, "invalid_media_url", http.StatusBadRequest)
 	}
 
@@ -302,6 +332,8 @@ func (a *TaskAdaptor) ValidateRequestAndSetAction(c *gin.Context, info *relaycom
 
 func defaultDurationForModel(modelName string) int {
 	switch modelName {
+	case secureMiniMaxH3Model:
+		return 15
 	case "MiniMax-H3", "MiniMax-H3-933-1440P-GF":
 		return 5
 	case "MiniMax-H3-C", "ok-video-1.5-preview", "ok-imagine-video":
@@ -315,6 +347,10 @@ func defaultDurationForModel(modelName string) int {
 
 func validateModelDuration(modelName string, duration int) error {
 	switch modelName {
+	case secureMiniMaxH3Model:
+		if duration < 4 || duration > 15 {
+			return fmt.Errorf("MiniMax H3 duration must be between 4 and 15 seconds")
+		}
 	case "MiniMax-H3", "MiniMax-H3-933-1440P-GF":
 		if duration < 5 || duration > 15 {
 			return fmt.Errorf("MiniMax H3 duration must be between 5 and 15 seconds")
@@ -375,7 +411,7 @@ func validateReferences(request generationRequest) error {
 	messageImages := extractMessageImageURLs(request.Messages)
 	imageCount := len(uniqueNonEmpty(append(append([]string{}, images...), messageImages...)))
 	videoCount := len(request.ReferenceVideos)
-	audioCount := len(request.ReferenceAudios) + len(request.AudioReference)
+	audioCount := len(request.audioReferenceURLs())
 
 	if len(request.StartFrame) > 1 || len(request.EndFrame) > 1 {
 		return fmt.Errorf("start_frame and end_frame support at most one URL each")
@@ -383,7 +419,7 @@ func validateReferences(request generationRequest) error {
 	if videoCount > 3 || audioCount > 3 {
 		return fmt.Errorf("reference_videos and reference audio support at most 3 URLs each")
 	}
-	if isMiniMaxH3Model(request.Model) || request.Model == "MiniMax-H3-C" {
+	if isSecureMiniMaxH3Model(request.Model) || isMiniMaxH3Model(request.Model) || request.Model == "MiniMax-H3-C" {
 		if imageCount+len(request.StartFrame)+len(request.EndFrame) > 5 {
 			return fmt.Errorf("MiniMax H3 supports at most 5 images")
 		}
@@ -435,7 +471,7 @@ func validateReferences(request generationRequest) error {
 			}
 		}
 	}
-	if !isOopiiVideosModel(request.Model) {
+	if !isOopiiVideosModel(request.Model) && !isSecureMiniMaxH3Model(request.Model) {
 		if len(request.Images) > 9 {
 			return fmt.Errorf("images supports at most 9 URLs")
 		}
@@ -468,28 +504,67 @@ func normalizeInputMode(request generationRequest) string {
 }
 
 func (request generationRequest) referenceImageURLs() []string {
-	values := make([]string, 0, len(request.Images)+len(request.ReferenceImages)+len(request.InputReference)+2)
+	return uniqueNonEmpty(request.referenceImageURLsPreserveDuplicates())
+}
+
+func (request generationRequest) referenceImageURLsPreserveDuplicates() []string {
+	values := make([]string, 0, len(request.Images)+len(request.ReferenceImages)+len(request.InputReference)+len(request.ImageURLs)+2)
 	values = append(values, request.Images...)
 	values = append(values, request.ReferenceImages...)
+	values = append(values, request.ReferenceImageURLs...)
 	values = append(values, request.InputReference...)
+	values = append(values, request.ImageURLs...)
 	if request.Image != "" {
 		values = append(values, request.Image)
 	}
 	if request.ImageURL != "" {
 		values = append(values, request.ImageURL)
 	}
-	return uniqueNonEmpty(values)
+	return values
+}
+
+func (request generationRequest) audioReferenceURLs() []string {
+	return uniqueNonEmpty(request.audioReferenceURLsPreserveDuplicates())
+}
+
+func (request generationRequest) audioReferenceURLsPreserveDuplicates() []string {
+	values := make([]string, 0, len(request.ReferenceAudios)+len(request.AudioReference)+len(request.AudioURL)+len(request.AudioURLs))
+	values = append(values, request.ReferenceAudios...)
+	values = append(values, request.AudioReference...)
+	values = append(values, request.AudioURL...)
+	values = append(values, request.AudioURLs...)
+	return values
 }
 
 func (request generationRequest) allMediaURLs() []string {
-	values := request.referenceImageURLs()
+	return uniqueNonEmpty(request.allMediaURLsPreserveDuplicates())
+}
+
+func (request generationRequest) allMediaURLsPreserveDuplicates() []string {
+	values := request.referenceImageURLsPreserveDuplicates()
 	values = append(values, request.StartFrame...)
 	values = append(values, request.EndFrame...)
+	values = append(values, request.VideoURLs...)
+	values = append(values, request.Videos...)
 	values = append(values, request.ReferenceVideos...)
-	values = append(values, request.ReferenceAudios...)
-	values = append(values, request.AudioReference...)
+	values = append(values, request.audioReferenceURLsPreserveDuplicates()...)
 	values = append(values, extractMessageImageURLs(request.Messages)...)
-	return uniqueNonEmpty(values)
+	return values
+}
+
+func hasDuplicateMediaURLs(values []string) bool {
+	seen := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			return true
+		}
+		seen[value] = struct{}{}
+	}
+	return false
 }
 
 func extractMessageImageURLs(messages json.RawMessage) []string {
@@ -558,6 +633,19 @@ func validatePublicMediaURLs(field string, values []string) error {
 	return nil
 }
 
+func validateSecurePublicMediaURLs(field string, values []string) error {
+	if err := validatePublicMediaURLs(field, values); err != nil {
+		return err
+	}
+	for _, value := range values {
+		parsed, err := url.Parse(strings.TrimSpace(value))
+		if err != nil || parsed.Scheme != "https" {
+			return fmt.Errorf("%s must contain HTTPS URLs", field)
+		}
+	}
+	return nil
+}
+
 func (a *TaskAdaptor) EstimateBilling(c *gin.Context, _ *relaycommon.RelayInfo) map[string]float64 {
 	value, ok := c.Get(requestContextKey)
 	if !ok {
@@ -605,6 +693,8 @@ func (a *TaskAdaptor) BuildRequestBody(c *gin.Context, info *relaycommon.RelayIn
 
 	var payload map[string]any
 	switch {
+	case isSecureMiniMaxH3Model(request.Model):
+		payload = buildSecureMiniMaxH3Payload(request)
 	case isMiniMaxH3Model(request.Model):
 		payload = buildMiniMaxH3Payload(request)
 	case request.Model == "MiniMax-H3-C":
@@ -623,6 +713,31 @@ func (a *TaskAdaptor) BuildRequestBody(c *gin.Context, info *relaycommon.RelayIn
 		return nil, err
 	}
 	return bytes.NewReader(body), nil
+}
+
+func buildSecureMiniMaxH3Payload(request generationRequest) map[string]any {
+	payload := map[string]any{
+		"model":    secureMiniMaxH3Model,
+		"prompt":   request.Prompt,
+		"duration": int(*request.Duration),
+		"ratio":    request.Ratio,
+	}
+	if request.Resolution != "" {
+		payload["resolution"] = request.Resolution
+	}
+	if request.PromptOptimize != nil {
+		payload["prompt_optimize"] = *request.PromptOptimize
+	}
+	if request.Seed != nil {
+		payload["seed"] = *request.Seed
+	}
+	if images := request.referenceImageURLs(); len(images) > 0 {
+		payload["image_urls"] = images
+	}
+	if audio := request.audioReferenceURLs(); len(audio) > 0 {
+		payload["audio_urls"] = audio
+	}
+	return payload
 }
 
 func buildColomiPayload(request generationRequest, modelName string) map[string]any {
@@ -1138,8 +1253,12 @@ func isMiniMaxH3Model(modelName string) bool {
 	return modelName == "MiniMax-H3" || modelName == "MiniMax-H3-933-1440P-GF"
 }
 
+func isSecureMiniMaxH3Model(modelName string) bool {
+	return modelName == secureMiniMaxH3Model
+}
+
 func isOopiiVideosModel(modelName string) bool {
-	return isMiniMaxH3Model(modelName) || modelName == "MiniMax-H3-C" || modelName == "OK-video" || modelName == "ok-video-1.5-preview" || modelName == "ok-imagine-video"
+	return isSecureMiniMaxH3Model(modelName) || isMiniMaxH3Model(modelName) || modelName == "MiniMax-H3-C" || modelName == "OK-video" || modelName == "ok-video-1.5-preview" || modelName == "ok-imagine-video"
 }
 
 func (a *TaskAdaptor) GetModelList() []string {

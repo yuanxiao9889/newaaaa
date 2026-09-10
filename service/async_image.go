@@ -381,8 +381,10 @@ func CleanupExpiredAsyncImages() error {
 }
 
 func cleanupExpiredSuccessfulAsyncImages(now int64, batchSize int) error {
-	for offset := 0; ; offset += batchSize {
-		tasks := model.GetSuccessfulImageTasksForCleanup(offset, batchSize)
+	var lastFinishTime int64
+	var lastID int64
+	for {
+		tasks := model.GetSuccessfulImageTasksForCleanupAfter(lastFinishTime, lastID, batchSize)
 		if len(tasks) == 0 {
 			break
 		}
@@ -402,6 +404,11 @@ func cleanupExpiredSuccessfulAsyncImages(now int64, batchSize int) error {
 				return err
 			}
 		}
+		lastTask := tasks[len(tasks)-1]
+		if lastTask != nil {
+			lastFinishTime = lastTask.FinishTime
+			lastID = lastTask.ID
+		}
 		if len(tasks) < batchSize {
 			break
 		}
@@ -411,8 +418,10 @@ func cleanupExpiredSuccessfulAsyncImages(now int64, batchSize int) error {
 
 func cleanupExpiredFailedAsyncImageTaskData(now int64, batchSize int) error {
 	cutoff := now - int64(GetAsyncImageRetention().Seconds())
-	for offset := 0; ; offset += batchSize {
-		tasks := model.GetFailedImageTasksForDataCleanup(cutoff, offset, batchSize)
+	var lastFinishTime int64
+	var lastID int64
+	for {
+		tasks := model.GetFailedImageTasksForDataCleanupAfter(cutoff, lastFinishTime, lastID, batchSize)
 		if len(tasks) == 0 {
 			break
 		}
@@ -423,6 +432,11 @@ func cleanupExpiredFailedAsyncImageTaskData(now int64, batchSize int) error {
 			if err := compactExpiredAsyncImageTaskData(task); err != nil {
 				return err
 			}
+		}
+		lastTask := tasks[len(tasks)-1]
+		if lastTask != nil {
+			lastFinishTime = lastTask.FinishTime
+			lastID = lastTask.ID
 		}
 		if len(tasks) < batchSize {
 			break
@@ -462,16 +476,14 @@ func asyncImageTaskDataNeedsCompaction(data []byte) bool {
 }
 
 func StartAsyncImageCleanupLoop() {
-	if err := CleanupExpiredAsyncImages(); err != nil {
-		common.SysError("cleanup expired async images failed: " + err.Error())
-	}
-
 	interval := GetAsyncImageCleanupInterval()
-	if interval <= 0 {
-		return
-	}
-
 	go func() {
+		if err := CleanupExpiredAsyncImages(); err != nil {
+			common.SysError("cleanup expired async images failed: " + err.Error())
+		}
+		if interval <= 0 {
+			return
+		}
 		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
 		for range ticker.C {
