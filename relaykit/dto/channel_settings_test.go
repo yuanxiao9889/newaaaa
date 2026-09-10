@@ -2,13 +2,13 @@ package dto
 
 import (
 	"encoding/json"
-	"regexp"
-	"testing"
-
 	"github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"regexp"
+	"testing"
 )
+
 
 func TestAdvancedCustomValidateResponsesToChatConverterPath(t *testing.T) {
 	valid := &AdvancedCustomConfig{
@@ -641,6 +641,18 @@ func TestChannelSettingsValidateHTTPTransport(t *testing.T) {
 	err = (&ChannelSettings{HTTPProtocol: "http1", HTTP2ConnectionShards: 2}).ValidateHTTPTransport()
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "http2_connection_shards")
+}
+
+func TestChannelOtherSettingsValidateToolLossPolicy(t *testing.T) {
+	require.NoError(t, (*ChannelOtherSettings)(nil).ValidateToolLossPolicy())
+	require.NoError(t, (&ChannelOtherSettings{}).ValidateToolLossPolicy())
+	require.NoError(t, (&ChannelOtherSettings{ToolLossPolicy: "allow"}).ValidateToolLossPolicy())
+	require.NoError(t, (&ChannelOtherSettings{ToolLossPolicy: "safe"}).ValidateToolLossPolicy())
+	require.NoError(t, (&ChannelOtherSettings{ToolLossPolicy: "strict"}).ValidateToolLossPolicy())
+
+	err := (&ChannelOtherSettings{ToolLossPolicy: "drop"}).ValidateToolLossPolicy()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "tool_loss_policy")
 }
 
 func TestChannelSettingsMultiImageReferenceJSONContract(t *testing.T) {

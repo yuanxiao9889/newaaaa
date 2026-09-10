@@ -46,30 +46,16 @@ func AddAdminQuota(userId int, quota int) (*TopUp, error) {
 		return nil, errors.New("invalid admin quota top-up")
 	}
 
-	now := common.GetTimestamp()
-	amount, money := adminQuotaAmounts(quota)
-	topUp := &TopUp{
-		UserId:          userId,
-		Amount:          amount,
-		QuotaAmount:     quota,
-		Money:           money,
-		TradeNo:         fmt.Sprintf("ADMUSR%dNO%s%d", userId, common.GetRandomString(6), time.Now().UnixNano()),
-		PaymentMethod:   PaymentMethodOfficialWebsite,
-		PaymentProvider: PaymentProviderAdmin,
-		CreateTime:      now,
-		CompleteTime:    now,
-		Status:          common.TopUpStatusSuccess,
-	}
+	var topUp *TopUp
 
 	err := DB.Transaction(func(tx *gorm.DB) error {
-		result := tx.Model(&User{}).Where("id = ?", userId).Update("quota", gorm.Expr("quota + ?", quota))
-		if result.Error != nil {
-			return result.Error
-		}
-		if result.RowsAffected != 1 {
-			return gorm.ErrRecordNotFound
-		}
-		return tx.Create(topUp).Error
+		var user User
+		if err := lockForUpdate(tx).First(&user, userId).Error; err != nil { return err }
+		after, err := common.WalletQuotaFromDecimalStrict(decimal.NewFromInt(int64(user.Quota)).Add(decimal.NewFromInt(int64(quota))))
+		if err != nil { return ErrWalletQuotaLimitExceeded }
+		if err := tx.Model(&User{}).Where("id = ?", userId).Update("quota", after).Error; err != nil { return err }
+		topUp, err = createAdminQuotaTopUp(tx, userId, quota)
+		return err
 	})
 	if err != nil {
 		return nil, err
@@ -242,4 +228,24 @@ func BackfillAdminQuotaTopUps() (int64, error) {
 		return inserted, err
 	}
 	return inserted, nil
+}
+
+func createAdminQuotaTopUp(tx *gorm.DB, userId, quota int) (*TopUp, error) {
+	now := common.GetTimestamp()
+	amount, money := adminQuotaAmounts(quota)
+	topUp := &TopUp{
+		UserId:          userId,
+		Amount:          amount,
+		QuotaAmount:     quota,
+		Money:           money,
+		TradeNo:         fmt.Sprintf("ADMUSR%dNO%s%d", userId, common.GetRandomString(6), time.Now().UnixNano()),
+		PaymentMethod:   PaymentMethodOfficialWebsite,
+		PaymentProvider: PaymentProviderAdmin,
+		CreateTime:      now,
+		CompleteTime:    now,
+		Status:          common.TopUpStatusSuccess,
+	}
+
+	if err := tx.Create(topUp).Error; err != nil { return nil, err }
+	return topUp, nil
 }

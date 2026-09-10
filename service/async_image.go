@@ -148,11 +148,11 @@ func VerifyAsyncImageToken(token string, task *model.Task) bool {
 		return false
 	}
 
-	payloadBytes, err := base64.RawURLEncoding.DecodeString(parts[0])
+	payloadBytes, err := base64.RawURLEncoding.Strict().DecodeString(parts[0])
 	if err != nil {
 		return false
 	}
-	signature, err := base64.RawURLEncoding.DecodeString(parts[1])
+	signature, err := base64.RawURLEncoding.Strict().DecodeString(parts[1])
 	if err != nil {
 		return false
 	}

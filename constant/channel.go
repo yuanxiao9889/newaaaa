@@ -1,5 +1,8 @@
 package constant
 
+import (
+)
+
 const (
 	ChannelTypeUnknown        = 0
 	ChannelTypeOpenAI         = 1
@@ -59,18 +62,10 @@ const (
 	ChannelTypeSub2API        = 59
 	ChannelTypeNewAPI         = 60
 	ChannelTypeGrokVideo      = 61
+	ChannelTypeTaskPlugin     = 62
 	ChannelTypeDummy          // this one is only for count, do not add any channel after this
 
 )
-
-func ChannelTypeSupportsMultiImageReferences(channelType int) bool {
-	switch channelType {
-	case ChannelTypeOpenAI, ChannelTypeNewAPI:
-		return true
-	default:
-		return false
-	}
-}
 
 var ChannelBaseURLs = []string{
 	"",                                    // 0
@@ -135,6 +130,7 @@ var ChannelBaseURLs = []string{
 	"",                                          //59
 	"",                                          //60
 	"",                                          //61
+	"",                                          //62
 }
 
 var ChannelTypeNames = map[int]string{
@@ -196,13 +192,7 @@ var ChannelTypeNames = map[int]string{
 	ChannelTypeSub2API:        "Sub2API",
 	ChannelTypeNewAPI:         "New API",
 	ChannelTypeGrokVideo:      "Grok Video (Generations)",
-}
-
-func GetChannelTypeName(channelType int) string {
-	if name, ok := ChannelTypeNames[channelType]; ok {
-		return name
-	}
-	return "Unknown"
+	ChannelTypeTaskPlugin:     "Task Plugin",
 }
 
 type ChannelSpecialBase struct {
@@ -227,4 +217,28 @@ var ChannelSpecialBases = map[string]ChannelSpecialBase{
 		ClaudeBaseURL: "https://ark.cn-beijing.volces.com/api/coding",
 		OpenAIBaseURL: "https://ark.cn-beijing.volces.com/api/coding/v3",
 	},
+}
+
+
+func GetChannelBaseURL(channelType int) string {
+	if channelType < 0 || channelType >= len(ChannelBaseURLs) {
+		return ""
+	}
+	return ChannelBaseURLs[channelType]
+}
+
+func GetChannelTypeName(channelType int) string {
+	if name, ok := ChannelTypeNames[channelType]; ok {
+		return name
+	}
+	return "Unknown"
+}
+
+func ChannelTypeSupportsMultiImageReferences(channelType int) bool {
+	switch channelType {
+	case ChannelTypeOpenAI, ChannelTypeNewAPI:
+		return true
+	default:
+		return false
+	}
 }

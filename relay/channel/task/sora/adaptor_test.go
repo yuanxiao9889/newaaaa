@@ -54,7 +54,7 @@ func TestOpenAIChannelPassesEnabledMultiImageReferenceArray(t *testing.T) {
 
 func TestParseTaskResultAcceptsStringErrorAndRunningStatus(t *testing.T) {
 	adaptor := &TaskAdaptor{}
-	result, err := adaptor.ParseTaskResult([]byte(`{
+	result, err := adaptor.ParseTaskResult(nil, nil, []byte(`{
 		"id":"grok-deb7f9869d32",
 		"task_id":"grok-deb7f9869d32",
 		"status":"running",
@@ -74,7 +74,7 @@ func TestParseTaskResultAcceptsStringErrorAndRunningStatus(t *testing.T) {
 
 func TestParseTaskResultAcceptsCompletedWithoutURL(t *testing.T) {
 	adaptor := &TaskAdaptor{}
-	result, err := adaptor.ParseTaskResult([]byte(`{
+	result, err := adaptor.ParseTaskResult(nil, nil, []byte(`{
 		"id":"video_33",
 		"status":"completed",
 		"progress":100
@@ -92,7 +92,7 @@ func TestParseTaskResultAcceptsCompletedWithoutURL(t *testing.T) {
 
 func TestParseTaskResultAcceptsSucceededAndExtractsVideoURL(t *testing.T) {
 	adaptor := &TaskAdaptor{}
-	result, err := adaptor.ParseTaskResult([]byte(`{
+	result, err := adaptor.ParseTaskResult(nil, nil, []byte(`{
 		"id":"grok-58b24b68819e",
 		"status":"succeeded",
 		"progress":100,

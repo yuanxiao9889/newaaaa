@@ -18,6 +18,11 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import * as z from 'zod'
 
+import {
+  formatPricingAmount,
+  USD_PRICING_CURRENCY,
+  type PricingCurrency,
+} from '@/features/model-pricing/currency'
 import { combineBillingExpr } from '@/features/pricing/lib/billing-expr'
 import type { FixedPriceUnit } from '@/features/pricing/types'
 
@@ -72,8 +77,6 @@ export type PreviewRow = {
   value: string
   multiline?: boolean
 }
-
-export const numericDraftRegex = /^(\d+(\.\d*)?|\.\d*)?$/
 
 export const EMPTY_LANE_PRICES: Record<LaneKey, string> = {
   completion: '',
@@ -231,15 +234,16 @@ export function buildPreviewRows(
   promptPrice: string,
   lanePrices: Record<LaneKey, string>,
   laneEnabled: Record<LaneKey, boolean>,
-  t: (key: string) => string
+  t: (key: string) => string,
+  currency: PricingCurrency = USD_PRICING_CURRENCY
 ): PreviewRow[] {
   if (mode === 'tiered_expr') {
     const effectiveExpr = combineBillingExpr(billingExpr, requestRuleExpr)
     return [
-      { key: 'mode', label: 'BillingMode', value: 'tiered_expr' },
+      { key: 'mode', label: t('Pricing'), value: t('Expression') },
       {
         key: 'expr',
-        label: t('Expression'),
+        label: `${t('Expression')} (USD)`,
         value: effectiveExpr || t('Empty'),
         multiline: true,
       },
@@ -250,15 +254,10 @@ export function buildPreviewRows(
     return [
       {
         key: 'price',
-        label: 'ModelPrice',
+        label: t('Fixed price'),
         value: values.price
-          ? `$${values.price} / ${t(fixedPriceUnit === 'second' ? 'second' : 'request')}`
+          ? `${formatPricingAmount(values.price, currency)} / ${t(fixedPriceUnit === 'second' ? 'second' : 'request')}`
           : t('Empty'),
-      },
-      {
-        key: 'fixedPriceUnit',
-        label: t('Fixed price unit'),
-        value: t(fixedPriceUnit === 'second' ? 'second' : 'request'),
       },
     ]
   }
@@ -267,14 +266,16 @@ export function buildPreviewRows(
     {
       key: 'inputPrice',
       label: t('Input price'),
-      value: promptPrice ? `$${promptPrice}` : t('Empty'),
+      value: promptPrice
+        ? formatPricingAmount(promptPrice, currency)
+        : t('Empty'),
     },
     {
       key: 'completion',
       label: t('Completion price'),
       value:
         laneEnabled.completion && lanePrices.completion
-          ? `$${lanePrices.completion}`
+          ? formatPricingAmount(lanePrices.completion, currency)
           : t('Empty'),
     },
     {
@@ -282,7 +283,7 @@ export function buildPreviewRows(
       label: t('Cache read price'),
       value:
         laneEnabled.cache && lanePrices.cache
-          ? `$${lanePrices.cache}`
+          ? formatPricingAmount(lanePrices.cache, currency)
           : t('Empty'),
     },
     {
@@ -290,7 +291,7 @@ export function buildPreviewRows(
       label: t('Cache write price'),
       value:
         laneEnabled.createCache && lanePrices.createCache
-          ? `$${lanePrices.createCache}`
+          ? formatPricingAmount(lanePrices.createCache, currency)
           : t('Empty'),
     },
     {
@@ -298,7 +299,7 @@ export function buildPreviewRows(
       label: t('Image input price'),
       value:
         laneEnabled.image && lanePrices.image
-          ? `$${lanePrices.image}`
+          ? formatPricingAmount(lanePrices.image, currency)
           : t('Empty'),
     },
     {
@@ -306,7 +307,7 @@ export function buildPreviewRows(
       label: t('Audio input price'),
       value:
         laneEnabled.audioInput && lanePrices.audioInput
-          ? `$${lanePrices.audioInput}`
+          ? formatPricingAmount(lanePrices.audioInput, currency)
           : t('Empty'),
     },
     {
@@ -314,7 +315,7 @@ export function buildPreviewRows(
       label: t('Audio output price'),
       value:
         laneEnabled.audioOutput && lanePrices.audioOutput
-          ? `$${lanePrices.audioOutput}`
+          ? formatPricingAmount(lanePrices.audioOutput, currency)
           : t('Empty'),
     },
   ]

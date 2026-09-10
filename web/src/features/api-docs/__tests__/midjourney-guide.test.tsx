@@ -55,7 +55,7 @@ describe('Midjourney canvas documentation', () => {
   })
 
   it('shows translated canvas guidance when Chinese is selected', async () => {
-    i18next.addResourceBundle('zh', 'translation', zh)
+    i18next.addResourceBundle('zh', 'translation', zh.translation)
     await i18next.changeLanguage('zh')
     try {
       render(<MidjourneyCanvasGuide baseUrl='https://relay.test' />)

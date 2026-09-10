@@ -2,7 +2,6 @@ package dto
 
 import (
 	"encoding/json"
-
 	relaydto "github.com/QuantumNous/new-api/relaykit/dto"
 )
 
@@ -25,10 +24,6 @@ type TaskResponse[T TaskData] struct {
 	Code    string `json:"code"`
 	Message string `json:"message"`
 	Data    T      `json:"data"`
-}
-
-func (t *TaskResponse[T]) IsSuccess() bool {
-	return t.Code == TaskSuccessCode
 }
 
 type TaskDto struct {
@@ -70,6 +65,9 @@ type TaskDto struct {
 	CompletionTokens int               `json:"completion_tokens,omitempty"`
 	TotalTokens      int               `json:"total_tokens,omitempty"`
 	UsageDetails     *TaskUsageDetails `json:"usage_details,omitempty"`
+	LegacyVideoAvailable bool `json:"legacy_video_available,omitempty"`
+	AdminInfo *TaskAdminInfo `json:"admin_info,omitempty"`
+	RootInfo *TaskRootInfo `json:"root_info,omitempty"`
 }
 
 type TaskUsageDetails struct {
@@ -80,6 +78,42 @@ type TaskUsageDetails struct {
 	CompletionTokenDetails relaydto.OutputTokenDetails `json:"completion_tokens_details,omitempty"`
 }
 
+type TaskPluginInfo struct {
+	Key     string                `json:"key"`
+	Name    string                `json:"name"`
+	Version string                `json:"version,omitempty"`
+	Author  *TaskPluginAuthorInfo `json:"author,omitempty"`
+}
+
+type TaskPluginAuthorInfo struct {
+	Name string `json:"name"`
+	URL  string `json:"url,omitempty"`
+}
+
+type TaskPluginRuntimeInfo struct {
+	Key        string `json:"key"`
+	Version    string `json:"version"`
+	APIVersion int    `json:"api_version"`
+	Generation uint64 `json:"generation"`
+}
+
+type TaskAdminInfo struct {
+	RequestID   string          `json:"request_id,omitempty"`
+	RequestPath string          `json:"request_path,omitempty"`
+	TaskPlugin  *TaskPluginInfo `json:"task_plugin,omitempty"`
+}
+
+type TaskRootInfo struct {
+	TaskPlugin     *TaskPluginRuntimeInfo `json:"task_plugin,omitempty"`
+	UpstreamTaskID string                 `json:"upstream_task_id,omitempty"`
+	NodeName       string                 `json:"node_name,omitempty"`
+}
+
 type FetchReq struct {
 	IDs []string `json:"ids"`
+}
+
+
+func (t *TaskResponse[T]) IsSuccess() bool {
+	return t.Code == TaskSuccessCode
 }

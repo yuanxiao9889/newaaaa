@@ -26,11 +26,7 @@ import {
   getPriceSummary,
   type ModelPricingSnapshotInput,
 } from '../model-pricing-snapshots'
-import {
-  applyResolutionRemovalPlan,
-  applyResolutionSelection,
-  type RatioDifferenceEntry,
-} from '../upstream-ratio-sync-helpers'
+import { applyPriceSyncSelections, applyPricingDraft, pricingOptions } from '@/features/model-pricing/pricing'
 
 const emptySnapshotInput: ModelPricingSnapshotInput = {
   modelPrice: '{}',
@@ -96,37 +92,12 @@ describe('model pricing fixed price units', () => {
     assert.equal(getPriceDetail(row, t), 'Fixed per second')
   })
 
-  test('upstream price selection and removal keep price and unit paired', () => {
-    const price: RatioDifferenceEntry = {
-      current: 0.2,
-      upstreams: { upstream: 0.45 },
-      confidence: { upstream: true },
-    }
-    const unit: RatioDifferenceEntry = {
-      current: 'request',
-      upstreams: { upstream: 'second' },
-      confidence: { upstream: true },
-    }
-    const selected = applyResolutionSelection(
-      {},
-      { video: { model_price: price, fixed_price_unit: unit } },
-      {
-        model: 'video',
-        ratioType: 'model_price',
-        value: 0.45,
-        sourceName: 'upstream',
-      }
-    )
-
-    expect(selected.video).toEqual({
-      model_price: 0.45,
-      fixed_price_unit: 'second',
-    })
-
-    const removed = applyResolutionRemovalPlan(
-      selected,
-      new Map([['video', new Set(['fixed_price_unit' as const])]])
-    )
-    expect(removed).toEqual({})
+  test('upstream price sync preserves the unit and changing mode clears it', () => {
+    const selected = applyPriceSyncSelections(pricingOptions({}), { video: { model_price: 0.45, fixed_price_unit: 'second' } })
+    expect(JSON.parse(selected.ModelPrice)).toEqual({ video: 0.45 })
+    expect(JSON.parse(selected['billing_setting.fixed_price_unit'])).toEqual({ video: 'second' })
+    const changed = applyPricingDraft(selected, { name: 'video', billingMode: 'per-token', ratio: '2' })
+    expect(JSON.parse(changed.ModelPrice)).toEqual({})
+    expect(JSON.parse(changed['billing_setting.fixed_price_unit'])).toEqual({})
   })
 })

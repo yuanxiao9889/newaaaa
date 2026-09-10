@@ -27,6 +27,7 @@ import { ComboboxInput } from '@/components/ui/combobox-input'
 import { Label } from '@/components/ui/label'
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
 import { getUserModels } from '@/lib/api'
+import { requireServerSuccess } from '@/lib/server-error-message'
 
 const CODEX_MODEL_SUGGESTIONS = [
   'gpt-5-codex',
@@ -106,7 +107,7 @@ function buildCCSwitchURL(
   apiKey: string
 ): string {
   const serverAddress = getServerAddress()
-  const endpoint = app === 'codex' ? serverAddress + '/v1' : serverAddress
+  const endpoint = app === 'codex' ? `${serverAddress}/v1` : serverAddress
   const params = new URLSearchParams()
   params.set('resource', 'provider')
   params.set('app', app)
@@ -135,7 +136,7 @@ export function CCSwitchDialog(props: Props) {
 
   const { data: modelsData } = useQuery({
     queryKey: ['user-models-ccswitch'],
-    queryFn: getUserModels,
+    queryFn: async () => requireServerSuccess(await getUserModels()),
     enabled: props.open,
     staleTime: 5 * 60 * 1000,
   })
@@ -236,7 +237,7 @@ export function CCSwitchDialog(props: Props) {
             onValueChange={setName}
             placeholder={currentConfig.defaultName}
             emptyText=''
-            allowCustomValue={true}
+            allowCustomValue
           />
         </div>
 

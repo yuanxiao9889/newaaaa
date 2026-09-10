@@ -4,18 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
-	"net/http"
-	"net/url"
-	"regexp"
-	"slices"
-	"strings"
-	"sync"
-	"time"
-
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/pkg/jsplugin"
 	"github.com/QuantumNous/new-api/relay/channel/advancedcustom"
 	"github.com/QuantumNous/new-api/relay/channel/gemini"
 	"github.com/QuantumNous/new-api/relay/channel/ollama"
@@ -24,9 +16,16 @@ import (
 	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/QuantumNous/new-api/service"
-
 	"github.com/gin-gonic/gin"
 	"github.com/samber/lo"
+	"io"
+	"net/http"
+	"net/url"
+	"regexp"
+	"slices"
+	"strings"
+	"sync"
+	"time"
 )
 
 const (
@@ -96,6 +95,16 @@ type upstreamModelUpdateChannelSummary struct {
 	AddCount    int
 	RemoveCount int
 }
+
+type upstreamModelUpdateSummary struct {
+	CheckedChannels      int `json:"checked_channels"`
+	ChangedChannels      int `json:"changed_channels"`
+	DetectedAddModels    int `json:"detected_add_models"`
+	DetectedRemoveModels int `json:"detected_remove_models"`
+	FailedChannels       int `json:"failed_channels"`
+	AutoAddedModels      int `json:"auto_added_models"`
+}
+
 
 func normalizeModelNames(models []string) []string {
 	return lo.Uniq(lo.FilterMap(models, func(model string, _ int) (string, bool) {
@@ -262,30 +271,6 @@ func getUpstreamModelUpdateMinCheckIntervalSeconds() int64 {
 	return interval
 }
 
-func buildChannelModelsURL(channelType int, baseURL string) string {
-	baseURL = strings.TrimRight(strings.TrimSpace(baseURL), "/")
-
-	switch channelType {
-	case constant.ChannelTypeAli:
-		return fmt.Sprintf("%s/compatible-mode/v1/models", baseURL)
-	case constant.ChannelTypeZhipu_v4:
-		if plan, ok := constant.ChannelSpecialBases[baseURL]; ok && plan.OpenAIBaseURL != "" {
-			return fmt.Sprintf("%s/models", strings.TrimRight(plan.OpenAIBaseURL, "/"))
-		}
-		return fmt.Sprintf("%s/api/paas/v4/models", baseURL)
-	case constant.ChannelTypeVolcEngine:
-		if plan, ok := constant.ChannelSpecialBases[baseURL]; ok && plan.OpenAIBaseURL != "" {
-			return fmt.Sprintf("%s/v1/models", strings.TrimRight(plan.OpenAIBaseURL, "/"))
-		}
-	case constant.ChannelTypeMoonshot:
-		if plan, ok := constant.ChannelSpecialBases[baseURL]; ok && plan.OpenAIBaseURL != "" {
-			return fmt.Sprintf("%s/models", strings.TrimRight(plan.OpenAIBaseURL, "/"))
-		}
-	}
-
-	return fmt.Sprintf("%s/v1/models", baseURL)
-}
-
 func parseOpenAIModelIDs(body []byte) ([]string, error) {
 	var result struct {
 		Data *[]OpenAIModel `json:"data"`
@@ -385,7 +370,14 @@ func getFetchModelsResponseBody(method string, requestURL string, channel *model
 }
 
 func fetchChannelUpstreamModelIDs(channel *model.Channel) ([]string, error) {
-	baseURL := constant.ChannelBaseURLs[channel.Type]
+	if channel.Type == constant.ChannelTypeTaskPlugin {
+		plugin, ok := jsplugin.DefaultRegistry.Get(channel.GetSetting().TaskPluginKey)
+		if !ok {
+			return nil, fmt.Errorf("task plugin %q is not registered", channel.GetSetting().TaskPluginKey)
+		}
+		return normalizeModelNames(plugin.Meta.Models), nil
+	}
+	baseURL := constant.GetChannelBaseURL(channel.Type)
 	if channel.GetBaseURL() != "" {
 		baseURL = channel.GetBaseURL()
 	}
@@ -490,7 +482,7 @@ func fetchAdvancedCustomUpstreamModelIDs(channel *model.Channel, baseURL string)
 
 func updateChannelUpstreamModelSettings(channel *model.Channel, settings dto.ChannelOtherSettings, updateModels bool) error {
 	channel.SetOtherSettings(settings)
-	updates := map[string]interface{}{
+	updates := map[string]any{
 		"settings": channel.OtherSettings,
 	}
 	if updateModels {
@@ -658,15 +650,6 @@ func buildUpstreamModelUpdateTaskNotificationContent(
 		}
 	}
 	return builder.String()
-}
-
-type upstreamModelUpdateSummary struct {
-	CheckedChannels      int `json:"checked_channels"`
-	ChangedChannels      int `json:"changed_channels"`
-	DetectedAddModels    int `json:"detected_add_models"`
-	DetectedRemoveModels int `json:"detected_remove_models"`
-	FailedChannels       int `json:"failed_channels"`
-	AutoAddedModels      int `json:"auto_added_models"`
 }
 
 // runChannelUpstreamModelUpdateTaskOnce runs one synchronous upstream model
@@ -881,7 +864,7 @@ func ApplyChannelUpstreamModelUpdates(c *gin.Context) {
 		refreshChannelRuntimeCache()
 	}
 
-	recordManageAudit(c, "channel.upstream_apply", map[string]interface{}{
+	recordManageAudit(c, "channel.upstream_apply", map[string]any{
 		"id": channel.Id,
 	})
 	c.JSON(http.StatusOK, gin.H{
@@ -1079,7 +1062,7 @@ func ApplyAllChannelUpstreamModelUpdates(c *gin.Context) {
 		refreshChannelRuntimeCache()
 	}
 
-	recordManageAudit(c, "channel.upstream_apply_all", map[string]interface{}{
+	recordManageAudit(c, "channel.upstream_apply_all", map[string]any{
 		"count": len(results),
 	})
 	c.JSON(http.StatusOK, gin.H{
@@ -1120,7 +1103,7 @@ func DetectAllChannelUpstreamModelUpdates(c *gin.Context) {
 		return
 	}
 
-	recordManageAudit(c, "channel.upstream_detect_all", map[string]interface{}{
+	recordManageAudit(c, "channel.upstream_detect_all", map[string]any{
 		"task_id": task.TaskID,
 	})
 	c.JSON(http.StatusOK, gin.H{
@@ -1131,4 +1114,29 @@ func DetectAllChannelUpstreamModelUpdates(c *gin.Context) {
 			"status":  task.Status,
 		},
 	})
+}
+
+func buildChannelModelsURL(channelType int, baseURL string) string {
+	baseURL = strings.TrimRight(strings.TrimSpace(baseURL), "/")
+
+	switch channelType {
+	case constant.ChannelTypeAli:
+		return fmt.Sprintf("%s/compatible-mode/v1/models", baseURL)
+	case constant.ChannelTypeZhipu_v4:
+		if plan, ok := constant.ChannelSpecialBases[baseURL]; ok && plan.OpenAIBaseURL != "" {
+			return fmt.Sprintf("%s/models", strings.TrimRight(plan.OpenAIBaseURL, "/"))
+		}
+		return fmt.Sprintf("%s/api/paas/v4/models", baseURL)
+	case constant.ChannelTypeVolcEngine:
+		if plan, ok := constant.ChannelSpecialBases[baseURL]; ok && plan.OpenAIBaseURL != "" {
+			return fmt.Sprintf("%s/v1/models", strings.TrimRight(plan.OpenAIBaseURL, "/"))
+		}
+		return fmt.Sprintf("%s/api/v3/models", baseURL)
+	case constant.ChannelTypeMoonshot:
+		if plan, ok := constant.ChannelSpecialBases[baseURL]; ok && plan.OpenAIBaseURL != "" {
+			return fmt.Sprintf("%s/models", strings.TrimRight(plan.OpenAIBaseURL, "/"))
+		}
+	}
+
+	return fmt.Sprintf("%s/v1/models", baseURL)
 }

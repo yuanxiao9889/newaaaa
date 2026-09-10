@@ -2,41 +2,43 @@ package model
 
 import (
 	"fmt"
-	"strings"
-
-	"sync"
-	"time"
-
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
+	"github.com/QuantumNous/new-api/pkg/jsplugin"
 	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/setting/billing_setting"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/QuantumNous/new-api/types"
+	"maps"
+	"strings"
+	"sync"
+	"time"
 )
 
 type Pricing struct {
-	ModelName              string                  `json:"model_name"`
-	Description            string                  `json:"description,omitempty"`
-	Icon                   string                  `json:"icon,omitempty"`
-	Tags                   string                  `json:"tags,omitempty"`
-	VendorID               int                     `json:"vendor_id,omitempty"`
-	QuotaType              int                     `json:"quota_type"`
-	ModelRatio             float64                 `json:"model_ratio"`
-	ModelPrice             float64                 `json:"model_price"`
-	OwnerBy                string                  `json:"owner_by"`
-	CompletionRatio        float64                 `json:"completion_ratio"`
-	CacheRatio             *float64                `json:"cache_ratio,omitempty"`
-	CreateCacheRatio       *float64                `json:"create_cache_ratio,omitempty"`
-	ImageRatio             *float64                `json:"image_ratio,omitempty"`
-	AudioRatio             *float64                `json:"audio_ratio,omitempty"`
-	AudioCompletionRatio   *float64                `json:"audio_completion_ratio,omitempty"`
-	EnableGroup            []string                `json:"enable_groups"`
-	SupportedEndpointTypes []constant.EndpointType `json:"supported_endpoint_types"`
-	BillingMode            string                  `json:"billing_mode,omitempty"`
-	BillingExpr            string                  `json:"billing_expr,omitempty"`
-	FixedPriceUnit         string                  `json:"fixed_price_unit,omitempty"`
-	PricingVersion         string                  `json:"pricing_version,omitempty"`
+	ModelName              string                               `json:"model_name"`
+	Description            string                               `json:"description,omitempty"`
+	Icon                   string                               `json:"icon,omitempty"`
+	Tags                   string                               `json:"tags,omitempty"`
+	VendorID               int                                  `json:"vendor_id,omitempty"`
+	QuotaType              int                                  `json:"quota_type"`
+	ModelRatio             float64                              `json:"model_ratio"`
+	ModelPrice             float64                              `json:"model_price"`
+	OwnerBy                string                               `json:"owner_by"`
+	CompletionRatio        float64                              `json:"completion_ratio"`
+	CacheRatio             *float64                             `json:"cache_ratio,omitempty"`
+	CreateCacheRatio       *float64                             `json:"create_cache_ratio,omitempty"`
+	ImageRatio             *float64                             `json:"image_ratio,omitempty"`
+	AudioRatio             *float64                             `json:"audio_ratio,omitempty"`
+	AudioCompletionRatio   *float64                             `json:"audio_completion_ratio,omitempty"`
+	EnableGroup            []string                             `json:"enable_groups"`
+	SupportedEndpointTypes []constant.EndpointType              `json:"supported_endpoint_types"`
+	BillingMode            string                               `json:"billing_mode,omitempty"`
+	BillingExpr            string                               `json:"billing_expr,omitempty"`
+	BillingUsageSchema     map[string]jsplugin.UsageFieldSchema `json:"billing_usage_schema,omitempty"`
+	BillingUsageExamples   []jsplugin.UsageExample              `json:"billing_usage_examples,omitempty"`
+	PricingVersion         string                               `json:"pricing_version,omitempty"`
+	FixedPriceUnit string `json:"fixed_price_unit,omitempty"`
 }
 
 type PricingVendor struct {
@@ -63,6 +65,7 @@ var (
 	modelSupportEndpointTypes = make(map[string][]constant.EndpointType)
 	modelSupportEndpointsLock = sync.RWMutex{}
 )
+
 
 func GetPricing() []Pricing {
 	if time.Since(lastGetPricingTime) > time.Minute*1 || len(pricingMap) == 0 {
@@ -178,32 +181,6 @@ func appendPricingEndpoint(endpoints []string, endpoint string) []string {
 	return append(endpoints, endpoint)
 }
 
-// LegacySecondBasedFixedPriceModel identifies fixed-price video models that
-// predate explicit unit configuration.
-func LegacySecondBasedFixedPriceModel(modelName string, endpoints []constant.EndpointType) bool {
-	normalizedName := strings.ToLower(modelName)
-	if normalizedName == "ok-video" {
-		return false
-	}
-	if normalizedName == "ok-video-1.5-preview" {
-		return true
-	}
-	if strings.HasPrefix(normalizedName, "ok-") && strings.Contains(normalizedName[3:], "video") {
-		return true
-	}
-	for _, endpoint := range endpoints {
-		if endpoint == constant.EndpointTypeOpenAIVideo {
-			return true
-		}
-	}
-	for _, marker := range []string{"video", "sora", "veo", "kling", "pika"} {
-		if strings.Contains(normalizedName, marker) {
-			return true
-		}
-	}
-	return false
-}
-
 func updatePricing() {
 	//modelRatios := common.GetModelRatios()
 	enableAbilities, err := GetAllEnableAbilityWithChannels()
@@ -214,54 +191,11 @@ func updatePricing() {
 	// 预加载模型元数据与供应商一次，避免循环查询
 	var allMeta []Model
 	_ = DB.Find(&allMeta).Error
-	metaMap := make(map[string]*Model)
-	prefixList := make([]*Model, 0)
-	suffixList := make([]*Model, 0)
-	containsList := make([]*Model, 0)
-	for i := range allMeta {
-		m := &allMeta[i]
-		if m.NameRule == NameRuleExact {
-			metaMap[m.ModelName] = m
-		} else {
-			switch m.NameRule {
-			case NameRulePrefix:
-				prefixList = append(prefixList, m)
-			case NameRuleSuffix:
-				suffixList = append(suffixList, m)
-			case NameRuleContains:
-				containsList = append(containsList, m)
-			}
-		}
+	names := make([]string, 0, len(enableAbilities))
+	for _, ability := range enableAbilities {
+		names = append(names, ability.Model)
 	}
-
-	// 将非精确规则模型匹配到 metaMap
-	for _, m := range prefixList {
-		for _, pricingModel := range enableAbilities {
-			if strings.HasPrefix(pricingModel.Model, m.ModelName) {
-				if _, exists := metaMap[pricingModel.Model]; !exists {
-					metaMap[pricingModel.Model] = m
-				}
-			}
-		}
-	}
-	for _, m := range suffixList {
-		for _, pricingModel := range enableAbilities {
-			if strings.HasSuffix(pricingModel.Model, m.ModelName) {
-				if _, exists := metaMap[pricingModel.Model]; !exists {
-					metaMap[pricingModel.Model] = m
-				}
-			}
-		}
-	}
-	for _, m := range containsList {
-		for _, pricingModel := range enableAbilities {
-			if strings.Contains(pricingModel.Model, m.ModelName) {
-				if _, exists := metaMap[pricingModel.Model]; !exists {
-					metaMap[pricingModel.Model] = m
-				}
-			}
-		}
-	}
+	metaMap := resolveModelMetadata(allMeta, names)
 
 	// 预加载供应商
 	var vendors []Vendor
@@ -317,12 +251,12 @@ func updatePricing() {
 		if strings.TrimSpace(meta.Endpoints) == "" {
 			continue
 		}
-		var raw map[string]interface{}
+		var raw map[string]any
 		if err := common.Unmarshal([]byte(meta.Endpoints), &raw); err == nil {
 			endpoints := modelSupportEndpointsStr[modelName]
 			for k, v := range raw {
 				switch v.(type) {
-				case string, map[string]interface{}:
+				case string, map[string]any:
 					endpoints = appendPricingEndpoint(endpoints, k)
 				}
 			}
@@ -359,13 +293,13 @@ func updatePricing() {
 		if strings.TrimSpace(meta.Endpoints) == "" {
 			continue
 		}
-		var raw map[string]interface{}
+		var raw map[string]any
 		if err := common.Unmarshal([]byte(meta.Endpoints), &raw); err == nil {
 			for k, v := range raw {
 				switch val := v.(type) {
 				case string:
 					supportedEndpointMap[k] = common.EndpointInfo{Path: val, Method: "POST"}
-				case map[string]interface{}:
+				case map[string]any:
 					ep := common.EndpointInfo{Method: "POST"}
 					if p, ok := val["path"].(string); ok {
 						ep.Path = p
@@ -382,6 +316,7 @@ func updatePricing() {
 	}
 
 	pricingMap = make([]Pricing, 0)
+	pluginGeneration := jsplugin.DefaultRegistry.Generation()
 	for model, groups := range modelGroupsMap {
 		pricing := Pricing{
 			ModelName:              model,
@@ -436,6 +371,45 @@ func updatePricing() {
 				pricing.BillingMode = billingMode
 				pricing.BillingExpr = expr
 			}
+		} else if target, resolved := ResolveTaskModelAlias(pluginGeneration, model); resolved && target.Declared != "" {
+			if tailMode := billing_setting.GetBillingMode(target.Declared); tailMode == "tiered_expr" {
+				if expr, ok := billing_setting.GetBillingExpr(target.Declared); ok && strings.TrimSpace(expr) != "" {
+					pricing.BillingMode = tailMode
+					pricing.BillingExpr = expr
+				}
+			}
+		}
+		plugin, ok := pluginGeneration.GetByModel(model)
+		if !ok {
+			if target, resolved := ResolveTaskModelAlias(pluginGeneration, model); resolved {
+				plugin, ok = pluginGeneration.Get(target.PluginKey)
+			}
+		}
+		if ok && plugin != nil && len(plugin.Meta.UsageSchema) > 0 {
+			pricing.BillingUsageSchema = make(map[string]jsplugin.UsageFieldSchema, len(plugin.Meta.UsageSchema))
+			for key, field := range plugin.Meta.UsageSchema {
+				field.Enum = append([]string(nil), field.Enum...)
+				field.Description = maps.Clone(field.Description)
+				if field.EnumLabels != nil {
+					labels := make(map[string]jsplugin.LocalizedText, len(field.EnumLabels))
+					for value, label := range field.EnumLabels {
+						labels[value] = maps.Clone(label)
+					}
+					field.EnumLabels = labels
+				}
+				pricing.BillingUsageSchema[key] = field
+			}
+			if len(plugin.Meta.UsageExamples) > 0 {
+				pricing.BillingUsageExamples = make([]jsplugin.UsageExample, len(plugin.Meta.UsageExamples))
+				for index, example := range plugin.Meta.UsageExamples {
+					facts := make(map[string]any, len(example.Facts))
+					maps.Copy(facts, example.Facts)
+					pricing.BillingUsageExamples[index] = jsplugin.UsageExample{
+						Label: example.Label,
+						Facts: facts,
+					}
+				}
+			}
 		}
 		pricingMap = append(pricingMap, pricing)
 	}
@@ -461,4 +435,30 @@ func updatePricing() {
 // GetSupportedEndpointMap 返回全局端点到路径的映射
 func GetSupportedEndpointMap() map[string]common.EndpointInfo {
 	return supportedEndpointMap
+}
+
+// LegacySecondBasedFixedPriceModel identifies fixed-price video models that
+// predate explicit unit configuration.
+func LegacySecondBasedFixedPriceModel(modelName string, endpoints []constant.EndpointType) bool {
+	normalizedName := strings.ToLower(modelName)
+	if normalizedName == "ok-video" {
+		return false
+	}
+	if normalizedName == "ok-video-1.5-preview" {
+		return true
+	}
+	if strings.HasPrefix(normalizedName, "ok-") && strings.Contains(normalizedName[3:], "video") {
+		return true
+	}
+	for _, endpoint := range endpoints {
+		if endpoint == constant.EndpointTypeOpenAIVideo {
+			return true
+		}
+	}
+	for _, marker := range []string{"video", "sora", "veo", "kling", "pika"} {
+		if strings.Contains(normalizedName, marker) {
+			return true
+		}
+	}
+	return false
 }

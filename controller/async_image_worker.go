@@ -282,7 +282,7 @@ func runInternalAsyncImageRelay(ctx context.Context, task *model.Task) ([]byte, 
 		if channel != nil {
 			c.Set(suppressRelayErrorLogContextKey, true)
 			c.Set("async_channel_retry_path", append([]string(nil), retryPath...))
-			processChannelError(c, *types.NewChannelError(channel.Id, channel.Type, channel.Name, channel.ChannelInfo.IsMultiKey, common.GetContextKeyString(c, constant.ContextKeyChannelKey), channel.GetAutoBan()), lastErr)
+			processChannelError(c, *types.NewChannelError(channel.Id, channel.Type, channel.Name, channel.ChannelInfo.IsMultiKey, common.GetContextKeyString(c, constant.ContextKeyChannelKey), channel.GetAutoBan()), lastErr, nil)
 		}
 		if !shouldRetry(c, lastErr, common.RetryTimes-retryParam.GetRetry()) {
 			break
@@ -468,28 +468,24 @@ func recordInternalAsyncImageFinalErrorLog(c *gin.Context, task *model.Task, cha
 	if modelName == "" && task.PrivateData.BillingContext != nil {
 		modelName = task.PrivateData.BillingContext.OriginModelName
 	}
-	other := map[string]interface{}{
-		"error_type":               err.GetErrorType(),
-		"error_code":               err.GetErrorCode(),
-		"status_code":              err.StatusCode,
-		"channel_id":               channelID,
-		"channel_name":             channelName,
-		"channel_type":             channelType,
-		"is_task":                  true,
-		"async_task":               true,
-		"task_id":                  task.TaskID,
-		"async_channel_retry_path": path,
-		"admin_info": map[string]interface{}{
-			"use_channel": path,
-		},
-	}
-	if len(retryDetails) > 0 {
-		other["async_channel_retry_details"] = retryDetails
-	}
+	other := model.NewLogOther()
+	other.SetPublic("error_type", err.GetErrorType())
+	other.SetPublic("error_code", err.GetErrorCode())
+	other.SetPublic("status_code", err.StatusCode)
+	other.SetPublic("is_task", true)
+	other.SetPublic("async_task", true)
+	other.SetPublic("task_id", task.TaskID)
+	other.SetAdmin("channel_id", channelID)
+	other.SetAdmin("channel_name", channelName)
+	other.SetAdmin("channel_type", channelType)
+	other.SetAdmin("use_channel", path)
+	other.SetAdmin("async_channel_retry_path", path)
+	if len(retryDetails) > 0 { other.SetAdmin("async_channel_retry_details", retryDetails) }
+
 	if c.Request != nil && c.Request.URL != nil {
-		other["request_path"] = c.Request.URL.Path
+		other.SetPublic("request_path", c.Request.URL.Path)
 	} else if task.PrivateData.RequestPath != "" {
-		other["request_path"] = task.PrivateData.RequestPath
+		other.SetPublic("request_path", task.PrivateData.RequestPath)
 	}
 	c.Set(common.RequestIdKey, task.TaskID)
 	c.Set("id", task.UserId)

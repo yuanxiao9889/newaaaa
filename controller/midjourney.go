@@ -335,6 +335,10 @@ func refundLegacyMidjourneyTask(ctx context.Context, task *model.Midjourney) {
 		logger.LogError(ctx, fmt.Sprintf("adjust legacy Midjourney usage failed for task %s: %v", task.MjId, err))
 		return
 	}
+	other := model.NewLogOther()
+	other.SetPublic("task_id", task.MjId)
+	other.SetPublic("reason", "构图失败")
+	other.SetPublic("unattributed_refund", true)
 	if err := model.RecordTaskBillingLog(model.RecordTaskBillingLogParams{
 		UserId:    task.UserId,
 		LogType:   model.LogTypeRefund,
@@ -342,11 +346,7 @@ func refundLegacyMidjourneyTask(ctx context.Context, task *model.Midjourney) {
 		ChannelId: task.ChannelId,
 		ModelName: service.CovertMjpActionToModelName(task.Action),
 		Quota:     task.Quota,
-		Other: map[string]interface{}{
-			"task_id":             task.MjId,
-			"reason":              "构图失败",
-			"unattributed_refund": true,
-		},
+		Other: other,
 	}); err != nil {
 		logger.LogError(ctx, fmt.Sprintf("record legacy Midjourney refund log failed for task %s: %v", task.MjId, err))
 	}

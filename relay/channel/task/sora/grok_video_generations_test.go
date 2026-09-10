@@ -165,20 +165,23 @@ func TestTaskAdaptorAcceptsNestedGenerationsSubmitResponse(t *testing.T) {
 	}
 	adaptor := &TaskAdaptor{}
 
-	upstreamID, taskData, taskErr := adaptor.DoResponse(context, response, &relaycommon.RelayInfo{
+	parsed, taskErr := adaptor.ParseResponse(context, response, &relaycommon.RelayInfo{
 		TaskRelayInfo: &relaycommon.TaskRelayInfo{
 			PublicTaskID: "task_public",
 		},
 	})
 	require.Nil(t, taskErr)
-	assert.Equal(t, "task_upstream", upstreamID)
+	assert.Equal(t, "task_upstream", parsed.UpstreamTaskID)
 	assert.JSONEq(t, `{
 		"created":1784994030,
 		"data":{"id":"task_upstream","status":"processing"}
-	}`, string(taskData))
+	}`, string(parsed.TaskData))
 
+	assert.Empty(t, recorder.Body.Bytes(), "parsing must not write before durable task persistence")
+	clientBody, marshalErr := common.Marshal(parsed.ClientResponse)
+	require.NoError(t, marshalErr)
 	var clientResponse map[string]any
-	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &clientResponse))
+	require.NoError(t, common.Unmarshal(clientBody, &clientResponse))
 	assert.Equal(t, "task_public", clientResponse["id"])
 	assert.Equal(t, "task_public", clientResponse["task_id"])
 	assert.Equal(t, "processing", clientResponse["status"])

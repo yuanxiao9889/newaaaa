@@ -2,21 +2,19 @@ package model
 
 import (
 	"fmt"
+	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
+	"github.com/glebarez/sqlite"
+	"gorm.io/driver/clickhouse"
+	"gorm.io/driver/mysql"
+	"gorm.io/driver/postgres"
+	"gorm.io/gorm"
 	"log"
 	"net/url"
 	"os"
 	"strings"
 	"sync"
 	"time"
-
-	"github.com/QuantumNous/new-api/common"
-	"github.com/QuantumNous/new-api/constant"
-
-	"github.com/glebarez/sqlite"
-	"gorm.io/driver/clickhouse"
-	"gorm.io/driver/mysql"
-	"gorm.io/driver/postgres"
-	"gorm.io/gorm"
 )
 
 var commonGroupCol string
@@ -26,6 +24,36 @@ var commonFalseVal string
 
 var logKeyCol string
 var logGroupCol string
+
+var DB *gorm.DB
+
+var LOG_DB *gorm.DB
+
+var userQuotaColumns = []string{"quota", "used_quota", "aff_quota", "aff_history"}
+
+type sqliteColumnDef struct {
+	Name string
+	DDL  string
+}
+
+var (
+	lastPingTime time.Time
+	pingMutex    sync.Mutex
+)
+
+
+// jsonScanBytes 归一化 json 列的驱动返回值:不同驱动/协议模式下同一列可能
+// 以 []byte 或 string 返回,静默丢弃 string 会导致字段被清零而不报错。
+func jsonScanBytes(value any) []byte {
+	switch v := value.(type) {
+	case []byte:
+		return v
+	case string:
+		return []byte(v)
+	default:
+		return nil
+	}
+}
 
 func initCol() {
 	// init common column names
@@ -49,10 +77,6 @@ func initCol() {
 		logKeyCol = "`key`"
 	}
 }
-
-var DB *gorm.DB
-
-var LOG_DB *gorm.DB
 
 func createRootAccountIfNeed() error {
 	var user User
@@ -138,10 +162,12 @@ func chooseDB(envName string, isLog bool) (*gorm.DB, common.DatabaseType, error)
 		if strings.HasPrefix(dsn, "postgres://") || strings.HasPrefix(dsn, "postgresql://") {
 			// Use PostgreSQL
 			common.SysLog("using PostgreSQL as database")
-			db, err := gorm.Open(postgres.New(postgres.Config{
+			// 同时关闭 pgx 隐式与 GORM 显式预处理语句:命名 prepared statement 与
+			// 事务池代理(PgBouncer/Neon/Supabase)不兼容,会触发 FATAL 08P01/42P05。
+			db, err := gorm.Open(postgresMigrationDialector{postgres.Dialector{Config: &postgres.Config{
 				DSN:                  dsn,
-				PreferSimpleProtocol: true, // disables implicit prepared statement usage
-			}), newGormConfig(true))
+				PreferSimpleProtocol: true,
+			}}}, newGormConfig(false))
 			return db, common.DatabaseTypePostgreSQL, err
 		}
 		if strings.HasPrefix(dsn, "local") {
@@ -159,7 +185,7 @@ func chooseDB(envName string, isLog bool) (*gorm.DB, common.DatabaseType, error)
 				dsn += "?parseTime=true"
 			}
 		}
-		db, err := gorm.Open(mysql.Open(dsn), newGormConfig(true))
+		db, err := gorm.Open(mysqlMigrationDialector{mysql.Dialector{Config: &mysql.Config{DSN: dsn}}}, newGormConfig(true))
 		return db, common.DatabaseTypeMySQL, err
 	}
 	// Use SQLite
@@ -185,6 +211,9 @@ func InitDB() (err error) {
 			if err := checkMySQLChineseSupport(DB); err != nil {
 				panic(err)
 			}
+		}
+		if err := ensureUserQuotaColumns(DB, common.MainDatabaseType()); err != nil {
+			return err
 		}
 		sqlDB, err := DB.DB()
 		if err != nil {
@@ -214,6 +243,9 @@ func InitLogDB() (err error) {
 		LOG_DB = DB
 		common.SetLogDatabaseType(common.MainDatabaseType())
 		initCol()
+		if common.IsMasterNode {
+			return MigrateAuditLogs()
+		}
 		return
 	}
 	db, dbType, err := chooseDB("LOG_SQL_DSN", true)
@@ -250,12 +282,65 @@ func InitLogDB() (err error) {
 	return err
 }
 
+// ensureUserQuotaColumns rejects a legacy 32-bit wallet schema before any
+// migrations run. The 64-bit-only build intentionally does not auto-upgrade
+// an existing wallet; operators must migrate it explicitly before starting.
+func ensureUserQuotaColumns(db *gorm.DB, dbType common.DatabaseType) error {
+	if common.GetEnvOrDefaultBool("SKIP_64BIT_QUOTA_SCHEMA_CHECK", false) {
+		common.SysLog("SKIP_64BIT_QUOTA_SCHEMA_CHECK=true; skipping user quota schema check")
+		return nil
+	}
+	if db == nil || dbType == common.DatabaseTypeSQLite {
+		return nil
+	}
+	if !db.Migrator().HasTable(&User{}) {
+		return nil
+	}
+	columnTypes, err := db.Migrator().ColumnTypes(&User{})
+	if err != nil {
+		return fmt.Errorf("failed to inspect users schema: %w", err)
+	}
+	for _, expected := range userQuotaColumns {
+		for _, actual := range columnTypes {
+			if !strings.EqualFold(actual.Name(), expected) {
+				continue
+			}
+			dataType := actual.DatabaseTypeName()
+			if !is64BitIntegerType(dbType, dataType) {
+				return fmt.Errorf("users.%s uses %s; 32-bit is not supported", expected, dataType)
+			}
+		}
+	}
+	return nil
+}
+
+func is64BitIntegerType(dbType common.DatabaseType, dataType string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(dataType))
+	switch dbType {
+	case common.DatabaseTypeMySQL:
+		return normalized == "bigint" || normalized == "unsigned bigint" || normalized == "bigint unsigned"
+	case common.DatabaseTypePostgreSQL:
+		return normalized == "bigint" || normalized == "int8"
+	default:
+		return false
+	}
+}
+
 func migrateDB() error {
+	if err := migrateTokenKeyUniqueness(DB); err != nil {
+		return err
+	}
+	if err := migratePrefillGroupUniqueness(DB); err != nil {
+		return err
+	}
 	// Migrate price_amount column from float/double to decimal for existing tables
 	migrateSubscriptionPlanPriceAmount()
 	// Migrate model_limits column from varchar to text for existing tables
 	if err := migrateTokenModelLimitsToText(); err != nil {
 		return err
+	}
+	if err := migrateOptionPrimaryKey(DB); err != nil {
+		common.SysError("failed to migrate options primary key: " + err.Error())
 	}
 
 	models := []interface{}{
@@ -267,6 +352,7 @@ func migrateDB() error {
 		&ExternalIdentityClaim{},
 		&PasskeyCredential{},
 		&Option{},
+		&LoginEncryptionKey{},
 		&Redemption{},
 		&Ability{},
 		&Log{},
@@ -281,6 +367,7 @@ func migrateDB() error {
 		&ProfitCostPriceVersion{},
 		&QuotaData{},
 		&Task{},
+		&TaskPlugin{},
 		&Model{},
 		&Vendor{},
 		&PrefillGroup{},
@@ -325,100 +412,10 @@ func migrateDB() error {
 	return nil
 }
 
-func migrateDBFast() error {
-
-	var wg sync.WaitGroup
-
-	migrations := []struct {
-		model interface{}
-		name  string
-	}{
-		{&Channel{}, "Channel"},
-		{&Token{}, "Token"},
-		{&User{}, "User"},
-		{&UserSession{}, "UserSession"},
-		{&AuthFlow{}, "AuthFlow"},
-		{&ExternalIdentityClaim{}, "ExternalIdentityClaim"},
-		{&PasskeyCredential{}, "PasskeyCredential"},
-		{&Option{}, "Option"},
-		{&Redemption{}, "Redemption"},
-		{&Ability{}, "Ability"},
-		{&Log{}, "Log"},
-		{&Midjourney{}, "Midjourney"},
-		{&TopUp{}, "TopUp"},
-		{&ProfitCostPrice{}, "ProfitCostPrice"},
-		{&ProfitCostPriceVersion{}, "ProfitCostPriceVersion"},
-		{&QuotaData{}, "QuotaData"},
-		{&Task{}, "Task"},
-		{&Model{}, "Model"},
-		{&Vendor{}, "Vendor"},
-		{&PrefillGroup{}, "PrefillGroup"},
-		{&Setup{}, "Setup"},
-		{&TwoFA{}, "TwoFA"},
-		{&TwoFABackupCode{}, "TwoFABackupCode"},
-		{&Checkin{}, "Checkin"},
-		{&SubscriptionOrder{}, "SubscriptionOrder"},
-		{&UserSubscription{}, "UserSubscription"},
-		{&SubscriptionPreConsumeRecord{}, "SubscriptionPreConsumeRecord"},
-		{&CustomOAuthProvider{}, "CustomOAuthProvider"},
-		{&UserOAuthBinding{}, "UserOAuthBinding"},
-		{&PerfMetric{}, "PerfMetric"},
-		{&SystemInstance{}, "SystemInstance"},
-		{&SystemTask{}, "SystemTask"},
-		{&SystemTaskLock{}, "SystemTaskLock"},
-	}
-	// 动态计算migration数量，确保errChan缓冲区足够大
-	if !common.UsingMainDatabase(common.DatabaseTypeSQLite) {
-		migrations = append(migrations, struct {
-			model interface{}
-			name  string
-		}{&AffiliateRewardRecord{}, "AffiliateRewardRecord"})
-	}
-	errChan := make(chan error, len(migrations))
-
-	for _, m := range migrations {
-		wg.Add(1)
-		go func(model interface{}, name string) {
-			defer wg.Done()
-			if err := DB.AutoMigrate(model); err != nil {
-				errChan <- fmt.Errorf("failed to migrate %s: %v", name, err)
-			}
-		}(m.model, m.name)
-	}
-
-	// Wait for all migrations to complete
-	wg.Wait()
-	close(errChan)
-
-	// Check for any errors
-	for err := range errChan {
-		if err != nil {
-			return err
-		}
-	}
-	if err := InitializeUserAuthVersions(); err != nil {
-		return err
-	}
-	if err := InitializeExternalIdentityClaims(); err != nil {
-		return err
-	}
-	if common.UsingMainDatabase(common.DatabaseTypeSQLite) {
-		if err := ensureAffiliateRewardRecordTableSQLite(); err != nil {
-			return err
-		}
-		if err := ensureSubscriptionPlanTableSQLite(); err != nil {
-			return err
-		}
-	} else {
-		if err := DB.AutoMigrate(&SubscriptionPlan{}); err != nil {
-			return err
-		}
-	}
-	common.SysLog("database migrated")
-	return nil
-}
-
 func migrateLOGDB() error {
+	if err := MigrateAuditLogs(); err != nil {
+		return err
+	}
 	if common.UsingLogDatabase(common.DatabaseTypeClickHouse) {
 		return migrateClickHouseLogDB()
 	}
@@ -512,74 +509,6 @@ func clickHouseLogTableHasTTL() (bool, error) {
 func clickHouseCreateTableHasTTL(createTableSQL string) bool {
 	upperSQL := strings.ToUpper(createTableSQL)
 	return strings.Contains(upperSQL, "\nTTL ") || strings.Contains(upperSQL, " TTL ")
-}
-
-type sqliteColumnDef struct {
-	Name string
-	DDL  string
-}
-
-func ensureAffiliateRewardRecordTableSQLite() error {
-	if !common.UsingMainDatabase(common.DatabaseTypeSQLite) {
-		return nil
-	}
-	tableName := "affiliate_reward_records"
-	if !DB.Migrator().HasTable(tableName) {
-		createSQL := `CREATE TABLE ` + "`" + tableName + "`" + ` (
-` + "`id`" + ` integer,
-` + "`inviter_id`" + ` integer NOT NULL,
-` + "`invitee_id`" + ` integer NOT NULL,
-` + "`top_up_id`" + ` integer NOT NULL,
-` + "`trade_no`" + ` varchar(255) NOT NULL,
-` + "`payment_amount`" + ` real NOT NULL DEFAULT 0,
-` + "`reward_quota`" + ` integer NOT NULL DEFAULT 0,
-` + "`created_at`" + ` integer,
-PRIMARY KEY (` + "`id`" + `)
-)`
-		if err := DB.Exec(createSQL).Error; err != nil {
-			return err
-		}
-	}
-	var cols []struct {
-		Name string `gorm:"column:name"`
-	}
-	if err := DB.Raw("PRAGMA table_info(`" + tableName + "`)").Scan(&cols).Error; err != nil {
-		return err
-	}
-	existing := make(map[string]struct{}, len(cols))
-	for _, c := range cols {
-		existing[c.Name] = struct{}{}
-	}
-	required := []sqliteColumnDef{
-		{Name: "inviter_id", DDL: "`inviter_id` integer NOT NULL DEFAULT 0"},
-		{Name: "invitee_id", DDL: "`invitee_id` integer NOT NULL DEFAULT 0"},
-		{Name: "top_up_id", DDL: "`top_up_id` integer NOT NULL DEFAULT 0"},
-		{Name: "trade_no", DDL: "`trade_no` varchar(255) NOT NULL DEFAULT ''"},
-		{Name: "payment_amount", DDL: "`payment_amount` real NOT NULL DEFAULT 0"},
-		{Name: "reward_quota", DDL: "`reward_quota` integer NOT NULL DEFAULT 0"},
-		{Name: "created_at", DDL: "`created_at` integer"},
-	}
-	for _, col := range required {
-		if _, ok := existing[col.Name]; ok {
-			continue
-		}
-		if err := DB.Exec("ALTER TABLE `" + tableName + "` ADD COLUMN " + col.DDL).Error; err != nil {
-			return err
-		}
-	}
-	indexes := []string{
-		"CREATE INDEX IF NOT EXISTS `idx_affiliate_reward_inviter` ON `affiliate_reward_records`(`inviter_id`)",
-		"CREATE INDEX IF NOT EXISTS `idx_affiliate_reward_invitee` ON `affiliate_reward_records`(`invitee_id`)",
-		"CREATE UNIQUE INDEX IF NOT EXISTS `idx_affiliate_reward_records_top_up_id` ON `affiliate_reward_records`(`top_up_id`)",
-		"CREATE UNIQUE INDEX IF NOT EXISTS `idx_affiliate_reward_records_trade_no` ON `affiliate_reward_records`(`trade_no`)",
-		"CREATE INDEX IF NOT EXISTS `idx_affiliate_reward_records_created_at` ON `affiliate_reward_records`(`created_at`)",
-	}
-	for _, stmt := range indexes {
-		if err := DB.Exec(stmt).Error; err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 func ensureSubscriptionPlanTableSQLite() error {
@@ -885,11 +814,6 @@ func checkMySQLChineseSupport(db *gorm.DB) error {
 	return nil
 }
 
-var (
-	lastPingTime time.Time
-	pingMutex    sync.Mutex
-)
-
 func PingDB() error {
 	pingMutex.Lock()
 	defer pingMutex.Unlock()
@@ -912,5 +836,70 @@ func PingDB() error {
 
 	lastPingTime = time.Now()
 	common.SysLog("Database pinged successfully")
+	return nil
+}
+
+
+
+func ensureAffiliateRewardRecordTableSQLite() error {
+	if !common.UsingMainDatabase(common.DatabaseTypeSQLite) {
+		return nil
+	}
+	tableName := "affiliate_reward_records"
+	if !DB.Migrator().HasTable(tableName) {
+		createSQL := `CREATE TABLE ` + "`" + tableName + "`" + ` (
+` + "`id`" + ` integer,
+` + "`inviter_id`" + ` integer NOT NULL,
+` + "`invitee_id`" + ` integer NOT NULL,
+` + "`top_up_id`" + ` integer NOT NULL,
+` + "`trade_no`" + ` varchar(255) NOT NULL,
+` + "`payment_amount`" + ` real NOT NULL DEFAULT 0,
+` + "`reward_quota`" + ` integer NOT NULL DEFAULT 0,
+` + "`created_at`" + ` integer,
+PRIMARY KEY (` + "`id`" + `)
+)`
+		if err := DB.Exec(createSQL).Error; err != nil {
+			return err
+		}
+	}
+	var cols []struct {
+		Name string `gorm:"column:name"`
+	}
+	if err := DB.Raw("PRAGMA table_info(`" + tableName + "`)").Scan(&cols).Error; err != nil {
+		return err
+	}
+	existing := make(map[string]struct{}, len(cols))
+	for _, c := range cols {
+		existing[c.Name] = struct{}{}
+	}
+	required := []sqliteColumnDef{
+		{Name: "inviter_id", DDL: "`inviter_id` integer NOT NULL DEFAULT 0"},
+		{Name: "invitee_id", DDL: "`invitee_id` integer NOT NULL DEFAULT 0"},
+		{Name: "top_up_id", DDL: "`top_up_id` integer NOT NULL DEFAULT 0"},
+		{Name: "trade_no", DDL: "`trade_no` varchar(255) NOT NULL DEFAULT ''"},
+		{Name: "payment_amount", DDL: "`payment_amount` real NOT NULL DEFAULT 0"},
+		{Name: "reward_quota", DDL: "`reward_quota` integer NOT NULL DEFAULT 0"},
+		{Name: "created_at", DDL: "`created_at` integer"},
+	}
+	for _, col := range required {
+		if _, ok := existing[col.Name]; ok {
+			continue
+		}
+		if err := DB.Exec("ALTER TABLE `" + tableName + "` ADD COLUMN " + col.DDL).Error; err != nil {
+			return err
+		}
+	}
+	indexes := []string{
+		"CREATE INDEX IF NOT EXISTS `idx_affiliate_reward_inviter` ON `affiliate_reward_records`(`inviter_id`)",
+		"CREATE INDEX IF NOT EXISTS `idx_affiliate_reward_invitee` ON `affiliate_reward_records`(`invitee_id`)",
+		"CREATE UNIQUE INDEX IF NOT EXISTS `idx_affiliate_reward_records_top_up_id` ON `affiliate_reward_records`(`top_up_id`)",
+		"CREATE UNIQUE INDEX IF NOT EXISTS `idx_affiliate_reward_records_trade_no` ON `affiliate_reward_records`(`trade_no`)",
+		"CREATE INDEX IF NOT EXISTS `idx_affiliate_reward_records_created_at` ON `affiliate_reward_records`(`created_at`)",
+	}
+	for _, stmt := range indexes {
+		if err := DB.Exec(stmt).Error; err != nil {
+			return err
+		}
+	}
 	return nil
 }

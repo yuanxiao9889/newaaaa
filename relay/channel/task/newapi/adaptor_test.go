@@ -337,17 +337,20 @@ func TestDoResponseHidesUpstreamTaskID(t *testing.T) {
 		}`)),
 	}
 
-	upstreamID, taskData, taskErr := (&TaskAdaptor{}).DoResponse(context, response, &relaycommon.RelayInfo{
+	parsed, taskErr := (&TaskAdaptor{}).ParseResponse(context, response, &relaycommon.RelayInfo{
 		OriginModelName: "MiniMax-H3",
 		TaskRelayInfo:   &relaycommon.TaskRelayInfo{PublicTaskID: "task_public"},
 	})
 
 	require.Nil(t, taskErr)
-	assert.Equal(t, "task_upstream", upstreamID)
-	assert.Contains(t, string(taskData), "task_upstream")
+	assert.Equal(t, "task_upstream", parsed.UpstreamTaskID)
+	assert.Contains(t, string(parsed.TaskData), "task_upstream")
 
+	assert.Empty(t, recorder.Body.Bytes(), "parsing must not write before durable task persistence")
+	clientBody, marshalErr := common.Marshal(parsed.ClientResponse)
+	require.NoError(t, marshalErr)
 	var clientResponse submitResponse
-	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &clientResponse))
+	require.NoError(t, common.Unmarshal(clientBody, &clientResponse))
 	assert.Equal(t, "task_public", clientResponse.ID)
 	assert.Equal(t, "task_public", clientResponse.TaskID)
 	assert.Equal(t, "MiniMax-H3", clientResponse.Model)
@@ -372,7 +375,7 @@ func TestFetchTaskSelectsEndpointByModel(t *testing.T) {
 		{model: "minimax-h3", path: "/v1/videos/task_3"},
 		{model: "ok-imagine-video", path: "/v1/videos/task_4"},
 	} {
-		response, err := adaptor.FetchTask(server.URL, "secret", map[string]any{"task_id": strings.TrimPrefix(test.path[strings.LastIndex(test.path, "/"):], "/"), "model": test.model}, "")
+		response, err := adaptor.FetchTask(server.URL, "secret", &model.Task{PrivateData: model.TaskPrivateData{UpstreamTaskID: strings.TrimPrefix(test.path[strings.LastIndex(test.path, "/"):], "/"), BillingContext: &model.TaskBillingContext{OriginModelName: test.model}}}, "")
 		require.NoError(t, err)
 		_ = response.Body.Close()
 	}
@@ -414,7 +417,7 @@ func TestParseTaskResultSupportsOopiiEnvelopes(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			result, err := (&TaskAdaptor{}).ParseTaskResult([]byte(test.body))
+			result, err := (&TaskAdaptor{}).ParseTaskResult(nil, nil, []byte(test.body))
 			require.NoError(t, err)
 			assert.Equal(t, string(test.status), result.Status)
 			assert.Equal(t, test.url, result.Url)
@@ -442,7 +445,7 @@ func TestParseAndConvertColomiResponsePreservesVerificationData(t *testing.T) {
 	}`)
 	adaptor := &TaskAdaptor{}
 
-	result, err := adaptor.ParseTaskResult(body)
+	result, err := adaptor.ParseTaskResult(nil, nil, body)
 	require.NoError(t, err)
 	assert.Equal(t, string(model.TaskStatusSuccess), result.Status)
 	assert.Equal(t, "https://ark.example.test/result.mp4", result.Url)
