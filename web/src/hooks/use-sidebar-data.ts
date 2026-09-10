@@ -106,7 +106,7 @@ export function useSidebarData(): SidebarData {
             icon: Image,
           },
           {
-            title: t('Task Logs'),
+            title: t('Async Tasks'),
             url: '/usage-logs/task',
             icon: ListTodo,
           },

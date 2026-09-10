@@ -617,7 +617,7 @@
     "Async task records": "非同步工作記錄",
     "Async task refund": "異步任務退款",
     "Async tasks": "Async tasks",
-    "Async Tasks": "Async Tasks",
+    "Async Tasks": "非同步任務",
     "Asynchronous image tasks": "非同步影像任務",
     "Asynchronous mode appends async=true to Grok text-to-image and reference-image generation requests.": "非同步模式會在 Grok 文生圖與參考圖生成請求中附加 async=true。",
     "At least one cost price is required": "At least one cost price is required",

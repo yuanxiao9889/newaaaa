@@ -51,7 +51,7 @@ const SECTION_META: Record<UsageLogsSectionId, { titleKey: string }> = {
     titleKey: 'Drawing Logs',
   },
   task: {
-    titleKey: 'Task Logs',
+    titleKey: 'Async Tasks',
   },
 }
 
@@ -75,7 +75,7 @@ function UsageLogsContent() {
   const tabNavGroups = useMemo<NavGroup[]>(
     () => [
       {
-        title: 'Task Logs',
+        title: 'Async Tasks',
         items: TASK_LOG_SECTIONS.map((section) => ({
           title: SECTION_META[section].titleKey,
           url: `/usage-logs/${section}`,
