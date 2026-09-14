@@ -203,6 +203,7 @@ func TestModelPriceHelperUsesFixedAsyncImagePreConsumeForGPTImage2(t *testing.T)
 
 	info := &relaycommon.RelayInfo{
 		OriginModelName: "gpt-image-2-OF",
+		Request:         &dto.ImageRequest{Model: "gpt-image-2-OF", N: common.GetPointer(uint(1))},
 		UserGroup:       "default",
 		UsingGroup:      "default",
 	}

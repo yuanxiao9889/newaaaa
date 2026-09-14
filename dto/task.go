@@ -6,6 +6,8 @@ import (
 )
 
 type TaskError struct {
+	// NoRetry prevents duplicate upstream work after a response has been accepted.
+	NoRetry    bool   `json:"-"`
 	Code       string `json:"code"`
 	Message    string `json:"message"`
 	Data       any    `json:"data"`
@@ -53,21 +55,21 @@ type TaskDto struct {
 	Username          string          `json:"username,omitempty"`
 	Data              json.RawMessage `json:"data"`
 
-	InternalAsync    bool              `json:"internal_async,omitempty"`
-	RequestPath      string            `json:"request_path,omitempty"`
-	WorkerAttempts   int               `json:"worker_attempts,omitempty"`
-	ChannelRetryPath []string          `json:"channel_retry_path,omitempty"`
-	BillingState     string            `json:"billing_state,omitempty"`
-	PreConsumedQuota int               `json:"pre_consumed_quota,omitempty"`
-	ActualQuota      int               `json:"actual_quota,omitempty"`
-	BillingError     string            `json:"billing_error,omitempty"`
-	PromptTokens     int               `json:"prompt_tokens,omitempty"`
-	CompletionTokens int               `json:"completion_tokens,omitempty"`
-	TotalTokens      int               `json:"total_tokens,omitempty"`
-	UsageDetails     *TaskUsageDetails `json:"usage_details,omitempty"`
-	LegacyVideoAvailable bool `json:"legacy_video_available,omitempty"`
-	AdminInfo *TaskAdminInfo `json:"admin_info,omitempty"`
-	RootInfo *TaskRootInfo `json:"root_info,omitempty"`
+	InternalAsync        bool              `json:"internal_async,omitempty"`
+	RequestPath          string            `json:"request_path,omitempty"`
+	WorkerAttempts       int               `json:"worker_attempts,omitempty"`
+	ChannelRetryPath     []string          `json:"channel_retry_path,omitempty"`
+	BillingState         string            `json:"billing_state,omitempty"`
+	PreConsumedQuota     int               `json:"pre_consumed_quota,omitempty"`
+	ActualQuota          int               `json:"actual_quota,omitempty"`
+	BillingError         string            `json:"billing_error,omitempty"`
+	PromptTokens         int               `json:"prompt_tokens,omitempty"`
+	CompletionTokens     int               `json:"completion_tokens,omitempty"`
+	TotalTokens          int               `json:"total_tokens,omitempty"`
+	UsageDetails         *TaskUsageDetails `json:"usage_details,omitempty"`
+	LegacyVideoAvailable bool              `json:"legacy_video_available,omitempty"`
+	AdminInfo            *TaskAdminInfo    `json:"admin_info,omitempty"`
+	RootInfo             *TaskRootInfo     `json:"root_info,omitempty"`
 }
 
 type TaskUsageDetails struct {
@@ -112,7 +114,6 @@ type TaskRootInfo struct {
 type FetchReq struct {
 	IDs []string `json:"ids"`
 }
-
 
 func (t *TaskResponse[T]) IsSuccess() bool {
 	return t.Code == TaskSuccessCode

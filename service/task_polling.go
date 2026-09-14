@@ -8,13 +8,11 @@ import (
 	taskdto "github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/model"
-	"github.com/QuantumNous/new-api/pkg/billingexpr"
 	"github.com/QuantumNous/new-api/relay/channel/task/taskcommon"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/bytedance/gopkg/util/gopool"
 	"github.com/samber/lo"
 	"io"
-	"maps"
 	"net/http"
 	"sort"
 	"strings"
@@ -668,10 +666,7 @@ func SettleTaskBillingOnComplete(ctx context.Context, adaptor TaskPollingAdaptor
 		if failed {
 			return RefundTaskQuota(ctx, task, task.FailReason)
 		}
-		usageFacts := make(map[string]any, len(bc.TieredSnapshot.UsageFacts)+len(taskResult.UsageFacts))
-		maps.Copy(usageFacts, bc.TieredSnapshot.UsageFacts)
-		maps.Copy(usageFacts, taskResult.UsageFacts)
-		result, err := billingexpr.ComputeTieredQuotaWithRequest(bc.TieredSnapshot, billingexpr.TokenParams{}, billingexpr.RequestInput{Usage: usageFacts})
+		result, usageFacts, err := EvaluateTaskCompletionUsage(bc.TieredSnapshot, taskResult.UsageFacts)
 		if err != nil {
 			markTaskBillingError(ctx, task, "task usage expression settlement failed: "+err.Error())
 			return err

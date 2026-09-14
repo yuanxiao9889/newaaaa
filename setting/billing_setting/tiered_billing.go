@@ -17,29 +17,32 @@ import (
 )
 
 const (
-	BillingModeRatio      = "ratio"
-	BillingModeTieredExpr = "tiered_expr"
-	BillingModeField      = "billing_mode"
-	BillingExprField      = "billing_expr"
-	FixedPriceUnitField   = "fixed_price_unit"
-	FixedPriceUnitRequest = "request"
-	FixedPriceUnitSecond  = "second"
-	maxTaskExprSmokeTests = 64
+	BillingModeRatio        = "ratio"
+	BillingModeTieredExpr   = "tiered_expr"
+	BillingModeField        = "billing_mode"
+	BillingExprField        = "billing_expr"
+	FixedPriceUnitField     = "fixed_price_unit"
+	FixedPriceUnitRequest   = "request"
+	FixedPriceUnitSecond    = "second"
+	maxTaskExprSmokeTests   = 64
+	PluginBillingExprOption = "billing_setting.plugin_billing_expr"
 )
 
 // BillingSetting is managed by config.GlobalConfig.Register.
 // DB keys: billing_setting.billing_mode, billing_setting.billing_expr,
-// billing_setting.fixed_price_unit
+// billing_setting.fixed_price_unit, billing_setting.plugin_billing_expr
 type BillingSetting struct {
-	BillingMode    map[string]string `json:"billing_mode"`
-	BillingExpr    map[string]string `json:"billing_expr"`
-	FixedPriceUnit map[string]string `json:"fixed_price_unit"`
+	PluginBillingExpr map[string]string `json:"plugin_billing_expr"`
+	BillingMode       map[string]string `json:"billing_mode"`
+	BillingExpr       map[string]string `json:"billing_expr"`
+	FixedPriceUnit    map[string]string `json:"fixed_price_unit"`
 }
 
 var billingSetting = BillingSetting{
-	BillingMode:    make(map[string]string),
-	BillingExpr:    make(map[string]string),
-	FixedPriceUnit: make(map[string]string),
+	PluginBillingExpr: make(map[string]string),
+	BillingMode:       make(map[string]string),
+	BillingExpr:       make(map[string]string),
+	FixedPriceUnit:    make(map[string]string),
 }
 
 // ---------------------------------------------------------------------------
@@ -54,7 +57,6 @@ type usageSmokeDimension struct {
 	name   string
 	values []any
 }
-
 
 func init() {
 	config.GlobalConfig.Register("billing_setting", &billingSetting)
@@ -92,6 +94,67 @@ func GetBillingExpr(model string) (string, bool) {
 func GetBuiltinBillingExpr(model string) (string, bool) {
 	expression, ok := builtinBillingExpr[model]
 	return expression, ok
+}
+
+func PluginBillingExprKey(pluginKey, model string) string {
+	return pluginKey + "::" + model
+}
+
+func SplitPluginBillingExprKey(key string) (plugin, model string, ok bool) {
+	plugin, model, ok = strings.Cut(key, "::")
+	if !ok || !jsplugin.ValidPluginKey(plugin) || strings.TrimSpace(model) == "" {
+		return "", "", false
+	}
+	return plugin, model, true
+}
+
+func GetPluginBillingExprCopy() map[string]string {
+	return maps.Clone(billingSetting.PluginBillingExpr)
+}
+
+func GetPluginBillingExpr(pluginKey, model string) (string, bool) {
+	expression, ok := billingSetting.PluginBillingExpr[PluginBillingExprKey(pluginKey, model)]
+	return expression, ok
+}
+
+// ResolveTaskBillingExpr selects the executing plugin's override before the
+// model expression, retaining the model alias fallback and explicit modes.
+func ResolveTaskBillingExpr(pluginKey, model, mappedModel string) (string, bool) {
+	if pluginKey != "" {
+		if expr, ok := GetPluginBillingExpr(pluginKey, model); ok {
+			return expr, true
+		}
+		if mappedModel != "" && mappedModel != model {
+			if expr, ok := GetPluginBillingExpr(pluginKey, mappedModel); ok {
+				return expr, true
+			}
+		}
+	}
+	if GetBillingMode(model) == BillingModeTieredExpr {
+		return GetBillingExpr(model)
+	}
+	if mappedModel != "" && mappedModel != model && GetBillingMode(mappedModel) == BillingModeTieredExpr {
+		expression, ok := GetBillingExpr(mappedModel)
+		return expression, ok && strings.TrimSpace(expression) != ""
+	}
+	return "", false
+}
+
+// TaskExprCompatible checks the schema contract even for usage references in
+// branches that the current request would not evaluate.
+func TaskExprCompatible(expression string, schema map[string]jsplugin.UsageFieldSchema) bool {
+	if strings.TrimSpace(expression) == "" {
+		return false
+	}
+	if _, err := billingexpr.CompileFromCache(expression); err != nil {
+		return false
+	}
+	for key := range billingexpr.UsedUsageKeys(expression) {
+		if _, exists := schema[key]; !exists {
+			return false
+		}
+	}
+	return !billingexpr.UsesFixedPricing(expression)
 }
 
 func GetBuiltinBillingExprCopy() map[string]string {
@@ -158,6 +221,9 @@ func smokeTestExpr(exprStr string) error {
 		{P: 1000, C: 1000, Len: 1000},
 		{P: 100000, C: 100000, Len: 100000},
 		{P: 1000000, C: 1000000, Len: 1000000},
+		{P: 300, C: 100, Len: 1000, CR: 100, Img: 400, ImgCR: 200},
+		{P: 800, C: 50, Len: 1000, AI: 200, AO: 50},
+		{Len: math.MaxInt32, ImgCR: math.MaxInt32},
 	}
 
 	for _, v := range vectors {

@@ -22,6 +22,8 @@ import {
   CLAUDE_FIELD_PASSTHROUGH_TYPES,
   CHANNEL_TYPE_NEW_API,
   CHANNEL_TYPE_TASK_PLUGIN,
+  CHANNEL_TYPE_VLLM,
+  CHANNEL_TYPE_SGLANG,
   CHANNEL_STATUS,
   ERROR_MESSAGES,
   FIELD_PASSTHROUGH_TYPES,
@@ -268,6 +270,7 @@ export const channelFormSchema = z
     multi_image_reference_enabled: z.boolean().optional(),
     image_adapter_enabled: z.boolean().optional(),
     image_adapter: z.string().optional(),
+    responses_websocket_enabled: z.boolean().optional(),
     system_prompt: z.string().optional(),
     system_prompt_override: z.boolean().optional(),
     // Type-specific settings (stored in settings JSON)
@@ -320,6 +323,8 @@ export const channelFormSchema = z
         61,
         CHANNEL_TYPE_NEW_API,
         CHANNEL_TYPE_TASK_PLUGIN,
+        CHANNEL_TYPE_VLLM,
+        CHANNEL_TYPE_SGLANG,
       ].includes(data.type) &&
       !data.base_url?.trim()
     ) {
@@ -479,6 +484,7 @@ export const CHANNEL_FORM_DEFAULT_VALUES: ChannelFormValues = {
   multi_image_reference_enabled: false,
   image_adapter_enabled: false,
   image_adapter: '',
+  responses_websocket_enabled: false,
   system_prompt: '',
   system_prompt_override: false,
   // Type-specific settings
@@ -523,6 +529,7 @@ export function transformChannelToFormDefaults(
     multi_image_reference_enabled: false,
     image_adapter_enabled: false,
     image_adapter: '',
+    responses_websocket_enabled: false,
     system_prompt: '',
     system_prompt_override: false,
   }
@@ -556,6 +563,8 @@ export function transformChannelToFormDefaults(
               2
             )
           : '',
+        responses_websocket_enabled:
+          parsed.responses_websocket_enabled === true,
         system_prompt: parsed.system_prompt || '',
         system_prompt_override: parsed.system_prompt_override || false,
       }
@@ -683,6 +692,9 @@ export function buildSettingJSON(formData: ChannelFormValues): string {
     pass_through_body_enabled: formData.pass_through_body_enabled || false,
     multi_image_reference_enabled:
       formData.multi_image_reference_enabled || false,
+    responses_websocket_enabled:
+      (formData.type === 1 || formData.type === 57) &&
+      formData.responses_websocket_enabled === true,
     system_prompt: formData.system_prompt || '',
     system_prompt_override: formData.system_prompt_override || false,
   }

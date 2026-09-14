@@ -1,8 +1,5 @@
 package constant
 
-import (
-)
-
 const (
 	ChannelTypeUnknown        = 0
 	ChannelTypeOpenAI         = 1
@@ -63,10 +60,14 @@ const (
 	ChannelTypeNewAPI         = 60
 	ChannelTypeGrokVideo      = 61
 	ChannelTypeTaskPlugin     = 62
+	ChannelTypeVLLM           = 63
+	ChannelTypeSGLang         = 64
 	ChannelTypeDummy          // this one is only for count, do not add any channel after this
 
 )
 
+// ChannelBaseURLs 保存各渠道类型的内置默认 Base URL。
+// 非空值会通过 /api/channel/default_base_urls 下发到前端，作为渠道表单的 API 地址占位提示。
 var ChannelBaseURLs = []string{
 	"",                                    // 0
 	"https://api.openai.com",              // 1
@@ -131,6 +132,8 @@ var ChannelBaseURLs = []string{
 	"",                                          //60
 	"",                                          //61
 	"",                                          //62
+	"",                                          //63
+	"",                                          //64
 }
 
 var ChannelTypeNames = map[int]string{
@@ -193,6 +196,8 @@ var ChannelTypeNames = map[int]string{
 	ChannelTypeNewAPI:         "New API",
 	ChannelTypeGrokVideo:      "Grok Video (Generations)",
 	ChannelTypeTaskPlugin:     "Task Plugin",
+	ChannelTypeVLLM:           "vLLM",
+	ChannelTypeSGLang:         "SGLang",
 }
 
 type ChannelSpecialBase struct {
@@ -219,7 +224,6 @@ var ChannelSpecialBases = map[string]ChannelSpecialBase{
 	},
 }
 
-
 func GetChannelBaseURL(channelType int) string {
 	if channelType < 0 || channelType >= len(ChannelBaseURLs) {
 		return ""
@@ -237,6 +241,16 @@ func GetChannelTypeName(channelType int) string {
 func ChannelTypeSupportsMultiImageReferences(channelType int) bool {
 	switch channelType {
 	case ChannelTypeOpenAI, ChannelTypeNewAPI:
+		return true
+	default:
+		return false
+	}
+}
+
+// IsAdvancedCustomChannel includes named channels backed by route presets.
+func IsAdvancedCustomChannel(channelType int) bool {
+	switch channelType {
+	case ChannelTypeAdvancedCustom, ChannelTypeVLLM, ChannelTypeSGLang:
 		return true
 	default:
 		return false
