@@ -212,6 +212,14 @@ func TestModelPriceHelperUsesFixedAsyncImagePreConsumeForGPTImage2(t *testing.T)
 	require.NoError(t, err)
 	require.Equal(t, common.QuotaFromFloat(0.4*common.QuotaPerUnit), priceData.QuotaToPreConsume)
 	require.Equal(t, priceData.QuotaToPreConsume, info.PriceData.QuotaToPreConsume)
+
+	// A zero-priced async image model must remain usable with an empty wallet.
+	require.NoError(t, ratio_setting.UpdateModelRatioByJSONString(`{"gpt-image-2-OF":0}`))
+	info.ImageQuotaBeforeGroup = 0
+	priceData, err = ModelPriceHelper(ctx, info, 1, &types.TokenCountMeta{})
+	require.NoError(t, err)
+	assert.Zero(t, priceData.QuotaToPreConsume)
+	assert.Zero(t, info.ImageQuotaBeforeGroup)
 }
 
 func TestModelPriceHelperTieredRejectsPreConsumeOverflow(t *testing.T) {

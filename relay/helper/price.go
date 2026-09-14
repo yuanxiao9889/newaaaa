@@ -151,7 +151,7 @@ func ModelPriceHelper(c *gin.Context, info *relaycommon.RelayInfo, promptTokens 
 		}
 	}
 
-	if quota, ok := fixedAsyncImagePreConsumeQuota(c, info, groupRatioInfo.GroupRatio); ok {
+	if quota, ok := fixedAsyncImagePreConsumeQuota(c, info, groupRatioInfo.GroupRatio); ok && modelRatio > 0 {
 		preConsumedQuota = quota
 		if !usePrice {
 			base, _ := fixedAsyncImagePreConsumeQuota(c, info, 1)
