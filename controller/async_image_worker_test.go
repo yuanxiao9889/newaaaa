@@ -1,9 +1,21 @@
 package controller
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/base64"
 	"fmt"
+	"github.com/QuantumNous/new-api/relay"
+	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/gin-gonic/gin"
+	"gorm.io/driver/mysql"
+	"gorm.io/driver/postgres"
+	"image"
+	"image/png"
 	"net/http"
+	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -31,11 +43,34 @@ func setupAsyncImageWorkerTestDB(t *testing.T) *gorm.DB {
 	constant.ErrorLogEnabled = true
 
 	dsn := fmt.Sprintf("file:%s?mode=memory&cache=shared", strings.ReplaceAll(t.Name(), "/", "_"))
-	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{})
+	var dialect gorm.Dialector = sqlite.Open(dsn)
+	originalMainType, originalLogType := common.MainDatabaseType(), common.LogDatabaseType()
+	if externalDSN := os.Getenv("NATIVE_BILLING_TEST_DSN"); externalDSN != "" {
+		require.Contains(t, externalDSN, "native_billing_test", "only a dedicated test database is allowed")
+		switch os.Getenv("NATIVE_BILLING_TEST_DIALECT") {
+		case "mysql":
+			dialect = mysql.Open(externalDSN)
+			common.SetDatabaseTypes(common.DatabaseTypeMySQL, common.DatabaseTypeMySQL)
+		case "postgres":
+			dialect = postgres.Open(externalDSN)
+			common.SetDatabaseTypes(common.DatabaseTypePostgreSQL, common.DatabaseTypePostgreSQL)
+		default:
+			t.Fatal("unsupported test dialect")
+		}
+	}
+	t.Cleanup(func() { common.SetDatabaseTypes(originalMainType, originalLogType) })
+	db, err := gorm.Open(dialect, &gorm.Config{})
 	require.NoError(t, err)
 	require.NoError(t, db.AutoMigrate(&model.User{}, &model.Token{}, &model.Log{}, &model.Task{}))
 	model.DB = db
 	model.LOG_DB = db
+	if os.Getenv("NATIVE_BILLING_TEST_DSN") != "" {
+		for _, table := range []string{"logs", "tasks", "tokens", "users", "channels", "quota_data"} {
+			if db.Migrator().HasTable(table) {
+				require.NoError(t, db.Exec("DELETE FROM "+table).Error)
+			}
+		}
+	}
 
 	t.Cleanup(func() {
 		sqlDB, err := db.DB()
@@ -208,4 +243,203 @@ func TestFailInternalAsyncImageTaskCompactsStoredData(t *testing.T) {
 	require.Equal(t, constant.TaskActionGeminiImage, payload["action"])
 	require.Equal(t, "gemini-image-test", payload["model"])
 	require.Equal(t, service.BuildAsyncImageContentURL("task_async_compact_failure"), payload["result_url"])
+}
+
+func TestImageAdapterChannelUpdateValidatesEffectiveSettings(t *testing.T) {
+	const enabled = `{"image_adapter":{"enabled":true,"request":{"generations_path":"/v1/images/generations"}}}`
+	const passthrough = `{"pass_through_body_enabled":true,"image_adapter":{"enabled":true,"request":{"generations_path":"/v1/images/generations"}}}`
+	for _, tc := range []struct {
+		name          string
+		originType    int
+		originSetting string
+		fields        map[string]any
+		wantType      int
+		wantError     string
+	}{
+		{name: "reject type-only move with retained adapter", originType: 1, originSetting: enabled, fields: map[string]any{"id": 136, "type": 24}, wantError: "supports only OpenAI"},
+		{name: "settings-only patch uses stored type", originType: 1, originSetting: "{}", fields: map[string]any{"id": 136, "setting": enabled}, wantType: 1},
+		{name: "settings-only patch cannot enable unsupported channel", originType: 24, originSetting: "{}", fields: map[string]any{"id": 136, "setting": enabled}, wantError: "supports only OpenAI"},
+		{name: "explicitly clear adapter while moving type", originType: 1, originSetting: enabled, fields: map[string]any{"id": 136, "type": 24, "setting": "{}"}, wantType: 24},
+		{name: "null settings retain adapter during type change", originType: 1, originSetting: enabled, fields: map[string]any{"id": 136, "type": 24, "setting": nil}, wantError: "supports only OpenAI"},
+		{name: "settings-only patch still rejects passthrough conflict", originType: 1, originSetting: enabled, fields: map[string]any{"id": 136, "setting": passthrough}, wantError: "pass_through_body_enabled"},
+		{name: "unrelated patch retains ordinary zero-value semantics", originType: 1, originSetting: enabled, fields: map[string]any{"id": 136, "name": "renamed"}, wantType: 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			origin := model.Channel{Id: 136, Type: tc.originType, Setting: common.GetPointer(tc.originSetting)}
+			body, err := common.Marshal(tc.fields)
+			require.NoError(t, err)
+			var patch PatchChannel
+			require.NoError(t, common.Unmarshal(body, &patch))
+			err = validateImageAdapterChannelUpdate(&patch.Channel, &origin, tc.fields)
+			if tc.wantError != "" {
+				require.ErrorContains(t, err, tc.wantError)
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, tc.wantType, patch.Type)
+			require.NoError(t, validateChannel(&patch.Channel, false))
+			require.Equal(t, tc.originType, origin.Type)
+			require.Equal(t, tc.originSetting, *origin.Setting)
+		})
+	}
+}
+
+// Exercise the production adoption -> durable reload -> image store -> billing
+// chain with an already reserved balance and a real HTTP upstream.
+func TestNativeAsyncImageFinalBilling(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		status      string
+		invalid     bool
+		wantSuccess bool
+		configured  bool
+	}{
+		{name: "upstream_suspended", status: "failed"},
+		{name: "valid_image", status: "succeeded", wantSuccess: true},
+		{name: "invalid_image_bytes", status: "succeeded", invalid: true},
+		{name: "configured_adapter_image", status: "done", configured: true, wantSuccess: true},
+		{name: "configured_adapter_string_failure", status: "broken", configured: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			db := setupAsyncImageWorkerTestDB(t)
+			require.NoError(t, db.AutoMigrate(&model.Channel{}, &model.QuotaData{}))
+			oldBatch, oldLog := common.BatchUpdateEnabled, common.LogConsumeEnabled
+			common.BatchUpdateEnabled = false
+			common.LogConsumeEnabled = true
+			t.Cleanup(func() { common.BatchUpdateEnabled = oldBatch; common.LogConsumeEnabled = oldLog })
+			t.Setenv("ASYNC_IMAGE_REQUEST_STORAGE_PATH", t.TempDir())
+			t.Setenv("ASYNC_IMAGE_STORAGE_PATH", t.TempDir())
+			require.NoError(t, db.Create(&model.User{Id: 61, Username: "native_billing_test", Quota: 850000, Status: common.UserStatusEnabled}).Error)
+			require.NoError(t, db.Create(&model.Token{Id: 62, UserId: 61, Key: "native-user-token", RemainQuota: 850000, UsedQuota: 150000, Status: common.TokenStatusEnabled}).Error)
+			var imageBytes bytes.Buffer
+			require.NoError(t, png.Encode(&imageBytes, image.NewRGBA(image.Rect(0, 0, 4, 4))))
+			var posts, gets int
+			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method == http.MethodPost {
+					posts++
+					w.WriteHeader(500)
+					return
+				}
+				gets++
+				if r.Header.Get("Authorization") != "Bearer native-upstream-key" {
+					w.WriteHeader(401)
+					return
+				}
+				if strings.HasSuffix(r.URL.Path, "/content") {
+					w.Header().Set("Content-Type", "image/png")
+					if tc.invalid {
+						_, _ = w.Write([]byte("this is not an image"))
+					} else {
+						_, _ = w.Write(imageBytes.Bytes())
+					}
+					return
+				}
+				w.Header().Set("Content-Type", "application/json")
+				if tc.configured {
+					if r.URL.Path != "/configured/upstream-test/status" {
+						w.WriteHeader(http.StatusNotFound)
+						return
+					}
+					_, _ = fmt.Fprintf(w, `{"job":{"state":%q,"error":"adapter rejected request native-upstream-key","output":{"image":%q}}}`, tc.status, base64.StdEncoding.EncodeToString(imageBytes.Bytes()))
+					return
+				}
+				_, _ = fmt.Fprintf(w, `{"status":%q,"error":{"message":"invalid image_url: upload init failed: You are suspended for violating our user agreement."}}`, tc.status)
+			}))
+			defer upstream.Close()
+			base := upstream.URL
+			require.NoError(t, db.Create(&model.Channel{Id: 63, Name: "native-test", Type: 1, Key: "native-upstream-key", BaseURL: &base, Status: 1}).Error)
+			snapshot := &relay.NativeAsyncImageSnapshot{ID: "upstream-test", PollURL: base + "/task", ContentURL: base + "/task/content", ChannelID: 63, KeyFingerprint: fmt.Sprintf("%x", sha256.Sum256([]byte("native-upstream-key")))}
+			if tc.configured {
+				snapshot.PollURL = base + "/configured/upstream-test/status"
+				snapshot.ContentURL = ""
+				snapshot.Task = &dto.ImageAdapterTaskConfig{
+					IDPaths:         []string{"job.id"},
+					StatusPath:      "job.state",
+					ResultB64Path:   "job.output.image",
+					ErrorPath:       "job.error",
+					PollURLTemplate: "/configured/{task_id}/status",
+					PendingStates:   []string{"working"},
+					SuccessStates:   []string{"done"},
+					FailureStates:   []string{"broken"},
+				}
+			}
+			recorder := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(recorder)
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/images/generations", nil)
+			c.Set("token_name", "native-test")
+			info := &relaycommon.RelayInfo{UserId: 61, TokenId: 62, UsingGroup: "default", OriginModelName: "dou-5-0-pro", FinalPreConsumedQuota: 150000, ChannelMeta: &relaycommon.ChannelMeta{ChannelId: 63}}
+			// Reservation has already happened in the request BillingSession. Adoption
+			// must preserve it without posting a second reserve or a consumption log.
+			require.Nil(t, relay.SubmitInternalAsyncImageTask(c, info, &dto.ImageRequest{Model: "dou-5-0-pro"}, snapshot))
+			require.Equal(t, http.StatusOK, recorder.Code)
+			var task model.Task
+			require.NoError(t, db.First(&task).Error)
+			require.Equal(t, service.TaskBillingStatePending, task.PrivateData.BillingState)
+			require.Equal(t, 150000, task.Quota)
+			var consumes int64
+			require.NoError(t, db.Model(&model.Log{}).Where("type = ?", model.LogTypeConsume).Count(&consumes).Error)
+			require.Zero(t, consumes)
+			saved, err := os.ReadFile(task.PrivateData.RequestBodyPath)
+			require.NoError(t, err)
+			require.NotContains(t, string(saved), "native-upstream-key")
+			if tc.configured {
+				var reloadedSnapshot relay.NativeAsyncImageSnapshot
+				require.NoError(t, common.Unmarshal(saved, &reloadedSnapshot))
+				require.Equal(t, snapshot.Task, reloadedSnapshot.Task)
+				require.Equal(t, snapshot.PollURL, reloadedSnapshot.PollURL)
+				require.NotEqual(t, snapshot.ID, task.TaskID)
+			}
+			// Reloaded state, with no process-local native task registration, is enough.
+			require.True(t, claimInternalAsyncImageTask(&task))
+			err = executeInternalAsyncImageTask(context.Background(), &task)
+			if tc.wantSuccess {
+				require.NoError(t, err)
+			} else {
+				require.Error(t, err)
+			}
+			require.NoError(t, db.First(&task, task.ID).Error)
+			var user model.User
+			require.NoError(t, db.First(&user, 61).Error)
+			var token model.Token
+			require.NoError(t, db.First(&token, 62).Error)
+			require.NoError(t, db.Model(&model.Log{}).Where("type = ?", model.LogTypeConsume).Count(&consumes).Error)
+			if tc.wantSuccess {
+				require.Equal(t, model.TaskStatus(model.TaskStatusSuccess), task.Status)
+				require.Equal(t, service.TaskBillingStateSettled, task.PrivateData.BillingState)
+				require.Equal(t, 850000, user.Quota)
+				require.Equal(t, 850000, token.RemainQuota)
+				require.EqualValues(t, 1, consumes)
+				stored, err := os.ReadFile(task.PrivateData.LocalPath)
+				require.NoError(t, err)
+				require.Equal(t, imageBytes.Bytes(), stored)
+				require.NoError(t, service.ConfirmTaskBillingSettled(context.Background(), &task, 150000, "duplicate terminal notification"))
+			} else {
+				require.Equal(t, model.TaskStatus(model.TaskStatusFailure), task.Status)
+				require.Equal(t, service.TaskBillingStateRefunded, task.PrivateData.BillingState)
+				require.Equal(t, 1000000, user.Quota)
+				require.Equal(t, 1000000, token.RemainQuota)
+				require.Zero(t, consumes)
+				if tc.configured {
+					require.Equal(t, "adapter rejected request [redacted]", task.FailReason)
+					require.NotContains(t, task.FailReason, "native-upstream-key")
+				}
+				require.NoError(t, service.RefundTaskQuota(context.Background(), &task, "duplicate terminal notification"))
+			}
+			var reloadedUser model.User
+			require.NoError(t, db.First(&reloadedUser, 61).Error)
+			require.Equal(t, user.Quota, reloadedUser.Quota)
+			var reloadedToken model.Token
+			require.NoError(t, db.First(&reloadedToken, 62).Error)
+			require.Equal(t, token.RemainQuota, reloadedToken.RemainQuota)
+			require.Equal(t, token.UsedQuota, reloadedToken.UsedQuota)
+			var finalConsumes int64
+			require.NoError(t, db.Model(&model.Log{}).Where("type = ?", model.LogTypeConsume).Count(&finalConsumes).Error)
+			require.Equal(t, consumes, finalConsumes)
+			require.Zero(t, posts)
+			require.Positive(t, gets)
+			if tc.configured {
+				require.Equal(t, 1, gets)
+			}
+		})
+	}
 }

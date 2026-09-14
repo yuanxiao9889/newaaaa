@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
+	relayconstant "github.com/QuantumNous/new-api/relay/constant"
 	kitreasoning "github.com/QuantumNous/new-api/relaykit/relayconvert/reasoning"
 	"github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/samber/lo"
@@ -651,7 +652,11 @@ func checkSingleCondition(data []byte, contextJSON string, condition ConditionOp
 	// 处理负数索引
 	path := processNegativeIndex(data, condition.Path)
 	value := gjson.GetBytes(data, path)
-	if !value.Exists() && contextJSON != "" {
+	if condition.Path == "image_adapter_enabled" {
+		// This flag is server-owned; request JSON must never enable a disabled
+		// channel conversion or its associated parameter preset.
+		value = gjson.Get(contextJSON, condition.Path)
+	} else if !value.Exists() && contextJSON != "" {
 		value = gjson.Get(contextJSON, condition.Path)
 	}
 	if !value.Exists() {
@@ -2172,6 +2177,9 @@ func BuildParamOverrideContext(info *RelayInfo) map[string]any {
 	}
 
 	ctx := make(map[string]any)
+	ctx["image_adapter_enabled"] = info.ChannelMeta != nil &&
+		(info.RelayMode == relayconstant.RelayModeImagesGenerations || info.RelayMode == relayconstant.RelayModeImagesEdits) &&
+		info.ChannelSetting.ImageAdapter.Matches(info.UpstreamModelName)
 	ctx["user_id"] = info.UserId
 	ctx["user_group"] = info.UserGroup
 	ctx["token_group"] = info.TokenGroup

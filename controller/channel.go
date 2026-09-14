@@ -959,6 +959,32 @@ type ChannelStatusBatchRequest struct {
 	Status int   `json:"status"`
 }
 
+// validateImageAdapterChannelUpdate checks the effective type/settings pair
+// without changing validation behavior for unrelated channel settings.
+func validateImageAdapterChannelUpdate(channel, origin *model.Channel, fields map[string]any) error {
+	effective := model.Channel{Type: origin.Type, Setting: origin.Setting}
+	if _, provided := fields["type"]; provided && channel.Type != 0 {
+		effective.Type = channel.Type
+	}
+	// GORM struct updates omit nil pointers and retain the stored settings.
+	if _, provided := fields["setting"]; provided && channel.Setting != nil {
+		effective.Setting = channel.Setting
+	}
+	settings := effective.GetSetting()
+	if settings.ImageAdapter == nil || !settings.ImageAdapter.Enabled {
+		return nil
+	}
+	if err := effective.ValidateSettings(); err != nil {
+		return err
+	}
+	// The regular validator receives the authoritative type when a settings-only
+	// patch enables an adapter. Persisting this same type leaves it unchanged.
+	if channel.Setting != nil && channel.Type == 0 {
+		channel.Type = effective.Type
+	}
+	return nil
+}
+
 func UpdateChannel(c *gin.Context) {
 	channel := PatchChannel{}
 	rawBody, err := c.GetRawData()
@@ -992,17 +1018,21 @@ func UpdateChannel(c *gin.Context) {
 
 	baseURLFromPluginDefault := channel.Type == constant.ChannelTypeTaskPlugin &&
 		(channel.BaseURL == nil || strings.TrimSpace(*channel.BaseURL) == "")
-	// 使用统一的校验函数
-	if err := validateChannel(&channel.Channel, false); err != nil {
+	// Validate image settings against the fields this partial update preserves.
+	originChannel, err := model.GetChannelById(channel.Id, true)
+	if err != nil {
 		c.JSON(http.StatusOK, gin.H{
 			"success": false,
 			"message": err.Error(),
 		})
 		return
 	}
-	// Preserve existing ChannelInfo to ensure multi-key channels keep correct state even if the client does not send ChannelInfo in the request.
-	originChannel, err := model.GetChannelById(channel.Id, true)
-	if err != nil {
+	if err := validateImageAdapterChannelUpdate(&channel.Channel, originChannel, requestData); err != nil {
+		c.JSON(http.StatusOK, gin.H{"success": false, "message": err.Error()})
+		return
+	}
+	// 使用统一的校验函数
+	if err := validateChannel(&channel.Channel, false); err != nil {
 		c.JSON(http.StatusOK, gin.H{
 			"success": false,
 			"message": err.Error(),

@@ -25,6 +25,10 @@ type (
 	GeminiUsageMetadata           = relaydto.GeminiUsageMetadata
 	GeneralErrorResponse          = relaydto.GeneralErrorResponse
 	GeneralOpenAIRequest          = relaydto.GeneralOpenAIRequest
+	ImageAdapterConfig            = relaydto.ImageAdapterConfig
+	ImageAdapterRequestConfig     = relaydto.ImageAdapterRequestConfig
+	ImageAdapterReferenceConfig   = relaydto.ImageAdapterReferenceConfig
+	ImageAdapterTaskConfig        = relaydto.ImageAdapterTaskConfig
 	ImageAsyncSubmitResponse      = relaydto.ImageAsyncSubmitResponse
 	ImageAsyncTaskResponse        = relaydto.ImageAsyncTaskResponse
 	ImageData                     = relaydto.ImageData

@@ -194,6 +194,7 @@ import {
 } from '../dialogs/missing-models-confirmation-dialog'
 import { ParamOverrideEditorDialog } from '../dialogs/param-override-editor-dialog'
 import { StatusCodeRiskDialog } from '../dialogs/status-code-risk-dialog'
+import { ImageAdapterSettings } from '../image-adapter-settings'
 import { ModelMappingEditor } from '../model-mapping-editor'
 import {
   ChannelAdvancedSection,
@@ -301,6 +302,8 @@ const SENSITIVE_FORM_FIELDS = [
   'http2_connection_shards',
   'pass_through_body_enabled',
   'multi_image_reference_enabled',
+  'image_adapter',
+  'image_adapter_enabled',
   'system_prompt',
   'system_prompt_override',
   'allow_service_tier',
@@ -355,6 +358,8 @@ function hasAdvancedSettingsValues(values: ChannelFormValues): boolean {
     values.thinking_to_content ||
     values.pass_through_body_enabled ||
     values.multi_image_reference_enabled ||
+    values.image_adapter_enabled ||
+    values.image_adapter?.trim() ||
     values.system_prompt_override ||
     (values.http_protocol && values.http_protocol !== 'auto') ||
     (values.http2_connection_shards != null &&
@@ -722,6 +727,8 @@ export function ChannelMutateDrawer({
   const currentMultiImageReferenceEnabled = form.watch(
     'multi_image_reference_enabled'
   )
+  const currentImageAdapter = form.watch('image_adapter')
+  const currentImageAdapterEnabled = form.watch('image_adapter_enabled')
   const currentDisableTaskPollingSleep = form.watch(
     'disable_task_polling_sleep'
   )
@@ -1015,6 +1022,8 @@ export function ChannelMutateDrawer({
     currentThinkingToContent ||
     currentPassThroughBodyEnabled ||
     currentMultiImageReferenceEnabled ||
+    currentImageAdapterEnabled ||
+    currentImageAdapter?.trim() ||
     currentDisableTaskPollingSleep ||
     currentProxy?.trim() ||
     currentSystemPrompt?.trim() ||
@@ -4187,6 +4196,12 @@ export function ChannelMutateDrawer({
                             disabled={sensitiveLocked}
                             className='space-y-4 disabled:opacity-60'
                           >
+                            {currentType === 1 && (
+                              <ImageAdapterSettings
+                                form={form}
+                                disabled={sensitiveLocked || isSubmitting}
+                              />
+                            )}
                             <div className='divide-border space-y-0 divide-y border-y'>
                               {currentType === 1 && (
                                 <FormField

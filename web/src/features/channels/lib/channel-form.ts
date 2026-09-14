@@ -37,6 +37,7 @@ import {
   stringifyAdvancedCustomConfig,
   validateAdvancedCustomConfig,
 } from './advanced-custom'
+import { getImageAdapterConfigError } from './image-adapter'
 
 // ============================================================================
 // Form Validation Schema
@@ -265,6 +266,8 @@ export const channelFormSchema = z
     http2_connection_shards: z.number().int().optional(),
     pass_through_body_enabled: z.boolean().optional(),
     multi_image_reference_enabled: z.boolean().optional(),
+    image_adapter_enabled: z.boolean().optional(),
+    image_adapter: z.string().optional(),
     system_prompt: z.string().optional(),
     system_prompt_override: z.boolean().optional(),
     // Type-specific settings (stored in settings JSON)
@@ -287,10 +290,37 @@ export const channelFormSchema = z
     upstream_model_update_ignored_models: z.string().optional(),
   })
   .superRefine((data, ctx) => {
+    const imageAdapterError = getImageAdapterConfigError(
+      data.image_adapter,
+      data.image_adapter_enabled === true
+    )
+    if (imageAdapterError) {
+      addRequiredIssue(ctx, 'image_adapter', imageAdapterError)
+    }
+    if (data.image_adapter_enabled && data.type !== 1) {
+      addRequiredIssue(
+        ctx,
+        'image_adapter',
+        'Image conversion is supported by OpenAI channels only'
+      )
+    }
+    if (data.image_adapter_enabled && data.pass_through_body_enabled) {
+      addRequiredIssue(
+        ctx,
+        'image_adapter',
+        'Disable Pass Through Body before enabling image conversion'
+      )
+    }
     if (
-      [3, 8, 36, 45, 61, CHANNEL_TYPE_NEW_API, CHANNEL_TYPE_TASK_PLUGIN].includes(
-        data.type
-      ) &&
+      [
+        3,
+        8,
+        36,
+        45,
+        61,
+        CHANNEL_TYPE_NEW_API,
+        CHANNEL_TYPE_TASK_PLUGIN,
+      ].includes(data.type) &&
       !data.base_url?.trim()
     ) {
       addRequiredIssue(
@@ -447,6 +477,8 @@ export const CHANNEL_FORM_DEFAULT_VALUES: ChannelFormValues = {
   http2_connection_shards: 1,
   pass_through_body_enabled: false,
   multi_image_reference_enabled: false,
+  image_adapter_enabled: false,
+  image_adapter: '',
   system_prompt: '',
   system_prompt_override: false,
   // Type-specific settings
@@ -489,6 +521,8 @@ export function transformChannelToFormDefaults(
     http2_connection_shards: 1,
     pass_through_body_enabled: false,
     multi_image_reference_enabled: false,
+    image_adapter_enabled: false,
+    image_adapter: '',
     system_prompt: '',
     system_prompt_override: false,
   }
@@ -510,6 +544,18 @@ export function transformChannelToFormDefaults(
         pass_through_body_enabled: parsed.pass_through_body_enabled || false,
         multi_image_reference_enabled:
           parsed.multi_image_reference_enabled === true,
+        image_adapter_enabled: parsed.image_adapter?.enabled === true,
+        image_adapter: parsed.image_adapter
+          ? JSON.stringify(
+              Object.fromEntries(
+                Object.entries(parsed.image_adapter).filter(
+                  ([key]) => key !== 'enabled'
+                )
+              ),
+              null,
+              2
+            )
+          : '',
         system_prompt: parsed.system_prompt || '',
         system_prompt_override: parsed.system_prompt_override || false,
       }
@@ -622,7 +668,11 @@ export function transformChannelToFormDefaults(
  * Build the setting JSON string from form extra settings
  */
 export function buildSettingJSON(formData: ChannelFormValues): string {
+  const imageAdapter = parseOptionalJson(formData.image_adapter)
   const settingObj: Record<string, unknown> = {
+    image_adapter: isJsonObjectValue(imageAdapter)
+      ? { ...imageAdapter, enabled: formData.image_adapter_enabled === true }
+      : undefined,
     task_plugin_key:
       formData.type === CHANNEL_TYPE_TASK_PLUGIN
         ? formData.task_plugin_key?.trim() || ''

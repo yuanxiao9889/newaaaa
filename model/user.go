@@ -60,6 +60,7 @@ type User struct {
 	AffQuota             int                        `json:"aff_quota" gorm:"type:int;default:0;column:aff_quota"`           // 邀请剩余额度
 	AffHistoryQuota      int                        `json:"aff_history_quota" gorm:"type:int;default:0;column:aff_history"` // 邀请历史额度
 	InviterId            int                        `json:"inviter_id" gorm:"type:int;column:inviter_id;index"`
+	IsVIP                bool                       `json:"is_vip" gorm:"column:is_vip;not null;default:false"`
 	DeletedAt            gorm.DeletedAt             `gorm:"index"`
 	LinuxDOId            string                     `json:"linux_do_id" gorm:"column:linux_do_id;index"`
 	Setting              string                     `json:"setting" gorm:"type:text;column:setting"`
@@ -85,7 +86,6 @@ var userBindColumns = map[string]bool{
 //	DB.Model(&User{}).Where("role = ?", common.RoleRootUser).Select("email").Find(&email)
 //	return email
 //}
-
 
 func NewUserSortOptions(sortBy string, sortOrder string) UserSortOptions {
 	normalizedSortBy := strings.ToLower(strings.TrimSpace(sortBy))
@@ -551,7 +551,7 @@ func GetSelfUserById(id int) (*User, error) {
 		"github_id", "discord_id", "oidc_id", "wechat_id", "telegram_id",
 		"group", "quota", "used_quota", "request_count", "aff_code", "aff_count",
 		"aff_quota", "aff_history", "inviter_id", "linux_do_id", "setting",
-		"stripe_customer", "auth_version",
+		"stripe_customer", "auth_version", "is_vip",
 		"CASE WHEN password <> '' THEN 1 ELSE 0 END AS has_password",
 	}).First(&profile, "id = ?", id).Error
 	profile.User.HasPassword = profile.HasPassword
@@ -843,6 +843,7 @@ func (user *User) UpdateWithTx(tx *gorm.DB, updatePassword bool) error {
 		"aff_count",
 		"aff_quota",
 		"aff_history",
+		"is_vip",
 		"auth_version",
 	).Updates(newUser).Error; err != nil {
 		return err

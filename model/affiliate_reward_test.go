@@ -201,14 +201,23 @@ func TestWalletRechargePaths_GrantAffiliateRewardFromPaymentMoney(t *testing.T) 
 
 			insertAffiliateUser(t, 1, "inviter", 0)
 			insertAffiliateUser(t, 2, "invitee", 1)
-			insertAffiliateTopUp(t, tc.tradeNo, 2, 20, 12.34, tc.provider)
-
-			require.NoError(t, tc.complete(tc.tradeNo))
-
-			inviter := getAffiliateUser(t, 1)
-			assert.Equal(t, 1234, inviter.AffQuota)
-			assert.Equal(t, 1234, inviter.AffHistoryQuota)
-			assert.Equal(t, int64(1), countAffiliateRewards(t, 2))
+			for i := range 7 {
+				if i == 6 {
+					_, err := SetUserVIP(1, common.RoleRootUser, true)
+					require.NoError(t, err)
+				}
+				tradeNo := fmt.Sprintf("%s-%d", tc.tradeNo, i)
+				insertAffiliateTopUp(t, tradeNo, 2, 20, 12.34, tc.provider)
+				require.NoError(t, tc.complete(tradeNo))
+				wantRewards := min(i+1, 5)
+				if i == 6 {
+					wantRewards = 6
+				}
+				inviter := getAffiliateUser(t, 1)
+				assert.Equal(t, 1234*wantRewards, inviter.AffQuota)
+				assert.Equal(t, 1234*wantRewards, inviter.AffHistoryQuota)
+				assert.EqualValues(t, wantRewards, countAffiliateRewards(t, 2))
+			}
 		})
 	}
 }

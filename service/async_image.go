@@ -1,10 +1,12 @@
 package service
 
 import (
+	"bytes"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/base64"
 	"fmt"
+	"image"
 	"io"
 	"mime"
 	"net/http"
@@ -339,6 +341,16 @@ func StoreAsyncImageResult(task *model.Task, proxy string, assetRef string) erro
 		return err
 	}
 
+	// A MIME label or URL is not proof of an image. Decode the complete payload
+	// before persisting an asset that can trigger successful task settlement.
+	config, _, configErr := image.DecodeConfig(bytes.NewReader(data))
+	if configErr != nil || config.Width <= 0 || config.Height <= 0 || int64(config.Width)*int64(config.Height) > 64*1024*1024 {
+		return fmt.Errorf("upstream returned invalid or oversized image dimensions")
+	}
+	decoded, _, decodeErr := image.Decode(bytes.NewReader(data))
+	if decodeErr != nil || decoded.Bounds().Dx() <= 0 || decoded.Bounds().Dy() <= 0 {
+		return fmt.Errorf("upstream returned invalid image bytes")
+	}
 	if err = os.MkdirAll(GetAsyncImageStoragePath(), 0755); err != nil {
 		return fmt.Errorf("create async image storage path failed: %w", err)
 	}

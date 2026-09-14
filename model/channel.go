@@ -87,7 +87,6 @@ var channelStatusLock sync.Mutex
 // channelPollingLocks stores locks for each channel.id to ensure thread-safe polling
 var channelPollingLocks sync.Map
 
-
 func NewChannelSortOptions(sortBy string, sortOrder string, idSort bool) ChannelSortOptions {
 	normalizedSortBy := strings.ToLower(strings.TrimSpace(sortBy))
 	normalizedSortOrder := strings.ToLower(strings.TrimSpace(sortOrder))
@@ -998,6 +997,12 @@ func (channel *Channel) ValidateSettings() error {
 	}
 	if err := channelParams.ValidateHTTPTransport(); err != nil {
 		return err
+	}
+	if err := channelParams.ValidateImageAdapter(); err != nil {
+		return err
+	}
+	if channelParams.ImageAdapter != nil && channelParams.ImageAdapter.Enabled && channel.Type != constant.ChannelTypeOpenAI {
+		return fmt.Errorf("image_adapter currently supports only OpenAI channels (type 1)")
 	}
 	channelOtherSettings := &dto.ChannelOtherSettings{}
 	if channel.OtherSettings != "" {

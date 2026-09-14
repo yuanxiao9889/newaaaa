@@ -102,6 +102,11 @@ export function useUsersColumns(): ColumnDef<User>[] {
               <LongText className='max-w-[140px] text-sm font-normal'>
                 {username}
               </LongText>
+              {row.original.is_vip && (
+                <StatusBadge variant='warning' copyable={false}>
+                  {t('VIP')}
+                </StatusBadge>
+              )}
               {remark && (
                 <Tooltip>
                   <TooltipTrigger

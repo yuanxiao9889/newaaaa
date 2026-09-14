@@ -79,7 +79,7 @@ func asyncImageTaskAction(relayMode int) string {
 	return constant.TaskActionImageGenerate
 }
 
-func SubmitInternalAsyncImageTask(c *gin.Context, info *relaycommon.RelayInfo, request *dto.ImageRequest) (ret *types.NewAPIError) {
+func SubmitInternalAsyncImageTask(c *gin.Context, info *relaycommon.RelayInfo, request *dto.ImageRequest, native ...*NativeAsyncImageSnapshot) (ret *types.NewAPIError) {
 	if err := validateAsyncImageTaskRequest(info, request); err != nil {
 		return err
 	}
@@ -141,15 +141,18 @@ func SubmitInternalAsyncImageTask(c *gin.Context, info *relaycommon.RelayInfo, r
 	}
 	task.Data = service.BuildPendingAsyncImageTaskData(task)
 
-	snapshotPath, snapshotSize, err := saveInternalAsyncImageRequestSnapshot(c, task.TaskID)
+	var err error
+	if len(native) > 0 && native[0] != nil {
+		err = SaveNativeAsyncImageSnapshot(task, native[0])
+	} else {
+		task.PrivateData.RequestBodyPath, task.PrivateData.RequestBodySize, err = saveInternalAsyncImageRequestSnapshot(c, task.TaskID)
+	}
 	if err != nil {
 		return types.NewErrorWithStatusCode(err, types.ErrorCodeReadRequestBodyFailed, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
 	}
-	task.PrivateData.RequestBodyPath = snapshotPath
-	task.PrivateData.RequestBodySize = snapshotSize
 
 	if err = task.Insert(); err != nil {
-		_ = os.Remove(snapshotPath)
+		_ = os.Remove(task.PrivateData.RequestBodyPath)
 		return types.NewErrorWithStatusCode(err, types.ErrorCodeUpdateDataError, http.StatusInternalServerError)
 	}
 

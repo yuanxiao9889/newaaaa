@@ -130,6 +130,15 @@ export async function manageUser(
   return res.data
 }
 
+export async function updateUserVIP(
+  id: number,
+  isVIP: boolean
+): Promise<ApiResponse<Pick<User, 'id' | 'is_vip'>>> {
+  const res = await api.put(`/api/user/${id}/vip`, { is_vip: isVIP })
+  requireServerSuccess(res.data)
+  return res.data
+}
+
 /**
  * Adjust user quota atomically (add/subtract/override)
  */

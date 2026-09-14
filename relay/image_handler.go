@@ -11,6 +11,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/logger"
+	"github.com/QuantumNous/new-api/relay/channel/openai"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relay/helper"
 	"github.com/QuantumNous/new-api/relaykit/dto"
@@ -44,6 +45,29 @@ func ImageHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *type
 		return types.NewError(fmt.Errorf("invalid api type: %d", info.ApiType), types.ErrorCodeInvalidApiType, types.ErrOptionWithSkipRetry())
 	}
 	adaptor.Init(info)
+	imageAdapter := info.ChannelSetting.ImageAdapter
+	adaptImage := imageAdapter.Matches(request.Model)
+	if adaptImage {
+		// ImageRequest.MarshalJSON omits Extra; preserve it inside the opt-in
+		// adapter after the normal deep-copy and authoritative model mapping.
+		request.Extra = imageReq.Extra
+		originalContentType := c.Request.Header.Get("Content-Type")
+		defer func() {
+			if originalContentType == "" {
+				c.Request.Header.Del("Content-Type")
+			} else {
+				c.Request.Header.Set("Content-Type", originalContentType)
+			}
+		}()
+		if imageAdapter.Task != nil {
+			if validationErr := validateAsyncImageTaskRequest(info, request); validationErr != nil {
+				return validationErr
+			}
+		}
+	}
+	if adaptImage && (model_setting.GetGlobalSettings().PassThroughRequestEnabled || info.ChannelSetting.PassThroughBodyEnabled) {
+		return types.NewErrorWithStatusCode(fmt.Errorf("image adapter cannot be combined with request body passthrough"), types.ErrorCodeInvalidRequest, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
+	}
 
 	var requestBody io.Reader
 
@@ -83,6 +107,11 @@ func ImageHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *type
 					return newAPIErrorFromParamOverride(err)
 				}
 			}
+			if adaptImage {
+				if err = openai.ValidateConfiguredImageCount(jsonData, request); err != nil {
+					return types.NewErrorWithStatusCode(err, types.ErrorCodeInvalidRequest, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
+				}
+			}
 
 			logger.LogDebug(c, "image request body: %s", jsonData)
 			body, closer, err := relaycommon.NewOutboundJSONBody(jsonData)
@@ -102,18 +131,23 @@ func ImageHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *type
 		return types.NewOpenAIError(err, types.ErrorCodeDoRequestFailed, http.StatusInternalServerError)
 	}
 	var httpResp *http.Response
-	nativeAsyncResponse := false
 	if resp != nil {
 		httpResp = resp.(*http.Response)
 		info.IsStream = info.IsStream || strings.HasPrefix(httpResp.Header.Get("Content-Type"), "text/event-stream")
-		if httpResp.StatusCode != http.StatusOK {
+		if httpResp.StatusCode != http.StatusOK || (adaptImage && imageAdapter.Task != nil) {
 			if httpResp.StatusCode == http.StatusCreated && info.ApiType == constant.APITypeReplicate {
 				// replicate channel returns 201 Created when using Prefer: wait, treat it as success.
 				httpResp.StatusCode = http.StatusOK
-			} else if httpResp.StatusCode == http.StatusAccepted {
-				// Register and forward provider-native async image creation. Do not
-				// run the synchronous parser against an in_progress body.
-				nativeAsyncResponse = registerNativeAsyncImageResponse(httpResp, info)
+			} else if httpResp.StatusCode == http.StatusAccepted || (httpResp.StatusCode == http.StatusOK && adaptImage && imageAdapter.Task != nil) {
+				snapshot, err := parseNativeAsyncImageSnapshot(httpResp, info)
+				if err != nil {
+					return types.NewOpenAIError(err, types.ErrorCodeReadResponseBodyFailed, http.StatusBadGateway, types.ErrOptionWithSkipRetry())
+				}
+				if c.GetBool("async_image_worker") {
+					c.Set(NativeAsyncImageFormat, snapshot)
+					return nil
+				}
+				return SubmitInternalAsyncImageTask(c, info, request, snapshot)
 			} else {
 				newAPIError = service.RelayErrorHandler(c.Request.Context(), httpResp, false)
 				// reset status code 重置状态码
@@ -122,16 +156,7 @@ func ImageHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *type
 			}
 		}
 	}
-	var usage any
-	if nativeAsyncResponse {
-		if err := forwardNativeAsyncImageResponse(c, httpResp); err != nil {
-			newAPIError = types.NewOpenAIError(err, types.ErrorCodeReadResponseBodyFailed, http.StatusBadGateway, types.ErrOptionWithSkipRetry())
-			return newAPIError
-		}
-		usage = &dto.Usage{}
-	} else {
-		usage, newAPIError = adaptor.DoResponse(c, httpResp, info)
-	}
+	usage, newAPIError := adaptor.DoResponse(c, httpResp, info)
 	if newAPIError != nil {
 		// reset status code 重置状态码
 		service.ResetStatusCode(newAPIError, statusCodeMappingStr)

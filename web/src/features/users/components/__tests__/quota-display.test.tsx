@@ -276,6 +276,7 @@ async function renderUsersList(emptyInvitation = false) {
             aff_count: emptyInvitation ? 0 : 2,
             aff_history_quota: emptyInvitation ? 0 : 500000,
             inviter_id: emptyInvitation ? 0 : 42,
+            is_vip: true,
           },
         ],
         total: 1,
@@ -327,6 +328,7 @@ it('sends balance sorting to the server and keeps invitation details on two line
     screen.queryByRole('button', { name: 'Total Used' })
   ).not.toBeInTheDocument()
   expect(screen.getByText('Inviter ID: 42')).toBeInTheDocument()
+  expect(screen.getByText('VIP')).toBeInTheDocument()
   expect(screen.getByText(/Invited 2 users · Earnings:/)).toBeInTheDocument()
 })
 

@@ -33,6 +33,7 @@ type nativeAsyncImagePollEntry struct {
 	authValue  string
 	baseHost   string
 	expiresAt  time.Time
+	taskConfig *dto.ImageAdapterTaskConfig
 }
 
 var nativeAsyncImagePolls sync.Map

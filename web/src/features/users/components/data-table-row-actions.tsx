@@ -28,6 +28,7 @@ import {
   ShieldAlert,
   Link2,
   CreditCard,
+  Crown,
 } from 'lucide-react'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -48,6 +49,7 @@ import {
 } from '@/components/ui/tooltip'
 import { UserSubscriptionsDialog } from '@/features/subscriptions/components/dialogs/user-subscriptions-dialog'
 import { handleServerError } from '@/lib/handle-server-error'
+import { useAuthStore } from '@/stores/auth-store'
 
 import { manageUser, resetUserPasskey, resetUserTwoFA } from '../api'
 import {
@@ -59,6 +61,7 @@ import {
 import { getUserActionMessage } from '../lib'
 import type { User, ManageUserAction } from '../types'
 import { UserBindingDialog } from './dialogs/user-binding-dialog'
+import { UserVIPDialog } from './user-vip-dialog'
 import { useUsers } from './users-provider'
 
 interface DataTableRowActionsProps {
@@ -73,6 +76,13 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
   const [resetTwoFAOpen, setResetTwoFAOpen] = useState(false)
   const [bindingDialogOpen, setBindingDialogOpen] = useState(false)
   const [subscriptionsDialogOpen, setSubscriptionsDialogOpen] = useState(false)
+  const [vipDialogOpen, setVIPDialogOpen] = useState(false)
+  const canManageVIP = useAuthStore((state) => {
+    const role = state.auth.user?.role ?? 0
+    return (
+      role === USER_ROLE.ROOT || (role >= USER_ROLE.ADMIN && role > user.role)
+    )
+  })
 
   const handleEdit = () => {
     setCurrentRow(user)
@@ -160,6 +170,14 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
         ariaLabel={t('Open menu')}
         contentClassName='w-48'
       >
+        {canManageVIP && (
+          <DropdownMenuItem onClick={() => setVIPDialogOpen(true)}>
+            {user.is_vip ? t('Cancel VIP') : t('Enable VIP')}
+            <DropdownMenuShortcut>
+              <Crown size={16} />
+            </DropdownMenuShortcut>
+          </DropdownMenuItem>
+        )}
         {isDisabled ? (
           <DropdownMenuItem onClick={() => handleManage('enable')}>
             {t('Enable')}
@@ -274,6 +292,15 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
         confirmText={t('Reset Passkey')}
         handleConfirm={handleResetPasskey}
       />
+
+      {vipDialogOpen && (
+        <UserVIPDialog
+          user={user}
+          open={vipDialogOpen}
+          onOpenChange={setVIPDialogOpen}
+          onSuccess={triggerRefresh}
+        />
+      )}
 
       <ConfirmDialog
         open={resetTwoFAOpen}

@@ -2,13 +2,13 @@ package dto
 
 import (
 	"encoding/json"
+	kitutil "github.com/QuantumNous/new-api/relaykit/relayconvert/kitutil"
 	"github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"regexp"
 	"testing"
 )
-
 
 func TestAdvancedCustomValidateResponsesToChatConverterPath(t *testing.T) {
 	valid := &AdvancedCustomConfig{
@@ -668,4 +668,119 @@ func TestChannelSettingsMultiImageReferenceJSONContract(t *testing.T) {
 	encoded, err = json.Marshal(ChannelSettings{})
 	require.NoError(t, err)
 	assert.NotContains(t, string(encoded), "multi_image_reference_enabled")
+}
+
+func imageAdapterTestConfig() *ImageAdapterConfig {
+	return &ImageAdapterConfig{
+		Enabled: true,
+		Models:  []string{"upstream-image"},
+		Request: ImageAdapterRequestConfig{
+			GenerationsPath: "/v1/images/generations",
+			EditsPath:       "/v1/images/generations",
+			FieldMap:        map[string]string{"quality": "detail_level"},
+			ValueMap:        map[string]map[string]string{"quality": {"high": "High"}},
+			SizeMap:         map[string]map[string]string{"2048x2048": {"quality": "2K", "aspect_ratio": "1:1"}},
+			DropFields:      []string{"size", "response_format"},
+			RejectFields:    []string{"mask", "background"},
+		},
+		References: &ImageAdapterReferenceConfig{Field: "input_reference", Encoding: "url_array", MaxImages: 16, UploadLocal: true},
+		Task: &ImageAdapterTaskConfig{
+			IDPaths:            []string{"id", "task_id"},
+			StatusPath:         "status",
+			ResultURLPath:      "data.0.url",
+			ErrorPath:          "error.message",
+			PollURLTemplate:    "/v1/images/generations/{task_id}",
+			ContentURLTemplate: "/v1/images/{task_id}/content",
+			PendingStates:      []string{"queued", "in_progress"},
+			SuccessStates:      []string{"completed"},
+			FailureStates:      []string{"failed"},
+		},
+	}
+}
+
+func TestImageAdapterConfigurationRoundTripAndModelSelection(t *testing.T) {
+	settings := ChannelSettings{ImageAdapter: imageAdapterTestConfig()}
+	require.NoError(t, settings.ValidateImageAdapter())
+	encoded, err := kitutil.Marshal(settings)
+	require.NoError(t, err)
+	var decoded ChannelSettings
+	require.NoError(t, kitutil.Unmarshal(encoded, &decoded))
+	assert.Equal(t, settings.ImageAdapter, decoded.ImageAdapter)
+	assert.True(t, decoded.ImageAdapter.Matches(" upstream-image "))
+	assert.False(t, decoded.ImageAdapter.Matches("public-image-alias"))
+	assert.False(t, decoded.ImageAdapter.Matches("upstream-image-extra"))
+	decoded.ImageAdapter.Models = nil
+	assert.True(t, decoded.ImageAdapter.Matches("another-image"))
+	decoded.ImageAdapter.Enabled = false
+	assert.False(t, decoded.ImageAdapter.Matches("upstream-image"))
+	assert.False(t, (*ImageAdapterConfig)(nil).Matches("upstream-image"))
+
+	encoded, err = kitutil.Marshal(ChannelSettings{})
+	require.NoError(t, err)
+	assert.NotContains(t, string(encoded), "image_adapter")
+	require.NoError(t, (&ChannelSettings{}).ValidateImageAdapter())
+	require.NoError(t, (&ChannelSettings{PassThroughBodyEnabled: true, ImageAdapter: &ImageAdapterConfig{}}).ValidateImageAdapter())
+}
+
+func TestImageAdapterRejectsInvalidAndBillingUnsafeConfiguration(t *testing.T) {
+	tests := []struct {
+		name   string
+		change func(*ImageAdapterConfig)
+	}{
+		{"empty enabled configuration", func(c *ImageAdapterConfig) { *c = ImageAdapterConfig{Enabled: true} }},
+		{"model aliases are not patterns", func(c *ImageAdapterConfig) { c.Models = []string{" ", "upstream-image"} }},
+		{"duplicate model", func(c *ImageAdapterConfig) { c.Models = []string{"image", "image"} }},
+		{"field path nesting", func(c *ImageAdapterConfig) { c.Request.FieldMap["quality"] = "config.detail" }},
+		{"duplicate output target", func(c *ImageAdapterConfig) { c.Request.FieldMap["style"] = "detail_level" }},
+		{"rename image count", func(c *ImageAdapterConfig) { c.Request.FieldMap["n"] = "copies" }},
+		{"overwrite image count", func(c *ImageAdapterConfig) { c.Request.FieldMap["style"] = "n" }},
+		{"modify image count", func(c *ImageAdapterConfig) { c.Request.ValueMap["n"] = map[string]string{"1": "2"} }},
+		{"drop image count", func(c *ImageAdapterConfig) { c.Request.DropFields = append(c.Request.DropFields, "n") }},
+		{"size writes count", func(c *ImageAdapterConfig) { c.Request.SizeMap["2048x2048"]["n"] = "2" }},
+		{"prototype field", func(c *ImageAdapterConfig) { c.Request.FieldMap["style"] = "__proto__" }},
+		{"invalid dimensions", func(c *ImageAdapterConfig) { c.Request.SizeMap["2048*2048"] = map[string]string{"quality": "2K"} }},
+		{"empty value mapping", func(c *ImageAdapterConfig) { c.Request.ValueMap["quality"] = map[string]string{} }},
+		{"invalid reference encoding", func(c *ImageAdapterConfig) { c.References.Encoding = "multipart" }},
+		{"too many references", func(c *ImageAdapterConfig) { c.References.MaxImages = 17 }},
+		{"reference overwrites count", func(c *ImageAdapterConfig) { c.References.Field = "n" }},
+		{"json path modifier", func(c *ImageAdapterConfig) { c.Task.ResultURLPath = "data.@reverse.0.url" }},
+		{"json path wildcard", func(c *ImageAdapterConfig) { c.Task.StatusPath = "data.*.status" }},
+		{"missing task id path", func(c *ImageAdapterConfig) { c.Task.IDPaths = nil }},
+		{"no result source", func(c *ImageAdapterConfig) { c.Task.ResultURLPath, c.Task.ContentURLTemplate = "", "" }},
+		{"overlapping terminal states", func(c *ImageAdapterConfig) { c.Task.FailureStates = []string{"COMPLETED"} }},
+		{"missing success states", func(c *ImageAdapterConfig) { c.Task.SuccessStates = nil }},
+		{"poll interval below minimum", func(c *ImageAdapterConfig) { c.Task.PollIntervalSeconds = 2 }},
+		{"poll interval above maximum", func(c *ImageAdapterConfig) { c.Task.PollIntervalSeconds = 61 }},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			config := imageAdapterTestConfig()
+			test.change(config)
+			require.Error(t, config.Validate())
+		})
+	}
+	settings := ChannelSettings{ImageAdapter: imageAdapterTestConfig(), PassThroughBodyEnabled: true}
+	require.ErrorContains(t, settings.ValidateImageAdapter(), "pass_through_body_enabled")
+}
+
+func TestImageAdapterURLTemplatesStayOnConfiguredOrigin(t *testing.T) {
+	for _, template := range []string{
+		"https://other.example/{task_id}", "//other.example/{task_id}",
+		"/task/{task_id}#fragment", "/task/{other_id}", "/task/no-placeholder",
+		"/task/../{task_id}", "/task/%2e%2e/{task_id}", "/task/%252e%252e/{task_id}",
+		"/task\\{task_id}", "/task/%5c/{task_id}", "/%2fother.example/{task_id}",
+		"/task/{task_id}\r\nheader", "/task/%00/{task_id}",
+	} {
+		t.Run(template, func(t *testing.T) {
+			config := imageAdapterTestConfig()
+			config.Task.PollURLTemplate = template
+			require.Error(t, config.Validate())
+		})
+	}
+	config := imageAdapterTestConfig()
+	config.Task.PollURLTemplate = "/v2/task?task_id={task_id}"
+	config.Task.PollIntervalSeconds = 60
+	require.NoError(t, config.Validate())
+	config.Request.GenerationsPath = "/generate/{task_id}"
+	require.Error(t, config.Validate())
 }

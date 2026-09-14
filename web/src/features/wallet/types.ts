@@ -240,6 +240,8 @@ export interface UserWalletData {
   aff_history_quota: number
   /** Number of successful affiliate invites */
   aff_count: number
+  /** VIP inviters receive referral rewards without a count limit. */
+  is_vip?: boolean
   /** User group */
   group: string
 }

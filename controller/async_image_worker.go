@@ -232,6 +232,10 @@ func executeInternalAsyncImageTask(ctx context.Context, task *model.Task) error 
 }
 
 func runInternalAsyncImageRelay(ctx context.Context, task *model.Task) ([]byte, int, string, *dto.Usage, error) {
+	if task.PrivateData.RequestRelayFormat == relay.NativeAsyncImageFormat {
+		body, channelID, proxy, err := relay.ResumeNativeAsyncImageTask(ctx, task)
+		return body, channelID, proxy, nil, err
+	}
 	body, err := os.ReadFile(task.PrivateData.RequestBodyPath)
 	if err != nil {
 		return nil, 0, "", nil, fmt.Errorf("read request snapshot failed: %w", err)
@@ -275,6 +279,22 @@ func runInternalAsyncImageRelay(ctx context.Context, task *model.Task) ([]byte, 
 				return nil, 0, "", nil, fmt.Errorf("internal async image relay selected no channel")
 			}
 			setInternalAsyncChannelRetryPath(task, retryPath)
+			if value, ok := c.Get(relay.NativeAsyncImageFormat); ok {
+				snapshot, ok := value.(*relay.NativeAsyncImageSnapshot)
+				if !ok {
+					return nil, channel.Id, lastProxy, nil, fmt.Errorf("invalid native image snapshot")
+				}
+				oldPath := task.PrivateData.RequestBodyPath
+				if err := relay.SaveNativeAsyncImageSnapshot(task, snapshot); err != nil {
+					return nil, channel.Id, lastProxy, nil, err
+				}
+				if err := model.UpdateTaskPrivateData(task.ID, task.PrivateData); err != nil {
+					return nil, channel.Id, lastProxy, nil, err
+				}
+				removeInternalAsyncImageRequestSnapshot(oldPath)
+				body, channelID, proxy, err := relay.ResumeNativeAsyncImageTask(ctx, task)
+				return body, channelID, proxy, nil, err
+			}
 			return recorder.Body.Bytes(), channel.Id, lastProxy, lastUsage, nil
 		}
 		lastErr = service.NormalizeViolationFeeError(newAPIError)
@@ -480,7 +500,9 @@ func recordInternalAsyncImageFinalErrorLog(c *gin.Context, task *model.Task, cha
 	other.SetAdmin("channel_type", channelType)
 	other.SetAdmin("use_channel", path)
 	other.SetAdmin("async_channel_retry_path", path)
-	if len(retryDetails) > 0 { other.SetAdmin("async_channel_retry_details", retryDetails) }
+	if len(retryDetails) > 0 {
+		other.SetAdmin("async_channel_retry_details", retryDetails)
+	}
 
 	if c.Request != nil && c.Request.URL != nil {
 		other.SetPublic("request_path", c.Request.URL.Path)

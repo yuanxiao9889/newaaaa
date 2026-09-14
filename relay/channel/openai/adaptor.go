@@ -104,6 +104,19 @@ func (a *Adaptor) Init(info *relaycommon.RelayInfo) {
 }
 
 func (a *Adaptor) GetRequestURL(info *relaycommon.RelayInfo) (string, error) {
+	if info.ChannelMeta != nil && info.ChannelSetting.ImageAdapter.Matches(info.UpstreamModelName) {
+		config := info.ChannelSetting.ImageAdapter
+		var path string
+		switch info.RelayMode {
+		case relayconstant.RelayModeImagesGenerations:
+			path = config.Request.GenerationsPath
+		case relayconstant.RelayModeImagesEdits:
+			path = config.Request.EditsPath
+		}
+		if path != "" {
+			return configuredImageEndpoint(info.ChannelBaseUrl, path)
+		}
+	}
 	if info.RelayMode == relayconstant.RelayModeRealtime {
 		if after, ok := strings.CutPrefix(info.ChannelBaseUrl, "https://"); ok {
 			baseUrl := after
@@ -502,6 +515,9 @@ func (a *Adaptor) ConvertAudioRequest(c *gin.Context, info *relaycommon.RelayInf
 }
 
 func (a *Adaptor) ConvertImageRequest(c *gin.Context, info *relaycommon.RelayInfo, request dto.ImageRequest) (any, error) {
+	if info.ChannelMeta != nil && info.ChannelSetting.ImageAdapter.Matches(request.Model) {
+		return ConvertConfiguredImageRequest(c, info, request)
+	}
 	switch info.RelayMode {
 	case relayconstant.RelayModeImagesEdits:
 		if isJSONRequest(c) {

@@ -143,9 +143,15 @@ export function AffiliateRewardsCard({
           />
           <RewardRule
             icon={<ListChecks className='size-3.5' />}
-            text={t(
-              'Rewards are granted only for the first 5 successful top-ups from each invited user.'
-            )}
+            text={
+              user?.is_vip
+                ? t(
+                    'VIP benefit: referral rewards have no count limit per invited user.'
+                  )
+                : t(
+                    'Rewards are granted only for the first 5 successful top-ups from each invited user.'
+                  )
+            }
           />
           <RewardRule
             icon={<CircleDollarSign className='size-3.5' />}

@@ -17,6 +17,7 @@ import (
 	"github.com/QuantumNous/new-api/i18n"
 	"github.com/QuantumNous/new-api/middleware"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/service/authz"
 	"github.com/alicebob/miniredis/v2"
 	"github.com/go-redis/redis/v8"
@@ -26,6 +27,370 @@ import (
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 )
+
+func performVIPRequest(t *testing.T, role int, target, body string) *httptest.ResponseRecorder {
+	t.Helper()
+	router := gin.New()
+	router.PUT("/api/user/:id/vip", func(c *gin.Context) {
+		c.Set("id", 9999)
+		c.Set("role", role)
+		c.Set("username", "root-operator")
+		UpdateUserVIP(c)
+	})
+	recorder := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPut, "/api/user/"+target+"/vip", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(recorder, req)
+	return recorder
+}
+
+func TestUserVIPChangesOnlyMembershipAndRecordsAudit(t *testing.T) {
+	db := setupManageUserTestDB(t)
+	createQuotaTestOperator(t, db, common.RoleRootUser)
+	user := model.User{Username: "vip-member", Role: common.RoleCommonUser, Status: common.UserStatusEnabled,
+		Group: "default", Quota: 1000, AffQuota: 200, AffHistoryQuota: 300, AuthVersion: 1}
+	require.NoError(t, db.Create(&user).Error)
+	now := time.Now().Unix()
+	require.NoError(t, db.Create(&model.UserSession{SID: "vip-session", UserID: user.Id, Version: 1,
+		UserAuthVersion: 1, Status: model.UserSessionStatusActive, RefreshHash: "vip-refresh",
+		LoginMethod: "password", LastActiveAt: now, ExpiresAt: now + 3600}).Error)
+	for _, enabled := range []bool{true, false} {
+		response := performVIPRequest(t, common.RoleAdminUser, strconv.Itoa(user.Id), fmt.Sprintf(`{"is_vip":%t}`, enabled))
+		require.Contains(t, response.Body.String(), `"success":true`)
+		profile, err := model.GetSelfUserById(user.Id)
+		require.NoError(t, err)
+		assert.Equal(t, enabled, buildSelfUserData(profile)["is_vip"])
+		assert.Equal(t, common.RoleCommonUser, profile.Role)
+		assert.Equal(t, common.UserStatusEnabled, profile.Status)
+		assert.Equal(t, "default", profile.Group)
+		assert.Equal(t, 1000, profile.Quota)
+		assert.Equal(t, 200, profile.AffQuota)
+		assert.Equal(t, 300, profile.AffHistoryQuota)
+		assert.EqualValues(t, 1, profile.AuthVersion)
+	}
+	var session model.UserSession
+	require.NoError(t, db.First(&session, "sid = ?", "vip-session").Error)
+	assert.Equal(t, model.UserSessionStatusActive, session.Status)
+	var audits []model.AuditLog
+	require.NoError(t, model.LOG_DB.Where("action = ?", "user.vip_update").Order("id").Find(&audits).Error)
+	require.Len(t, audits, 2)
+	for i, audit := range audits {
+		assert.Equal(t, 9999, audit.UserId)
+		other := audit.Other
+		require.NotNil(t, other.Op)
+		params, err := common.Marshal(other.Op.Params)
+		require.NoError(t, err)
+		assert.JSONEq(t, fmt.Sprintf(`{"target_user_id":%d,"previous_is_vip":%t,"is_vip":%t}`, user.Id, i == 1, i == 0), string(params))
+	}
+}
+
+func TestUserVIPRejectsInvalidOrUnauthorizedChanges(t *testing.T) {
+	db := setupManageUserTestDB(t)
+	for _, user := range []model.User{
+		{Id: 1, Username: "vip-common", Role: common.RoleCommonUser, AffCode: "vip-common"},
+		{Id: 2, Username: "vip-admin", Role: common.RoleAdminUser, AffCode: "vip-admin"},
+		{Id: 3, Username: "vip-root", Role: common.RoleRootUser, AffCode: "vip-root"},
+		{Id: 4, Username: "vip-deleted", Role: common.RoleCommonUser, AffCode: "vip-deleted"},
+	} {
+		require.NoError(t, db.Create(&user).Error)
+	}
+	require.NoError(t, db.Delete(&model.User{}, 4).Error)
+	for _, tc := range []struct {
+		name     string
+		role     int
+		id, body string
+	}{
+		{"ordinary_user", common.RoleCommonUser, "1", `{"is_vip":true}`},
+		{"admin_peer", common.RoleAdminUser, "2", `{"is_vip":true}`},
+		{"admin_root", common.RoleAdminUser, "3", `{"is_vip":true}`},
+		{"deleted", common.RoleRootUser, "4", `{"is_vip":true}`},
+		{"missing_user", common.RoleRootUser, "12345", `{"is_vip":true}`},
+		{"zero_id", common.RoleRootUser, "0", `{"is_vip":true}`},
+		{"negative_id", common.RoleRootUser, "-1", `{"is_vip":true}`},
+		{"invalid_id", common.RoleRootUser, "invalid", `{"is_vip":true}`},
+		{"missing_flag", common.RoleRootUser, "1", `{}`},
+		{"null_flag", common.RoleRootUser, "1", `{"is_vip":null}`},
+		{"string_flag", common.RoleRootUser, "1", `{"is_vip":"true"}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			response := performVIPRequest(t, tc.role, tc.id, tc.body)
+			assert.NotContains(t, response.Body.String(), `"success":true`)
+		})
+	}
+	var count int64
+	require.NoError(t, db.Model(&model.User{}).Where("is_vip = ?", true).Count(&count).Error)
+	assert.Zero(t, count)
+	require.NoError(t, model.LOG_DB.Model(&model.AuditLog{}).Count(&count).Error)
+	assert.Zero(t, count)
+}
+
+func TestUserVIPRouteRequiresAuthenticatedAdministrator(t *testing.T) {
+	db := setupManageUserTestDB(t)
+	previousSecret := common.SessionSecret
+	common.SessionSecret = "vip-route-test-secret"
+	t.Cleanup(func() { common.SessionSecret = previousSecret })
+	member := model.User{Username: "vip-route-member", Role: common.RoleCommonUser, Status: common.UserStatusEnabled, AuthVersion: 1, AffCode: "vip-route-member"}
+	require.NoError(t, db.Create(&member).Error)
+	admin := model.User{Username: "vip-route-admin", Role: common.RoleAdminUser, Status: common.UserStatusEnabled, AuthVersion: 1, AffCode: "vip-route-admin"}
+	require.NoError(t, db.Create(&admin).Error)
+	router := gin.New()
+	router.PUT("/api/user/:id/vip", middleware.AdminAuth(), UpdateUserVIP)
+	for _, tc := range []struct {
+		name       string
+		id, status int
+	}{
+		{"anonymous", 0, http.StatusUnauthorized},
+		{"member", member.Id, http.StatusForbidden},
+		{"administrator", admin.Id, http.StatusOK},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPut, fmt.Sprintf("/api/user/%d/vip", member.Id), strings.NewReader(`{"is_vip":true}`))
+			req.Header.Set("Content-Type", "application/json")
+			if tc.id != 0 {
+				session, err := service.CreateLoginSession(tc.id, "password", "127.0.0.1", "vip-test")
+				require.NoError(t, err)
+				req.Header.Set("Authorization", "Bearer "+session.AccessToken)
+				req.Header.Set("X-Auth-Session", session.Session.SID)
+			}
+			recorder := httptest.NewRecorder()
+			router.ServeHTTP(recorder, req)
+			assert.Equal(t, tc.status, recorder.Code, recorder.Body.String())
+		})
+	}
+	require.NoError(t, db.First(&member, member.Id).Error)
+	assert.True(t, member.IsVIP)
+}
+
+func TestUserVIPCannotBeChangedThroughProfileUpdates(t *testing.T) {
+	previousMaster := common.IsMasterNode
+	common.IsMasterNode = false
+	t.Cleanup(func() { common.IsMasterNode = previousMaster })
+	for _, enabled := range []bool{false, true} {
+		t.Run(fmt.Sprintf("existing_vip_%t", enabled), func(t *testing.T) {
+			db := setupManageUserTestDB(t)
+			require.NoError(t, authz.Init(db))
+			user := model.User{Username: "vip-profile", Role: common.RoleCommonUser, Status: common.UserStatusEnabled,
+				Group: "default", IsVIP: enabled, AuthVersion: 1}
+			require.NoError(t, db.Create(&user).Error)
+			for _, handler := range []gin.HandlerFunc{UpdateSelf, UpdateUser} {
+				recorder := httptest.NewRecorder()
+				c, _ := gin.CreateTestContext(recorder)
+				c.Set("id", user.Id)
+				c.Set("role", common.RoleRootUser)
+				c.Request = httptest.NewRequest(http.MethodPut, "/api/user/", strings.NewReader(fmt.Sprintf(
+					`{"id":%d,"username":"vip-profile","display_name":"Updated profile","group":"default","is_vip":%t}`, user.Id, !enabled)))
+				handler(c)
+				require.Contains(t, recorder.Body.String(), `"success":true`)
+				require.NoError(t, db.First(&user, user.Id).Error)
+				assert.Equal(t, enabled, user.IsVIP)
+				assert.Equal(t, "Updated profile", user.DisplayName)
+			}
+		})
+	}
+}
+
+func TestVIPReferralLifecycle(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		membership []bool
+		want       int
+	}{
+		{"ordinary_inviter_vip_invitee", []bool{false, false, false, false, false, false}, 5},
+		{"vip_inviter", []bool{true, true, true, true, true, true}, 6},
+		{"upgrade_after_limit_and_cancel", []bool{false, false, false, false, false, false, true, true, false}, 7},
+		{"cancel_before_limit", []bool{true, true, false, false, false, false}, 5},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			db := setupManageUserTestDB(t)
+			require.NoError(t, db.AutoMigrate(&model.AffiliateRewardRecord{}))
+			oldQuotaPerUnit, oldBatch := common.QuotaPerUnit, common.BatchUpdateEnabled
+			common.QuotaPerUnit, common.BatchUpdateEnabled = 1000, false
+			t.Cleanup(func() { common.QuotaPerUnit, common.BatchUpdateEnabled = oldQuotaPerUnit, oldBatch })
+			inviter := model.User{Username: "lifecycle-inviter", Role: common.RoleCommonUser, AffCode: "lifecycle-inviter"}
+			require.NoError(t, db.Create(&inviter).Error)
+			invitee := model.User{Username: "lifecycle-invitee", Role: common.RoleCommonUser, AffCode: "lifecycle-invitee", InviterId: inviter.Id, IsVIP: true}
+			require.NoError(t, db.Create(&invitee).Error)
+			for i, vip := range tc.membership {
+				order := model.TopUp{UserId: invitee.Id, TradeNo: fmt.Sprintf("vip-lifecycle-%d", i), Amount: 10, Money: 10,
+					PaymentProvider: model.PaymentProviderEpay, Status: common.TopUpStatusPending}
+				require.NoError(t, db.Create(&order).Error)
+				_, err := model.SetUserVIP(inviter.Id, common.RoleRootUser, vip)
+				require.NoError(t, err)
+				done, err := model.RechargeEpay(order.TradeNo, "alipay", "127.0.0.1")
+				require.NoError(t, err)
+				assert.False(t, done)
+			}
+			// Enabling membership and replaying all callbacks never backfills
+			// skipped orders or duplicates a previously granted reward.
+			_, err := model.SetUserVIP(inviter.Id, common.RoleRootUser, true)
+			require.NoError(t, err)
+			for i := range tc.membership {
+				done, err := model.RechargeEpay(fmt.Sprintf("vip-lifecycle-%d", i), "alipay", "127.0.0.1")
+				require.NoError(t, err)
+				assert.True(t, done)
+			}
+			require.NoError(t, db.First(&inviter, inviter.Id).Error)
+			assert.Equal(t, tc.want*1000, inviter.AffQuota)
+			assert.Equal(t, tc.want*1000, inviter.AffHistoryQuota)
+			require.NoError(t, db.First(&invitee, invitee.Id).Error)
+			assert.Equal(t, len(tc.membership)*10000, invitee.Quota)
+			var count int64
+			require.NoError(t, db.Model(&model.AffiliateRewardRecord{}).Count(&count).Error)
+			assert.EqualValues(t, tc.want, count)
+		})
+	}
+}
+
+// The persisted user schema in v1.0.0-rc.37 differs from the existing rc.33
+// fixture only by access_token_created_at (verified against the release source).
+type releasedVIPUser struct {
+	User                 releasedAuditUser `gorm:"embedded"`
+	AccessTokenCreatedAt *int64            `gorm:"type:bigint;column:access_token_created_at"`
+}
+
+func (releasedVIPUser) TableName() string { return "users" }
+
+func TestUserVIPMigration(t *testing.T) {
+	dialect := os.Getenv("TEST_MANAGE_USER_DIALECT")
+	if dialect == "" {
+		dialect = "sqlite"
+	}
+	for _, upgrade := range []bool{false, true} {
+		t.Run(fmt.Sprintf("upgrade_rc37_%t", upgrade), func(t *testing.T) {
+			db, _ := newAuditTestDatabase(t, dialect, os.Getenv("TEST_"+strings.ToUpper(dialect)+"_DSN"))
+			if upgrade {
+				require.NoError(t, db.AutoMigrate(&releasedVIPUser{}))
+				require.NoError(t, db.Create(&releasedVIPUser{User: releasedAuditUser{
+					Id: 1, Username: "legacy-vip", Password: "retained-password-hash", Group: "default",
+					Quota: 1000, AffQuota: 200, AffHistoryQuota: 300, AffCount: 2, AffCode: "legacy-aff", AuthVersion: 4,
+				}}).Error)
+			}
+			require.NoError(t, db.AutoMigrate(&model.User{}))
+			if !upgrade {
+				require.NoError(t, db.Create(&model.User{Id: 1, Username: "legacy-vip", Password: "retained-password-hash", Group: "default",
+					Quota: 1000, AffQuota: 200, AffHistoryQuota: 300, AffCount: 2, AffCode: "legacy-aff", AuthVersion: 4}).Error)
+			}
+			for _, enabled := range []bool{false, true} {
+				if enabled {
+					require.NoError(t, db.Model(&model.User{}).Where("id = ?", 1).Update("is_vip", true).Error)
+				}
+				require.NoError(t, db.AutoMigrate(&model.User{}))
+				var user model.User
+				require.NoError(t, db.First(&user, 1).Error)
+				assert.Equal(t, enabled, user.IsVIP)
+				assert.Equal(t, "retained-password-hash", user.Password)
+				assert.Equal(t, "default", user.Group)
+				assert.Equal(t, 1000, user.Quota)
+				assert.Equal(t, 200, user.AffQuota)
+				assert.Equal(t, 300, user.AffHistoryQuota)
+				assert.Equal(t, 2, user.AffCount)
+				assert.EqualValues(t, 4, user.AuthVersion)
+			}
+			for _, duplicate := range []model.User{
+				{Username: "legacy-vip", AffCode: "different-aff"},
+				{Username: "different-user", AffCode: "legacy-aff"},
+			} {
+				assert.Error(t, db.Create(&duplicate).Error, "existing uniqueness guarantees must survive migration")
+			}
+			assert.True(t, db.Migrator().HasIndex(&model.User{}, "idx_users_inviter_id"))
+		})
+	}
+}
+
+func TestVIPReferralConcurrentSettlement(t *testing.T) {
+	for _, vip := range []bool{false, true} {
+		t.Run(fmt.Sprintf("vip_%t", vip), func(t *testing.T) {
+			db := setupManageUserTestDB(t)
+			require.NoError(t, db.AutoMigrate(&model.AffiliateRewardRecord{}))
+			if common.UsingMainDatabase(common.DatabaseTypeSQLite) {
+				connection, err := db.DB()
+				require.NoError(t, err)
+				connection.SetMaxOpenConns(1)
+			}
+			previous := common.QuotaPerUnit
+			common.QuotaPerUnit = 1000
+			t.Cleanup(func() { common.QuotaPerUnit = previous })
+			inviter := model.User{Username: "concurrent-inviter", AffCode: "concurrent-inviter", IsVIP: vip}
+			require.NoError(t, db.Create(&inviter).Error)
+			invitee := model.User{Username: "concurrent-invitee", AffCode: "concurrent-invitee", InviterId: inviter.Id}
+			require.NoError(t, db.Create(&invitee).Error)
+			for i := range 6 {
+				order := model.TopUp{UserId: invitee.Id, TradeNo: fmt.Sprintf("vip-concurrent-%d", i), Amount: 10, Money: 10,
+					PaymentProvider: model.PaymentProviderEpay, Status: common.TopUpStatusPending}
+				require.NoError(t, db.Create(&order).Error)
+				if i < 4 {
+					_, err := model.RechargeEpay(order.TradeNo, "alipay", "127.0.0.1")
+					require.NoError(t, err)
+				}
+			}
+			start := make(chan struct{})
+			results := make(chan error, 4)
+			var workers sync.WaitGroup
+			// Two distinct orders, each with a duplicate callback.
+			for _, tradeNo := range []string{"vip-concurrent-4", "vip-concurrent-4", "vip-concurrent-5", "vip-concurrent-5"} {
+				workers.Go(func() {
+					<-start
+					_, err := model.RechargeEpay(tradeNo, "alipay", "127.0.0.1")
+					results <- err
+				})
+			}
+			close(start)
+			workers.Wait()
+			close(results)
+			for err := range results {
+				require.NoError(t, err)
+			}
+			want := 5000
+			if vip {
+				want = 6000
+			}
+			require.NoError(t, db.First(&inviter, inviter.Id).Error)
+			assert.Equal(t, want, inviter.AffQuota)
+			assert.Equal(t, want, inviter.AffHistoryQuota)
+			require.NoError(t, db.First(&invitee, invitee.Id).Error)
+			assert.Equal(t, 60000, invitee.Quota)
+		})
+	}
+}
+
+func TestVIPReferralFailureRollsBackRechargeAndCanRetry(t *testing.T) {
+	db := setupManageUserTestDB(t)
+	require.NoError(t, db.AutoMigrate(&model.AffiliateRewardRecord{}))
+	previous := common.QuotaPerUnit
+	common.QuotaPerUnit = 1000
+	t.Cleanup(func() { common.QuotaPerUnit = previous })
+	inviter := model.User{Username: "rollback-inviter", AffCode: "rollback-inviter", IsVIP: true}
+	require.NoError(t, db.Create(&inviter).Error)
+	invitee := model.User{Username: "rollback-invitee", AffCode: "rollback-invitee", InviterId: inviter.Id}
+	require.NoError(t, db.Create(&invitee).Error)
+	order := model.TopUp{UserId: invitee.Id, TradeNo: "vip-rollback-order", Amount: 10, Money: 10,
+		PaymentProvider: model.PaymentProviderEpay, Status: common.TopUpStatusPending}
+	require.NoError(t, db.Create(&order).Error)
+	require.NoError(t, db.Callback().Create().After("gorm:create").Register("test:vip_reward_failure", func(tx *gorm.DB) {
+		if tx.Statement.Table == "affiliate_reward_records" {
+			tx.AddError(errors.New("reward storage unavailable"))
+		}
+	}))
+	_, err := model.RechargeEpay(order.TradeNo, "alipay", "127.0.0.1")
+	require.Error(t, err)
+	require.NoError(t, db.First(&invitee, invitee.Id).Error)
+	assert.Zero(t, invitee.Quota)
+	require.NoError(t, db.First(&inviter, inviter.Id).Error)
+	assert.Zero(t, inviter.AffQuota)
+	require.NoError(t, db.First(&order, order.Id).Error)
+	assert.Equal(t, common.TopUpStatusPending, order.Status)
+	var count int64
+	require.NoError(t, db.Model(&model.AffiliateRewardRecord{}).Count(&count).Error)
+	assert.Zero(t, count)
+	require.NoError(t, db.Callback().Create().Remove("test:vip_reward_failure"))
+	done, err := model.RechargeEpay(order.TradeNo, "alipay", "127.0.0.1")
+	require.NoError(t, err)
+	assert.False(t, done)
+	require.NoError(t, db.First(&inviter, inviter.Id).Error)
+	assert.Equal(t, 1000, inviter.AffQuota)
+	require.NoError(t, db.First(&invitee, invitee.Id).Error)
+	assert.Equal(t, 10000, invitee.Quota)
+}
 
 func setupManageUserTestDB(t *testing.T) *gorm.DB {
 	t.Helper()

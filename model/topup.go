@@ -66,7 +66,6 @@ var ErrInvalidTopUpMonth = errors.New("invalid top-up month")
 // 防止对超大表执行无界 COUNT 触发 DoS。
 const searchTopUpCountHardLimit = 10000
 
-
 func (topUp *TopUp) Insert() error {
 	var err error
 	err = DB.Create(topUp).Error
@@ -642,20 +641,24 @@ func grantAffiliateTopUpRewardTx(tx *gorm.DB, topUp *TopUp) error {
 		return nil
 	}
 
-	var rewardedCount int64
-	if err := tx.Model(&AffiliateRewardRecord{}).Where("invitee_id = ?", invitee.Id).Count(&rewardedCount).Error; err != nil {
-		return err
-	}
-	if rewardedCount >= affiliateTopUpRewardLimit {
-		return nil
-	}
-
 	var inviter User
-	if err := lockForUpdate(tx).Select("id").Where("id = ?", invitee.InviterId).First(&inviter).Error; err != nil {
+	if err := lockForUpdate(tx).Select("id", "is_vip").Where("id = ?", invitee.InviterId).First(&inviter).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil
 		}
 		return err
+	}
+
+	// Read membership inside the settlement transaction. VIP rewards remain in
+	// the same history, so cancelling VIP never resets the ordinary reward limit.
+	if !inviter.IsVIP {
+		var rewardedCount int64
+		if err := tx.Model(&AffiliateRewardRecord{}).Where("invitee_id = ?", invitee.Id).Count(&rewardedCount).Error; err != nil {
+			return err
+		}
+		if rewardedCount >= affiliateTopUpRewardLimit {
+			return nil
+		}
 	}
 
 	record := &AffiliateRewardRecord{
@@ -671,7 +674,7 @@ func grantAffiliateTopUpRewardTx(tx *gorm.DB, topUp *TopUp) error {
 		return err
 	}
 
-	return tx.Model(&User{}).Where("id = ?", invitee.InviterId).Updates(map[string]interface{}{
+	return tx.Model(&User{}).Where("id = ?", invitee.InviterId).Updates(map[string]any{
 		"aff_quota":   gorm.Expr("aff_quota + ?", rewardQuota),
 		"aff_history": gorm.Expr("aff_history + ?", rewardQuota),
 	}).Error

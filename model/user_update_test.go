@@ -57,6 +57,7 @@ func TestUserUpdateDoesNotOverwriteConcurrentAccountingOrTokenChanges(t *testing
 		AffCount:        2,
 		AffQuota:        800,
 		AffHistoryQuota: 1200,
+		IsVIP:           true,
 	}
 	user.SetAccessToken("old-token")
 	require.NoError(t, DB.Create(&user).Error)
@@ -72,6 +73,7 @@ func TestUserUpdateDoesNotOverwriteConcurrentAccountingOrTokenChanges(t *testing
 		"aff_quota":     gorm.Expr("aff_quota - ?", 500),
 		"aff_history":   gorm.Expr("aff_history + ?", 500),
 		"access_token":  "rotated-token",
+		"is_vip":        false,
 	}).Error)
 
 	staleUser.DisplayName = "after"
@@ -87,6 +89,7 @@ func TestUserUpdateDoesNotOverwriteConcurrentAccountingOrTokenChanges(t *testing
 	assert.Equal(t, 300, got.AffQuota)
 	assert.Equal(t, 1700, got.AffHistoryQuota)
 	assert.Equal(t, "rotated-token", got.GetAccessToken())
+	assert.False(t, got.IsVIP, "stale profile updates must not restore cancelled VIP membership")
 }
 
 func TestUsageAccountingSupportsSignedDirectAndBatchDeltas(t *testing.T) {
