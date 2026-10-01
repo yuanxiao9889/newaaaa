@@ -635,6 +635,104 @@ it('filters unpriced and loss-making usage and opens the matching cost form', as
   expect(panel.queryByText('loss-model')).not.toBeInTheDocument()
 })
 
+it('shows a saved cost price independently of historical coverage and opens its existing record', async () => {
+  prices = [
+    savedPrice,
+    { ...savedPrice, id: 2, channel_id: 8, channel_name: 'Other provider' },
+  ]
+  breakdown = [
+    {
+      ...metric,
+      channel_id: 7,
+      channel_name: 'Primary provider',
+      model_name: 'text-model',
+      unpriced_count: 1,
+      priced_count: 3,
+      coverage_rate: 0.75,
+    },
+  ]
+  renderProfit()
+  const user = userEvent.setup()
+  const row = within(
+    await screen.findByRole('row', { name: /text-model.*Primary provider/ })
+  )
+  expect(await row.findByText('Cost price configured')).toBeVisible()
+  expect(row.getByText('75.00%')).toBeVisible()
+  expect(row.getByText('Unpriced requests: 1')).toBeVisible()
+  expect(
+    row.queryByRole('button', { name: 'Configure cost price' })
+  ).not.toBeInTheDocument()
+  await user.click(row.getByRole('button', { name: 'View cost price' }))
+  const costs = within(
+    await screen.findByRole('region', { name: 'Cost prices' })
+  )
+  expect(costs.getByText('#7 · Primary provider')).toBeVisible()
+  expect(costs.queryByText('#8 · Other provider')).not.toBeInTheDocument()
+  expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+})
+
+it('keeps cost price status unknown while loading or after a fetch failure', async () => {
+  breakdown = [
+    {
+      ...metric,
+      channel_id: 7,
+      channel_name: 'Primary provider',
+      model_name: 'text-model',
+      unpriced_count: 1,
+    },
+  ]
+  const { promise: pendingPrices, reject: rejectPrices } =
+    Promise.withResolvers<never>()
+  const original = vi.mocked(api.get).getMockImplementation()
+  if (!original) throw new Error('API fixture was not initialized')
+  vi.mocked(api.get).mockImplementation((url, config) =>
+    url === '/api/profit/cost-prices' ? pendingPrices : original(url, config)
+  )
+  renderProfit()
+  const row = within(
+    await screen.findByRole('row', { name: /text-model.*Primary provider/ })
+  )
+  expect(
+    row.queryByRole('button', { name: 'Configure cost price' })
+  ).not.toBeInTheDocument()
+  expect(row.getByText('Loading...')).toBeVisible()
+  await act(async () => {
+    rejectPrices(new Error('Price service unavailable'))
+  })
+  expect(await row.findByText('Cost price status unavailable')).toBeVisible()
+  expect(
+    row.queryByRole('button', { name: 'Configure cost price' })
+  ).not.toBeInTheDocument()
+})
+
+it('distinguishes disabled prices from missing prices for the same model on another channel', async () => {
+  prices = [{ ...savedPrice, disabled: true }]
+  breakdown = [7, 8].map((channel_id) => ({
+    ...metric,
+    channel_id,
+    channel_name: `Provider ${channel_id}`,
+    model_name: 'text-model',
+    unpriced_count: 1,
+  }))
+  renderProfit()
+  const disabled = within(
+    await screen.findByRole('row', { name: /text-model.*Provider 7/ })
+  )
+  expect(await disabled.findByText('Disabled')).toBeVisible()
+  expect(
+    disabled.getByRole('button', { name: 'View cost price' })
+  ).toBeVisible()
+  expect(
+    disabled.queryByRole('button', { name: 'Configure cost price' })
+  ).not.toBeInTheDocument()
+  const missing = within(
+    screen.getByRole('row', { name: /text-model.*Provider 8/ })
+  )
+  expect(
+    await missing.findByRole('button', { name: 'Configure cost price' })
+  ).toBeVisible()
+})
+
 it('refreshes quick-range reports through the current time', async () => {
   renderProfit()
   const user = userEvent.setup()
@@ -678,7 +776,7 @@ it('shows chronological trend data and preserves negative profit', async () => {
   expect(rows[2]).toHaveTextContent('-$2')
 })
 
-it('loads channels and cost prices only when their controls are opened', async () => {
+it('defers channel and cost queries when the overview has no usage rows', async () => {
   renderProfit()
   const user = userEvent.setup()
   await screen.findByRole('region', { name: 'Usage revenue' })

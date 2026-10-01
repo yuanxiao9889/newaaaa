@@ -275,10 +275,11 @@ export function Profit() {
 
   const pricesQuery = useQuery({
     queryKey: ['profit-cost-prices'],
-    enabled: activeTab === 'costs',
+    enabled:
+      activeTab === 'costs' || (reportQuery.data?.breakdown?.length ?? 0) > 0,
     queryFn: async ({ signal }) => {
       const res = await profitQuery(() => getProfitCostPrices(false, signal))
-      return res ? requireServerSuccess(res).data : []
+      return res ? requireServerSuccess(res).data : null
     },
   })
 
@@ -383,6 +384,14 @@ export function Profit() {
     setSheetMode('create')
     setForm({ ...emptyForm(), channel_id: channel, model_name: model })
     setSheetOpen(true)
+  }, [])
+
+  const viewCostPrice = useCallback((price: ProfitCostPrice) => {
+    setPriceSearch(
+      `#${price.channel_id} ${price.channel_name ?? ''} ${price.model_name}`
+    )
+    setPriceStatus('all')
+    setActiveTab('costs')
   }, [])
 
   const openEditSheet = (item: ProfitCostPrice) => {
@@ -716,6 +725,7 @@ export function Profit() {
                         title={t('Refresh')}
                         disabled={reportQuery.isFetching}
                         onClick={() => {
+                          void pricesQuery.refetch()
                           const nextEnd = nowSeconds()
                           if (quickRange && nextEnd !== end) {
                             setStart(defaultStart(Number(quickRange)))
@@ -796,6 +806,13 @@ export function Profit() {
                 {!reportQuery.isPending && !reportQuery.isError && report && (
                   <ProfitOverview
                     report={report}
+                    costPrices={
+                      pricesQuery.isError
+                        ? undefined
+                        : (pricesQuery.data ?? undefined)
+                    }
+                    costPricesLoading={pricesQuery.isPending}
+                    onViewPrice={viewCostPrice}
                     scrollContainerRef={contentRef}
                     onConfigure={openCreateSheet}
                   />

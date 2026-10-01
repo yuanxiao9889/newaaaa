@@ -20,6 +20,7 @@ import {
 } from '@/components/data-table'
 import { EmptyState } from '@/components/empty-state'
 import { LoadingState } from '@/components/loading-state'
+import { StatusBadge } from '@/components/status-badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
@@ -29,19 +30,35 @@ import { cn } from '@/lib/utils'
 import { useSystemConfigStore } from '@/stores/system-config-store'
 
 import { formatMoney, formatPercent } from '../lib/format'
-import type { ProfitBreakdownItem, ProfitReport } from '../types'
+import type {
+  ProfitBreakdownItem,
+  ProfitCostPrice,
+  ProfitReport,
+} from '../types'
 
 const ProfitTrendChart = lazy(() => import('./profit-trend-chart'))
 
 export const ProfitOverview = memo(function ProfitOverview(props: {
   report: ProfitReport
+  costPrices?: ProfitCostPrice[]
+  costPricesLoading: boolean
+  onViewPrice: (price: ProfitCostPrice) => void
   scrollContainerRef: RefObject<HTMLDivElement | null>
   onConfigure: (channel: string, model: string) => void
 }) {
   const { t } = useTranslation()
   // Currency formatting reads this store; keep memoized displays reactive.
   useSystemConfigStore((state) => state.config.currency)
-  const { onConfigure } = props
+  const { onConfigure, onViewPrice, costPricesLoading } = props
+  const costPricesByModel = useMemo(() => {
+    if (!props.costPrices) return undefined
+    return new Map(
+      props.costPrices.map((price) => [
+        JSON.stringify([price.channel_id, price.model_name.trim()]),
+        price,
+      ])
+    )
+  }, [props.costPrices])
   const breakdownRef = useRef<HTMLElement>(null)
   const searchRef = useRef<HTMLInputElement>(null)
   const [search, setSearch] = useState('')
@@ -148,9 +165,45 @@ export const ProfitOverview = memo(function ProfitOverview(props: {
       },
       {
         id: 'actions',
-        header: t('Actions'),
-        cell: ({ row }) =>
-          row.original.unpriced_count > 0 && (
+        header: t('Cost price status'),
+        cell: ({ row }) => {
+          if (!costPricesByModel) {
+            return (
+              <span className='text-muted-foreground text-xs'>
+                {costPricesLoading
+                  ? t('Loading...')
+                  : t('Cost price status unavailable')}
+              </span>
+            )
+          }
+          const price = costPricesByModel.get(
+            JSON.stringify([
+              row.original.channel_id,
+              row.original.model_name.trim(),
+            ])
+          )
+          if (price?.disabled || price?.price_configured) {
+            return (
+              <div className='flex flex-wrap items-center gap-2'>
+                <StatusBadge
+                  label={
+                    price.disabled ? t('Disabled') : t('Cost price configured')
+                  }
+                  variant={price.disabled ? 'neutral' : 'success'}
+                  size='sm'
+                  copyable={false}
+                />
+                <Button
+                  size='sm'
+                  variant='ghost'
+                  onClick={() => onViewPrice(price)}
+                >
+                  {t('View cost price')}
+                </Button>
+              </div>
+            )
+          }
+          return (
             <Button
               size='sm'
               variant='outline'
@@ -163,10 +216,11 @@ export const ProfitOverview = memo(function ProfitOverview(props: {
             >
               {t('Configure cost price')}
             </Button>
-          ),
+          )
+        },
       },
     ],
-    [t, onConfigure]
+    [t, onConfigure, onViewPrice, costPricesByModel, costPricesLoading]
   )
   const { table } = useDataTable({
     data: rows,
@@ -267,7 +321,7 @@ export const ProfitOverview = memo(function ProfitOverview(props: {
             <AlertTriangle className='text-warning mt-0.5 size-4 shrink-0' />
             <p>
               {t(
-                'Some usage has no cost price configured. Profit only includes priced usage.'
+                'Cost coverage reflects usage in the selected period, not the current cost price configuration. Profit only includes usage with calculated costs.'
               )}
             </p>
           </div>
