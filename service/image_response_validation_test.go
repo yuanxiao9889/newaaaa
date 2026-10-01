@@ -1,6 +1,33 @@
 package service
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/stretchr/testify/require"
+)
+
+func TestValidateOpenAIImageResponseForBillingObjectData(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		body  string
+		valid bool
+	}{
+		{"URL image", `{"data":{"url":"https://example.com/image.png"}}`, true},
+		{"base64 image", `{"data":{"b64_json":"abc123"},"usage":{"output_tokens":80}}`, true},
+		{"empty object", `{"data":{}}`, false},
+		{"blank image", `{"data":{"url":"  "}}`, false},
+		{"zero output tokens", `{"data":{"b64_json":"abc123"},"usage":{"output_tokens":0}}`, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := ValidateOpenAIImageResponseForBilling([]byte(tc.body))
+			if tc.valid {
+				require.NoError(t, err)
+			} else {
+				require.Error(t, err)
+			}
+		})
+	}
+}
 
 func TestValidateOpenAIImageResponseForBillingRejectsZeroOutputTokens(t *testing.T) {
 	body := []byte(`{

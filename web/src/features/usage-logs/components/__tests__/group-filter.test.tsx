@@ -177,17 +177,18 @@ it.each([{}, null])(
       groups
     )
     const input = screen.getByRole('combobox', { name: 'Group' })
+    const searchButton = screen.getByRole('button', { name: 'Search' })
     expect(input).toHaveValue('retired')
     await userEvent.clear(input)
     await userEvent.type(input, 'historical')
-    await userEvent.click(screen.getByRole('button', { name: 'Search' }))
+    await userEvent.click(searchButton)
     await waitFor(() =>
       expect(router.state.location.search).toMatchObject({
         group: 'historical',
       })
     )
     await userEvent.clear(input)
-    await userEvent.click(screen.getByRole('button', { name: 'Search' }))
+    await userEvent.click(searchButton)
     await waitFor(() =>
       expect(router.state.location.search).not.toHaveProperty('group')
     )
@@ -227,7 +228,7 @@ it('keeps the compact input and masks the dropdown together with other sensitive
   const option = await screen.findByRole('option', { name: 'premium' })
   const maskedField = input.closest('.\\[-webkit-text-security\\:disc\\]')
   expect(maskedField).not.toBeNull()
-  expect(maskedField).toContainElement(option)
+  expect(option.closest('.\\[-webkit-text-security\\:disc\\]')).not.toBeNull()
   await userEvent.keyboard('{Escape}')
   expect(input).toHaveAttribute('aria-expanded', 'false')
   await userEvent.tab()
@@ -292,12 +293,13 @@ it('keeps historical auto values editable when auto is the only available group'
     auto: { desc: '', ratio: 1 },
   })
   const input = screen.getByRole('combobox', { name: 'Group' })
+  const searchButton = screen.getByRole('button', { name: 'Search' })
   expect(input).toHaveValue('auto')
   await userEvent.click(input)
   expect(screen.queryByRole('option', { name: 'auto' })).not.toBeInTheDocument()
   await userEvent.clear(input)
   await userEvent.type(input, 'retired')
-  await userEvent.click(screen.getByRole('button', { name: 'Search' }))
+  await userEvent.click(searchButton)
   await waitFor(() =>
     expect(router.state.location.search).toMatchObject({ group: 'retired' })
   )

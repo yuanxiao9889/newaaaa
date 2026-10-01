@@ -55,6 +55,7 @@ type TaskDto struct {
 	Username          string          `json:"username,omitempty"`
 	Data              json.RawMessage `json:"data"`
 
+	ResultDiscarded      bool              `json:"result_discarded,omitempty"`
 	InternalAsync        bool              `json:"internal_async,omitempty"`
 	RequestPath          string            `json:"request_path,omitempty"`
 	WorkerAttempts       int               `json:"worker_attempts,omitempty"`

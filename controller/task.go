@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"github.com/QuantumNous/new-api/common"
@@ -115,6 +116,9 @@ func writeTaskArtifacts(c *gin.Context, task *model.Task, dashboard bool) {
 		})
 	}
 	response := gin.H{"task_id": task.TaskID, "artifacts": items}
+	if dashboard && task.Status == model.TaskStatusSuccess && task.Platform == constant.TaskPlatformSuno {
+		response["legacy_audio_clips"] = legacySunoAudioClips(task.Data)
+	}
 	if legacyVideoAvailable(task) {
 		legacyContentURL, buildErr := service.BuildTaskArtifactContentURL(task.TaskID, "video")
 		if buildErr != nil {
@@ -130,8 +134,41 @@ func writeTaskArtifacts(c *gin.Context, task *model.Task, dashboard bool) {
 	c.JSON(http.StatusOK, response)
 }
 
+// legacySunoAudioClips projects a pre-plugin Suno task's persisted snapshot
+// into the clips the dashboard audio preview renders. Task lists no longer
+// carry the snapshot, so the dashboard reads it here on demand. The snapshot
+// is either a clip array or a JSON string holding one; only clips with an
+// audio URL are kept and only preview fields are exposed.
+func legacySunoAudioClips(data json.RawMessage) []map[string]any {
+	clips := make([]map[string]any, 0)
+	if len(data) == 0 {
+		return clips
+	}
+	var items []map[string]any
+	if err := common.Unmarshal(data, &items); err != nil {
+		var encoded string
+		if common.Unmarshal(data, &encoded) != nil || common.UnmarshalJsonStr(encoded, &items) != nil {
+			return clips
+		}
+	}
+	for _, item := range items {
+		audioURL, _ := item["audio_url"].(string)
+		if strings.TrimSpace(audioURL) == "" {
+			continue
+		}
+		clip := map[string]any{"audio_url": audioURL}
+		for _, key := range []string{"clip_id", "id", "title", "tags", "duration", "image_url", "image_large_url", "metadata"} {
+			if value, ok := item[key]; ok {
+				clip[key] = value
+			}
+		}
+		clips = append(clips, clip)
+	}
+	return clips
+}
+
 func projectTaskArtifacts(task *model.Task) ([]relaychannel.TaskArtifact, error) {
-	if task == nil || task.Status != model.TaskStatusSuccess {
+	if task == nil || task.Status != model.TaskStatusSuccess || !task.ResultRetrievable() {
 		return []relaychannel.TaskArtifact{}, nil
 	}
 	if task.Platform == constant.TaskPlatformInternalImage && task.PrivateData.AssetType == service.AsyncImageAssetType {
@@ -297,7 +334,7 @@ func TaskArtifactContent(c *gin.Context) {
 		return
 	}
 	artifactKey := strings.TrimSpace(c.Param("artifact_key"))
-	if !taskArtifactKeyPattern.MatchString(artifactKey) {
+	if !taskArtifactKeyPattern.MatchString(artifactKey) || !task.ResultRetrievable() {
 		writeTaskArtifactError(c, http.StatusNotFound, "artifact_not_found", "Task or artifact not found")
 		return
 	}
@@ -491,6 +528,7 @@ func tasksToDto(tasks []*model.Task, fillUser bool, viewerRole int) []*dto.TaskD
 		}
 		item := relay.TaskModel2DtoWithOptions(task, false, viewerRole >= common.RoleAdminUser)
 		item.LegacyVideoAvailable = legacyVideoAvailable(task)
+		item.ResultDiscarded = task.PrivateData.ResultDiscarded
 		if task.Status == model.TaskStatusSuccess && !task.PrivateData.InternalAsync {
 			item.ResultURL = ""
 			if taskFailReasonIsLegacyResultURL(task.FailReason) {

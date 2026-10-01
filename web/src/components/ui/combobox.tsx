@@ -27,10 +27,7 @@ import * as React from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { Button } from '@/components/ui/button'
-import {
-  ComboboxInput as LegacyComboboxInput,
-  type ComboboxInputOption,
-} from '@/components/ui/combobox-input'
+import type { ComboboxInputOption } from '@/components/ui/combobox-input'
 import {
   InputGroup,
   InputGroupAddon,
@@ -50,6 +47,7 @@ type LegacyComboboxProps = {
   allowCustomValue?: boolean
   showSelectedIcon?: boolean
   className?: string
+  popupClassName?: string
   id?: string
   openOnFocus?: boolean
   disabled?: boolean
@@ -73,24 +71,7 @@ function Combobox(
     | LegacyComboboxProps
 ) {
   if ('options' in props) {
-    if (!props.allowCustomValue) return <OptionCombobox {...props} />
-    return (
-      <LegacyComboboxInput
-        id={props.id}
-        aria-label={props['aria-label']}
-        aria-labelledby={props['aria-labelledby']}
-        aria-invalid={props['aria-invalid']}
-        onKeyDown={props.onKeyDown}
-        options={props.options}
-        value={props.value ?? ''}
-        onValueChange={(value) => props.onValueChange?.(value)}
-        placeholder={props.searchPlaceholder ?? props.placeholder}
-        emptyText={props.emptyText}
-        className={props.className}
-        allowCustomValue={props.allowCustomValue}
-        openOnFocus={props.openOnFocus}
-      />
-    )
+    return <OptionCombobox {...props} />
   }
 
   return <ComboboxPrimitive.Root {...props} />
@@ -100,29 +81,51 @@ function OptionCombobox(props: LegacyComboboxProps) {
   const { t } = useTranslation()
   const [open, setOpen] = React.useState(false)
   const [search, setSearch] = React.useState('')
+  const [searchEdited, setSearchEdited] = React.useState(false)
+  const highlighted = React.useRef<ComboboxInputOption | undefined>(undefined)
   const anchor = useComboboxAnchor()
   const selected = props.options.find((option) => option.value === props.value)
   const displayedValue = selected?.label ?? props.value ?? ''
   return (
     <ComboboxPrimitive.Root
       items={props.options}
-      value={selected ?? null}
+      value={
+        selected ??
+        (props.allowCustomValue && props.value
+          ? { value: props.value, label: props.value }
+          : null)
+      }
       name={props.name}
       disabled={props.disabled}
       open={open && !props.disabled}
-      inputValue={open ? search : displayedValue}
+      inputValue={
+        open && (!props.allowCustomValue || searchEdited)
+          ? search
+          : displayedValue
+      }
       onInputValueChange={(value, details) => {
-        if (details.reason === 'input-change') setSearch(value)
+        if (details.reason !== 'input-change') return
+        setSearch(value)
+        setSearchEdited(true)
+        if (props.allowCustomValue) props.onValueChange?.(value)
       }}
       onOpenChange={(nextOpen, details) => {
         setOpen(nextOpen)
-        if (details.reason !== 'input-change') setSearch('')
+        if (details.reason !== 'input-change') {
+          setSearch('')
+          setSearchEdited(false)
+        }
+      }}
+      onItemHighlighted={(option) => {
+        highlighted.current = option
       }}
       onValueChange={(option) => {
         if (option) props.onValueChange?.(option.value)
       }}
       filter={(option, query) => {
-        const term = query.trim().toLowerCase()
+        const term = (props.allowCustomValue ? search : query)
+          .trim()
+          .toLowerCase()
         return (
           option.label.toLowerCase().includes(term) ||
           option.value.toLowerCase().includes(term)
@@ -135,11 +138,39 @@ function OptionCombobox(props: LegacyComboboxProps) {
           ref={props.ref}
           id={props.id}
           disabled={props.disabled}
+          render={
+            <InputGroupInput
+              disabled={props.disabled}
+              className={props.allowCustomValue ? props.className : undefined}
+            />
+          }
           onBlur={props.onBlur}
-          onKeyDown={props.onKeyDown}
+          onKeyDown={(event) => {
+            if (
+              props.allowCustomValue &&
+              open &&
+              event.key === 'Enter' &&
+              !event.nativeEvent.isComposing
+            ) {
+              // Let Base UI select a highlighted item before a caller's
+              // Enter handler can submit the enclosing form or filter.
+              if (highlighted.current) return
+              const value = event.currentTarget.value.trim()
+              if (value) {
+                event.preventDefault()
+                event.preventBaseUIHandler()
+                props.onValueChange?.(value)
+                setOpen(false)
+                setSearch('')
+                setSearchEdited(false)
+                return
+              }
+            }
+            props.onKeyDown?.(event)
+          }}
           onFocus={() => {
             // Dialog autofocus should not expand a select-style combobox.
-            if (props.openOnFocus) setOpen(true)
+            if (props.openOnFocus ?? props.allowCustomValue) setOpen(true)
           }}
           aria-label={props['aria-label']}
           aria-labelledby={props['aria-labelledby']}
@@ -158,7 +189,7 @@ function OptionCombobox(props: LegacyComboboxProps) {
           )}
         </ComboboxInput>
       </div>
-      <ComboboxContent anchor={anchor}>
+      <ComboboxContent anchor={anchor} className={props.popupClassName}>
         <ComboboxEmpty>
           {props.emptyText ?? t('No results found')}
         </ComboboxEmpty>

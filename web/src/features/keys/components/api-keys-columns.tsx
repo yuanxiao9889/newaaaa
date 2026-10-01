@@ -1,4 +1,3 @@
-import { formatQuota } from '@/lib/format'
 /*
 Copyright (C) 2023-2026 QuantumNous
 
@@ -19,6 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { useQuery } from '@tanstack/react-query'
 import type { ColumnDef } from '@tanstack/react-table'
+import { useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { StatusBadge } from '@/components/status-badge'
@@ -33,6 +33,7 @@ import { useMediaQuery } from '@/hooks'
 import { toIntlLocale } from '@/i18n/languages'
 import { getUserGroups } from '@/lib/api'
 import { getCurrencyDisplay } from '@/lib/currency'
+import { formatQuota } from '@/lib/format'
 import { requireServerSuccess } from '@/lib/server-error-message'
 import { useSystemConfigStore } from '@/stores/system-config-store'
 
@@ -57,6 +58,7 @@ interface ApiKeysColumnsOptions {
   isUsageError?: boolean
 }
 
+const EMPTY_GROUP_RATIOS: Record<string, number | string> = {}
 
 function useGroupRatios(): Record<string, number | string> {
   const { data } = useQuery({
@@ -75,7 +77,7 @@ function useGroupRatios(): Record<string, number | string> {
     },
   })
 
-  return data ?? {}
+  return data ?? EMPTY_GROUP_RATIOS
 }
 
 export function useApiKeysColumns(
@@ -83,208 +85,232 @@ export function useApiKeysColumns(
   options: ApiKeysColumnsOptions = {}
 ): ColumnDef<ApiKey>[] {
   const { t, i18n } = useTranslation()
-  useSystemConfigStore((state) => state.config.currency)
+  const currencyConfig = useSystemConfigStore((state) => state.config.currency)
   const { meta: currency } = getCurrencyDisplay()
   const quotaUnit = currency.kind === 'tokens' ? t('Tokens') : currency.symbol
   const groupRatios = useGroupRatios()
   const shouldReduceMotion = useMediaQuery('(prefers-reduced-motion: reduce)')
   const locale = toIntlLocale(i18n.resolvedLanguage || i18n.language)
   const justNowLabel = t('Just now')
-  return [
-    {
-      id: 'select',
-      header: ({ table }) => (
-        <Checkbox
-          checked={table.getIsAllPageRowsSelected()}
-          indeterminate={table.getIsSomePageRowsSelected()}
-          onCheckedChange={(value) => table.toggleAllPageRowsSelected(!!value)}
-          aria-label={t('Select all API keys on this page')}
-          className='translate-y-[2px]'
-        />
-      ),
-      cell: ({ row }) => (
-        <Checkbox
-          checked={row.getIsSelected()}
-          onCheckedChange={(value) => row.toggleSelected(!!value)}
-          aria-label={t('Select API key {{name}}', { name: row.original.name })}
-          className='translate-y-[2px]'
-        />
-      ),
-      enableSorting: false,
-      enableHiding: false,
-      size: 40,
-    },
-    {
-      accessorKey: 'name',
-      header: t('Name'),
-      cell: ({ row }) => (
-        <span className='font-medium'>{row.getValue('name')}</span>
-      ),
-      size: 180,
-      meta: { mobileTitle: true },
-    },
-    {
-      accessorKey: 'status',
-      header: t('Status'),
-      cell: ({ row }) => {
-        const statusConfig = API_KEY_STATUSES[row.getValue('status') as number]
-        if (!statusConfig) return null
-        return (
-          <StatusBadge
-            label={t(statusConfig.label)}
-            variant={statusConfig.variant}
-            copyable={false}
-            className='-ml-1.5'
+  return useMemo<ColumnDef<ApiKey>[]>(
+    () => [
+      {
+        id: 'select',
+        header: ({ table }) => (
+          <Checkbox
+            checked={table.getIsAllPageRowsSelected()}
+            indeterminate={table.getIsSomePageRowsSelected()}
+            onCheckedChange={(value) =>
+              table.toggleAllPageRowsSelected(!!value)
+            }
+            aria-label={t('Select all API keys on this page')}
+            className='translate-y-[2px]'
           />
-        )
-      },
-      filterFn: (row, id, value) => value.includes(String(row.getValue(id))),
-      size: 120,
-      meta: { mobileBadge: true },
-    },
-    {
-      id: 'key',
-      accessorKey: 'key',
-      header: t('API Key'),
-      cell: ({ row }) => <ApiKeyCell apiKey={row.original} />,
-      enableSorting: false,
-      size: 260,
-    },
-    {
-      id: 'quota',
-      accessorKey: 'remain_quota',
-      header: `${t('Quota')} (${quotaUnit})`,
-      cell: ({ row }) => <ApiKeyQuotaCell apiKey={row.original} now={now} />,
-      size: 260,
-      minSize: 260,
-    },
-    {
-      id: 'usage',
-      header: t('Settled usage (selected period)'),
-      cell: ({ row }) => {
-        if (options.isUsageLoading) {
-          return <Skeleton className='h-5 w-24' />
-        }
-        if (options.isUsageError) {
-          return <span className='text-muted-foreground'>—</span>
-        }
-
-        const stat = options.usageByTokenId?.[row.original.id]
-        const quota = stat?.quota ?? 0
-
-        return (
-          <Tooltip>
-            <TooltipTrigger
-              render={
-                <span className='block w-[120px] font-medium tabular-nums' />
-              }
-            >
-              {formatQuota(quota)}
-            </TooltipTrigger>
-            <TooltipContent>
-              <div className='flex flex-col gap-1 text-xs'>
-                <div>
-                  {t('Settled usage (selected period)')}: {formatQuota(quota)}
-                </div>
-                <div>
-                  {t('Used:')} {formatQuota(stat?.consume_quota ?? 0)}
-                </div>
-                <div>
-                  {t('Refunded')}: {formatQuota(stat?.refund_quota ?? 0)}
-                </div>
-                <div>
-                  {t('Pre-consume rollback')}:
-                  {formatQuota(stat?.rollback_quota ?? 0)}
-                </div>
-              </div>
-            </TooltipContent>
-          </Tooltip>
-        )
-      },
-      size: 140,
-      meta: { mobileHidden: true },
-    },
-    {
-      accessorKey: 'group',
-      header: t('Group'),
-      cell: ({ row }) => {
-        const apiKey = row.original
-        const group = row.getValue('group') as string
-        return (
-          <ApiKeyGroupCell
-            group={group}
-            ratio={groupRatios[group]}
-            crossGroupRetry={apiKey.cross_group_retry}
-            shouldReduceMotion={shouldReduceMotion}
+        ),
+        cell: ({ row }) => (
+          <Checkbox
+            checked={row.getIsSelected()}
+            onCheckedChange={(value) => row.toggleSelected(!!value)}
+            aria-label={t('Select API key {{name}}', {
+              name: row.original.name,
+            })}
+            className='translate-y-[2px]'
           />
-        )
+        ),
+        enableSorting: false,
+        enableHiding: false,
+        size: 40,
       },
-      size: 220,
-      meta: { mobileHidden: true },
-    },
-    {
-      id: 'model_limits',
-      accessorKey: 'model_limits',
-      header: t('Models'),
-      cell: ({ row }) => <ModelLimitsCell apiKey={row.original} />,
-      enableSorting: false,
-      size: 160,
-      meta: { mobileHidden: true },
-    },
-    {
-      id: 'allow_ips',
-      accessorKey: 'allow_ips',
-      header: t('IP Restriction'),
-      cell: ({ row }) => <IpRestrictionsCell apiKey={row.original} />,
-      enableSorting: false,
-      size: 160,
-      meta: { mobileHidden: true },
-    },
-    {
-      id: 'activity_time',
-      accessorKey: 'created_time',
-      header: t('Time'),
-      cell: ({ row }) => <ApiKeyActivityCell apiKey={row.original} now={now} />,
-      size: 220,
-      meta: { mobileHidden: true },
-    },
-    {
-      accessorKey: 'expired_time',
-      header: t('Expires'),
-      cell: ({ row }) => {
-        const expiredTime = row.getValue('expired_time') as number
-        if (expiredTime === -1) {
+      {
+        accessorKey: 'name',
+        header: t('Name'),
+        cell: ({ row }) => (
+          <span className='font-medium'>{row.getValue('name')}</span>
+        ),
+        size: 180,
+        meta: { mobileTitle: true },
+      },
+      {
+        accessorKey: 'status',
+        header: t('Status'),
+        cell: ({ row }) => {
+          const statusConfig =
+            API_KEY_STATUSES[row.getValue('status') as number]
+          if (!statusConfig) return null
           return (
             <StatusBadge
-              label={t('Never')}
-              variant='neutral'
+              label={t(statusConfig.label)}
+              variant={statusConfig.variant}
               copyable={false}
               className='-ml-1.5'
             />
           )
-        }
-        return (
-          <ApiKeyTimestampCell
-            timestamp={expiredTime}
-            now={now}
-            locale={locale}
-            justNowLabel={justNowLabel}
-            className={
-              expiredTime * 1000 <= now
-                ? 'text-destructive'
-                : 'text-muted-foreground'
-            }
-          />
-        )
+        },
+        filterFn: (row, id, value) => value.includes(String(row.getValue(id))),
+        size: 120,
+        meta: { mobileBadge: true },
       },
-      size: 180,
-      meta: { mobileHidden: true },
-    },
-    {
-      id: 'actions',
-      header: () => t('Actions'),
-      cell: DataTableRowActions,
-      meta: { pinned: 'right' as const },
-    },
-  ]
+      {
+        id: 'key',
+        accessorKey: 'key',
+        header: t('API Key'),
+        cell: ({ row }) => <ApiKeyCell apiKey={row.original} />,
+        enableSorting: false,
+        size: 260,
+      },
+      {
+        id: 'quota',
+        accessorKey: 'remain_quota',
+        header: `${t('Quota')} (${quotaUnit})`,
+        cell: ({ row }) => <ApiKeyQuotaCell apiKey={row.original} now={now} />,
+        size: 260,
+        minSize: 260,
+      },
+      {
+        id: 'usage',
+        header: t('Settled usage (selected period)'),
+        cell: ({ row }) => {
+          if (options.isUsageLoading) {
+            return <Skeleton className='h-5 w-24' />
+          }
+          if (options.isUsageError) {
+            return <span className='text-muted-foreground'>—</span>
+          }
+
+          const stat = options.usageByTokenId?.[row.original.id]
+          const quota = stat?.quota ?? 0
+
+          return (
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <span className='block w-[120px] font-medium tabular-nums' />
+                }
+              >
+                {formatQuota(quota)}
+              </TooltipTrigger>
+              <TooltipContent>
+                <div className='flex flex-col gap-1 text-xs'>
+                  <div>
+                    {t('Settled usage (selected period)')}: {formatQuota(quota)}
+                  </div>
+                  <div>
+                    {t('Used:')} {formatQuota(stat?.consume_quota ?? 0)}
+                  </div>
+                  <div>
+                    {t('Refunded')}: {formatQuota(stat?.refund_quota ?? 0)}
+                  </div>
+                  <div>
+                    {t('Pre-consume rollback')}:
+                    {formatQuota(stat?.rollback_quota ?? 0)}
+                  </div>
+                </div>
+              </TooltipContent>
+            </Tooltip>
+          )
+        },
+        size: 140,
+        meta: { mobileHidden: true },
+      },
+      {
+        accessorKey: 'group',
+        header: t('Group'),
+        cell: ({ row }) => {
+          const apiKey = row.original
+          const group = row.getValue('group') as string
+          return (
+            <ApiKeyGroupCell
+              group={group}
+              ratio={groupRatios[group]}
+              crossGroupRetry={apiKey.cross_group_retry}
+              shouldReduceMotion={shouldReduceMotion}
+            />
+          )
+        },
+        size: 220,
+        meta: { mobileHidden: true },
+      },
+      {
+        id: 'model_limits',
+        accessorKey: 'model_limits',
+        header: t('Models'),
+        cell: ({ row }) => <ModelLimitsCell apiKey={row.original} />,
+        enableSorting: false,
+        size: 160,
+        meta: { mobileHidden: true },
+      },
+      {
+        id: 'allow_ips',
+        accessorKey: 'allow_ips',
+        header: t('IP Restriction'),
+        cell: ({ row }) => <IpRestrictionsCell apiKey={row.original} />,
+        enableSorting: false,
+        size: 160,
+        meta: { mobileHidden: true },
+      },
+      {
+        id: 'activity_time',
+        accessorKey: 'created_time',
+        header: t('Time'),
+        cell: ({ row }) => (
+          <ApiKeyActivityCell apiKey={row.original} now={now} />
+        ),
+        size: 220,
+        meta: { mobileHidden: true },
+      },
+      {
+        accessorKey: 'expired_time',
+        header: t('Expires'),
+        cell: ({ row }) => {
+          const expiredTime = row.getValue('expired_time') as number
+          if (expiredTime === -1) {
+            return (
+              <StatusBadge
+                label={t('Never')}
+                variant='neutral'
+                copyable={false}
+                className='-ml-1.5'
+              />
+            )
+          }
+          return (
+            <ApiKeyTimestampCell
+              timestamp={expiredTime}
+              now={now}
+              locale={locale}
+              justNowLabel={justNowLabel}
+              className={
+                expiredTime * 1000 <= now
+                  ? 'text-destructive'
+                  : 'text-muted-foreground'
+              }
+            />
+          )
+        },
+        size: 180,
+        meta: { mobileHidden: true },
+      },
+      {
+        id: 'actions',
+        header: () => t('Actions'),
+        cell: DataTableRowActions,
+        meta: { pinned: 'right' as const },
+      },
+    ],
+    // formatQuota reads the currency configuration from the store.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [
+      t,
+      quotaUnit,
+      now,
+      groupRatios,
+      shouldReduceMotion,
+      locale,
+      justNowLabel,
+      options.usageByTokenId,
+      options.isUsageLoading,
+      options.isUsageError,
+      currencyConfig,
+    ]
+  )
 }

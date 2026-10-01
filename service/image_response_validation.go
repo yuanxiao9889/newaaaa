@@ -10,7 +10,7 @@ import (
 
 func ValidateOpenAIImageResponseForBilling(body []byte) error {
 	var payload struct {
-		Data  []dto.ImageData `json:"data"`
+		Data  common.RawMessage `json:"data"`
 		Usage *struct {
 			OutputTokens *int `json:"output_tokens"`
 		} `json:"usage"`
@@ -19,8 +19,19 @@ func ValidateOpenAIImageResponseForBilling(body []byte) error {
 		return err
 	}
 
+	var images []dto.ImageData
+	if common.GetJsonType(payload.Data) == "object" {
+		var item dto.ImageData
+		if err := common.Unmarshal(payload.Data, &item); err != nil {
+			return err
+		}
+		images = append(images, item)
+	} else if err := common.Unmarshal(payload.Data, &images); err != nil {
+		return err
+	}
+
 	hasImage := false
-	for _, item := range payload.Data {
+	for _, item := range images {
 		if strings.TrimSpace(item.Url) != "" || strings.TrimSpace(item.B64Json) != "" {
 			hasImage = true
 			break

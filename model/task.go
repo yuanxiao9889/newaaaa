@@ -122,6 +122,11 @@ type TaskPrivateData struct {
 	PluginState json.RawMessage `json:"plugin_state,omitempty"`
 	// PollFailures counts consecutive unrecognized or transient poll outcomes.
 	PollFailures int `json:"poll_failures,omitempty"`
+	// ResultDiscarded marks an immediate terminal result whose submit route
+	// declared retainResult: false. The upstream snapshot was never written
+	// and every retrieval surface treats the task as not found. The zero
+	// value keeps historical rows retained and retrievable.
+	ResultDiscarded bool `json:"result_discarded,omitempty"`
 }
 
 // AsyncImageRetryState keeps the original client request separate from the
@@ -268,6 +273,12 @@ func (m Properties) Value() (driver.Value, error) {
 	return string(b), nil
 }
 
+// ResultRetrievable reports whether retrieval surfaces (native query routes,
+// protocol retrieve endpoints, artifact projection) may serve this task.
+func (t *Task) ResultRetrievable() bool {
+	return !t.PrivateData.ResultDiscarded
+}
+
 // GetUpstreamTaskID 获取上游真实 task ID（用于与 provider 通信）
 // 旧数据没有 UpstreamTaskID 时，TaskID 本身就是上游 ID
 func (t *Task) GetUpstreamTaskID() string {
@@ -325,7 +336,8 @@ func InitTask(platform constant.TaskPlatform, relayInfo *commonRelay.RelayInfo) 
 		if relayInfo.ChannelMeta != nil {
 			channelID = relayInfo.ChannelId
 			if relayInfo.ChannelMeta.ChannelType == constant.ChannelTypeGemini ||
-				relayInfo.ChannelMeta.ChannelType == constant.ChannelTypeVertexAi {
+				relayInfo.ChannelMeta.ChannelType == constant.ChannelTypeVertexAi ||
+				relayInfo.ChannelMeta.ChannelType == constant.ChannelTypeNewAPI {
 				privateData.Key = relayInfo.ChannelMeta.ApiKey
 			}
 			if relayInfo.UpstreamModelName != "" {
@@ -518,8 +530,15 @@ func (Task *Task) Insert() error {
 	return Task.InsertWithContext(context.Background())
 }
 
-func (Task *Task) InsertWithContext(ctx context.Context) error {
-	return DB.WithContext(ctx).Create(Task).Error
+// InsertWithContext creates the row. omitColumns are left out of the INSERT
+// (for example "data" when the submit route discards the upstream snapshot)
+// while the in-memory task keeps its values for presentation.
+func (Task *Task) InsertWithContext(ctx context.Context, omitColumns ...string) error {
+	tx := DB.WithContext(ctx)
+	if len(omitColumns) > 0 {
+		tx = tx.Omit(omitColumns...)
+	}
+	return tx.Create(Task).Error
 }
 
 func (s taskSnapshot) Equal(other taskSnapshot) bool {
