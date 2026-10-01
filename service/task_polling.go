@@ -521,7 +521,7 @@ func updateVideoSingleTask(ctx context.Context, adaptor TaskPollingAdaptor, ch *
 			}
 			task.Data = t.Data
 		} else if parseErr != nil {
-			return fmt.Errorf("parseTaskResult failed for task %s: %w", taskId, parseErr)
+			return recordPollFailure(ctx, adaptor, task, snap.Status, pollClassHookError, resp.StatusCode, parseErr.Error())
 		} else {
 			taskResult = &relaycommon.TaskInfo{}
 		}

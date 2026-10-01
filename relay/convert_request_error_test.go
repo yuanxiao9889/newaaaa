@@ -2,6 +2,7 @@ package relay
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -294,23 +295,28 @@ func TestGeminiThinkingControlsConvertBestEffort(t *testing.T) {
 // that classification unchanged instead of wrapping it into a retryable
 // conversion failure that other channels would then be asked to serve.
 func TestImageHelperKeepsAdaptorClassifiedConvertError(t *testing.T) {
-	c, _ := gin.CreateTestContext(httptest.NewRecorder())
-	c.Request = httptest.NewRequest(http.MethodPost, "/v1/images/generations", strings.NewReader(`{"model":"wanx-style-repaint-v1","prompt":"a cat"}`))
-	c.Request.Header.Set("Content-Type", "application/json")
-	common.SetContextKey(c, constant.ContextKeyChannelType, constant.ChannelTypeAli)
-	common.SetContextKey(c, constant.ContextKeyChannelBaseUrl, "https://dashscope.invalid")
-	request, err := helper.GetAndValidOpenAIImageRequest(c, relayconstant.RelayModeImagesGenerations)
-	require.NoError(t, err)
-	info := &relaycommon.RelayInfo{Request: request, OriginModelName: "wanx-style-repaint-v1", RelayMode: relayconstant.RelayModeImagesGenerations,
-		RequestURLPath: c.Request.URL.Path, Billing: &imageReservation{limit: 500000},
-		PriceData: hosttypes.PriceData{UsePrice: true, ModelPrice: 0.04, GroupRatioInfo: hosttypes.GroupRatioInfo{GroupRatio: 1}},
+	for _, passthrough := range []bool{false, true} {
+		t.Run(fmt.Sprintf("passthrough_%t", passthrough), func(t *testing.T) {
+			c, _ := gin.CreateTestContext(httptest.NewRecorder())
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/images/generations", strings.NewReader(`{"model":"wanx-style-repaint-v1","prompt":"a cat"}`))
+			c.Request.Header.Set("Content-Type", "application/json")
+			common.SetContextKey(c, constant.ContextKeyChannelType, constant.ChannelTypeAli)
+			common.SetContextKey(c, constant.ContextKeyChannelBaseUrl, "https://dashscope.invalid")
+			common.SetContextKey(c, constant.ContextKeyChannelSetting, dto.ChannelSettings{PassThroughBodyEnabled: passthrough})
+			request, err := helper.GetAndValidOpenAIImageRequest(c, relayconstant.RelayModeImagesGenerations)
+			require.NoError(t, err)
+			info := &relaycommon.RelayInfo{Request: request, OriginModelName: "wanx-style-repaint-v1", RelayMode: relayconstant.RelayModeImagesGenerations,
+				RequestURLPath: c.Request.URL.Path, Billing: &imageReservation{limit: 500000},
+				PriceData: hosttypes.PriceData{UsePrice: true, ModelPrice: 0.04, GroupRatioInfo: hosttypes.GroupRatioInfo{GroupRatio: 1}},
+			}
+
+			apiErr := ImageHelper(c, info)
+
+			require.NotNil(t, apiErr)
+			assert.Equal(t, http.StatusBadRequest, apiErr.StatusCode)
+			assert.Equal(t, types.ErrorCodeInvalidRequest, apiErr.GetErrorCode())
+			assert.True(t, types.IsSkipRetryError(apiErr), "other channels must not be asked to serve the same name")
+			assert.Contains(t, apiErr.Error(), "plugin")
+		})
 	}
-
-	apiErr := ImageHelper(c, info)
-
-	require.NotNil(t, apiErr)
-	assert.Equal(t, http.StatusBadRequest, apiErr.StatusCode)
-	assert.Equal(t, types.ErrorCodeInvalidRequest, apiErr.GetErrorCode())
-	assert.True(t, types.IsSkipRetryError(apiErr), "other channels must not be asked to serve the same name")
-	assert.Contains(t, apiErr.Error(), "not served by the alibaba task plugin")
 }

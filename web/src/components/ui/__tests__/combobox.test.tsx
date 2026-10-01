@@ -48,6 +48,48 @@ function Fixture() {
   )
 }
 
+function CustomValueFixture() {
+  const [value, setValue] = useState('gemini')
+  return (
+    <>
+      <Combobox
+        options={options}
+        value={value}
+        onValueChange={(next) => setValue(next ?? '')}
+        allowCustomValue
+        aria-label='Custom provider'
+      />
+      <output aria-label='Provider key'>{value}</output>
+    </>
+  )
+}
+
+describe('custom values', () => {
+  it('preserves the selected key when confirming an unchanged display label', async () => {
+    render(<CustomValueFixture />)
+    const user = userEvent.setup()
+    const input = screen.getByRole('combobox', { name: 'Custom provider' })
+    expect(input).toHaveValue('Google')
+    await user.tab()
+    expect(input).toHaveValue('gemini')
+    await user.keyboard('{Enter}')
+    expect(screen.getByLabelText('Provider key')).toHaveTextContent('gemini')
+    expect(input).toHaveAttribute('aria-expanded', 'false')
+  })
+
+  it('edits the selected key instead of appending to its translated display label', async () => {
+    render(<CustomValueFixture />)
+    const user = userEvent.setup()
+    const input = screen.getByRole('combobox', { name: 'Custom provider' })
+    await user.click(input)
+    await user.keyboard('{End}-custom{Enter}')
+    expect(screen.getByLabelText('Provider key')).toHaveTextContent(
+      'gemini-custom'
+    )
+    expect(input).toHaveValue('gemini-custom')
+  })
+})
+
 describe('searchable single selection', () => {
   it.each(['dialog', 'sheet'] as const)(
     'keeps the options closed when a %s autofocuses the input, then opens on click',

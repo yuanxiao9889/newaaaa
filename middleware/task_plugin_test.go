@@ -921,6 +921,69 @@ func TestPrepareTaskPluginEndpointExposesIndexedRefsForRepeatedImageFiles(t *tes
 	assert.True(t, reachedRelay, "an unclaimed image model keeps the built-in relay")
 }
 
+func TestTaskPluginImageEndpointPreservesInternalAsyncQueue(t *testing.T) {
+	common.OptionMapRWMutex.Lock()
+	originalOptions := common.OptionMap
+	common.OptionMap = map[string]string{}
+	common.OptionMapRWMutex.Unlock()
+	t.Cleanup(func() {
+		common.OptionMapRWMutex.Lock()
+		common.OptionMap = originalOptions
+		common.OptionMapRWMutex.Unlock()
+	})
+	for _, endpoint := range []string{"/v1/images/generations", "/v1/images/edits"} {
+		t.Run(endpoint, func(t *testing.T) {
+			const key = "endpoint-internal-image-test"
+			_, err := jsplugin.DefaultRegistry.Register(taskProtocolPluginSource(
+				key, "1.0.0", `["image-model"]`, endpoint,
+				`return {model: ctx.model, requestBody: ctx.body.value};`,
+			), jsplugin.Options{})
+			require.NoError(t, err)
+			t.Cleanup(func() { require.NoError(t, jsplugin.DefaultRegistry.Unregister(key)) })
+			for _, tc := range []struct {
+				name, enabled, query string
+				wantPinned           bool
+			}{
+				{"local async", "true", "?async=true", false},
+				{"local async numeric", "true", "?async=1", false},
+				{"queue disabled", "false", "?async=true", true},
+				{"synchronous", "true", "", true},
+				{"explicit synchronous", "true", "?async=false", true},
+				{"invalid async", "true", "?async=invalid", true},
+			} {
+				t.Run(tc.name, func(t *testing.T) {
+					common.OptionMapRWMutex.Lock()
+					common.OptionMap[common.AsyncImageInternalTaskEnabledOptionKey] = tc.enabled
+					common.OptionMapRWMutex.Unlock()
+					const body = `{"model":"image-model","prompt":"a cat","n":1}`
+					router := gin.New()
+					reached := false
+					router.POST(endpoint, PinTaskPluginEndpoint(), PrepareTaskPluginEndpoint(), func(c *gin.Context) {
+						reached = true
+						_, pinned := c.Get(jsplugin.ContextKeyPinnedEndpoint)
+						assert.Equal(t, tc.wantPinned, pinned)
+						if !tc.wantPinned {
+							assert.Empty(t, c.GetString("expected_task_plugin_key"))
+							_, decoded := c.Get("task_request")
+							assert.False(t, decoded, "the worker must receive the original image request")
+							data, err := io.ReadAll(c.Request.Body)
+							require.NoError(t, err)
+							assert.JSONEq(t, body, string(data))
+						}
+						c.Status(http.StatusNoContent)
+					})
+					request := httptest.NewRequest(http.MethodPost, endpoint+tc.query, strings.NewReader(body))
+					request.Header.Set("Content-Type", "application/json")
+					recorder := httptest.NewRecorder()
+					router.ServeHTTP(recorder, request)
+					assert.True(t, reached)
+					assert.Equal(t, http.StatusNoContent, recorder.Code, recorder.Body.String())
+				})
+			}
+		})
+	}
+}
+
 func TestVideoGenerationsIsNotClaimedByOpenAIVideoProtocol(t *testing.T) {
 	const key = "endpoint-video-gen-test"
 	_, err := jsplugin.DefaultRegistry.Register(taskProtocolPluginSource(

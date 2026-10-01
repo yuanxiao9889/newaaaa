@@ -3,8 +3,11 @@ package service
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	"net/http"
+	"net/url"
+	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -18,8 +21,12 @@ import (
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/bytedance/gopkg/util/gopool"
+	mysqldriver "github.com/go-sql-driver/mysql"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gorm.io/driver/mysql"
+	"gorm.io/driver/postgres"
+	"gorm.io/gorm"
 )
 
 type taskPollingFetchAdaptor struct {
@@ -829,9 +836,11 @@ func (a *scriptedBatchPollingAdaptor) ParseBatchResult([]*model.Task, *http.Resp
 }
 
 func TestUpdateVideoSingleTaskPollClassification(t *testing.T) {
+	setupTaskPollingRegressionDB(t)
 	testCases := []struct {
 		name          string
 		statusCode    int
+		body          []byte
 		fetchErr      error
 		parse         *relaycommon.TaskInfo
 		parseErr      error
@@ -869,6 +878,33 @@ func TestUpdateVideoSingleTaskPollClassification(t *testing.T) {
 			wantFailures:  3,
 			wantRefund:    true,
 			wantReason:    "poll failed: transient (HTTP 429)",
+		},
+		{
+			name:          "hook error increments without changing status",
+			statusCode:    http.StatusOK,
+			parseErr:      errors.New("malformed provider response"),
+			wantStatus:    model.TaskStatusInProgress,
+			wantFailures:  1,
+			wantUnchanged: true,
+		},
+		{
+			name:          "hook error reaches threshold and refunds",
+			statusCode:    http.StatusOK,
+			parseErr:      errors.New("malformed provider response"),
+			priorFailures: 2,
+			maxFailures:   3,
+			wantStatus:    model.TaskStatusFailure,
+			wantFailures:  3,
+			wantRefund:    true,
+			wantReason:    "poll failed: hook_error",
+		},
+		{
+			name:          "legacy gateway envelope survives a hook error",
+			statusCode:    http.StatusOK,
+			body:          []byte(`{"code":"success","data":{"task_id":"upstream_poll_class","status":"IN_PROGRESS","progress":"40%"}}`),
+			parseErr:      errors.New("unrecognized provider envelope"),
+			priorFailures: 2,
+			wantStatus:    model.TaskStatusInProgress,
 		},
 		{
 			name:          "UNKNOWN increments",
@@ -939,7 +975,7 @@ func TestUpdateVideoSingleTaskPollClassification(t *testing.T) {
 			}
 			require.NoError(t, model.DB.Create(task).Error)
 
-			adaptor := &scriptedPollingAdaptor{statusCode: testCase.statusCode, fetchErr: testCase.fetchErr, parse: testCase.parse, parseErr: testCase.parseErr}
+			adaptor := &scriptedPollingAdaptor{statusCode: testCase.statusCode, body: testCase.body, fetchErr: testCase.fetchErr, parse: testCase.parse, parseErr: testCase.parseErr}
 			require.NoError(t, updateVideoSingleTask(context.Background(), adaptor, ch, task.GetUpstreamTaskID(), map[string]*model.Task{
 				task.GetUpstreamTaskID(): task,
 			}))
@@ -970,6 +1006,58 @@ func TestUpdateVideoSingleTaskPollClassification(t *testing.T) {
 			}
 		})
 	}
+}
+
+// External runs use fresh, dedicated task_poll_test databases; normal unit
+// runs keep the package's SQLite fixture.
+func setupTaskPollingRegressionDB(t *testing.T) {
+	t.Helper()
+	dialect := os.Getenv("TASK_POLL_TEST_DIALECT")
+	if dialect == "" || dialect == "sqlite" {
+		return
+	}
+	require.Contains(t, []string{"mysql", "postgres"}, dialect)
+	var databases []*gorm.DB
+	for _, env := range []string{"TASK_POLL_TEST_DSN", "TASK_POLL_TEST_LOG_DSN"} {
+		dsn := os.Getenv(env)
+		require.NotEmpty(t, dsn, env)
+		var driver gorm.Dialector
+		if dialect == "mysql" {
+			config, err := mysqldriver.ParseDSN(dsn)
+			require.NoError(t, err)
+			require.Contains(t, config.DBName, "task_poll_test", "use a dedicated regression database")
+			driver = mysql.Open(dsn)
+		} else {
+			parsed, err := url.Parse(dsn)
+			require.NoError(t, err)
+			require.Contains(t, parsed.Path, "task_poll_test", "use a dedicated regression database")
+			driver = postgres.New(postgres.Config{DSN: dsn, PreferSimpleProtocol: true})
+		}
+		db, err := gorm.Open(driver, &gorm.Config{})
+		require.NoError(t, err)
+		sqlDB, err := db.DB()
+		require.NoError(t, err)
+		sqlDB.SetMaxOpenConns(1)
+		t.Cleanup(func() { require.NoError(t, sqlDB.Close()) })
+		databases = append(databases, db)
+	}
+	previousDB, previousLogDB := model.DB, model.LOG_DB
+	previousMainType, previousLogType := common.MainDatabaseType(), common.LogDatabaseType()
+	model.DB, model.LOG_DB = databases[0], databases[1]
+	databaseType := common.DatabaseTypeMySQL
+	if dialect == "postgres" {
+		databaseType = common.DatabaseTypePostgreSQL
+	}
+	common.SetDatabaseTypes(databaseType, databaseType)
+	t.Cleanup(func() {
+		model.DB, model.LOG_DB = previousDB, previousLogDB
+		common.SetDatabaseTypes(previousMainType, previousLogType)
+	})
+	require.NoError(t, model.DB.AutoMigrate(&model.Task{}, &model.User{}, &model.Token{}, &model.Channel{}, &model.Log{},
+		&model.TopUp{}, &model.QuotaData{}, &model.UserSubscription{}, &model.ProfitCostPrice{},
+		&model.ProfitCostPriceVersion{}, &model.SystemTask{}, &model.SystemTaskLock{}))
+	require.NoError(t, model.LOG_DB.AutoMigrate(&model.Log{}))
+	t.Cleanup(func() { require.NoError(t, databases[1].Where("1 = 1").Delete(&model.Log{}).Error) })
 }
 
 func TestUpdateBatchTasksPollClassification(t *testing.T) {

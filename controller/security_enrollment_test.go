@@ -54,8 +54,11 @@ func setupSecurityEnrollmentTest(t *testing.T) (*model.User, service.AuthIdentit
 		dialect = "sqlite"
 	}
 	dsn := os.Getenv("TEST_" + strings.ToUpper(dialect) + "_DSN")
-	db, _ := newAuditTestDatabase(t, dialect, dsn)
-	logDB, _ := newAuditTestDatabase(t, dialect, dsn)
+	// Security requests use the production SQLite transaction mode. Keep this
+	// opt-in: other fixtures intentionally exercise deferred transaction races.
+	sqliteOptions := []string{"_pragma=busy_timeout(30000)", "_pragma=journal_mode(WAL)", "_txlock=immediate"}
+	db, _ := newAuditTestDatabase(t, dialect, dsn, sqliteOptions...)
+	logDB, _ := newAuditTestDatabase(t, dialect, dsn, sqliteOptions...)
 	db.Logger = logger.Default.LogMode(logger.Silent)
 	logDB.Logger = logger.Default.LogMode(logger.Silent)
 	versionQuery := "SELECT VERSION()"

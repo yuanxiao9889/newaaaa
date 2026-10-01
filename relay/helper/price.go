@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/pkg/billingexpr"
@@ -196,12 +197,22 @@ func ModelPriceHelper(c *gin.Context, info *relaycommon.RelayInfo, promptTokens 
 		}
 	}
 	if request, image := info.Request.(*dto.ImageRequest); image {
-		count, err := request.ImageCount(false)
+		legacyAliImage := UsesLegacyAliImageParameters(c, common.GetContextKeyInt(c, constant.ContextKeyChannelType))
+		count, err := request.ImageCount(legacyAliImage)
 		if err != nil {
 			return hosttypes.PriceData{}, err
 		}
-		if usePrice {
+		if usePrice || legacyAliImage {
 			priceData.AddOtherRatio("n", float64(count))
+		}
+		if legacyAliImage && request.BillingParameters != nil && request.BillingParameters.PromptExtend != nil && *request.BillingParameters.PromptExtend {
+			mapped := &relaycommon.RelayInfo{OriginModelName: info.OriginModelName, ChannelMeta: &relaycommon.ChannelMeta{UpstreamModelName: info.OriginModelName}}
+			if err := ModelMappedHelper(c, mapped, nil); err != nil {
+				return hosttypes.PriceData{}, err
+			}
+			if strings.Contains(mapped.UpstreamModelName, "z-image") {
+				priceData.AddOtherRatio("prompt_extend", common.ZImagePromptExtendMultiplier)
+			}
 		}
 		if !usePrice {
 			quota, err := common.QuotaFromFloatStrict(priceData.ApplyOtherRatiosToFloat(info.ImageQuotaBeforeGroup * groupRatioInfo.GroupRatio))

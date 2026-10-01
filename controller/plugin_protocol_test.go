@@ -15,10 +15,12 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
+	"github.com/QuantumNous/new-api/middleware"
 	"github.com/QuantumNous/new-api/model"
 	pluginruntime "github.com/QuantumNous/new-api/pkg/jsplugin"
 	"github.com/QuantumNous/new-api/relay"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	kitdto "github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
@@ -1660,6 +1662,101 @@ func imageProtocolTestOutcome(info *relaycommon.RelayInfo, status model.TaskStat
 		task.SetData(map[string]any{"images": images})
 	}
 	return &taskSubmissionOutcome{Result: &relay.TaskSubmitResult{}, Task: task, RelayInfo: info}
+}
+
+func TestTaskPluginProtocolUsesSuccessfulRetryProvider(t *testing.T) {
+	for _, protocol := range []string{"responses sync", "responses stream", "images"} {
+		t.Run(protocol, func(t *testing.T) {
+			first := compilePluginProtocolTestEndpoint(t, "first-provider", `
+				export const protocols = {
+					openai_responses: {
+						renderEvents() { throw new Error("failed provider rendered"); },
+						renderFinal() { throw new Error("failed provider rendered"); }
+					},
+					openai_image: {render() { throw new Error("failed provider rendered"); }}
+				};
+			`)
+			second := compilePluginProtocolTestEndpoint(t, "successful-provider", `
+				export const protocols = {
+					openai_responses: {
+						renderEvents() { return {events:[{type:"output",data:"successful-provider"}],done:true}; },
+						renderFinal() { return {vendor:"successful-provider"}; }
+					},
+					openai_image: {render() { return {data:[{url:"https://cdn.example/successful-provider.png"}],vendor:"successful-provider"}; }}
+				};
+			`)
+			c, recorder := newPluginProtocolTestContext(protocol == "responses stream", protocol == "responses stream")
+			if protocol == "images" {
+				imageEndpoint := imageProtocolTestEndpoint(t)
+				first.Protocol, first.Operation, first.Model = imageEndpoint.Protocol, imageEndpoint.Operation, imageEndpoint.Model
+				c, recorder = newImageProtocolTestContext("")
+			}
+			first.Candidates = []pluginruntime.ProtocolBinding{
+				{Plugin: first.Plugin, Protocol: first.Protocol, Operation: first.Operation, Model: first.Model},
+				{Plugin: second.Plugin, Protocol: first.Protocol, Operation: first.Operation, Model: first.Model},
+			}
+			c.Set(pluginruntime.ContextKeyPinnedEndpoint, first)
+			c.Set("expected_task_plugin_key", first.Plugin.Meta.Key)
+			submissions := 0
+			deps := pluginProtocolTestDeps()
+			deps.submit = func(c *gin.Context, info *relaycommon.RelayInfo) (*taskSubmissionOutcome, *dto.TaskError) {
+				submissions++
+				channel := &model.Channel{Id: 2, Type: constant.ChannelTypeTaskPlugin, Key: "test-key", Status: common.ChannelStatusEnabled}
+				channel.SetSetting(kitdto.ChannelSettings{TaskPluginKey: second.Plugin.Meta.Key})
+				require.Nil(t, middleware.SetupContextForSelectedChannel(c, channel, first.Model))
+				outcome := pluginProtocolTestOutcome(info, second.Plugin.Meta.Key, "task_successful_retry")
+				outcome.Task.Status = model.TaskStatusSuccess
+				return outcome, nil
+			}
+			deps.loadTask = func(_ context.Context, _ int, platform constant.TaskPlatform, taskID string) (*model.Task, bool, error) {
+				assert.Equal(t, constant.TaskPlatform(second.Plugin.Meta.Key), platform)
+				return &model.Task{TaskID: taskID, Platform: platform, UserId: 71, Status: model.TaskStatusSuccess}, true, nil
+			}
+			if protocol == "images" {
+				serveTaskPluginImageProtocol(c, first, deps)
+			} else {
+				serveTaskPluginProtocol(c, first, deps)
+			}
+			assert.Equal(t, 1, submissions, "presenting the successful provider must not submit again")
+			require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+			assert.Contains(t, recorder.Body.String(), "successful-provider")
+			assert.NotContains(t, recorder.Body.String(), "task_protocol_error")
+		})
+	}
+}
+
+func TestTaskPluginProtocolRejectsChangedSubmissionIdentity(t *testing.T) {
+	for _, changed := range []string{"generation", "protocol", "model"} {
+		t.Run(changed, func(t *testing.T) {
+			pinned := compilePluginProtocolTestEndpoint(t, "frozen-provider", `
+				export const protocols = {openai_responses: {
+					renderFinal() { return {vendor:"must-not-render"}; }
+				}};
+			`)
+			c, recorder := newPluginProtocolTestContext(false, false)
+			deps := pluginProtocolTestDeps()
+			deps.submit = func(c *gin.Context, info *relaycommon.RelayInfo) (*taskSubmissionOutcome, *dto.TaskError) {
+				selected := pinned
+				switch changed {
+				case "generation":
+					selected.Generation = &pluginruntime.RoutingGeneration{Number: pinned.Generation.Number + 1}
+				case "protocol":
+					selected.Protocol = pluginruntime.ProtocolOpenAIImage
+				case "model":
+					selected.Model = "different-model"
+				}
+				c.Set(pluginruntime.ContextKeyPinnedEndpoint, selected)
+				return pluginProtocolTestOutcome(info, pinned.Plugin.Meta.Key, "task_changed_identity"), nil
+			}
+			deps.loadTask = func(_ context.Context, _ int, platform constant.TaskPlatform, taskID string) (*model.Task, bool, error) {
+				return &model.Task{TaskID: taskID, Platform: platform, UserId: 71, Status: model.TaskStatusSuccess}, true, nil
+			}
+			serveTaskPluginProtocol(c, pinned, deps)
+			require.Equal(t, http.StatusInternalServerError, recorder.Code, recorder.Body.String())
+			assert.Contains(t, recorder.Body.String(), "task_protocol_error")
+			assert.NotContains(t, recorder.Body.String(), "must-not-render")
+		})
+	}
 }
 
 // The OpenAI Images protocol answers synchronously: an immediate result is

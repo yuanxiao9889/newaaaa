@@ -828,16 +828,20 @@ func (releasedAuditLog) TableName() string { return "logs" }
 
 // External tests create a new database per case on a loopback-only disposable
 // instance. They never drop databases or tables supplied through an environment variable.
-func newAuditTestDatabase(t *testing.T, kind, dsn string) (*gorm.DB, string) {
+func newAuditTestDatabase(t *testing.T, kind, dsn string, sqliteOptions ...string) (*gorm.DB, string) {
 	t.Helper()
 	if kind == "sqlite" {
 		path := t.TempDir() + "/audit.db"
-		db, err := gorm.Open(sqlite.Open(path), &gorm.Config{})
+		sqliteDSN := path
+		if len(sqliteOptions) > 0 {
+			sqliteDSN += "?" + strings.Join(sqliteOptions, "&")
+		}
+		db, err := gorm.Open(sqlite.Open(sqliteDSN), &gorm.Config{})
 		require.NoError(t, err)
 		connection, err := db.DB()
 		require.NoError(t, err)
 		t.Cleanup(func() { assert.NoError(t, connection.Close()) })
-		return db, path
+		return db, sqliteDSN
 	}
 	require.NotEmpty(t, dsn)
 	name := fmt.Sprintf("newapi_audit_%d", time.Now().UnixNano())

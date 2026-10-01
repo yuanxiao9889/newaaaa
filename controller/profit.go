@@ -3,14 +3,11 @@ package controller
 import (
 	"net/http"
 	"strconv"
-	"strings"
-	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/middleware"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/service"
-	"github.com/gin-contrib/sessions"
 	"github.com/gin-gonic/gin"
 )
 
@@ -136,8 +133,13 @@ func DeleteProfitCostPrice(c *gin.Context) {
 }
 
 func GetProfitPasswordStatus(c *gin.Context) {
+	hash, err := model.GetProfitPasswordHash()
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
 	common.ApiSuccess(c, gin.H{
-		"configured": middleware.ProfitPasswordHash() != "",
+		"configured": hash != "",
 	})
 }
 
@@ -149,21 +151,37 @@ func SetProfitPassword(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
-	password := strings.TrimSpace(req.Password)
-	if password == "" {
-		common.ApiErrorMsg(c, "password is required")
+	if err := common.ValidateNewAccountPassword(req.Password); err != nil {
+		common.ApiError(c, err)
 		return
 	}
-	hash, err := common.Password2Hash(password)
+	previousHash, err := model.GetProfitPasswordHash()
 	if err != nil {
 		common.ApiError(c, err)
 		return
 	}
-	if err := model.UpdateOption(middleware.ProfitVerificationPasswordHashOptionKey, hash); err != nil {
+	if previousHash != "" && !middleware.RequireProfitVerification(c, previousHash) {
+		return
+	}
+	hash, err := common.HashAccountPassword(req.Password)
+	if err != nil {
 		common.ApiError(c, err)
 		return
 	}
-	setProfitVerifiedSession(c)
+	updated, err := model.CompareAndSetProfitPasswordHash(previousHash, hash)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	if !updated {
+		middleware.ClearProfitVerification(c)
+		c.JSON(http.StatusForbidden, gin.H{"success": false, "message": "请输入利润页访问密码", "code": "PROFIT_VERIFICATION_REQUIRED"})
+		return
+	}
+	if err := middleware.MarkProfitVerified(c, hash); err != nil {
+		common.ApiError(c, err)
+		return
+	}
 	common.ApiSuccess(c, gin.H{"configured": true})
 }
 
@@ -175,7 +193,11 @@ func VerifyProfitPassword(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
-	hash := middleware.ProfitPasswordHash()
+	hash, err := model.GetProfitPasswordHash()
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
 	if hash == "" {
 		c.JSON(http.StatusForbidden, gin.H{
 			"success": false,
@@ -191,12 +213,9 @@ func VerifyProfitPassword(c *gin.Context) {
 		})
 		return
 	}
-	setProfitVerifiedSession(c)
+	if err := middleware.MarkProfitVerified(c, hash); err != nil {
+		common.ApiError(c, err)
+		return
+	}
 	common.ApiSuccess(c, gin.H{"verified": true})
-}
-
-func setProfitVerifiedSession(c *gin.Context) {
-	session := sessions.Default(c)
-	session.Set(middleware.ProfitVerificationSessionKey, time.Now().Unix())
-	_ = session.Save()
 }

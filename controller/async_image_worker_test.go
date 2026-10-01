@@ -17,9 +17,11 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -459,6 +461,172 @@ func TestNativeAsyncImageFinalBilling(t *testing.T) {
 			if tc.configured {
 				require.Equal(t, 1, gets)
 			}
+		})
+	}
+}
+
+func TestAliAsyncImageWorkerCompatibility(t *testing.T) {
+	require.NoError(t, i18n.Init())
+	service.InitHttpClient()
+	originalMaxDownload := constant.MaxFileDownloadMB
+	constant.MaxFileDownloadMB = 1
+	t.Cleanup(func() { constant.MaxFileDownloadMB = originalMaxDownload })
+	for _, tc := range []struct {
+		name           string
+		legacySnapshot bool
+		choicesResult  bool
+		n              int
+		parameterN     int
+	}{
+		{name: "queued request", n: 1, parameterN: 1},
+		{name: "legacy snapshot", legacySnapshot: true, n: 1, parameterN: 1},
+		{name: "choices result after text content", choicesResult: true, n: 1, parameterN: 1},
+		{name: "legacy snapshot rejects provider count", legacySnapshot: true, n: 1, parameterN: 2},
+		{name: "legacy snapshot rejects top-level count", legacySnapshot: true, n: 2, parameterN: 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			db := setupAsyncImageWorkerTestDB(t)
+			require.NoError(t, db.AutoMigrate(&model.Channel{}, &model.Ability{}, &model.QuotaData{}))
+			require.NoError(t, db.Where("channel_id = ?", 910).Delete(&model.Ability{}).Error)
+			oldMemory, oldBatch, oldLog := common.MemoryCacheEnabled, common.BatchUpdateEnabled, common.LogConsumeEnabled
+			common.MemoryCacheEnabled, common.BatchUpdateEnabled, common.LogConsumeEnabled = false, false, true
+			t.Cleanup(func() {
+				common.MemoryCacheEnabled, common.BatchUpdateEnabled, common.LogConsumeEnabled = oldMemory, oldBatch, oldLog
+			})
+			t.Setenv("ASYNC_IMAGE_REQUEST_STORAGE_PATH", t.TempDir())
+			t.Setenv("ASYNC_IMAGE_STORAGE_PATH", t.TempDir())
+			require.NoError(t, db.Create(&model.User{Id: 61, Username: "native_billing_test", Quota: 850000, Status: common.UserStatusEnabled}).Error)
+			require.NoError(t, db.Create(&model.Token{Id: 62, UserId: 61, Key: "ali-user-token", RemainQuota: 850000, UsedQuota: 150000, Status: common.TokenStatusEnabled}).Error)
+
+			var imageBytes bytes.Buffer
+			require.NoError(t, png.Encode(&imageBytes, image.NewRGBA(image.Rect(0, 0, 4, 4))))
+			var posts, polls atomic.Int32
+			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/result.png" {
+					w.Header().Set("Content-Type", "image/png")
+					_, _ = w.Write(imageBytes.Bytes())
+					return
+				}
+				assert.Equal(t, "Bearer ali-upstream-key", r.Header.Get("Authorization"))
+				w.Header().Set("Content-Type", "application/json")
+				if r.Method == http.MethodPost {
+					posts.Add(1)
+					assert.Equal(t, "/api/v1/services/aigc/text2image/image-synthesis", r.URL.Path)
+					assert.Equal(t, "enable", r.Header.Get("X-DashScope-Async"))
+					var request struct {
+						Model string `json:"model"`
+						Input struct {
+							Prompt string `json:"prompt"`
+						} `json:"input"`
+						Parameters struct {
+							N int `json:"n"`
+						} `json:"parameters"`
+					}
+					if !assert.NoError(t, common.DecodeJson(r.Body, &request)) {
+						w.WriteHeader(http.StatusBadRequest)
+						return
+					}
+					assert.Equal(t, "wanx2.1-t2i-turbo", request.Model)
+					assert.Equal(t, "fixture", request.Input.Prompt)
+					assert.Equal(t, 1, request.Parameters.N)
+					_, _ = io.WriteString(w, `{"output":{"task_id":"ali-job","task_status":"PENDING"},"request_id":"submit"}`)
+					return
+				}
+				polls.Add(1)
+				assert.Equal(t, http.MethodGet, r.Method)
+				assert.Equal(t, "/api/v1/tasks/ali-job", r.URL.Path)
+				var persisted model.Task
+				if assert.NoError(t, db.Where("channel_id = ?", 910).First(&persisted).Error) {
+					assert.Equal(t, relay.NativeAsyncImageFormat, persisted.PrivateData.RequestRelayFormat)
+					snapshot, err := os.ReadFile(persisted.PrivateData.RequestBodyPath)
+					if assert.NoError(t, err) {
+						assert.Contains(t, string(snapshot), "ali-job")
+						assert.NotContains(t, string(snapshot), "ali-upstream-key")
+					}
+				}
+				if tc.choicesResult {
+					_, _ = fmt.Fprintf(w, `{"output":{"task_id":"ali-job","task_status":"SUCCEEDED","choices":[{"message":{"content":[{"text":"Image generated"},{"image":"http://%s/result.png"}]}}]},"usage":{"image_count":1}}`, r.Host)
+					return
+				}
+				_, _ = fmt.Fprintf(w, `{"output":{"task_id":"ali-job","task_status":"SUCCEEDED","results":[{"url":"http://%s/result.png"}]},"usage":{"image_count":1}}`, r.Host)
+			}))
+			defer upstream.Close()
+			upstreamURL, err := url.Parse(upstream.URL)
+			require.NoError(t, err)
+			fetchSetting := system_setting.GetFetchSetting()
+			originalFetchSetting := *fetchSetting
+			fetchSetting.AllowPrivateIp = true
+			fetchSetting.AllowedPorts = []string{upstreamURL.Port()}
+			t.Cleanup(func() { *fetchSetting = originalFetchSetting })
+			channel := &model.Channel{Id: 910, Name: "ali-native-async", Type: constant.ChannelTypeAli, Key: "ali-upstream-key", Models: "custom-ali-image", Group: "default", Status: common.ChannelStatusEnabled, BaseURL: common.GetPointer(upstream.URL), ModelMapping: common.GetPointer(`{"custom-ali-image":"wanx2.1-t2i-turbo"}`)}
+			require.NoError(t, db.Create(channel).Error)
+			require.NoError(t, channel.AddAbilities(db))
+			recorder := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(recorder)
+			body := fmt.Sprintf(`{"model":"custom-ali-image","prompt":"fixture","size":"1024x1024","n":%d,"parameters":{"n":%d}}`, tc.n, tc.parameterN)
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/images/generations?async=true", strings.NewReader(body))
+			c.Request.Header.Set("Content-Type", "application/json")
+			info := &relaycommon.RelayInfo{UserId: 61, TokenId: 62, UsingGroup: "default", OriginModelName: "custom-ali-image", FinalPreConsumedQuota: 150000, ChannelMeta: &relaycommon.ChannelMeta{ChannelId: 910}}
+			require.Nil(t, relay.SubmitInternalAsyncImageTask(c, info, &dto.ImageRequest{Model: "custom-ali-image", N: common.GetPointer(uint(1))}))
+			common.CleanupBodyStorage(c)
+			require.Equal(t, http.StatusOK, recorder.Code)
+			var response dto.ImageAsyncSubmitResponse
+			require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &response))
+			assert.Equal(t, dto.ImageAsyncStatusSubmitted, response.Status)
+			assert.NotEmpty(t, response.TaskID)
+			assert.Zero(t, posts.Load(), "admission must not wait on the provider")
+
+			var task model.Task
+			require.NoError(t, db.Where("task_id = ?", response.TaskID).First(&task).Error)
+			if tc.legacySnapshot {
+				// Older persisted requests predate retry metadata but must still run.
+				task.PrivateData.ImageRetry = nil
+				require.NoError(t, model.UpdateTaskPrivateData(task.ID, task.PrivateData))
+			}
+			require.True(t, claimInternalAsyncImageTask(&task))
+			require.NoError(t, db.First(&task, task.ID).Error)
+			err = executeInternalAsyncImageTask(context.Background(), &task)
+			if tc.n != 1 || tc.parameterN != 1 {
+				require.Error(t, err)
+				require.NoError(t, db.First(&task, task.ID).Error)
+				assert.Equal(t, model.TaskStatus(model.TaskStatusFailure), task.Status)
+				assert.Equal(t, service.TaskBillingStateRefunded, task.PrivateData.BillingState)
+				assert.Zero(t, posts.Load())
+				assert.Zero(t, polls.Load())
+				var user model.User
+				require.NoError(t, db.First(&user, 61).Error)
+				assert.Equal(t, 1000000, user.Quota)
+				var token model.Token
+				require.NoError(t, db.First(&token, 62).Error)
+				assert.Equal(t, 1000000, token.RemainQuota)
+				var consumes int64
+				require.NoError(t, model.LOG_DB.Model(&model.Log{}).Where("type = ?", model.LogTypeConsume).Count(&consumes).Error)
+				assert.Zero(t, consumes)
+				return
+			}
+			require.NoError(t, err)
+			require.NoError(t, db.First(&task, task.ID).Error)
+			assert.Equal(t, model.TaskStatus(model.TaskStatusSuccess), task.Status)
+			assert.Equal(t, service.TaskBillingStateSettled, task.PrivateData.BillingState)
+			assert.Equal(t, int32(1), posts.Load())
+			assert.Equal(t, int32(1), polls.Load())
+			storedImage, err := os.ReadFile(task.PrivateData.LocalPath)
+			require.NoError(t, err)
+			assert.Equal(t, imageBytes.Bytes(), storedImage)
+			require.NoError(t, service.ConfirmTaskBillingSettled(context.Background(), &task, 150000, "duplicate Ali completion"))
+			var user model.User
+			require.NoError(t, db.First(&user, 61).Error)
+			assert.Equal(t, 850000, user.Quota)
+			var token model.Token
+			require.NoError(t, db.First(&token, 62).Error)
+			assert.Equal(t, 850000, token.RemainQuota)
+			assert.Equal(t, 150000, token.UsedQuota)
+			var consumes int64
+			require.NoError(t, model.LOG_DB.Model(&model.Log{}).Where("type = ?", model.LogTypeConsume).Count(&consumes).Error)
+			assert.EqualValues(t, 1, consumes)
+			_, _, _, _, err = runInternalAsyncImageRelay(context.Background(), &task)
+			require.Error(t, err, "a completed task must not resubmit its original request")
+			assert.Equal(t, int32(1), posts.Load())
 		})
 	}
 }

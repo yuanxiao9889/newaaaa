@@ -324,14 +324,17 @@ func serveTaskPluginProtocol(
 		respondPluginProtocolSubmissionError(c, taskErr)
 		return
 	}
-	if outcome == nil || outcome.Task == nil || outcome.RelayInfo == nil ||
+	selected, selectionValid := submittedTaskPluginEndpoint(c, pinned)
+	if !selectionValid || outcome == nil || outcome.Task == nil || outcome.RelayInfo == nil ||
 		outcome.Task.UserId != relayInfo.UserId ||
-		outcome.Task.Platform != constant.TaskPlatform(pinned.Plugin.Meta.Key) {
+		outcome.Task.Platform != constant.TaskPlatform(selected.Plugin.Meta.Key) {
 		logger.LogError(c, "task protocol submission returned an invalid durable outcome")
 		logger.LogDebug(c, "task_plugin subsystem=protocol event=submission_failed generation=%d plugin=%q reason=invalid_durable_outcome", generation, pluginKey)
 		respondPluginProtocolError(c, http.StatusInternalServerError, "task_protocol_error", "Task protocol request failed")
 		return
 	}
+	pinned = selected
+	pluginKey = pinned.Plugin.Meta.Key
 	logger.LogDebug(
 		c,
 		"task_plugin subsystem=protocol event=submission_durable generation=%d plugin=%q public_task_id=%q status=%q stream=%t",
@@ -390,6 +393,32 @@ func serveTaskPluginProtocol(
 	}
 	logger.LogDebug(c, "task_plugin subsystem=protocol event=observation_enter generation=%d plugin=%q mode=nonstream public_task_id=%q", generation, pluginKey, outcome.Task.TaskID)
 	waitTaskPluginProtocol(c, pinned, protocolRequest, outcome.Task.TaskID, machine, deps)
+}
+
+// submittedTaskPluginEndpoint follows a successful cross-provider retry within
+// the request's frozen candidate set. Observers and renderers must use the
+// provider that actually accepted the task, without resolving a newer registry.
+func submittedTaskPluginEndpoint(c *gin.Context, initial pluginruntime.PinnedEndpoint) (pluginruntime.PinnedEndpoint, bool) {
+	value, exists := c.Get(pluginruntime.ContextKeyPinnedEndpoint)
+	if !exists {
+		return initial, initial.Plugin != nil
+	}
+	selected, ok := value.(pluginruntime.PinnedEndpoint)
+	if !ok || selected.Plugin == nil || selected.Generation != initial.Generation ||
+		selected.Protocol != initial.Protocol || selected.Model != initial.Model ||
+		selected.Operation.Name != initial.Operation.Name || selected.Operation.Path != initial.Operation.Path {
+		return initial, false
+	}
+	if selected.Plugin == initial.Plugin {
+		return selected, true
+	}
+	for _, candidate := range initial.Candidates {
+		if candidate.Plugin == selected.Plugin && candidate.Protocol == selected.Protocol &&
+			candidate.Operation.Name == selected.Operation.Name && candidate.Operation.Path == selected.Operation.Path {
+			return selected, true
+		}
+	}
+	return initial, false
 }
 
 func streamTaskPluginProtocol(

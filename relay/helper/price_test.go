@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/pkg/billingexpr"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relaykit/dto"
@@ -21,6 +22,60 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestModelPriceHelperPreservesLegacyAliAsyncSurcharge(t *testing.T) {
+	savedPrices := ratio_setting.ModelPrice2JSONString()
+	t.Cleanup(func() { require.NoError(t, ratio_setting.UpdateModelPriceByJSONString(savedPrices)) })
+	require.NoError(t, ratio_setting.UpdateModelPriceByJSONString(`{"legacy-async-price-alias":0.01}`))
+	common.OptionMapRWMutex.Lock()
+	previousMap := common.OptionMap
+	if common.OptionMap == nil {
+		common.OptionMap = make(map[string]string)
+	}
+	previous, existed := common.OptionMap[common.AsyncImageInternalTaskEnabledOptionKey]
+	common.OptionMap[common.AsyncImageInternalTaskEnabledOptionKey] = "true"
+	common.OptionMapRWMutex.Unlock()
+	t.Cleanup(func() {
+		common.OptionMapRWMutex.Lock()
+		defer common.OptionMapRWMutex.Unlock()
+		if existed {
+			common.OptionMap[common.AsyncImageInternalTaskEnabledOptionKey] = previous
+		} else {
+			delete(common.OptionMap, common.AsyncImageInternalTaskEnabledOptionKey)
+		}
+		if previousMap == nil {
+			common.OptionMap = nil
+		}
+	})
+	for _, test := range []struct {
+		name, query, mappedModel string
+		channelType              int
+		promptExtend             bool
+		wantQuota                int
+	}{
+		{"legacy Ali enqueue", "?async=true", "z-image-turbo", constant.ChannelTypeAli, true, 10000},
+		{"ordinary Ali plugin", "", "z-image-turbo", constant.ChannelTypeAli, true, 5000},
+		{"other provider queue", "?async=true", "z-image-turbo", constant.ChannelTypeOpenAI, true, 5000},
+		{"other Ali model", "?async=true", "wanx2.1-t2i-turbo", constant.ChannelTypeAli, true, 5000},
+		{"explicit prompt extension off", "?async=true", "z-image-turbo", constant.ChannelTypeAli, false, 5000},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+			ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/images/generations"+test.query, nil)
+			ctx.Set("group", "default")
+			ctx.Set("model_mapping", fmt.Sprintf(`{"legacy-async-price-alias":%q}`, test.mappedModel))
+			common.SetContextKey(ctx, constant.ContextKeyChannelType, test.channelType)
+			request := &dto.ImageRequest{Model: "legacy-async-price-alias", N: common.GetPointer(uint(1)),
+				BillingParameters: &dto.ImageBillingParameters{N: common.GetPointer(uint(1)), PromptExtend: &test.promptExtend}}
+			info := &relaycommon.RelayInfo{OriginModelName: request.Model, Request: request, UserGroup: "default", UsingGroup: "default"}
+			price, err := ModelPriceHelper(ctx, info, 0, &types.TokenCountMeta{})
+			require.NoError(t, err)
+			assert.Equal(t, test.wantQuota, price.QuotaToPreConsume)
+			assert.Equal(t, 0.01, price.ModelPrice, "administrator pricing must remain authoritative")
+			assert.Equal(t, "legacy-async-price-alias", request.Model, "pricing must not mutate the replay model")
+		})
+	}
+}
 
 func TestModelPriceHelperTieredUsesPreloadedRequestInput(t *testing.T) {
 	gin.SetMode(gin.TestMode)

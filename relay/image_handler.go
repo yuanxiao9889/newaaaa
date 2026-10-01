@@ -12,6 +12,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/logger"
+	"github.com/QuantumNous/new-api/relay/channel/ali"
 	"github.com/QuantumNous/new-api/relay/channel/openai"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relay/helper"
@@ -39,6 +40,11 @@ func ImageHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *type
 	if err != nil {
 		return types.NewError(fmt.Errorf("failed to copy request to ImageRequest: %w", err), types.ErrorCodeInvalidRequest, types.ErrOptionWithSkipRetry())
 	}
+	if c.GetBool("async_image_worker") {
+		if validationErr := validateAsyncImageTaskRequest(info, request); validationErr != nil {
+			return validationErr
+		}
+	}
 
 	err = helper.ModelMappedHelper(c, info, request)
 	if err != nil {
@@ -50,6 +56,16 @@ func ImageHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *type
 		return types.NewError(fmt.Errorf("invalid api type: %d", info.ApiType), types.ErrorCodeInvalidApiType, types.ErrOptionWithSkipRetry())
 	}
 	adaptor.Init(info)
+	legacyAliImage := info.ChannelType == constant.ChannelTypeAli && c.GetBool("async_image_worker")
+	var legacyTaskConfig *dto.ImageAdapterTaskConfig
+	if legacyAliImage {
+		// Persisted local image jobs keep their native Ali wire format. Plugin
+		// claims apply to ordinary synchronous requests, not queue replays.
+		aliAdaptor := adaptor.(*ali.Adaptor)
+		aliAdaptor.LegacyAsyncImage = true
+		legacyTaskConfig = aliAdaptor.ImageTaskConfig()
+		request.Extra = imageReq.Extra
+	}
 	imageAdapter := info.ChannelSetting.ImageAdapter
 	adaptImage := imageAdapter.Matches(request.Model)
 	if adaptImage {
@@ -73,7 +89,7 @@ func ImageHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *type
 	if adaptImage && (model_setting.GetGlobalSettings().PassThroughRequestEnabled || info.ChannelSetting.PassThroughBodyEnabled) {
 		return types.NewErrorWithStatusCode(fmt.Errorf("image adapter cannot be combined with request body passthrough"), types.ErrorCodeInvalidRequest, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
 	}
-	imageCount, err := request.ImageCount(false)
+	imageCount, err := request.ImageCount(legacyAliImage)
 	if err != nil {
 		return types.NewErrorWithStatusCode(err, types.ErrorCodeInvalidRequest, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
 	}
@@ -142,18 +158,38 @@ func ImageHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *type
 		// This is a different trust boundary from ingress: channel overrides
 		// and pass-through bodies can change the quantity actually submitted.
 		var outbound struct {
-			N *uint `json:"n"`
+			N          *uint                       `json:"n"`
+			Parameters *dto.ImageBillingParameters `json:"parameters"`
 		}
 		if err := common.Unmarshal(jsonData, &outbound); err != nil {
 			return types.NewErrorWithStatusCode(fmt.Errorf("invalid image billing parameters: %w", err), types.ErrorCodeInvalidRequest, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
 		}
 		quantityRequest := dto.ImageRequest{N: outbound.N}
+		if legacyAliImage {
+			quantityRequest.BillingParameters = outbound.Parameters
+		}
 		if quantityRequest.N == nil {
 			quantityRequest.N = common.GetPointer(uint(imageCount))
 		}
-		imageCount, err = quantityRequest.ImageCount(false)
+		imageCount, err = quantityRequest.ImageCount(legacyAliImage)
 		if err != nil {
 			return types.NewErrorWithStatusCode(err, types.ErrorCodeInvalidRequest, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
+		}
+		if legacyAliImage {
+			if imageCount != 1 {
+				return types.NewErrorWithStatusCode(errors.New("async image tasks only support n=1"), types.ErrorCodeInvalidRequest, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
+			}
+			jsonData, err = sjson.SetBytes(jsonData, "parameters.n", imageCount)
+			if err != nil {
+				return types.NewError(err, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
+			}
+			if info.TieredBillingSnapshot == nil {
+				extensionRatio := 1.0
+				if strings.Contains(info.UpstreamModelName, "z-image") && outbound.Parameters != nil && outbound.Parameters.PromptExtend != nil && *outbound.Parameters.PromptExtend {
+					extensionRatio = common.ZImagePromptExtendMultiplier
+				}
+				info.PriceData.AddOtherRatio("prompt_extend", extensionRatio)
+			}
 		}
 		logger.LogDebug(c, "image request body: %s", jsonData)
 		body, closer, err := relaycommon.NewOutboundJSONBody(jsonData)
@@ -177,12 +213,12 @@ func ImageHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *type
 	if resp != nil {
 		httpResp = resp.(*http.Response)
 		info.IsStream = info.IsStream || strings.HasPrefix(httpResp.Header.Get("Content-Type"), "text/event-stream")
-		if httpResp.StatusCode != http.StatusOK || (adaptImage && imageAdapter.Task != nil) {
+		if httpResp.StatusCode != http.StatusOK || (adaptImage && imageAdapter.Task != nil) || legacyTaskConfig != nil {
 			if httpResp.StatusCode == http.StatusCreated && info.ApiType == constant.APITypeReplicate {
 				// replicate channel returns 201 Created when using Prefer: wait, treat it as success.
 				httpResp.StatusCode = http.StatusOK
-			} else if httpResp.StatusCode == http.StatusAccepted || (httpResp.StatusCode == http.StatusOK && adaptImage && imageAdapter.Task != nil) {
-				snapshot, err := parseNativeAsyncImageSnapshot(httpResp, info)
+			} else if httpResp.StatusCode == http.StatusAccepted || (httpResp.StatusCode == http.StatusOK && ((adaptImage && imageAdapter.Task != nil) || legacyTaskConfig != nil)) {
+				snapshot, err := parseNativeAsyncImageSnapshot(httpResp, info, legacyTaskConfig)
 				if err != nil {
 					return types.NewOpenAIError(err, types.ErrorCodeReadResponseBodyFailed, http.StatusBadGateway, types.ErrOptionWithSkipRetry())
 				}

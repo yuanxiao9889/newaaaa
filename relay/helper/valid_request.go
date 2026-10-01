@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/logger"
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
 	"github.com/QuantumNous/new-api/relaykit/dto"
@@ -289,10 +290,26 @@ func GetAndValidOpenAIImageRequest(c *gin.Context, relayMode int) (*dto.ImageReq
 		}
 		imageRequest.BillingParameters = parameters
 	}
-	if _, err := imageRequest.ImageCount(false); err != nil {
+	if _, err := imageRequest.ImageCount(UsesLegacyAliImageParameters(c, common.GetContextKeyInt(c, constant.ContextKeyChannelType))); err != nil {
 		return nil, err
 	}
 	return imageRequest, nil
+}
+
+// UsesLegacyAliImageParameters identifies the local durable queue boundary.
+// Ordinary Ali images use the plugin's own validated request and pricing.
+func UsesLegacyAliImageParameters(c *gin.Context, channelType int) bool {
+	if c == nil || channelType != constant.ChannelTypeAli {
+		return false
+	}
+	if c.GetBool("async_image_worker") {
+		return true
+	}
+	if c.Request == nil || c.Request.URL == nil {
+		return false
+	}
+	async, err := strconv.ParseBool(strings.TrimSpace(c.Query("async")))
+	return err == nil && async && common.GetAsyncImageInternalTaskEnabled()
 }
 
 func firstFormValue(values map[string][]string, key string) string {

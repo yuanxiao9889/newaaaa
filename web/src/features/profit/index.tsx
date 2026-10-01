@@ -1093,6 +1093,7 @@ export function Profit() {
         open={passwordOpen}
         mode={passwordMode}
         onOpenChange={setPasswordOpen}
+        onVerificationRequired={showPasswordDialog}
         onSuccess={handlePasswordSuccess}
       />
     </>
@@ -1164,6 +1165,7 @@ function ProfitPasswordDialog(props: {
   open: boolean
   mode: ProfitPasswordMode
   onOpenChange: (open: boolean) => void
+  onVerificationRequired: (code: string) => void
   onSuccess: () => void
 }) {
   const { t } = useTranslation()
@@ -1194,6 +1196,19 @@ function ProfitPasswordDialog(props: {
       } else {
         toast.error(res.message || t('Request failed'))
       }
+    } catch (error) {
+      const code = (error as { response?: { data?: { code?: string } } })
+        ?.response?.data?.code
+      if (
+        code === 'PROFIT_PASSWORD_NOT_CONFIGURED' ||
+        code === 'PROFIT_VERIFICATION_REQUIRED' ||
+        code === 'PROFIT_VERIFICATION_EXPIRED'
+      ) {
+        setPassword('')
+        setConfirmPassword('')
+        props.onVerificationRequired(code)
+      }
+      handleServerError(error, t('Request failed'))
     } finally {
       setLoading(false)
     }
@@ -1226,6 +1241,7 @@ function ProfitPasswordDialog(props: {
         <div className='grid gap-3'>
           <Field label={t('Profit access password')}>
             <PasswordInput
+              aria-label={t('Profit access password')}
               value={password}
               disabled={loading}
               onChange={(e) => setPassword(e.target.value)}
@@ -1237,6 +1253,7 @@ function ProfitPasswordDialog(props: {
           {isSetup && (
             <Field label={t('Confirm profit access password')}>
               <PasswordInput
+                aria-label={t('Confirm profit access password')}
                 value={confirmPassword}
                 disabled={loading}
                 onChange={(e) => setConfirmPassword(e.target.value)}

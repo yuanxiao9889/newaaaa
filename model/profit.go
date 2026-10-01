@@ -7,15 +7,56 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 const (
-	ProfitPriceTypeSimpleToken = "simple_token"
-	ProfitPriceTypeTieredExpr  = "tiered_expr"
-	ProfitPriceTypeFixedPrice  = "fixed_price"
-	ProfitFixedUnitRequest     = "request"
-	ProfitFixedUnitSecond      = "second"
+	ProfitVerificationPasswordHashOptionKey = "ProfitVerificationPasswordHash"
+	ProfitPriceTypeSimpleToken              = "simple_token"
+	ProfitPriceTypeTieredExpr               = "tiered_expr"
+	ProfitPriceTypeFixedPrice               = "fixed_price"
+	ProfitFixedUnitRequest                  = "request"
+	ProfitFixedUnitSecond                   = "second"
 )
+
+// GetProfitPasswordHash reads the authoritative credential so a password change
+// immediately invalidates grants on other nodes, before their option cache syncs.
+func GetProfitPasswordHash() (string, error) {
+	var option Option
+	err := DB.Where(&Option{Key: ProfitVerificationPasswordHashOptionKey}).First(&option).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return "", nil
+	}
+	return option.Value, err
+}
+
+// CompareAndSetProfitPasswordHash prevents an unverified first-setup request or
+// a stale verified request from overwriting a credential installed meanwhile.
+func CompareAndSetProfitPasswordHash(expected, next string) (bool, error) {
+	if next == "" {
+		return false, errors.New("profit password hash is required")
+	}
+	if expected == "" {
+		result := DB.Clauses(clause.OnConflict{DoNothing: true}).Create(&Option{Key: ProfitVerificationPasswordHashOptionKey, Value: next})
+		if result.Error != nil {
+			return false, result.Error
+		}
+		// MySQL may report one affected row for a no-op conflict when
+		// clientFoundRows is enabled. Verify what was actually installed.
+		current, err := GetProfitPasswordHash()
+		if err != nil {
+			return false, err
+		}
+		if current == next {
+			return true, updateOptionMap(ProfitVerificationPasswordHashOptionKey, next)
+		}
+	}
+	result := DB.Model(&Option{}).Where(&Option{Key: ProfitVerificationPasswordHashOptionKey}).Where("value = ?", expected).Update("value", next)
+	if result.Error != nil || result.RowsAffected != 1 {
+		return false, result.Error
+	}
+	return true, updateOptionMap(ProfitVerificationPasswordHashOptionKey, next)
+}
 
 type ProfitCostPrice struct {
 	Id               int    `json:"id"`

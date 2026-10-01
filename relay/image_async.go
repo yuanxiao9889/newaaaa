@@ -56,8 +56,16 @@ func validateAsyncImageTaskRequest(info *relaycommon.RelayInfo, request *dto.Ima
 	if request == nil {
 		return types.NewErrorWithStatusCode(fmt.Errorf("image request is required"), types.ErrorCodeInvalidRequest, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
 	}
-	if request.N != nil && *request.N > 1 {
-		return types.NewErrorWithStatusCode(fmt.Errorf("async image tasks only support n=1"), types.ErrorCodeInvalidRequest, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
+	// The queue stores a single image. Provider count overrides must obey the
+	// same limit even before a channel has initialized RelayInfo.ChannelMeta.
+	for _, providerParameters := range []bool{false, true} {
+		count, err := request.ImageCount(providerParameters)
+		if err != nil {
+			return types.NewErrorWithStatusCode(err, types.ErrorCodeInvalidRequest, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
+		}
+		if count > 1 {
+			return types.NewErrorWithStatusCode(fmt.Errorf("async image tasks only support n=1"), types.ErrorCodeInvalidRequest, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
+		}
 	}
 	return nil
 }

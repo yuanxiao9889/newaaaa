@@ -85,7 +85,10 @@ function OptionCombobox(props: LegacyComboboxProps) {
   const highlighted = React.useRef<ComboboxInputOption | undefined>(undefined)
   const anchor = useComboboxAnchor()
   const selected = props.options.find((option) => option.value === props.value)
-  const displayedValue = selected?.label ?? props.value ?? ''
+  const displayedValue =
+    open && props.allowCustomValue
+      ? props.value ?? ''
+      : selected?.label ?? props.value ?? ''
   return (
     <ComboboxPrimitive.Root
       items={props.options}

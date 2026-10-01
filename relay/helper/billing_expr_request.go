@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/pkg/billingexpr"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relaykit/dto"
@@ -41,11 +42,19 @@ func ResolveImageBillingRequestInput(c *gin.Context, info *relaycommon.RelayInfo
 	if !ok {
 		return input, nil
 	}
-	count, err := request.ImageCount(false)
+	channelType := common.GetContextKeyInt(c, constant.ContextKeyChannelType)
+	if info.ChannelMeta != nil {
+		channelType = info.ChannelType
+	}
+	count, err := request.ImageCount(UsesLegacyAliImageParameters(c, channelType))
 	if err != nil {
 		return input, err
 	}
-	body := map[string]any{"model": request.Model, "n": count, "size": request.Size, "quality": request.Quality}
+	topLevelCount, err := request.ImageCount(false)
+	if err != nil {
+		return input, err
+	}
+	body := map[string]any{"model": request.Model, "n": topLevelCount, "size": request.Size, "quality": request.Quality}
 	if request.BillingParameters != nil {
 		body["parameters"] = request.BillingParameters
 	}

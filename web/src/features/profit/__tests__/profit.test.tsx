@@ -1,6 +1,7 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { toast } from 'sonner'
 import { beforeEach, afterEach, expect, it, vi } from 'vitest'
 
 import { api } from '@/lib/api'
@@ -20,6 +21,7 @@ let client: QueryClient
 let summaryRequests: Record<string, unknown>[]
 let prices: ProfitCostPrice[]
 let reportFails: boolean
+let passwordConfigured: boolean
 let breakdown: ProfitBreakdownItem[] | null
 let series: ProfitSeriesItem[] | null
 
@@ -60,6 +62,7 @@ beforeEach(() => {
   summaryRequests = []
   prices = []
   reportFails = false
+  passwordConfigured = true
   breakdown = []
   series = []
   useSystemConfigStore
@@ -104,7 +107,7 @@ beforeEach(() => {
         breakdown,
       }
     } else if (url === '/api/profit/password/status') {
-      data = { configured: true }
+      data = { configured: passwordConfigured }
     } else if (url === '/api/profit/cost-price-prefill') {
       data = {
         channel_id: 7,
@@ -137,6 +140,121 @@ function renderProfit() {
     </QueryClientProvider>
   )
 }
+
+it('requests verification when another administrator sets the profit password first', async () => {
+  passwordConfigured = false
+  const post = vi
+    .spyOn(api, 'post')
+    .mockRejectedValueOnce({
+      response: {
+        status: 403,
+        data: {
+          success: false,
+          code: 'PROFIT_VERIFICATION_REQUIRED',
+          message: 'Enter the existing profit password',
+        },
+      },
+    })
+    .mockResolvedValueOnce({ data: { success: true } })
+  renderProfit()
+  const user = userEvent.setup()
+  await user.click(
+    await screen.findByRole('button', { name: 'Set profit access password' })
+  )
+  await user.type(
+    screen.getByLabelText('Profit access password'),
+    ' new password '
+  )
+  await user.type(
+    screen.getByLabelText('Confirm profit access password'),
+    ' new password '
+  )
+  await user.click(screen.getByRole('button', { name: 'Save' }))
+
+  const dialog = await screen.findByRole('dialog', {
+    name: 'Enter profit access password',
+  })
+  expect(post).toHaveBeenNthCalledWith(
+    1,
+    '/api/profit/password',
+    { password: ' new password ' },
+    expect.any(Object)
+  )
+  expect(
+    within(dialog).queryByLabelText('Confirm profit access password')
+  ).not.toBeInTheDocument()
+  expect(within(dialog).getByLabelText('Profit access password')).toHaveValue(
+    ''
+  )
+  await user.type(
+    within(dialog).getByLabelText('Profit access password'),
+    ' existing password '
+  )
+  await user.click(within(dialog).getByRole('button', { name: 'Verify' }))
+  await waitFor(() =>
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+  )
+  expect(post).toHaveBeenNthCalledWith(
+    2,
+    '/api/profit/verify',
+    { password: ' existing password ' },
+    expect.any(Object)
+  )
+})
+
+it('shows password policy and request errors while allowing setup to be retried', async () => {
+  passwordConfigured = false
+  const errorToast = vi.spyOn(toast, 'error')
+  const post = vi
+    .spyOn(api, 'post')
+    .mockResolvedValueOnce({
+      data: {
+        success: false,
+        message: 'Password must contain at least 8 characters',
+      },
+    })
+    .mockRejectedValueOnce({
+      response: { status: 429, data: { message: 'Too many attempts' } },
+    })
+    .mockResolvedValueOnce({ data: { success: true } })
+  renderProfit()
+  const user = userEvent.setup()
+  await user.click(
+    await screen.findByRole('button', { name: 'Set profit access password' })
+  )
+  await user.type(screen.getByLabelText('Profit access password'), 'short')
+  await user.type(
+    screen.getByLabelText('Confirm profit access password'),
+    'short'
+  )
+  await user.click(screen.getByRole('button', { name: 'Save' }))
+  expect(errorToast).toHaveBeenLastCalledWith(
+    'Password must contain at least 8 characters'
+  )
+  await user.clear(screen.getByLabelText('Profit access password'))
+  await user.clear(screen.getByLabelText('Confirm profit access password'))
+  await user.type(
+    screen.getByLabelText('Profit access password'),
+    ' valid password '
+  )
+  await user.type(
+    screen.getByLabelText('Confirm profit access password'),
+    ' valid password '
+  )
+  await user.click(screen.getByRole('button', { name: 'Save' }))
+  expect(errorToast).toHaveBeenLastCalledWith('Too many attempts')
+  expect(screen.getByRole('button', { name: 'Save' })).toBeEnabled()
+  await user.click(screen.getByRole('button', { name: 'Save' }))
+  await waitFor(() =>
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+  )
+  expect(post).toHaveBeenNthCalledWith(
+    3,
+    '/api/profit/password',
+    { password: ' valid password ' },
+    expect.any(Object)
+  )
+})
 
 it('separates the report and cost management into tabs while retaining cost search', async () => {
   prices = [savedPrice]

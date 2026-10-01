@@ -13,12 +13,14 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	kitdto "github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/tidwall/gjson"
+	"github.com/tidwall/sjson"
 )
 
 const NativeAsyncImageFormat = "native_async_image"
@@ -105,9 +107,10 @@ type NativeAsyncImageSnapshot struct {
 	ChannelID      int                            `json:"channel_id"`
 	KeyFingerprint string                         `json:"key_fingerprint"`
 	Task           *kitdto.ImageAdapterTaskConfig `json:"image_adapter_task,omitempty"`
+	Provider       string                         `json:"native_provider,omitempty"`
 }
 
-func parseNativeAsyncImageSnapshot(resp *http.Response, info *relaycommon.RelayInfo) (*NativeAsyncImageSnapshot, error) {
+func parseNativeAsyncImageSnapshot(resp *http.Response, info *relaycommon.RelayInfo, nativeConfig ...*kitdto.ImageAdapterTaskConfig) (*NativeAsyncImageSnapshot, error) {
 	defer resp.Body.Close()
 	body, err := io.ReadAll(io.LimitReader(resp.Body, nativeAsyncImagePollMaxResponseBytes+1))
 	if err != nil {
@@ -117,18 +120,33 @@ func parseNativeAsyncImageSnapshot(resp *http.Response, info *relaycommon.RelayI
 		return nil, fmt.Errorf("native image task response too large")
 	}
 	var snapshot NativeAsyncImageSnapshot
-	// Task rules come only from channel configuration, never upstream JSON.
-	if adapter := info.ChannelSetting.ImageAdapter; adapter.Matches(info.UpstreamModelName) && adapter.Task != nil {
-		configured, err := configuredImageTaskSnapshot(body, adapter.Task)
+	// Task rules come only from channel configuration or the native adaptor,
+	// never from upstream JSON.
+	var taskConfig *kitdto.ImageAdapterTaskConfig
+	if adapter := info.ChannelSetting.ImageAdapter; adapter.Matches(info.UpstreamModelName) {
+		taskConfig = adapter.Task
+	}
+	if taskConfig == nil && len(nativeConfig) > 0 && nativeConfig[0] != nil {
+		taskConfig = nativeConfig[0]
+		if info.ChannelType == constant.ChannelTypeAli {
+			snapshot.Provider = "ali_image"
+		}
+	}
+	if taskConfig != nil {
+		configured, err := configuredImageTaskSnapshot(body, taskConfig)
 		if err != nil {
 			return nil, err
 		}
+		configured.Provider = snapshot.Provider
 		snapshot = *configured
 	} else {
 		if err = common.Unmarshal(body, &snapshot); err != nil {
 			return nil, fmt.Errorf("invalid native image task response")
 		}
 		snapshot.Task = nil
+		// Provider parsers are host-selected; an upstream task envelope cannot
+		// opt itself into a different protocol interpretation.
+		snapshot.Provider = ""
 	}
 	if strings.TrimSpace(snapshot.ID) == "" || strings.TrimSpace(snapshot.PollURL) == "" {
 		return nil, fmt.Errorf("native image task response missing id or poll_url")
@@ -193,7 +211,10 @@ func ResumeNativeAsyncImageTask(ctx context.Context, task *model.Task) ([]byte, 
 	if err != nil {
 		return nil, 0, "", fmt.Errorf("native image task channel unavailable")
 	}
-	entry := nativeAsyncImagePollEntry{settings: channel.GetSetting(), taskConfig: snapshot.Task}
+	if snapshot.Provider != "" && (snapshot.Provider != "ali_image" || channel.Type != constant.ChannelTypeAli || snapshot.Task == nil) {
+		return nil, snapshot.ChannelID, "", fmt.Errorf("stored native image provider does not match channel")
+	}
+	entry := nativeAsyncImagePollEntry{settings: channel.GetSetting(), taskConfig: snapshot.Task, provider: snapshot.Provider}
 	if snapshot.Task != nil {
 		if err := (&kitdto.ImageAdapterConfig{Enabled: true, Task: snapshot.Task}).Validate(); err != nil {
 			return nil, snapshot.ChannelID, "", fmt.Errorf("invalid stored image task configuration")
@@ -261,7 +282,11 @@ func pollNativeAsyncImageResult(ctx context.Context, client *http.Client, entry 
 			}
 			if readErr == nil && (resp.StatusCode == 200 || resp.StatusCode == 202) {
 				if entry.taskConfig != nil {
-					body, err = normalizeConfiguredImageTaskResponse(body, entry.taskConfig)
+					if entry.provider == "ali_image" {
+						body, err = normalizeLegacyAliImageTaskResponse(body, entry.taskConfig)
+					} else {
+						body, err = normalizeConfiguredImageTaskResponse(body, entry.taskConfig)
+					}
 					if err != nil {
 						return nil, err
 					}
@@ -307,6 +332,54 @@ func pollNativeAsyncImageResult(ctx context.Context, client *http.Client, entry 
 		case <-timer.C:
 		}
 	}
+}
+
+// Legacy Ali image models return either results[] or multimodal choices[].
+// The durable queue stores one image, so text-only parts and empty entries do
+// not prevent it from finding the first real image in either response shape.
+func normalizeLegacyAliImageTaskResponse(body []byte, config *kitdto.ImageAdapterTaskConfig) ([]byte, error) {
+	normalized, err := normalizeConfiguredImageTaskResponse(body, config)
+	if err != nil || gjson.GetBytes(normalized, "status").String() != "completed" {
+		return normalized, err
+	}
+	var image dto.ImageData
+	for _, result := range gjson.GetBytes(body, "output.results").Array() {
+		if value := result.Get("url"); value.Type == gjson.String {
+			image.Url = strings.TrimSpace(value.String())
+		}
+		if value := result.Get("b64_image"); value.Type == gjson.String {
+			image.B64Json = strings.TrimSpace(value.String())
+		}
+		if image.Url != "" || image.B64Json != "" {
+			break
+		}
+	}
+	if image.Url == "" && image.B64Json == "" {
+	choices:
+		for _, choice := range gjson.GetBytes(body, "output.choices").Array() {
+			for _, part := range choice.Get("message.content").Array() {
+				value := part.Get("image")
+				if value.Type != gjson.String || strings.TrimSpace(value.String()) == "" {
+					continue
+				}
+				content := strings.TrimSpace(value.String())
+				if strings.HasPrefix(content, "http://") || strings.HasPrefix(content, "https://") {
+					image.Url = content
+				} else {
+					image.B64Json = content
+				}
+				break choices
+			}
+		}
+	}
+	if image.Url == "" && image.B64Json == "" {
+		return normalized, nil
+	}
+	data, err := common.Marshal([]dto.ImageData{image})
+	if err != nil {
+		return nil, err
+	}
+	return sjson.SetRawBytes(normalized, "data", data)
 }
 
 func fetchNativeAsyncImageResult(ctx context.Context, client *http.Client, entry nativeAsyncImagePollEntry) ([]byte, error) {

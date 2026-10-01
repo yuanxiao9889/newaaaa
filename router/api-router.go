@@ -359,8 +359,8 @@ func SetApiRouter(router *gin.Engine) {
 		profitRoute.Use(middleware.AdminAuth())
 		{
 			profitRoute.GET("/password/status", controller.GetProfitPasswordStatus)
-			profitRoute.POST("/password", controller.SetProfitPassword)
-			profitRoute.POST("/verify", controller.VerifyProfitPassword)
+			profitRoute.POST("/password", middleware.CriticalRateLimit(), middleware.UserCriticalRateLimit("profit-verification"), controller.SetProfitPassword)
+			profitRoute.POST("/verify", middleware.CriticalRateLimit(), middleware.UserCriticalRateLimit("profit-verification"), controller.VerifyProfitPassword)
 
 			protectedProfitRoute := profitRoute.Group("/")
 			protectedProfitRoute.Use(middleware.ProfitVerificationRequired())

@@ -1,6 +1,7 @@
 package model
 
 import (
+	"errors"
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/pkg/jsplugin"
@@ -233,6 +234,9 @@ func SyncOptions(frequency int) {
 }
 
 func validateOptionValue(key string, value string) error {
+	if strings.EqualFold(key, ProfitVerificationPasswordHashOptionKey) {
+		return errors.New("profit password must be changed through its verification endpoint")
+	}
 	if key == legacyAccessTokenRetireAtKey {
 		return errLegacyRetireAtReadOnly
 	}
@@ -273,7 +277,13 @@ func UpdateOption(key string, value string) error {
 		Key: key,
 	}
 	// https://gorm.io/docs/update.html#Save-All-Fields
-	DB.FirstOrCreate(&option, Option{Key: key})
+	if err := DB.FirstOrCreate(&option, Option{Key: key}).Error; err != nil {
+		return err
+	}
+	// Database collations can resolve an alternate spelling to a protected row.
+	if err := validateOptionValue(option.Key, value); err != nil {
+		return err
+	}
 	option.Value = value
 	// Save is a combination function.
 	// If save value does not contain primary key, it will execute Create,
@@ -327,6 +337,9 @@ func UpdateOptionsBulk(values map[string]string) error {
 		for k, v := range values {
 			option := Option{Key: k}
 			if err := tx.FirstOrCreate(&option, Option{Key: k}).Error; err != nil {
+				return err
+			}
+			if err := validateOptionValue(option.Key, v); err != nil {
 				return err
 			}
 			option.Value = v

@@ -34,6 +34,7 @@ type nativeAsyncImagePollEntry struct {
 	baseHost   string
 	expiresAt  time.Time
 	taskConfig *dto.ImageAdapterTaskConfig
+	provider   string
 }
 
 var nativeAsyncImagePolls sync.Map
