@@ -1,28 +1,25 @@
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
-  AlertTriangle,
-  BarChart3,
   Calculator,
-  DollarSign,
-  Percent,
-  Pencil,
   Plus,
+  RefreshCw,
   Save,
   ShieldCheck,
-  Trash2,
+  SlidersHorizontal,
 } from 'lucide-react'
+import { useCallback, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
-import { PasswordInput } from '@/components/password-input'
-import { SectionPageLayout } from '@/components/layout'
+
+import { ConfirmDialog } from '@/components/confirm-dialog'
 import { DatePicker } from '@/components/date-picker'
-import { getChannels } from '@/features/channels/api'
-import type { Channel } from '@/features/channels/types'
-import { useSystemConfig } from '@/hooks/use-system-config'
-import { formatBillingCurrencyFromUSD } from '@/lib/currency'
-import type { CurrencyConfig } from '@/stores/system-config-store'
+import { Dialog as FormDialog } from '@/components/dialog'
+import { ErrorState } from '@/components/error-state'
+import { SectionPageLayout } from '@/components/layout/components/section-page-layout'
+import { LoadingState } from '@/components/loading-state'
+import { PasswordInput } from '@/components/password-input'
 import { Button } from '@/components/ui/button'
+import { Combobox } from '@/components/ui/combobox'
 import {
   Dialog,
   DialogContent,
@@ -40,22 +37,15 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import {
-  Sheet,
-  SheetContent,
-  SheetDescription,
-  SheetFooter,
-  SheetHeader,
-  SheetTitle,
-} from '@/components/ui/sheet'
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
+import { getChannels } from '@/features/channels/api'
+import type { Channel } from '@/features/channels/types'
+import { useSystemConfig } from '@/hooks/use-system-config'
+import { handleServerError } from '@/lib/handle-server-error'
+import { requireServerSuccess } from '@/lib/server-error-message'
+import type { CurrencyConfig } from '@/stores/system-config-store'
+
 import {
   deleteProfitCostPrice,
   getProfitCostPrices,
@@ -66,6 +56,13 @@ import {
   setProfitPassword,
   verifyProfitPassword,
 } from './api'
+import {
+  CostPriceFields,
+  type CostPriceForm,
+} from './components/cost-price-fields'
+import { CostPriceTable } from './components/cost-price-table'
+import { ProfitOverview } from './components/profit-overview'
+import { formatMoney, toDateInput } from './lib/format'
 import type {
   ProfitCostPrice,
   ProfitCostPricePrefill,
@@ -76,41 +73,25 @@ import type {
 
 const nowSeconds = () => Math.floor(Date.now() / 1000)
 
-function defaultStart(range: ProfitRange) {
+function defaultStart(days = 30) {
   const date = new Date()
-  if (range === 'month') date.setMonth(date.getMonth() - 6)
-  else if (range === 'week') date.setDate(date.getDate() - 84)
-  else date.setDate(date.getDate() - 30)
+  date.setDate(date.getDate() - days + 1)
   date.setHours(0, 0, 0, 0)
   return Math.floor(date.getTime() / 1000)
-}
-
-function formatMoney(value: number) {
-  return formatBillingCurrencyFromUSD(value || 0, {
-    digitsLarge: 2,
-    digitsSmall: 6,
-    minimumNonZero: 0.000001,
-  })
-}
-
-function formatPercent(value: number) {
-  return `${((value || 0) * 100).toFixed(2)}%`
-}
-
-function toDateInput(timestamp?: number) {
-  if (!timestamp) return ''
-  const date = new Date(timestamp * 1000)
-  const year = date.getFullYear()
-  const month = String(date.getMonth() + 1).padStart(2, '0')
-  const day = String(date.getDate()).padStart(2, '0')
-  return `${year}-${month}-${day}`
 }
 
 function fromDateInput(value: string, end = false) {
   if (!value) return undefined
   const [year, month, day] = value.split('-').map(Number)
   if (!year || !month || !day) return undefined
-  const date = new Date(year, month - 1, day, end ? 23 : 0, end ? 59 : 0, end ? 59 : 0)
+  const date = new Date(
+    year,
+    month - 1,
+    day,
+    end ? 23 : 0,
+    end ? 59 : 0,
+    end ? 59 : 0
+  )
   return Math.floor(date.getTime() / 1000)
 }
 
@@ -136,14 +117,18 @@ function getProfitMoneyUnit(currency?: CurrencyConfig) {
   if (currency?.quotaDisplayType === 'CNY') {
     return {
       label: 'CNY',
-      rate: currency.usdExchangeRate && currency.usdExchangeRate > 0 ? currency.usdExchangeRate : 1,
+      rate:
+        currency.usdExchangeRate && currency.usdExchangeRate > 0
+          ? currency.usdExchangeRate
+          : 1,
     }
   }
   if (currency?.quotaDisplayType === 'CUSTOM') {
     return {
       label: currency.customCurrencySymbol?.trim() || 'Custom',
       rate:
-        currency.customCurrencyExchangeRate && currency.customCurrencyExchangeRate > 0
+        currency.customCurrencyExchangeRate &&
+        currency.customCurrencyExchangeRate > 0
           ? currency.customCurrencyExchangeRate
           : 1,
     }
@@ -160,8 +145,9 @@ function usdToDisplayMoney(value: number, rate: number) {
 }
 
 function formatPriceInput(value?: number) {
-  if (!value) return ''
-  return Number(value.toFixed(6)).toString()
+  if (value === undefined || value === 0) return ''
+  // Keep small prices while trimming binary noise from currency conversion.
+  return Number(value.toPrecision(15)).toString()
 }
 
 function parseChannelModels(channel?: Pick<Channel, 'models'>) {
@@ -174,23 +160,7 @@ function parseChannelModels(channel?: Pick<Channel, 'models'>) {
     .sort((a, b) => a.localeCompare(b))
 }
 
-type FormState = {
-  channel_id: string
-  model_name: string
-  cost_mode: 'token' | 'request' | 'second'
-  input_price: string
-  cache_read_price: string
-  cache_creation_price: string
-  cache_creation_1h_price: string
-  image_input_price: string
-  image_output_price: string
-  audio_input_price: string
-  audio_output_price: string
-  output_price: string
-  request_price: string
-  second_price: string
-  effective_date: string
-}
+type FormState = CostPriceForm
 
 const emptyForm = (): FormState => ({
   channel_id: '',
@@ -216,21 +186,34 @@ type CostPriceSheetMode = 'create' | 'edit'
 
 export function Profit() {
   const { t } = useTranslation()
+  const contentRef = useRef<HTMLDivElement>(null)
   const queryClient = useQueryClient()
   const { currency } = useSystemConfig()
   const profitMoneyUnit = useMemo(
     () => getProfitMoneyUnit(currency),
     [currency]
   )
+  const [activeTab, setActiveTab] = useState('overview')
   const [range, setRange] = useState<ProfitRange>('day')
-  const [start, setStart] = useState(defaultStart('day'))
+  const [start, setStart] = useState(defaultStart())
   const [end, setEnd] = useState(nowSeconds())
   const [draftStart, setDraftStart] = useState<Date | undefined>(() =>
-    timestampToDate(defaultStart('day'))
+    timestampToDate(defaultStart())
   )
   const [draftEnd, setDraftEnd] = useState<Date | undefined>(() =>
     timestampToDate(nowSeconds())
   )
+  const [draftRange, setDraftRange] = useState<ProfitRange>('day')
+  const [draftChannelId, setDraftChannelId] = useState('')
+  const [draftModelName, setDraftModelName] = useState('')
+  const [priceSearch, setPriceSearch] = useState('')
+  const [priceStatus, setPriceStatus] = useState('active')
+  const [filtersOpen, setFiltersOpen] = useState(false)
+  const [quickRange, setQuickRange] = useState('30')
+  const [saving, setSaving] = useState(false)
+  const savingRef = useRef(false)
+  const [deleting, setDeleting] = useState(false)
+  const [deleteTarget, setDeleteTarget] = useState<ProfitCostPrice | null>(null)
   const [channelId, setChannelId] = useState('')
   const [modelName, setModelName] = useState('')
   const [sheetOpen, setSheetOpen] = useState(false)
@@ -251,7 +234,9 @@ export function Profit() {
   )
 
   const showPasswordDialog = useCallback((code?: string) => {
-    setPasswordMode(code === 'PROFIT_PASSWORD_NOT_CONFIGURED' ? 'setup' : 'verify')
+    setPasswordMode(
+      code === 'PROFIT_PASSWORD_NOT_CONFIGURED' ? 'setup' : 'verify'
+    )
     setPasswordOpen(true)
   }, [])
 
@@ -279,17 +264,21 @@ export function Profit() {
 
   const reportQuery = useQuery({
     queryKey: ['profit-summary', params],
-    queryFn: async () => {
-      const res = await profitQuery(() => getProfitSummary(params))
-      return res?.data ?? null
+    retry: false,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
+    queryFn: async ({ signal }) => {
+      const res = await profitQuery(() => getProfitSummary(params, signal))
+      return res ? requireServerSuccess(res).data : null
     },
   })
 
   const pricesQuery = useQuery({
     queryKey: ['profit-cost-prices'],
-    queryFn: async () => {
-      const res = await profitQuery(() => getProfitCostPrices(false))
-      return res?.data ?? []
+    enabled: activeTab === 'costs',
+    queryFn: async ({ signal }) => {
+      const res = await profitQuery(() => getProfitCostPrices(false, signal))
+      return res ? requireServerSuccess(res).data : []
     },
   })
 
@@ -303,14 +292,48 @@ export function Profit() {
 
   const channelsQuery = useQuery({
     queryKey: ['profit-channels'],
+    enabled: filtersOpen || sheetOpen,
+    staleTime: 60_000,
     queryFn: async () => {
-      const res = await getChannels({ page_size: 1000 })
-      return res.data?.items ?? []
+      const first = requireServerSuccess(
+        await getChannels({ p: 1, page_size: 100, id_sort: true })
+      )
+      const channels = [...(first.data?.items ?? [])]
+      const pageCount = Math.ceil(
+        (first.data?.total ?? 0) / (first.data?.page_size || 100)
+      )
+      // Respect the server's 100-row cap and limit concurrent page requests.
+      for (let page = 2; page <= pageCount; page += 5) {
+        const pages = await Promise.all(
+          Array.from(
+            { length: Math.min(5, pageCount - page + 1) },
+            (_, index) =>
+              getChannels({ p: page + index, page_size: 100, id_sort: true })
+          )
+        )
+        for (const result of pages) {
+          channels.push(...(requireServerSuccess(result).data?.items ?? []))
+        }
+      }
+      return [
+        ...new Map(channels.map((channel) => [channel.id, channel])).values(),
+      ]
     },
   })
 
+  const channelOptions = useMemo(
+    () =>
+      (channelsQuery.data ?? []).map((channel) => ({
+        value: String(channel.id),
+        label: `#${channel.id} ${channel.name || ''}`.trim(),
+      })),
+    [channelsQuery.data]
+  )
   const selectedFormChannel = useMemo(
-    () => (channelsQuery.data ?? []).find((channel) => String(channel.id) === form.channel_id),
+    () =>
+      (channelsQuery.data ?? []).find(
+        (channel) => String(channel.id) === form.channel_id
+      ),
     [channelsQuery.data, form.channel_id]
   )
 
@@ -322,26 +345,19 @@ export function Profit() {
   const prefillQuery = useQuery({
     queryKey: ['profit-cost-price-prefill', form.channel_id, form.model_name],
     enabled: sheetOpen && !!form.channel_id && !!form.model_name,
-    queryFn: async () => {
+    queryFn: async ({ signal }) => {
       const res = await profitQuery(() =>
-        getProfitCostPricePrefill(Number(form.channel_id), form.model_name)
+        getProfitCostPricePrefill(
+          Number(form.channel_id),
+          form.model_name,
+          signal
+        )
       )
-      return res?.data ?? null
+      return res ? requireServerSuccess(res).data : null
     },
   })
 
   const report = reportQuery.data
-  const summary = report?.summary
-
-  const updateRange = (value: ProfitRange) => {
-    const nextStart = defaultStart(value)
-    const nextEnd = nowSeconds()
-    setRange(value)
-    setStart(nextStart)
-    setEnd(nextEnd)
-    setDraftStart(timestampToDate(nextStart))
-    setDraftEnd(timestampToDate(nextEnd))
-  }
 
   const applyFilters = () => {
     const nextStart = dateToTimestamp(draftStart)
@@ -356,13 +372,18 @@ export function Profit() {
     }
     setStart(nextStart)
     setEnd(nextEnd)
+    setRange(draftRange)
+    setChannelId(draftChannelId)
+    setModelName(draftModelName.trim())
+    setQuickRange('')
+    setFiltersOpen(false)
   }
 
-  const openCreateSheet = () => {
+  const openCreateSheet = useCallback((channel = '', model = '') => {
     setSheetMode('create')
-    setForm(emptyForm())
+    setForm({ ...emptyForm(), channel_id: channel, model_name: model })
     setSheetOpen(true)
-  }
+  }, [])
 
   const openEditSheet = (item: ProfitCostPrice) => {
     if (item.price_type === 'tiered_expr') {
@@ -378,24 +399,52 @@ export function Profit() {
       channel_id: String(item.channel_id),
       model_name: item.model_name,
       cost_mode: costMode,
-      input_price: formatPriceInput(usdToDisplayMoney(item.input_price ?? 0, profitMoneyUnit.rate)),
-      cache_read_price: formatPriceInput(usdToDisplayMoney(item.cache_read_price ?? 0, profitMoneyUnit.rate)),
-      cache_creation_price: formatPriceInput(usdToDisplayMoney(item.cache_creation_price ?? 0, profitMoneyUnit.rate)),
-      cache_creation_1h_price: formatPriceInput(usdToDisplayMoney(item.cache_creation_1h_price ?? 0, profitMoneyUnit.rate)),
-      image_input_price: formatPriceInput(usdToDisplayMoney(item.image_input_price ?? 0, profitMoneyUnit.rate)),
-      image_output_price: formatPriceInput(usdToDisplayMoney(item.image_output_price ?? 0, profitMoneyUnit.rate)),
-      audio_input_price: formatPriceInput(usdToDisplayMoney(item.audio_input_price ?? 0, profitMoneyUnit.rate)),
-      audio_output_price: formatPriceInput(usdToDisplayMoney(item.audio_output_price ?? 0, profitMoneyUnit.rate)),
-      output_price: formatPriceInput(usdToDisplayMoney(item.output_price ?? 0, profitMoneyUnit.rate)),
-      request_price: formatPriceInput(usdToDisplayMoney(item.request_price ?? 0, profitMoneyUnit.rate)),
-      second_price: formatPriceInput(usdToDisplayMoney(item.second_price ?? 0, profitMoneyUnit.rate)),
-      effective_date: toDateInput(item.effective_from) || toDateInput(nowSeconds()),
+      input_price: formatPriceInput(
+        usdToDisplayMoney(item.input_price ?? 0, profitMoneyUnit.rate)
+      ),
+      cache_read_price: formatPriceInput(
+        usdToDisplayMoney(item.cache_read_price ?? 0, profitMoneyUnit.rate)
+      ),
+      cache_creation_price: formatPriceInput(
+        usdToDisplayMoney(item.cache_creation_price ?? 0, profitMoneyUnit.rate)
+      ),
+      cache_creation_1h_price: formatPriceInput(
+        usdToDisplayMoney(
+          item.cache_creation_1h_price ?? 0,
+          profitMoneyUnit.rate
+        )
+      ),
+      image_input_price: formatPriceInput(
+        usdToDisplayMoney(item.image_input_price ?? 0, profitMoneyUnit.rate)
+      ),
+      image_output_price: formatPriceInput(
+        usdToDisplayMoney(item.image_output_price ?? 0, profitMoneyUnit.rate)
+      ),
+      audio_input_price: formatPriceInput(
+        usdToDisplayMoney(item.audio_input_price ?? 0, profitMoneyUnit.rate)
+      ),
+      audio_output_price: formatPriceInput(
+        usdToDisplayMoney(item.audio_output_price ?? 0, profitMoneyUnit.rate)
+      ),
+      output_price: formatPriceInput(
+        usdToDisplayMoney(item.output_price ?? 0, profitMoneyUnit.rate)
+      ),
+      request_price: formatPriceInput(
+        usdToDisplayMoney(item.request_price ?? 0, profitMoneyUnit.rate)
+      ),
+      second_price: formatPriceInput(
+        usdToDisplayMoney(item.second_price ?? 0, profitMoneyUnit.rate)
+      ),
+      effective_date:
+        toDateInput(item.effective_from) || toDateInput(nowSeconds()),
     })
     setSheetOpen(true)
   }
 
   const updateCostPriceChannel = (channelIdValue: string) => {
-    const channel = (channelsQuery.data ?? []).find((item) => String(item.id) === channelIdValue)
+    const channel = (channelsQuery.data ?? []).find(
+      (item) => String(item.id) === channelIdValue
+    )
     const models = parseChannelModels(channel)
     setForm((prev) => ({
       ...prev,
@@ -436,6 +485,7 @@ export function Profit() {
   }
 
   const submitCostPrice = async () => {
+    if (savingRef.current) return
     const inputPrice = toOptionalNumber(form.input_price)
     const cacheReadPrice = toOptionalNumber(form.cache_read_price)
     const cacheCreationPrice = toOptionalNumber(form.cache_creation_price)
@@ -455,20 +505,50 @@ export function Profit() {
     }
     if (form.cost_mode === 'token') {
       payload.input_price = displayMoneyToUSD(inputPrice, profitMoneyUnit.rate)
-      payload.cache_read_price = displayMoneyToUSD(cacheReadPrice, profitMoneyUnit.rate)
-      payload.cache_creation_price = displayMoneyToUSD(cacheCreationPrice, profitMoneyUnit.rate)
-      payload.cache_creation_1h_price = displayMoneyToUSD(cacheCreation1hPrice, profitMoneyUnit.rate)
-      payload.image_input_price = displayMoneyToUSD(imageInputPrice, profitMoneyUnit.rate)
-      payload.image_output_price = displayMoneyToUSD(imageOutputPrice, profitMoneyUnit.rate)
-      payload.audio_input_price = displayMoneyToUSD(audioInputPrice, profitMoneyUnit.rate)
-      payload.audio_output_price = displayMoneyToUSD(audioOutputPrice, profitMoneyUnit.rate)
-      payload.output_price = displayMoneyToUSD(outputPrice, profitMoneyUnit.rate)
+      payload.cache_read_price = displayMoneyToUSD(
+        cacheReadPrice,
+        profitMoneyUnit.rate
+      )
+      payload.cache_creation_price = displayMoneyToUSD(
+        cacheCreationPrice,
+        profitMoneyUnit.rate
+      )
+      payload.cache_creation_1h_price = displayMoneyToUSD(
+        cacheCreation1hPrice,
+        profitMoneyUnit.rate
+      )
+      payload.image_input_price = displayMoneyToUSD(
+        imageInputPrice,
+        profitMoneyUnit.rate
+      )
+      payload.image_output_price = displayMoneyToUSD(
+        imageOutputPrice,
+        profitMoneyUnit.rate
+      )
+      payload.audio_input_price = displayMoneyToUSD(
+        audioInputPrice,
+        profitMoneyUnit.rate
+      )
+      payload.audio_output_price = displayMoneyToUSD(
+        audioOutputPrice,
+        profitMoneyUnit.rate
+      )
+      payload.output_price = displayMoneyToUSD(
+        outputPrice,
+        profitMoneyUnit.rate
+      )
     } else if (form.cost_mode === 'request') {
       payload.fixed_unit = 'request'
-      payload.fixed_amount = displayMoneyToUSD(requestPrice, profitMoneyUnit.rate)
+      payload.fixed_amount = displayMoneyToUSD(
+        requestPrice,
+        profitMoneyUnit.rate
+      )
     } else {
       payload.fixed_unit = 'second'
-      payload.fixed_amount = displayMoneyToUSD(secondPrice, profitMoneyUnit.rate)
+      payload.fixed_amount = displayMoneyToUSD(
+        secondPrice,
+        profitMoneyUnit.rate
+      )
     }
     if (!payload.channel_id || !payload.model_name) {
       toast.error(t('Channel and model are required'))
@@ -490,7 +570,7 @@ export function Profit() {
     } else if (form.cost_mode === 'request') {
       activePrices = [requestPrice]
     }
-    if (activePrices.some(Number.isNaN)) {
+    if (activePrices.some((value) => !Number.isFinite(value))) {
       toast.error(t('Please enter valid numbers'))
       return
     }
@@ -502,23 +582,43 @@ export function Profit() {
       toast.error(t('At least one cost price is required'))
       return
     }
-    const res = await profitQuery(() => saveProfitCostPrice(payload))
-    if (res?.success) {
+    if (!payload.effective_from) {
+      toast.error(t('Please select an effective date'))
+      return
+    }
+    savingRef.current = true
+    setSaving(true)
+    try {
+      const res = await profitQuery(() => saveProfitCostPrice(payload))
+      if (!res) return
+      requireServerSuccess(res)
       toast.success(t('Cost price saved'))
       setSheetOpen(false)
       void queryClient.invalidateQueries({ queryKey: ['profit-summary'] })
       void queryClient.invalidateQueries({ queryKey: ['profit-cost-prices'] })
-    } else if (res?.message) {
-      toast.error(res.message)
+    } catch (error) {
+      handleServerError(error)
+    } finally {
+      savingRef.current = false
+      setSaving(false)
     }
   }
 
   const removeCostPrice = async (item: ProfitCostPrice) => {
-    const res = await profitQuery(() => deleteProfitCostPrice(item.id))
-    if (res?.success) {
+    if (deleting) return
+    setDeleting(true)
+    try {
+      const res = await profitQuery(() => deleteProfitCostPrice(item.id))
+      if (!res) return
+      requireServerSuccess(res)
       toast.success(t('Cost price disabled'))
+      setDeleteTarget(null)
       void queryClient.invalidateQueries({ queryKey: ['profit-summary'] })
       void queryClient.invalidateQueries({ queryKey: ['profit-cost-prices'] })
+    } catch (error) {
+      handleServerError(error)
+    } finally {
+      setDeleting(false)
     }
   }
 
@@ -529,101 +629,12 @@ export function Profit() {
     void queryClient.invalidateQueries({ queryKey: ['profit-cost-prices'] })
   }
 
-  useEffect(() => {
-    if (!prefillQuery.data) return
-    const prefill = prefillQuery.data
-    const matchesCurrentForm =
-      String(prefill.channel_id) === form.channel_id &&
-      prefill.model_name === form.model_name
-    const formHasNoPrices =
-      form.input_price === '' &&
-      form.cache_read_price === '' &&
-      form.cache_creation_price === '' &&
-      form.cache_creation_1h_price === '' &&
-      form.image_input_price === '' &&
-      form.image_output_price === '' &&
-      form.audio_input_price === '' &&
-      form.audio_output_price === '' &&
-      form.output_price === '' &&
-      form.request_price === '' &&
-      form.second_price === ''
-    if (matchesCurrentForm && formHasNoPrices && prefill.has_pricing) {
-      const nextInputPrice = formatPriceInput(usdToDisplayMoney(prefill.input_price, profitMoneyUnit.rate))
-      const nextCacheReadPrice = formatPriceInput(usdToDisplayMoney(prefill.cache_read_price, profitMoneyUnit.rate))
-      const nextCacheCreationPrice = formatPriceInput(usdToDisplayMoney(prefill.cache_creation_price, profitMoneyUnit.rate))
-      const nextCacheCreation1hPrice = formatPriceInput(usdToDisplayMoney(prefill.cache_creation_1h_price, profitMoneyUnit.rate))
-      const nextImageInputPrice = formatPriceInput(usdToDisplayMoney(prefill.image_input_price, profitMoneyUnit.rate))
-      const nextImageOutputPrice = formatPriceInput(usdToDisplayMoney(prefill.image_output_price, profitMoneyUnit.rate))
-      const nextAudioInputPrice = formatPriceInput(usdToDisplayMoney(prefill.audio_input_price, profitMoneyUnit.rate))
-      const nextAudioOutputPrice = formatPriceInput(usdToDisplayMoney(prefill.audio_output_price, profitMoneyUnit.rate))
-      const nextOutputPrice = formatPriceInput(usdToDisplayMoney(prefill.output_price, profitMoneyUnit.rate))
-      const nextRequestPrice = formatPriceInput(usdToDisplayMoney(prefill.request_price, profitMoneyUnit.rate))
-      const nextSecondPrice = formatPriceInput(usdToDisplayMoney(prefill.second_price, profitMoneyUnit.rate))
-      if (
-        !nextInputPrice &&
-        !nextCacheReadPrice &&
-        !nextCacheCreationPrice &&
-        !nextCacheCreation1hPrice &&
-        !nextImageInputPrice &&
-        !nextImageOutputPrice &&
-        !nextAudioInputPrice &&
-        !nextAudioOutputPrice &&
-        !nextOutputPrice &&
-        !nextRequestPrice &&
-        !nextSecondPrice
-      ) {
-        return
-      }
-      setForm((prev) => {
-        let nextCostMode = prev.cost_mode
-        if (prefill.pricing_mode === 'simple_token') {
-          nextCostMode = 'token'
-        } else if (prefill.pricing_mode === 'fixed_price' && nextRequestPrice) {
-          nextCostMode = 'request'
-        } else if (prefill.pricing_mode === 'fixed_price' && nextSecondPrice) {
-          nextCostMode = 'second'
-        }
-        return {
-          ...prev,
-          cost_mode: nextCostMode,
-          input_price: nextInputPrice,
-          cache_read_price: nextCacheReadPrice,
-          cache_creation_price: nextCacheCreationPrice,
-          cache_creation_1h_price: nextCacheCreation1hPrice,
-          image_input_price: nextImageInputPrice,
-          image_output_price: nextImageOutputPrice,
-          audio_input_price: nextAudioInputPrice,
-          audio_output_price: nextAudioOutputPrice,
-          output_price: nextOutputPrice,
-          request_price: nextRequestPrice,
-          second_price: nextSecondPrice,
-        }
-      })
-    }
-  }, [
-    form.channel_id,
-    form.audio_input_price,
-    form.audio_output_price,
-    form.cache_read_price,
-    form.cache_creation_price,
-    form.cache_creation_1h_price,
-    form.image_input_price,
-    form.image_output_price,
-    form.input_price,
-    form.model_name,
-    form.output_price,
-    form.request_price,
-    form.second_price,
-    prefillQuery.data,
-    profitMoneyUnit.rate,
-  ])
-
   return (
     <>
-      <SectionPageLayout>
+      <SectionPageLayout contentRef={contentRef}>
         <SectionPageLayout.Title>{t('Profit')}</SectionPageLayout.Title>
         <SectionPageLayout.Actions>
-          <Button size='sm' onClick={openCreateSheet}>
+          <Button size='sm' onClick={() => openCreateSheet()}>
             <Plus className='size-4' />
             {t('Cost price')}
           </Button>
@@ -633,436 +644,450 @@ export function Profit() {
             {passwordStatusQuery.data === false && (
               <div className='flex flex-wrap items-center justify-between gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-200'>
                 <span>{t('Profit password is not configured')}</span>
-                <Button size='sm' variant='outline' onClick={() => showPasswordDialog('PROFIT_PASSWORD_NOT_CONFIGURED')}>
+                <Button
+                  size='sm'
+                  variant='outline'
+                  onClick={() =>
+                    showPasswordDialog('PROFIT_PASSWORD_NOT_CONFIGURED')
+                  }
+                >
                   <ShieldCheck className='size-4' />
                   {t('Set profit access password')}
                 </Button>
               </div>
             )}
 
-            <div className='flex flex-wrap items-end gap-2 border-b pb-3'>
-              <div className='flex flex-col gap-1'>
-                <Label>{t('Range')}</Label>
-                <Select value={range} onValueChange={(v) => updateRange(v as ProfitRange)}>
-                  <SelectTrigger className='w-32'>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value='day'>{t('Daily')}</SelectItem>
-                    <SelectItem value='week'>{t('Weekly')}</SelectItem>
-                    <SelectItem value='month'>{t('Monthly')}</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className='flex flex-col gap-1'>
-                <Label>{t('Start date')}</Label>
-                <DatePicker
-                  selected={draftStart}
-                  onSelect={setDraftStart}
-                  placeholder={t('Start date')}
+            <Tabs
+              value={activeTab}
+              onValueChange={setActiveTab}
+              className='min-w-0 gap-5'
+            >
+              <TabsList variant='line' aria-label={t('Profit')}>
+                <TabsTrigger value='overview'>
+                  {t('Profit overview')}
+                </TabsTrigger>
+                <TabsTrigger value='costs'>{t('Cost management')}</TabsTrigger>
+              </TabsList>
+              <TabsContent value='overview' className='min-w-0 space-y-5'>
+                <div className='space-y-3'>
+                  <div className='flex flex-wrap items-center justify-between gap-3'>
+                    <ToggleGroup
+                      aria-label={t('Date range')}
+                      variant='outline'
+                      value={quickRange ? [quickRange] : []}
+                      onValueChange={(values) => {
+                        if (!values[0]) return
+                        setQuickRange(values[0])
+                        setStart(defaultStart(Number(values[0])))
+                        setEnd(nowSeconds())
+                      }}
+                    >
+                      {[7, 30, 90].map((days) => (
+                        <ToggleGroupItem key={days} value={String(days)}>
+                          {t('Last {{days}} days', { days })}
+                        </ToggleGroupItem>
+                      ))}
+                    </ToggleGroup>
+                    <div className='flex items-center gap-2'>
+                      <Button
+                        variant='outline'
+                        size='sm'
+                        onClick={() => {
+                          setDraftStart(timestampToDate(start))
+                          setDraftEnd(timestampToDate(end))
+                          setDraftRange(range)
+                          setDraftChannelId(channelId)
+                          setDraftModelName(modelName)
+                          setFiltersOpen(true)
+                        }}
+                      >
+                        <SlidersHorizontal className='size-4' />
+                        {t('Filters')}
+                        {(channelId || modelName) && (
+                          <span className='bg-primary text-primary-foreground rounded px-1.5 text-xs'>
+                            {Number(!!channelId) + Number(!!modelName)}
+                          </span>
+                        )}
+                      </Button>
+                      <Button
+                        variant='ghost'
+                        size='icon-sm'
+                        aria-label={t('Refresh')}
+                        title={t('Refresh')}
+                        disabled={reportQuery.isFetching}
+                        onClick={() => {
+                          const nextEnd = nowSeconds()
+                          if (quickRange && nextEnd !== end) {
+                            setStart(defaultStart(Number(quickRange)))
+                            setEnd(nextEnd)
+                            return
+                          }
+                          void reportQuery.refetch()
+                        }}
+                      >
+                        <RefreshCw
+                          className={
+                            reportQuery.isFetching
+                              ? 'size-4 animate-spin'
+                              : 'size-4'
+                          }
+                        />
+                      </Button>
+                    </div>
+                  </div>
+                  <div className='text-muted-foreground flex flex-wrap items-center gap-x-3 gap-y-2 text-xs'>
+                    <span>
+                      {t('Applied range')}: {toDateInput(start)} –{' '}
+                      {toDateInput(end)}
+                    </span>
+                    <span>
+                      {
+                        {
+                          day: t('Daily'),
+                          week: t('Weekly'),
+                          month: t('Monthly'),
+                        }[range]
+                      }
+                    </span>
+                    {channelId && (
+                      <span className='bg-muted max-w-full truncate rounded px-2 py-1'>
+                        {channelOptions.find(
+                          (option) => option.value === channelId
+                        )?.label ?? `#${channelId}`}
+                      </span>
+                    )}
+                    {modelName && (
+                      <span
+                        className='bg-muted max-w-full truncate rounded px-2 py-1'
+                        title={modelName}
+                      >
+                        {modelName}
+                      </span>
+                    )}
+                    {(channelId ||
+                      modelName ||
+                      quickRange !== '30' ||
+                      range !== 'day') && (
+                      <Button
+                        variant='link'
+                        size='sm'
+                        className='h-auto p-0 text-xs'
+                        onClick={() => {
+                          setStart(defaultStart())
+                          setEnd(nowSeconds())
+                          setRange('day')
+                          setChannelId('')
+                          setModelName('')
+                          setQuickRange('30')
+                        }}
+                      >
+                        {t('Reset')}
+                      </Button>
+                    )}
+                  </div>
+                </div>
+                {reportQuery.isError && (
+                  <ErrorState
+                    className='min-h-32'
+                    onRetry={() => void reportQuery.refetch()}
+                  />
+                )}
+                {reportQuery.isPending && <LoadingState />}
+                {!reportQuery.isPending && !reportQuery.isError && report && (
+                  <ProfitOverview
+                    report={report}
+                    scrollContainerRef={contentRef}
+                    onConfigure={openCreateSheet}
+                  />
+                )}
+              </TabsContent>
+              <TabsContent value='costs' className='min-w-0'>
+                <CostPriceTable
+                  prices={pricesQuery.data ?? []}
+                  loading={pricesQuery.isPending}
+                  error={pricesQuery.isError}
+                  refreshing={pricesQuery.isFetching}
+                  onRefresh={() => void pricesQuery.refetch()}
+                  search={priceSearch}
+                  onSearchChange={setPriceSearch}
+                  status={priceStatus}
+                  onStatusChange={setPriceStatus}
+                  onEdit={openEditSheet}
+                  onDisable={setDeleteTarget}
                 />
-              </div>
-              <div className='flex flex-col gap-1'>
-                <Label>{t('End date')}</Label>
-                <DatePicker
-                  selected={draftEnd}
-                  onSelect={setDraftEnd}
-                  placeholder={t('End date')}
-                />
-              </div>
-              <div className='flex flex-col gap-1'>
-                <Label>{t('Channel')}</Label>
-                <Input
-                  className='h-8 w-32'
-                  placeholder={t('Channel ID')}
-                  value={channelId}
-                  onChange={(e) => setChannelId(e.target.value)}
-                />
-              </div>
-              <div className='flex flex-col gap-1'>
-                <Label>{t('Model')}</Label>
-                <Input
-                  id='profit-model-filter'
-                  name='profit-model-filter'
-                  className='h-8 w-56'
-                  autoComplete='off'
-                  placeholder={t('Model name')}
-                  value={modelName}
-                  onChange={(e) => setModelName(e.target.value)}
-                />
-              </div>
-              <Button
-                variant='outline'
-                size='sm'
-                onClick={applyFilters}
-              >
-                <BarChart3 className='size-4' />
-                {t('Apply filters')}
-              </Button>
-            </div>
-
-            <div className='text-muted-foreground text-sm'>
-              {t('Applied range')}: {toDateInput(start)} - {toDateInput(end)}
-            </div>
-
-            <div className='grid gap-2 md:grid-cols-5'>
-              <MetricCell
-                icon={<DollarSign className='size-4' />}
-                label={t('Usage revenue')}
-                value={formatMoney(summary?.revenue ?? 0)}
-                description={t('Calculated from usage logs, not top-up payments')}
-              />
-              <MetricCell icon={<DollarSign className='size-4' />} label={t('Cost')} value={formatMoney(summary?.cost ?? 0)} />
-              <MetricCell icon={<BarChart3 className='size-4' />} label={t('Profit')} value={formatMoney(summary?.profit ?? 0)} />
-              <MetricCell icon={<Percent className='size-4' />} label={t('Margin')} value={formatPercent(summary?.profit_margin ?? 0)} />
-              <MetricCell icon={<ShieldCheck className='size-4' />} label={t('Coverage')} value={formatPercent(summary?.coverage_rate ?? 0)} />
-            </div>
-
-            {(summary?.unpriced_count ?? 0) > 0 && (
-              <div className='flex items-center gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-200'>
-                <AlertTriangle className='size-4' />
-                {t('Some usage has no cost price configured. Profit only includes priced usage.')}
-              </div>
-            )}
-
-            <div className='grid gap-3 xl:grid-cols-[1fr_1.1fr]'>
-              <DataPanel title={t('Trend')}>
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>{t('Period')}</TableHead>
-                      <TableHead>{t('Usage revenue')}</TableHead>
-                      <TableHead>{t('Cost')}</TableHead>
-                      <TableHead>{t('Profit')}</TableHead>
-                      <TableHead>{t('Coverage')}</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {(report?.series ?? []).map((item) => (
-                      <TableRow key={item.period_start}>
-                        <TableCell>{item.period_label}</TableCell>
-                        <TableCell>{formatMoney(item.revenue)}</TableCell>
-                        <TableCell>{formatMoney(item.cost)}</TableCell>
-                        <TableCell>{formatMoney(item.profit)}</TableCell>
-                        <TableCell>{formatPercent(item.coverage_rate)}</TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </DataPanel>
-
-              <DataPanel title={t('Channel model breakdown')}>
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>{t('Channel')}</TableHead>
-                      <TableHead>{t('Model')}</TableHead>
-                      <TableHead>{t('Requests')}</TableHead>
-                      <TableHead>{t('Usage revenue')}</TableHead>
-                      <TableHead>{t('Profit')}</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {(report?.breakdown ?? []).map((item) => (
-                      <TableRow key={`${item.channel_id}-${item.model_name}`}>
-                        <TableCell>{item.channel_name || item.channel_id}</TableCell>
-                        <TableCell className='max-w-60 truncate'>{item.model_name}</TableCell>
-                        <TableCell>{item.request_count}</TableCell>
-                        <TableCell>{formatMoney(item.revenue)}</TableCell>
-                        <TableCell>{formatMoney(item.profit)}</TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </DataPanel>
-            </div>
-
-            <DataPanel title={t('Cost prices')}>
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>{t('Channel')}</TableHead>
-                    <TableHead>{t('Model')}</TableHead>
-                    <TableHead>{t('Type')}</TableHead>
-                    <TableHead>{t('Price summary')}</TableHead>
-                    <TableHead>{t('Effective from')}</TableHead>
-                    <TableHead>{t('Status')}</TableHead>
-                    <TableHead className='w-20' />
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {(pricesQuery.data ?? []).map((item) => (
-                    <TableRow key={item.id}>
-                      <TableCell>{item.channel_name || item.channel_id}</TableCell>
-                      <TableCell>{item.model_name}</TableCell>
-                      <TableCell>{priceTypeLabel(item.price_type, t)}</TableCell>
-                      <TableCell>{priceSummary(item, t)}</TableCell>
-                      <TableCell>{toDateInput(item.effective_from)}</TableCell>
-                      <TableCell>{item.disabled ? t('Disabled') : t('Active')}</TableCell>
-                      <TableCell>
-                        <div className='flex items-center justify-end gap-1'>
-                          <Button
-                            variant='ghost'
-                            size='icon-sm'
-                            title={t('Edit')}
-                            aria-label={t('Edit')}
-                            onClick={() => openEditSheet(item)}
-                          >
-                            <Pencil className='size-4' />
-                          </Button>
-                          <Button
-                            variant='ghost'
-                            size='icon-sm'
-                            title={t('Delete')}
-                            aria-label={t('Delete')}
-                            onClick={() => void removeCostPrice(item)}
-                          >
-                            <Trash2 className='size-4' />
-                          </Button>
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </DataPanel>
+              </TabsContent>
+            </Tabs>
           </div>
         </SectionPageLayout.Content>
       </SectionPageLayout>
 
-      <Sheet
+      <FormDialog
+        open={filtersOpen}
+        onOpenChange={setFiltersOpen}
+        title={t('Filters')}
+        description={t(
+          'Choose the period, channel and model for your profit report.'
+        )}
+        footer={
+          <>
+            <Button variant='outline' onClick={() => setFiltersOpen(false)}>
+              {t('Cancel')}
+            </Button>
+            <Button type='submit' form='profit-filter-form'>
+              {t('Apply filters')}
+            </Button>
+          </>
+        }
+      >
+        <form
+          id='profit-filter-form'
+          className='grid gap-4 sm:grid-cols-2'
+          onSubmit={(event) => {
+            event.preventDefault()
+            applyFilters()
+          }}
+        >
+          <div className='space-y-1.5'>
+            <Label htmlFor='profit-start-date'>{t('Start date')}</Label>
+            <DatePicker
+              id='profit-start-date'
+              aria-label={t('Start date')}
+              className='w-full'
+              selected={draftStart}
+              onSelect={setDraftStart}
+              placeholder={t('Start date')}
+            />
+          </div>
+          <div className='space-y-1.5'>
+            <Label htmlFor='profit-end-date'>{t('End date')}</Label>
+            <DatePicker
+              id='profit-end-date'
+              aria-label={t('End date')}
+              className='w-full'
+              selected={draftEnd}
+              onSelect={setDraftEnd}
+              placeholder={t('End date')}
+            />
+          </div>
+          <div className='space-y-1.5 sm:col-span-2'>
+            <Label htmlFor='profit-range'>{t('Time granularity')}</Label>
+            <Select
+              items={[
+                { value: 'day', label: t('Daily') },
+                { value: 'week', label: t('Weekly') },
+                { value: 'month', label: t('Monthly') },
+              ]}
+              value={draftRange}
+              onValueChange={(value) => setDraftRange(value as ProfitRange)}
+            >
+              <SelectTrigger id='profit-range' className='w-full'>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value='day'>{t('Daily')}</SelectItem>
+                <SelectItem value='week'>{t('Weekly')}</SelectItem>
+                <SelectItem value='month'>{t('Monthly')}</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div className='space-y-1.5'>
+            <Label htmlFor='profit-channel-filter'>{t('Channel')}</Label>
+            <Combobox
+              id='profit-channel-filter'
+              aria-label={t('Channel')}
+              className='w-full'
+              options={[
+                { value: '', label: t('All channels') },
+                ...channelOptions,
+              ]}
+              placeholder={t('Search channel name or ID')}
+              value={draftChannelId}
+              onValueChange={(value) => setDraftChannelId(value ?? '')}
+            />
+          </div>
+          <div className='space-y-1.5'>
+            <Label htmlFor='profit-model-filter'>{t('Model')}</Label>
+            <Input
+              id='profit-model-filter'
+              autoComplete='off'
+              placeholder={t('Model name')}
+              value={draftModelName}
+              onChange={(event) => setDraftModelName(event.target.value)}
+            />
+          </div>
+          {channelsQuery.isError && (
+            <ErrorState
+              className='min-h-24 sm:col-span-2'
+              onRetry={() => void channelsQuery.refetch()}
+            />
+          )}
+        </form>
+      </FormDialog>
+
+      <FormDialog
         open={sheetOpen}
         onOpenChange={(open) => {
-          setSheetOpen(open)
-          if (!open) setSheetMode('create')
+          if (!saving) setSheetOpen(open)
         }}
+        title={sheetMode === 'edit' ? t('Edit cost price') : t('Cost price')}
+        description={t(
+          'Configure simple encrypted upstream cost pricing by channel and model.'
+        )}
+        showCloseButton={!saving}
+        contentClassName='sm:max-w-2xl'
+        footer={
+          <>
+            <Button
+              variant='outline'
+              disabled={saving}
+              onClick={() => setSheetOpen(false)}
+            >
+              {t('Cancel')}
+            </Button>
+            <Button
+              type='submit'
+              form='profit-cost-form'
+              disabled={saving || !form.channel_id || !form.model_name}
+            >
+              <Save className='size-4' />
+              {saving ? t('Saving...') : t('Save')}
+            </Button>
+          </>
+        }
       >
-        <SheetContent className='sm:max-w-xl'>
-          <SheetHeader>
-            <SheetTitle>{sheetMode === 'edit' ? t('Edit model pricing') : t('Cost price')}</SheetTitle>
-            <SheetDescription>
-              {t('Configure simple encrypted upstream cost pricing by channel and model.')}
-            </SheetDescription>
-          </SheetHeader>
-          <div className='flex flex-1 flex-col gap-3 overflow-auto px-4'>
-            <div className='grid gap-3 sm:grid-cols-2'>
-              <Field label={t('Channel')}>
-                <Select
+        <form
+          id='profit-cost-form'
+          onSubmit={(event) => {
+            event.preventDefault()
+            void submitCostPrice()
+          }}
+        >
+          <fieldset disabled={saving} className='min-w-0 space-y-4'>
+            <div className='grid gap-4 sm:grid-cols-2'>
+              <div className='space-y-1.5'>
+                <Label htmlFor='profit-cost-channel'>{t('Channel')}</Label>
+                <Combobox
+                  id='profit-cost-channel'
+                  aria-label={t('Channel')}
+                  options={channelOptions}
                   value={form.channel_id}
-                  onValueChange={(v) => updateCostPriceChannel(v ?? '')}
-                  disabled={sheetMode === 'edit'}
-                >
-                  <SelectTrigger className='w-full'>
-                    <SelectValue placeholder={t('Select channel')} />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {(channelsQuery.data ?? []).map((channel: Channel) => (
-                      <SelectItem key={channel.id} value={String(channel.id)}>
-                        {channel.name || `#${channel.id}`}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </Field>
-              <Field label={t('Model')}>
-                <Select
-                  value={form.model_name}
-                  onValueChange={(v) => updateCostPriceModel(v ?? '')}
-                  disabled={sheetMode === 'edit' || !form.channel_id || formModels.length === 0}
-                >
-                  <SelectTrigger className='w-full'>
-                    <SelectValue
-                      placeholder={
-                        form.channel_id
-                          ? t('Select model')
-                          : t('Select channel first')
-                      }
-                    />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {formModels.map((model) => (
-                      <SelectItem key={model} value={model}>
-                        {model}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </Field>
-            </div>
-            {form.channel_id && formModels.length === 0 && (
-              <div className='text-muted-foreground text-sm'>
-                {t('This channel has no configured models. Please update the channel model list first.')}
+                  onValueChange={(value) => updateCostPriceChannel(value ?? '')}
+                  disabled={
+                    saving ||
+                    sheetMode === 'edit' ||
+                    channelsQuery.isPending ||
+                    channelsQuery.isError
+                  }
+                  placeholder={t('Search channel name or ID')}
+                  className='w-full'
+                />
               </div>
+              <div className='space-y-1.5'>
+                <Label htmlFor='profit-cost-model'>{t('Model')}</Label>
+                <Combobox
+                  id='profit-cost-model'
+                  aria-label={t('Model')}
+                  options={formModels.map((model) => ({
+                    value: model,
+                    label: model,
+                  }))}
+                  value={form.model_name}
+                  onValueChange={(value) => updateCostPriceModel(value ?? '')}
+                  disabled={
+                    saving ||
+                    sheetMode === 'edit' ||
+                    !form.channel_id ||
+                    formModels.length === 0
+                  }
+                  placeholder={
+                    form.channel_id
+                      ? t('Select model')
+                      : t('Select channel first')
+                  }
+                  className='w-full'
+                />
+              </div>
+            </div>
+            {channelsQuery.isPending && (
+              <LoadingState inline message={t('Loading...')} />
+            )}
+            {channelsQuery.isError && (
+              <ErrorState
+                className='min-h-24'
+                onRetry={() => void channelsQuery.refetch()}
+              />
+            )}
+            {form.channel_id &&
+              !channelsQuery.isPending &&
+              !channelsQuery.isError &&
+              formModels.length === 0 && (
+                <p className='text-muted-foreground text-sm'>
+                  {t(
+                    'This channel has no configured models. Please update the channel model list first.'
+                  )}
+                </p>
+              )}
+            <CostPriceFields
+              form={form}
+              currency={profitMoneyUnit.label}
+              onChange={(patch) =>
+                setForm((previous) => ({ ...previous, ...patch }))
+              }
+            />
+            {form.model_name && prefillQuery.isPending && (
+              <LoadingState inline message={t('Loading...')} />
+            )}
+            {form.model_name && prefillQuery.isError && (
+              <ErrorState
+                className='min-h-24'
+                onRetry={() => void prefillQuery.refetch()}
+              />
             )}
             {form.model_name && prefillQuery.data?.has_pricing && (
-              <div className='rounded-md border bg-muted/30 px-3 py-2 text-sm'>
+              <div className='bg-muted/30 rounded-lg border p-3 text-xs'>
                 <div className='flex items-center gap-1.5 font-medium'>
                   <Calculator className='size-4' />
                   {t('Selling price reference')}
                 </div>
-                <div className='text-muted-foreground mt-1'>
+                <p className='text-muted-foreground mt-2 break-words'>
                   {sellingPriceReference(prefillQuery.data, t)}
-                </div>
-                <div className='text-muted-foreground mt-1'>
-                  {t('Selling price and upstream cost can use different billing units.')}
-                </div>
+                </p>
+                <p className='text-muted-foreground mt-2'>
+                  {t(
+                    'Reference from legacy pricing settings only; tiered and dynamic prices may differ. Enter your actual upstream cost.'
+                  )}
+                </p>
               </div>
             )}
-            {form.model_name && prefillQuery.data && !prefillQuery.data.has_pricing && (
-              <div className='text-muted-foreground text-sm'>
-                {t('No selling price found for this model. Please enter cost price manually.')}
-              </div>
-            )}
-            <div className='grid gap-3 sm:grid-cols-2'>
-              <Field label={t('Cost billing mode')}>
-                <Select
-                  value={form.cost_mode}
-                  onValueChange={(v) =>
-                    setForm((prev) => ({
-                      ...prev,
-                      cost_mode: (v as FormState['cost_mode']) ?? 'token',
-                    }))
-                  }
-                >
-                  <SelectTrigger className='w-full'>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value='token'>{t('Token unit price')}</SelectItem>
-                    <SelectItem value='request'>{t('Fixed per request')}</SelectItem>
-                    <SelectItem value='second'>{t('Fixed per second')}</SelectItem>
-                  </SelectContent>
-                </Select>
-              </Field>
-              {form.cost_mode === 'token' && (
-                <>
-                  <Field label={t('Input price ({{currency}} / 1M tokens)', { currency: profitMoneyUnit.label })}>
-                    <Input
-                      type='number'
-                      step='0.000001'
-                      min='0'
-                      value={form.input_price}
-                      onChange={(e) => setForm((prev) => ({ ...prev, input_price: e.target.value }))}
-                    />
-                  </Field>
-                  <Field label={t('Cache read price ({{currency}} / 1M tokens)', { currency: profitMoneyUnit.label })}>
-                    <Input
-                      type='number'
-                      step='0.000001'
-                      min='0'
-                      value={form.cache_read_price}
-                      onChange={(e) => setForm((prev) => ({ ...prev, cache_read_price: e.target.value }))}
-                    />
-                  </Field>
-                  <Field label={t('Cache create price ({{currency}} / 1M tokens)', { currency: profitMoneyUnit.label })}>
-                    <Input
-                      type='number'
-                      step='0.000001'
-                      min='0'
-                      value={form.cache_creation_price}
-                      onChange={(e) => setForm((prev) => ({ ...prev, cache_creation_price: e.target.value }))}
-                    />
-                  </Field>
-                  <Field label={t('Cache create (1h) price ({{currency}} / 1M tokens)', { currency: profitMoneyUnit.label })}>
-                    <Input
-                      type='number'
-                      step='0.000001'
-                      min='0'
-                      value={form.cache_creation_1h_price}
-                      onChange={(e) => setForm((prev) => ({ ...prev, cache_creation_1h_price: e.target.value }))}
-                    />
-                  </Field>
-                  <Field label={t('Image input price ({{currency}} / 1M tokens)', { currency: profitMoneyUnit.label })}>
-                    <Input
-                      type='number'
-                      step='0.000001'
-                      min='0'
-                      value={form.image_input_price}
-                      onChange={(e) => setForm((prev) => ({ ...prev, image_input_price: e.target.value }))}
-                    />
-                  </Field>
-                  <Field label={t('Image output price ({{currency}} / 1M tokens)', { currency: profitMoneyUnit.label })}>
-                    <Input
-                      type='number'
-                      step='0.000001'
-                      min='0'
-                      value={form.image_output_price}
-                      onChange={(e) => setForm((prev) => ({ ...prev, image_output_price: e.target.value }))}
-                    />
-                  </Field>
-                  <Field label={t('Audio input price ({{currency}} / 1M tokens)', { currency: profitMoneyUnit.label })}>
-                    <Input
-                      type='number'
-                      step='0.000001'
-                      min='0'
-                      value={form.audio_input_price}
-                      onChange={(e) => setForm((prev) => ({ ...prev, audio_input_price: e.target.value }))}
-                    />
-                  </Field>
-                  <Field label={t('Audio output price ({{currency}} / 1M tokens)', { currency: profitMoneyUnit.label })}>
-                    <Input
-                      type='number'
-                      step='0.000001'
-                      min='0'
-                      value={form.audio_output_price}
-                      onChange={(e) => setForm((prev) => ({ ...prev, audio_output_price: e.target.value }))}
-                    />
-                  </Field>
-                  <Field label={t('Output price ({{currency}} / 1M tokens)', { currency: profitMoneyUnit.label })}>
-                    <Input
-                      type='number'
-                      step='0.000001'
-                      min='0'
-                      value={form.output_price}
-                      onChange={(e) => setForm((prev) => ({ ...prev, output_price: e.target.value }))}
-                    />
-                  </Field>
-                </>
+            {form.model_name &&
+              prefillQuery.data &&
+              !prefillQuery.data.has_pricing && (
+                <p className='text-muted-foreground text-xs'>
+                  {t(
+                    'No selling price found for this model. Please enter cost price manually.'
+                  )}
+                </p>
               )}
-              {form.cost_mode === 'request' && (
-                <Field label={t('Fixed per request ({{currency}})', { currency: profitMoneyUnit.label })}>
-                  <Input
-                    type='number'
-                    step='0.000001'
-                    min='0'
-                    value={form.request_price}
-                    onChange={(e) => setForm((prev) => ({ ...prev, request_price: e.target.value }))}
-                  />
-                </Field>
-              )}
-              {form.cost_mode === 'second' && (
-                <>
-                  <Field label={t('Fixed per second ({{currency}})', { currency: profitMoneyUnit.label })}>
-                    <Input
-                      type='number'
-                      step='0.000001'
-                      min='0'
-                      value={form.second_price}
-                      onChange={(e) => setForm((prev) => ({ ...prev, second_price: e.target.value }))}
-                    />
-                  </Field>
-                  <div className='text-muted-foreground self-end text-sm'>
-                    {t('For video tasks, per-second cost uses the task duration from logs when available.')}
-                  </div>
-                </>
-              )}
-              <Field label={t('Effective from')}>
-                <Input
-                  type='date'
-                  value={form.effective_date}
-                  onChange={(e) => setForm((prev) => ({ ...prev, effective_date: e.target.value }))}
-                />
-              </Field>
-            </div>
-          </div>
-          <SheetFooter>
-            <Button onClick={() => void submitCostPrice()}>
-              <Save className='size-4' />
-              {t('Save')}
-            </Button>
-          </SheetFooter>
-        </SheetContent>
-      </Sheet>
+          </fieldset>
+        </form>
+      </FormDialog>
+      <ConfirmDialog
+        open={!!deleteTarget}
+        onOpenChange={(open) => {
+          if (!open && !deleting) setDeleteTarget(null)
+        }}
+        title={t('Disable cost price?')}
+        desc={t(
+          'Disable the cost price for {{model}} on channel #{{id}}? Historical usage before disabling keeps its cost price.',
+          { model: deleteTarget?.model_name, id: deleteTarget?.channel_id }
+        )}
+        confirmText={t('Disable')}
+        destructive
+        isLoading={deleting}
+        handleConfirm={() => {
+          if (deleteTarget) void removeCostPrice(deleteTarget)
+        }}
+      />
 
       <ProfitPasswordDialog
         open={passwordOpen}
@@ -1074,51 +1099,6 @@ export function Profit() {
   )
 }
 
-function priceTypeLabel(type: ProfitCostPrice['price_type'], t: (key: string) => string) {
-  if (type === 'simple_token') return t('Unit pricing')
-  if (type === 'tiered_expr') return t('Advanced expression')
-  return t('Fixed cost')
-}
-
-function priceSummary(item: ProfitCostPrice, t: (key: string) => string) {
-  if (item.price_type !== 'simple_token') return item.price_summary || '-'
-  const parts: string[] = []
-  if ((item.input_price ?? 0) > 0) {
-    parts.push(`${t('Input')} ${formatMoney(item.input_price ?? 0)}`)
-  }
-  if ((item.cache_read_price ?? 0) > 0) {
-    parts.push(`${t('Cache Read')} ${formatMoney(item.cache_read_price ?? 0)}`)
-  }
-  if ((item.cache_creation_price ?? 0) > 0) {
-    parts.push(`${t('Cache Creation')} ${formatMoney(item.cache_creation_price ?? 0)}`)
-  }
-  if ((item.cache_creation_1h_price ?? 0) > 0) {
-    parts.push(`${t('Cache Creation (1h)')} ${formatMoney(item.cache_creation_1h_price ?? 0)}`)
-  }
-  if ((item.image_input_price ?? 0) > 0) {
-    parts.push(`${t('Image input')} ${formatMoney(item.image_input_price ?? 0)}`)
-  }
-  if ((item.image_output_price ?? 0) > 0) {
-    parts.push(`${t('Image Output')} ${formatMoney(item.image_output_price ?? 0)}`)
-  }
-  if ((item.audio_input_price ?? 0) > 0) {
-    parts.push(`${t('Audio Input')} ${formatMoney(item.audio_input_price ?? 0)}`)
-  }
-  if ((item.audio_output_price ?? 0) > 0) {
-    parts.push(`${t('Audio Output')} ${formatMoney(item.audio_output_price ?? 0)}`)
-  }
-  if ((item.output_price ?? 0) > 0) {
-    parts.push(`${t('Output')} ${formatMoney(item.output_price ?? 0)}`)
-  }
-  if ((item.request_price ?? 0) > 0) {
-    parts.push(`${t('Per request')} ${formatMoney(item.request_price ?? 0)}`)
-  }
-  if ((item.second_price ?? 0) > 0) {
-    parts.push(`${t('Per second')} ${formatMoney(item.second_price ?? 0)}`)
-  }
-  return parts.join(' / ') || '-'
-}
-
 function sellingPriceReference(
   prefill: ProfitCostPricePrefill,
   t: (key: string) => string
@@ -1126,31 +1106,49 @@ function sellingPriceReference(
   const parts: string[] = []
   if (prefill.pricing_mode === 'simple_token') {
     if (prefill.input_price > 0) {
-      parts.push(`${t('Input')} ${formatMoney(prefill.input_price)} / 1M tokens`)
+      parts.push(
+        `${t('Input')} ${formatMoney(prefill.input_price)} / 1M tokens`
+      )
     }
     if (prefill.cache_read_price > 0) {
-      parts.push(`${t('Cache Read')} ${formatMoney(prefill.cache_read_price)} / 1M tokens`)
+      parts.push(
+        `${t('Cache Read')} ${formatMoney(prefill.cache_read_price)} / 1M tokens`
+      )
     }
     if (prefill.cache_creation_price > 0) {
-      parts.push(`${t('Cache Creation')} ${formatMoney(prefill.cache_creation_price)} / 1M tokens`)
+      parts.push(
+        `${t('Cache Creation')} ${formatMoney(prefill.cache_creation_price)} / 1M tokens`
+      )
     }
     if (prefill.cache_creation_1h_price > 0) {
-      parts.push(`${t('Cache Creation (1h)')} ${formatMoney(prefill.cache_creation_1h_price)} / 1M tokens`)
+      parts.push(
+        `${t('Cache Creation (1h)')} ${formatMoney(prefill.cache_creation_1h_price)} / 1M tokens`
+      )
     }
     if (prefill.image_input_price > 0) {
-      parts.push(`${t('Image input')} ${formatMoney(prefill.image_input_price)} / 1M tokens`)
+      parts.push(
+        `${t('Image input')} ${formatMoney(prefill.image_input_price)} / 1M tokens`
+      )
     }
     if (prefill.image_output_price > 0) {
-      parts.push(`${t('Image Output')} ${formatMoney(prefill.image_output_price)} / 1M tokens`)
+      parts.push(
+        `${t('Image Output')} ${formatMoney(prefill.image_output_price)} / 1M tokens`
+      )
     }
     if (prefill.audio_input_price > 0) {
-      parts.push(`${t('Audio Input')} ${formatMoney(prefill.audio_input_price)} / 1M tokens`)
+      parts.push(
+        `${t('Audio Input')} ${formatMoney(prefill.audio_input_price)} / 1M tokens`
+      )
     }
     if (prefill.audio_output_price > 0) {
-      parts.push(`${t('Audio Output')} ${formatMoney(prefill.audio_output_price)} / 1M tokens`)
+      parts.push(
+        `${t('Audio Output')} ${formatMoney(prefill.audio_output_price)} / 1M tokens`
+      )
     }
     if (prefill.output_price > 0) {
-      parts.push(`${t('Output')} ${formatMoney(prefill.output_price)} / 1M tokens`)
+      parts.push(
+        `${t('Output')} ${formatMoney(prefill.output_price)} / 1M tokens`
+      )
     }
   }
   if (prefill.request_price > 0) {
@@ -1215,7 +1213,9 @@ function ProfitPasswordDialog(props: {
       <DialogContent showCloseButton={!loading}>
         <DialogHeader>
           <DialogTitle>
-            {isSetup ? t('Set profit access password') : t('Enter profit access password')}
+            {isSetup
+              ? t('Set profit access password')
+              : t('Enter profit access password')}
           </DialogTitle>
           <DialogDescription>
             {isSetup
@@ -1255,30 +1255,6 @@ function ProfitPasswordDialog(props: {
         </DialogFooter>
       </DialogContent>
     </Dialog>
-  )
-}
-
-function MetricCell(props: { icon: ReactNode; label: string; value: string; description?: string }) {
-  return (
-    <div className='rounded-md border px-3 py-2'>
-      <div className='text-muted-foreground flex items-center gap-1.5 text-xs'>
-        {props.icon}
-        {props.label}
-      </div>
-      <div className='mt-1 truncate text-lg font-semibold'>{props.value}</div>
-      {props.description && (
-        <div className='text-muted-foreground mt-1 truncate text-xs'>{props.description}</div>
-      )}
-    </div>
-  )
-}
-
-function DataPanel(props: { title: string; children: ReactNode }) {
-  return (
-    <section className='min-h-0 rounded-md border'>
-      <div className='border-b px-3 py-2 text-sm font-medium'>{props.title}</div>
-      <div className='max-h-[420px] overflow-auto'>{props.children}</div>
-    </section>
   )
 }
 

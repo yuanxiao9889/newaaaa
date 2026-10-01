@@ -1021,6 +1021,9 @@ func (channel *Channel) ValidateSettings() error {
 	if err := channelParams.ValidateImageAdapter(); err != nil {
 		return err
 	}
+	if err := channelParams.ValidateImageRequestFilter(); err != nil {
+		return err
+	}
 	if channelParams.ImageAdapter != nil && channelParams.ImageAdapter.Enabled && channel.Type != constant.ChannelTypeOpenAI {
 		return fmt.Errorf("image_adapter currently supports only OpenAI channels (type 1)")
 	}

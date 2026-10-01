@@ -83,6 +83,9 @@ it.each([false, true])(
     const dialog = screen.getByRole('alertdialog')
     expect(dialog).toHaveTextContent('inviter (ID: 2)')
     expect(dialog).toHaveTextContent(
+      isVIP ? 'The 3-reward limit' : 'earn 10% rewards without a count limit'
+    )
+    expect(dialog).toHaveTextContent(
       isVIP
         ? 'Existing rewards are kept.'
         : 'Past skipped rewards will not be paid retroactively.'

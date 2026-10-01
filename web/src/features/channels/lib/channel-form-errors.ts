@@ -40,6 +40,8 @@ const ADVANCED_SETTINGS_FIELDS = new Set<FieldPath<ChannelFormValues>>([
   'pass_through_body_enabled',
   'image_adapter',
   'image_adapter_enabled',
+  'image_request_filter',
+  'image_request_filter_enabled',
   'responses_websocket_enabled',
   'proxy',
   'http_protocol',

@@ -580,8 +580,9 @@ func TestProfitCostPriceEncryptionDoesNotStorePlaintext(t *testing.T) {
 
 	var stored model.ProfitCostPriceVersion
 	require.NoError(t, model.DB.Where("id = ?", version.Id).First(&stored).Error)
-	assert.NotContains(t, stored.CipherText, "secret")
-	assert.NotContains(t, stored.CipherText, "99")
+	// Random base64 ciphertext may contain short substrings such as "99".
+	assert.NotEmpty(t, stored.CipherText)
+	assert.NotEqual(t, plain, stored.CipherText)
 
 	revealed, err := common.DecryptString(stored.CipherText, stored.Nonce, stored.EncryptionVer)
 	require.NoError(t, err)
@@ -693,4 +694,73 @@ func TestProfitReport_DisabledCostPriceKeepsHistoricalOnly(t *testing.T) {
 	assert.Equal(t, int64(1), report.Summary.PricedCount)
 	assert.Equal(t, int64(1), report.Summary.UnpricedCount)
 	assert.InDelta(t, 0.1, report.Summary.Cost, 0.000001)
+}
+
+func newProfitCostTestResolver(t testing.TB, priceType, plain string) *profitCostPriceResolver {
+	t.Helper()
+	cipherText, nonce, version, err := common.EncryptString(plain)
+	require.NoError(t, err)
+	return &profitCostPriceResolver{versions: map[string][]profitCostPriceVersionEntry{
+		profitBreakdownKey(10, "cost-model"): {{version: model.ProfitCostPriceVersion{
+			Id: 1, ChannelId: 10, ModelName: "cost-model", PriceType: priceType,
+			CipherText: cipherText, Nonce: nonce, EncryptionVer: version, EffectiveFrom: 1,
+		}}},
+	}}
+}
+
+func TestProfitCostResolverReusesPricesWithoutReusingUsage(t *testing.T) {
+	for _, tc := range []struct {
+		name, priceType, plain string
+		first, second          float64
+	}{
+		{"token", model.ProfitPriceTypeSimpleToken, `{"input_price":2,"output_price":4}`, .004, .008},
+		{"per request", model.ProfitPriceTypeFixedPrice, `{"amount":0.2,"unit":"request"}`, .2, .2},
+		{"per second", model.ProfitPriceTypeFixedPrice, `{"amount":0.2,"unit":"second"}`, .4, .8},
+		{"expression", model.ProfitPriceTypeTieredExpr, `tier("base", p * 2 + c * 4)`, .004, .008},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			resolver := newProfitCostTestResolver(t, tc.priceType, tc.plain)
+			log := model.Log{ChannelId: 10, ModelName: "cost-model", CreatedAt: 10, PromptTokens: 1000, CompletionTokens: 500, UseTime: 2}
+			first, priced, err := calculateLogCostUSD(log, resolver)
+			require.NoError(t, err)
+			require.True(t, priced)
+			assert.InDelta(t, tc.first, first, 1e-12)
+			log.PromptTokens = 2000
+			log.CompletionTokens = 1000
+			log.UseTime = 4
+			second, priced, err := calculateLogCostUSD(log, resolver)
+			require.NoError(t, err)
+			require.True(t, priced)
+			assert.InDelta(t, tc.second, second, 1e-12)
+		})
+	}
+}
+
+func TestProfitCostResolverCountsEveryInvalidPriceUsage(t *testing.T) {
+	resolver := newProfitCostTestResolver(t, model.ProfitPriceTypeSimpleToken, `invalid-json`)
+	log := model.Log{Type: model.LogTypeConsume, ChannelId: 10, ModelName: "cost-model", CreatedAt: 10, Quota: 1}
+	for range 2 {
+		metric := calculateLogProfit(log, resolver)
+		assert.Equal(t, int64(1), metric.ErrorCount)
+		assert.Equal(t, int64(1), metric.UnpricedCount)
+		assert.Zero(t, metric.PricedCount)
+	}
+	// A newly loaded report must use its own prices, including after a correction.
+	corrected := newProfitCostTestResolver(t, model.ProfitPriceTypeFixedPrice, `{"amount":0.2,"unit":"request"}`)
+	metric := calculateLogProfit(log, corrected)
+	assert.Zero(t, metric.ErrorCount)
+	assert.Equal(t, int64(1), metric.PricedCount)
+	assert.Equal(t, .2, metric.Cost)
+}
+
+func BenchmarkProfitCostToken(b *testing.B) {
+	resolver := newProfitCostTestResolver(b, model.ProfitPriceTypeSimpleToken, `{"input_price":2,"output_price":4,"cache_read_price":0.2}`)
+	log := model.Log{ChannelId: 10, ModelName: "cost-model", CreatedAt: 10, PromptTokens: 1000, CompletionTokens: 500, Other: `{"cache_tokens":400}`}
+	b.ReportAllocs()
+	for b.Loop() {
+		_, _, err := calculateLogCostUSD(log, resolver)
+		if err != nil {
+			b.Fatal(err)
+		}
+	}
 }

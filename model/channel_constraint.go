@@ -3,12 +3,17 @@ package model
 import (
 	"slices"
 
+	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
+	kitdto "github.com/QuantumNous/new-api/relaykit/dto"
+	hostreasoning "github.com/QuantumNous/new-api/setting/reasoning"
 )
 
 var filterEvalOrder = []dto.ChannelFilterKind{
+	dto.FilterChannelIdentity,
 	dto.FilterRequestPath,
+	dto.FilterImageRequest,
 	dto.FilterTaskPluginIdentity,
 	dto.FilterResponsesWebSocket,
 }
@@ -89,6 +94,8 @@ func candidatePassesKindFilters(ch *Channel, exists bool, modelName string, kind
 
 func channelMatchesFilter(ch *Channel, modelName string, filter dto.ChannelFilter) bool {
 	switch filter.Kind {
+	case dto.FilterChannelIdentity:
+		return ch.Status == common.ChannelStatusEnabled && (filter.ChannelID == 0 || ch.Id == filter.ChannelID) && !slices.Contains(filter.ExcludedChannelIDs, ch.Id)
 	case dto.FilterRequestPath:
 		if filter.RequestPath == "" {
 			return true
@@ -106,7 +113,53 @@ func channelMatchesFilter(ch *Channel, modelName string, filter dto.ChannelFilte
 		return filter.TaskPluginKey == "" || slices.Contains(filter.TaskPluginChannelTypes, ch.Type)
 	case dto.FilterResponsesWebSocket:
 		return (ch.Type == constant.ChannelTypeOpenAI || ch.Type == constant.ChannelTypeCodex) && ch.GetSetting().ResponsesWebSocketEnabled
+	case dto.FilterImageRequest:
+		return channelMatchesImageRequestFilter(ch, modelName, filter)
 	default:
 		return true
 	}
+}
+
+func channelMatchesImageRequestFilter(ch *Channel, modelName string, filter dto.ChannelFilter) bool {
+	if ch.Setting == nil || *ch.Setting == "" {
+		return true
+	}
+	// Do not use GetSetting here: its malformed-JSON recovery clears and saves
+	// the setting, which would silently remove an admission restriction.
+	var settings struct {
+		ImageRequestFilter *kitdto.ImageRequestFilterConfig `json:"image_request_filter"`
+	}
+	if err := common.Unmarshal([]byte(*ch.Setting), &settings); err != nil {
+		return false
+	}
+	config := settings.ImageRequestFilter
+	if config == nil || !config.Enabled {
+		return true
+	}
+	if filter.ImageModelAmbiguous {
+		return false
+	}
+	var completeSettings kitdto.ChannelSettings
+	if err := common.Unmarshal([]byte(*ch.Setting), &completeSettings); err != nil {
+		return false
+	}
+	if err := config.Validate(); err != nil {
+		return false
+	}
+	models, err := ResolveChannelModelMapping(ch.GetModelMapping(), modelName)
+	if err != nil {
+		return false
+	}
+	for _, candidate := range models {
+		base := hostreasoning.BaseModelName(candidate)
+		for _, rule := range config.Rules {
+			if !slices.Contains(rule.Models, candidate) && !slices.Contains(rule.Models, base) {
+				continue
+			}
+			if !filter.ImageRequestValid || !slices.Contains(rule.Qualities, filter.ImageQuality) || !slices.Contains(rule.Sizes, filter.ImageSize) {
+				return false
+			}
+		}
+	}
+	return true
 }

@@ -123,6 +123,18 @@ type profitLogOther struct {
 
 type profitCostPriceResolver struct {
 	versions map[string][]profitCostPriceVersionEntry
+	// Decoded prices live only for this report, never across configuration changes.
+	decoded map[*model.ProfitCostPriceVersion]*profitDecodedCostPrice
+}
+
+type profitDecodedCostPrice struct {
+	expression string
+	token      model.ProfitSimpleTokenPrice
+	fixed      struct {
+		Amount float64 `json:"amount"`
+		Unit   string  `json:"unit"`
+	}
+	err error
 }
 
 type profitCostPriceVersionEntry struct {
@@ -486,46 +498,64 @@ func calculateLogCostUSD(log model.Log, resolver *profitCostPriceResolver) (floa
 	if !ok {
 		return 0, false, nil
 	}
-	plain, err := common.DecryptString(version.CipherText, version.Nonce, version.EncryptionVer)
+	price, err := resolver.decodePrice(version)
 	if err != nil {
 		return 0, false, err
 	}
 	switch version.PriceType {
 	case model.ProfitPriceTypeSimpleToken:
-		var payload model.ProfitSimpleTokenPrice
-		if err := common.UnmarshalJsonStr(plain, &payload); err != nil {
-			return 0, false, err
+		cost := calculateSimpleTokenCostUSD(log, price.token)
+		cost += price.token.RequestPrice
+		if price.token.SecondPrice != 0 {
+			cost += profitLogBillableSeconds(log) * price.token.SecondPrice
 		}
-		cost := calculateSimpleTokenCostUSD(log, payload)
-		cost += payload.RequestPrice
-		cost += profitLogBillableSeconds(log) * payload.SecondPrice
 		return cost, true, nil
 	case model.ProfitPriceTypeTieredExpr:
-		params := buildProfitTokenParams(log, plain)
-		cost, _, err := billingexpr.RunExpr(plain, params)
+		params := buildProfitTokenParams(log, price.expression)
+		cost, _, err := billingexpr.RunExpr(price.expression, params)
 		if err != nil {
 			return 0, false, err
 		}
 		return cost / 1_000_000, true, nil
 	case model.ProfitPriceTypeFixedPrice:
-		var payload struct {
-			Amount float64 `json:"amount"`
-			Unit   string  `json:"unit"`
-		}
-		if err := common.Unmarshal([]byte(plain), &payload); err != nil {
-			return 0, false, err
-		}
-		switch payload.Unit {
+		switch price.fixed.Unit {
 		case model.ProfitFixedUnitRequest:
-			return payload.Amount, true, nil
+			return price.fixed.Amount, true, nil
 		case model.ProfitFixedUnitSecond:
-			return payload.Amount * profitLogBillableSeconds(log), true, nil
+			return price.fixed.Amount * profitLogBillableSeconds(log), true, nil
 		default:
 			return 0, false, errors.New("unsupported fixed cost unit")
 		}
 	default:
 		return 0, false, errors.New("unsupported profit price type")
 	}
+}
+
+func (resolver *profitCostPriceResolver) decodePrice(version *model.ProfitCostPriceVersion) (*profitDecodedCostPrice, error) {
+	if price, ok := resolver.decoded[version]; ok {
+		return price, price.err
+	}
+	if resolver.decoded == nil {
+		resolver.decoded = make(map[*model.ProfitCostPriceVersion]*profitDecodedCostPrice)
+	}
+	price := &profitDecodedCostPrice{}
+	resolver.decoded[version] = price
+	plain, err := common.DecryptString(version.CipherText, version.Nonce, version.EncryptionVer)
+	if err != nil {
+		price.err = err
+		return price, err
+	}
+	switch version.PriceType {
+	case model.ProfitPriceTypeSimpleToken:
+		price.err = common.UnmarshalJsonStr(plain, &price.token)
+	case model.ProfitPriceTypeFixedPrice:
+		price.err = common.UnmarshalJsonStr(plain, &price.fixed)
+	case model.ProfitPriceTypeTieredExpr:
+		price.expression = plain
+	default:
+		price.err = errors.New("unsupported profit price type")
+	}
+	return price, price.err
 }
 
 func calculateSimpleTokenCostUSD(log model.Log, payload model.ProfitSimpleTokenPrice) float64 {

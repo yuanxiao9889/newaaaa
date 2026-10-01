@@ -11,12 +11,13 @@ import (
 )
 
 type ChannelSettings struct {
-	ImageAdapter           *ImageAdapterConfig `json:"image_adapter,omitempty"`
-	TaskPluginKey          string              `json:"task_plugin_key,omitempty"`
-	ForceFormat            bool                `json:"force_format,omitempty"`
-	ThinkingToContent      bool                `json:"thinking_to_content,omitempty"`
-	Proxy                  string              `json:"proxy"`
-	PassThroughBodyEnabled bool                `json:"pass_through_body_enabled,omitempty"`
+	ImageRequestFilter     *ImageRequestFilterConfig `json:"image_request_filter,omitempty"`
+	ImageAdapter           *ImageAdapterConfig       `json:"image_adapter,omitempty"`
+	TaskPluginKey          string                    `json:"task_plugin_key,omitempty"`
+	ForceFormat            bool                      `json:"force_format,omitempty"`
+	ThinkingToContent      bool                      `json:"thinking_to_content,omitempty"`
+	Proxy                  string                    `json:"proxy"`
+	PassThroughBodyEnabled bool                      `json:"pass_through_body_enabled,omitempty"`
 	// MultiImageReferenceEnabled allows adapters to send multiple image references as an upstream array.
 	MultiImageReferenceEnabled bool   `json:"multi_image_reference_enabled,omitempty"`
 	SystemPrompt               string `json:"system_prompt,omitempty"`

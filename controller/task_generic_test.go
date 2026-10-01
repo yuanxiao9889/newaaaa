@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -110,6 +112,182 @@ func TestGetTaskArtifactsReturnsEmptyForLegacyTask(t *testing.T) {
 	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &response))
 	assert.Equal(t, task.TaskID, response.TaskID)
 	assert.Empty(t, response.Artifacts)
+}
+
+func TestInternalImageTaskArtifacts(t *testing.T) {
+	task := setupGenericTaskTest(t)
+	previousSecret := common.CryptoSecret
+	previousPublicAddress := system_setting.TaskPublicAddress
+	common.CryptoSecret = "internal-image-artifact-test-secret"
+	system_setting.TaskPublicAddress = "https://gateway.example"
+	t.Cleanup(func() {
+		common.CryptoSecret = previousSecret
+		system_setting.TaskPublicAddress = previousPublicAddress
+	})
+	imagePath := filepath.Join(t.TempDir(), "result.png")
+	imageBytes := []byte("stored-image-bytes")
+	require.NoError(t, os.WriteFile(imagePath, imageBytes, 0600))
+	task.Platform = constant.TaskPlatformInternalImage
+	task.Action = constant.TaskActionImageGenerate
+	task.PrivateData = model.TaskPrivateData{
+		InternalAsync: true,
+		AssetType:     service.AsyncImageAssetType,
+		LocalPath:     imagePath,
+		MimeType:      "image/png",
+		ExpiresAt:     time.Now().Add(time.Hour).Unix(),
+		SourceURL:     "https://private-upstream.invalid/result.png",
+	}
+	require.NoError(t, model.DB.Save(task).Error)
+
+	var contentURL string
+	for _, tc := range []struct {
+		name      string
+		dashboard bool
+		userID    int
+		role      int
+		tokenID   int
+		status    int
+	}{
+		{name: "owner API", userID: 7, status: http.StatusOK},
+		{name: "owner dashboard", dashboard: true, userID: 7, role: common.RoleCommonUser, status: http.StatusOK},
+		{name: "admin dashboard", dashboard: true, userID: 8, role: common.RoleAdminUser, status: http.StatusOK},
+		{name: "other user", dashboard: true, userID: 8, role: common.RoleCommonUser, status: http.StatusNotFound},
+		{name: "admin token cannot read foreign task", dashboard: true, userID: 8, role: common.RoleRootUser, tokenID: 99, status: http.StatusNotFound},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			recorder := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(recorder)
+			c.Set("id", tc.userID)
+			c.Set("role", tc.role)
+			c.Set("token_id", tc.tokenID)
+			if tc.dashboard {
+				c.Params = gin.Params{{Key: "task_id", Value: task.TaskID}}
+				c.Request = httptest.NewRequest(http.MethodGet, "/api/task/"+task.TaskID+"/artifacts", nil)
+				GetDashboardTaskArtifacts(c)
+			} else {
+				c.Params = gin.Params{{Key: "key", Value: task.TaskID}}
+				c.Request = httptest.NewRequest(http.MethodGet, "/v1/tasks/"+task.TaskID+"/artifacts", nil)
+				GetTaskArtifacts(c)
+			}
+			require.Equal(t, tc.status, recorder.Code)
+			assert.NotContains(t, recorder.Body.String(), "private-upstream.invalid")
+			assert.NotContains(t, recorder.Body.String(), "local_path")
+			assert.NotContains(t, recorder.Body.String(), "internal-image-artifact-test-secret")
+			if tc.status != http.StatusOK {
+				return
+			}
+			var response struct {
+				Artifacts []taskArtifactResponse `json:"artifacts"`
+				Data      struct {
+					Artifacts []taskArtifactResponse `json:"artifacts"`
+				} `json:"data"`
+			}
+			require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &response))
+			artifacts := response.Artifacts
+			if tc.dashboard {
+				artifacts = response.Data.Artifacts
+			}
+			require.Len(t, artifacts, 1)
+			assert.Equal(t, "image", artifacts[0].Key)
+			assert.Equal(t, "image", artifacts[0].Type)
+			assert.Equal(t, "image/png", artifacts[0].MimeType)
+			contentURL = artifacts[0].ContentURL
+		})
+	}
+
+	parsed, err := url.Parse(contentURL)
+	require.NoError(t, err)
+	require.Equal(t, "/v1/tasks/"+task.TaskID+"/artifacts/image/content", parsed.Path)
+	wrongArtifactURL, err := service.BuildTaskArtifactContentURL(task.TaskID, "video")
+	require.NoError(t, err)
+	router := gin.New()
+	router.Handle(http.MethodGet, "/v1/tasks/:key/artifacts/:artifact_key/content", middleware.TokenOrTaskArtifactAccessAuth("key", "artifact_key"), TaskArtifactContent)
+	router.Handle(http.MethodHead, "/v1/tasks/:key/artifacts/:artifact_key/content", middleware.TokenOrTaskArtifactAccessAuth("key", "artifact_key"), TaskArtifactContent)
+	for _, tc := range []struct {
+		name        string
+		method      string
+		url         string
+		rangeHeader string
+		status      int
+		body        string
+	}{
+		{name: "preview and download", method: http.MethodGet, url: parsed.RequestURI(), status: http.StatusOK, body: string(imageBytes)},
+		{name: "HEAD", method: http.MethodHead, url: parsed.RequestURI(), status: http.StatusOK},
+		{name: "range", method: http.MethodGet, url: parsed.RequestURI(), rangeHeader: "bytes=0-5", status: http.StatusPartialContent, body: "stored"},
+		{name: "tampered signature", method: http.MethodGet, url: parsed.Path + "?access=" + strings.Repeat("A", 43), status: http.StatusNotFound},
+		{name: "different task", method: http.MethodGet, url: strings.Replace(parsed.RequestURI(), task.TaskID, "another_task", 1), status: http.StatusNotFound},
+		{name: "different artifact", method: http.MethodGet, url: strings.Replace(parsed.RequestURI(), "/image/", "/video/", 1), status: http.StatusNotFound},
+		{name: "unknown artifact with valid signature", method: http.MethodGet, url: wrongArtifactURL, status: http.StatusNotFound},
+		{name: "empty signature", method: http.MethodGet, url: parsed.Path + "?access=", status: http.StatusNotFound},
+		{name: "unauthenticated", method: http.MethodGet, url: parsed.Path, status: http.StatusUnauthorized},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			recorder := httptest.NewRecorder()
+			req := httptest.NewRequest(tc.method, tc.url, nil)
+			req.Header.Set("Range", tc.rangeHeader)
+			router.ServeHTTP(recorder, req)
+			assert.Equal(t, tc.status, recorder.Code)
+			assert.Equal(t, "private, no-store", recorder.Header().Get("Cache-Control"))
+			if tc.status < 400 {
+				assert.Equal(t, tc.body, recorder.Body.String())
+				assert.Equal(t, "image/png", recorder.Header().Get("Content-Type"))
+				assert.Contains(t, recorder.Header().Get("Content-Disposition"), task.TaskID+".png")
+			} else {
+				assert.NotContains(t, recorder.Body.String(), string(imageBytes))
+			}
+		})
+	}
+
+	for _, tc := range []struct {
+		name      string
+		status    model.TaskStatus
+		path      string
+		expiresAt int64
+	}{
+		{name: "unfinished", status: model.TaskStatusInProgress, path: imagePath, expiresAt: task.PrivateData.ExpiresAt},
+		{name: "failed", status: model.TaskStatusFailure, path: imagePath, expiresAt: task.PrivateData.ExpiresAt},
+		{name: "expired", status: model.TaskStatusSuccess, path: imagePath, expiresAt: time.Now().Add(-time.Hour).Unix()},
+		{name: "missing file", status: model.TaskStatusSuccess, path: imagePath + ".missing", expiresAt: task.PrivateData.ExpiresAt},
+		{name: "cleaned file", status: model.TaskStatusSuccess, expiresAt: task.PrivateData.ExpiresAt},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			task.Status = tc.status
+			task.PrivateData.LocalPath = tc.path
+			task.PrivateData.ExpiresAt = tc.expiresAt
+			require.NoError(t, model.DB.Save(task).Error)
+			recorder := httptest.NewRecorder()
+			router.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, parsed.RequestURI(), nil))
+			assert.Equal(t, http.StatusNotFound, recorder.Code)
+			assert.NotContains(t, recorder.Body.String(), string(imageBytes))
+			if tc.status != model.TaskStatusSuccess {
+				recorder = httptest.NewRecorder()
+				c, _ := gin.CreateTestContext(recorder)
+				c.Set("id", task.UserId)
+				c.Params = gin.Params{{Key: "key", Value: task.TaskID}}
+				c.Request = httptest.NewRequest(http.MethodGet, "/v1/tasks/"+task.TaskID+"/artifacts", nil)
+				GetTaskArtifacts(c)
+				require.Equal(t, http.StatusOK, recorder.Code)
+				var response struct {
+					Artifacts []taskArtifactResponse `json:"artifacts"`
+				}
+				require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &response))
+				assert.Empty(t, response.Artifacts)
+			}
+		})
+	}
+
+	t.Run("disabled owner revokes existing URL", func(t *testing.T) {
+		task.Status = model.TaskStatusSuccess
+		task.PrivateData.LocalPath = imagePath
+		task.PrivateData.ExpiresAt = time.Now().Add(time.Hour).Unix()
+		require.NoError(t, model.DB.Save(task).Error)
+		require.NoError(t, model.DB.Model(&model.User{}).Where("id = ?", task.UserId).
+			Update("status", common.UserStatusDisabled).Error)
+		recorder := httptest.NewRecorder()
+		router.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, parsed.RequestURI(), nil))
+		assert.Equal(t, http.StatusNotFound, recorder.Code)
+		assert.NotContains(t, recorder.Body.String(), string(imageBytes))
+	})
 }
 
 func TestTaskArtifactAuthorizationKeepsForeignTasksHidden(t *testing.T) {

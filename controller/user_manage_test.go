@@ -194,11 +194,12 @@ func TestVIPReferralLifecycle(t *testing.T) {
 		name       string
 		membership []bool
 		want       int
+		wantQuota  int
 	}{
-		{"ordinary_inviter_vip_invitee", []bool{false, false, false, false, false, false}, 5},
-		{"vip_inviter", []bool{true, true, true, true, true, true}, 6},
-		{"upgrade_after_limit_and_cancel", []bool{false, false, false, false, false, false, true, true, false}, 7},
-		{"cancel_before_limit", []bool{true, true, false, false, false, false}, 5},
+		{"ordinary_inviter_vip_invitee", []bool{false, false, false, false}, 3, 1500},
+		{"vip_inviter", []bool{true, true, true, true, true, true}, 6, 6000},
+		{"upgrade_after_limit_and_cancel", []bool{false, false, false, false, true, true, false}, 5, 3500},
+		{"cancel_before_limit", []bool{true, true, false, false}, 3, 2500},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			db := setupManageUserTestDB(t)
@@ -211,7 +212,7 @@ func TestVIPReferralLifecycle(t *testing.T) {
 			invitee := model.User{Username: "lifecycle-invitee", Role: common.RoleCommonUser, AffCode: "lifecycle-invitee", InviterId: inviter.Id, IsVIP: true}
 			require.NoError(t, db.Create(&invitee).Error)
 			for i, vip := range tc.membership {
-				order := model.TopUp{UserId: invitee.Id, TradeNo: fmt.Sprintf("vip-lifecycle-%d", i), Amount: 10, Money: 10,
+				order := model.TopUp{UserId: invitee.Id, TradeNo: fmt.Sprintf("vip-lifecycle-%d", i), Amount: 20, Money: 10,
 					PaymentProvider: model.PaymentProviderEpay, Status: common.TopUpStatusPending}
 				require.NoError(t, db.Create(&order).Error)
 				_, err := model.SetUserVIP(inviter.Id, common.RoleRootUser, vip)
@@ -230,10 +231,10 @@ func TestVIPReferralLifecycle(t *testing.T) {
 				assert.True(t, done)
 			}
 			require.NoError(t, db.First(&inviter, inviter.Id).Error)
-			assert.Equal(t, tc.want*1000, inviter.AffQuota)
-			assert.Equal(t, tc.want*1000, inviter.AffHistoryQuota)
+			assert.Equal(t, tc.wantQuota, inviter.AffQuota)
+			assert.Equal(t, tc.wantQuota, inviter.AffHistoryQuota)
 			require.NoError(t, db.First(&invitee, invitee.Id).Error)
-			assert.Equal(t, len(tc.membership)*10000, invitee.Quota)
+			assert.Equal(t, len(tc.membership)*20000, invitee.Quota)
 			var count int64
 			require.NoError(t, db.Model(&model.AffiliateRewardRecord{}).Count(&count).Error)
 			assert.EqualValues(t, tc.want, count)
@@ -314,11 +315,11 @@ func TestVIPReferralConcurrentSettlement(t *testing.T) {
 			require.NoError(t, db.Create(&inviter).Error)
 			invitee := model.User{Username: "concurrent-invitee", AffCode: "concurrent-invitee", InviterId: inviter.Id}
 			require.NoError(t, db.Create(&invitee).Error)
-			for i := range 6 {
+			for i := range 4 {
 				order := model.TopUp{UserId: invitee.Id, TradeNo: fmt.Sprintf("vip-concurrent-%d", i), Amount: 10, Money: 10,
 					PaymentProvider: model.PaymentProviderEpay, Status: common.TopUpStatusPending}
 				require.NoError(t, db.Create(&order).Error)
-				if i < 4 {
+				if i < 2 {
 					_, err := model.RechargeEpay(order.TradeNo, "alipay", "127.0.0.1")
 					require.NoError(t, err)
 				}
@@ -327,7 +328,7 @@ func TestVIPReferralConcurrentSettlement(t *testing.T) {
 			results := make(chan error, 4)
 			var workers sync.WaitGroup
 			// Two distinct orders, each with a duplicate callback.
-			for _, tradeNo := range []string{"vip-concurrent-4", "vip-concurrent-4", "vip-concurrent-5", "vip-concurrent-5"} {
+			for _, tradeNo := range []string{"vip-concurrent-2", "vip-concurrent-2", "vip-concurrent-3", "vip-concurrent-3"} {
 				workers.Go(func() {
 					<-start
 					_, err := model.RechargeEpay(tradeNo, "alipay", "127.0.0.1")
@@ -340,15 +341,15 @@ func TestVIPReferralConcurrentSettlement(t *testing.T) {
 			for err := range results {
 				require.NoError(t, err)
 			}
-			want := 5000
+			want := 1500
 			if vip {
-				want = 6000
+				want = 4000
 			}
 			require.NoError(t, db.First(&inviter, inviter.Id).Error)
 			assert.Equal(t, want, inviter.AffQuota)
 			assert.Equal(t, want, inviter.AffHistoryQuota)
 			require.NoError(t, db.First(&invitee, invitee.Id).Error)
-			assert.Equal(t, 60000, invitee.Quota)
+			assert.Equal(t, 40000, invitee.Quota)
 		})
 	}
 }

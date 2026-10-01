@@ -39,14 +39,22 @@ const (
 	FilterRequestPath        ChannelFilterKind = "request_path"
 	FilterTaskPluginIdentity ChannelFilterKind = "task_plugin_identity"
 	FilterResponsesWebSocket ChannelFilterKind = "responses_websocket"
+	FilterImageRequest       ChannelFilterKind = "image_request"
+	FilterChannelIdentity    ChannelFilterKind = "channel_identity"
 )
 
 type ChannelFilter struct {
+	ChannelID              int
+	ExcludedChannelIDs     []int
 	Kind                   ChannelFilterKind
 	RequestPath            string
 	TaskPluginKey          string
 	TaskPluginKeys         []string
 	TaskPluginChannelTypes []int
+	ImageRequestValid      bool
+	ImageModelAmbiguous    bool
+	ImageQuality           string
+	ImageSize              string
 }
 
 type ChannelConstraints struct {

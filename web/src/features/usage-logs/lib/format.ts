@@ -163,8 +163,9 @@ export function isAsyncTaskBillingLog(
   log: UsageLog,
   other: LogOtherData | null
 ): boolean {
-  if (!other?.is_task || !other.task_id) return false
+  if (!other?.task_id) return false
   if (log.type === 6 || log.type === 8) return true
+  if (!other.is_task) return false
   return (
     log.type === 2 &&
     (other.billing_state != null ||

@@ -119,6 +119,9 @@ func SubmitInternalAsyncImageTask(c *gin.Context, info *relaycommon.RelayInfo, r
 	task.PrivateData.RequestPath = c.Request.URL.Path
 	task.PrivateData.RequestQuery = stripAsyncQuery(c.Request.URL.RawQuery)
 	task.PrivateData.RequestContentType = c.Request.Header.Get("Content-Type")
+	if original, exists := c.Get("async_image_original_content_type"); exists {
+		task.PrivateData.RequestContentType, _ = original.(string)
+	}
 	task.PrivateData.RequestRelayFormat = string(types.RelayFormatOpenAIImage)
 	task.PrivateData.BillingSource = info.BillingSource
 	task.PrivateData.SubscriptionId = info.SubscriptionId
@@ -141,18 +144,31 @@ func SubmitInternalAsyncImageTask(c *gin.Context, info *relaycommon.RelayInfo, r
 	}
 	task.Data = service.BuildPendingAsyncImageTaskData(task)
 
-	var err error
+	err := saveInternalAsyncImageReplay(c, task)
+	if err != nil {
+		return types.NewErrorWithStatusCode(err, types.ErrorCodeReadRequestBodyFailed, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
+	}
 	if len(native) > 0 && native[0] != nil {
+		if task.PrivateData.ImageRetry != nil {
+			task.PrivateData.ChannelRetryPath = append([]string(nil), c.GetStringSlice("use_channel")...)
+			if len(task.PrivateData.ChannelRetryPath) == 0 {
+				task.PrivateData.ChannelRetryPath = []string{strconv.Itoa(native[0].ChannelID)}
+			}
+		}
 		err = SaveNativeAsyncImageSnapshot(task, native[0])
-	} else {
-		task.PrivateData.RequestBodyPath, task.PrivateData.RequestBodySize, err = saveInternalAsyncImageRequestSnapshot(c, task.TaskID)
 	}
 	if err != nil {
+		if replay := task.PrivateData.ImageRetry; replay != nil {
+			_ = os.Remove(replay.BodyPath)
+		}
 		return types.NewErrorWithStatusCode(err, types.ErrorCodeReadRequestBodyFailed, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
 	}
 
 	if err = task.Insert(); err != nil {
 		_ = os.Remove(task.PrivateData.RequestBodyPath)
+		if replay := task.PrivateData.ImageRetry; replay != nil {
+			_ = os.Remove(replay.BodyPath)
+		}
 		return types.NewErrorWithStatusCode(err, types.ErrorCodeUpdateDataError, http.StatusInternalServerError)
 	}
 
@@ -228,15 +244,12 @@ func SubmitInternalAsyncGeminiImageTask(c *gin.Context, info *relaycommon.RelayI
 	}
 	task.Data = service.BuildPendingAsyncImageTaskData(task)
 
-	snapshotPath, snapshotSize, err := saveInternalAsyncImageRequestSnapshot(c, task.TaskID)
+	err := saveInternalAsyncImageReplay(c, task)
 	if err != nil {
 		return types.NewErrorWithStatusCode(err, types.ErrorCodeReadRequestBodyFailed, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
 	}
-	task.PrivateData.RequestBodyPath = snapshotPath
-	task.PrivateData.RequestBodySize = snapshotSize
-
 	if err = task.Insert(); err != nil {
-		_ = os.Remove(snapshotPath)
+		_ = os.Remove(task.PrivateData.RequestBodyPath)
 		return types.NewErrorWithStatusCode(err, types.ErrorCodeUpdateDataError, http.StatusInternalServerError)
 	}
 
@@ -247,6 +260,24 @@ func SubmitInternalAsyncGeminiImageTask(c *gin.Context, info *relaycommon.RelayI
 		ContentURL: service.BuildAsyncImageContentURL(task.TaskID),
 		ExpiresAt:  0,
 	})
+	return nil
+}
+
+func saveInternalAsyncImageReplay(c *gin.Context, task *model.Task) error {
+	path, size, err := saveInternalAsyncImageRequestSnapshot(c, task.TaskID)
+	if err != nil {
+		return err
+	}
+	task.PrivateData.RequestBodyPath, task.PrivateData.RequestBodySize = path, size
+	// Older callers without a replayable body retain GET-only recovery.
+	if size > 0 {
+		task.PrivateData.ImageRetry = &model.AsyncImageRetryState{
+			BodyPath: path, BodySize: size, RelayFormat: task.PrivateData.RequestRelayFormat,
+			Constraints: *service.GetChannelConstraints(c),
+		}
+	} else {
+		_ = os.Remove(path)
+	}
 	return nil
 }
 

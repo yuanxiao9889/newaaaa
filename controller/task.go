@@ -131,7 +131,13 @@ func writeTaskArtifacts(c *gin.Context, task *model.Task, dashboard bool) {
 }
 
 func projectTaskArtifacts(task *model.Task) ([]relaychannel.TaskArtifact, error) {
-	if task == nil || task.Status != model.TaskStatusSuccess || !taskHasPluginExecution(task) {
+	if task == nil || task.Status != model.TaskStatusSuccess {
+		return []relaychannel.TaskArtifact{}, nil
+	}
+	if task.Platform == constant.TaskPlatformInternalImage && task.PrivateData.AssetType == service.AsyncImageAssetType {
+		return []relaychannel.TaskArtifact{{Key: "image", Type: "image", MimeType: task.PrivateData.MimeType}}, nil
+	}
+	if !taskHasPluginExecution(task) {
 		return []relaychannel.TaskArtifact{}, nil
 	}
 	adaptor := relay.GetTaskAdaptor(task.Platform)
@@ -297,6 +303,19 @@ func TaskArtifactContent(c *gin.Context) {
 	}
 	if task.Status != model.TaskStatusSuccess {
 		writeTaskArtifactError(c, http.StatusConflict, "artifact_not_ready", "Task artifacts are not ready")
+		return
+	}
+	if task.Platform == constant.TaskPlatformInternalImage && task.PrivateData.AssetType == service.AsyncImageAssetType {
+		if artifactKey != "image" {
+			writeTaskArtifactError(c, http.StatusNotFound, "artifact_not_found", "Task or artifact not found")
+			return
+		}
+		if service.IsAsyncImageExpired(task) || task.PrivateData.LocalPath == "" {
+			writeTaskArtifactError(c, http.StatusGone, "artifact_expired", "Image content has expired or is unavailable")
+			return
+		}
+		c.Header("Cache-Control", "private, no-store")
+		serveImageTaskContent(c, task)
 		return
 	}
 	if !taskHasPluginExecution(task) {

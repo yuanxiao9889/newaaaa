@@ -55,7 +55,7 @@ export function UserVIPDialog(props: UserVIPDialogProps) {
       desc={
         props.user.is_vip
           ? t(
-              'Cancel VIP for {{username}} (ID: {{id}})? The 5-reward limit per invited user will apply again, including rewards already granted during VIP membership. Existing rewards are kept.',
+              'Cancel VIP for {{username}} (ID: {{id}})? The 3-reward limit per invited user will apply again, including rewards already granted during VIP membership. Existing rewards are kept.',
               { username: props.user.username, id: props.user.id }
             )
           : t(

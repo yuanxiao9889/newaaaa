@@ -417,7 +417,10 @@ export function useCommonLogsColumns(
           const useChannel = Array.isArray(rawUseChannel)
             ? rawUseChannel.map(String).filter(Boolean)
             : []
-          const rawAsyncRetryPath = other?.async_channel_retry_path ?? []
+          const rawAsyncRetryPath =
+            other?.admin_info?.async_channel_retry_path ??
+            other?.async_channel_retry_path ??
+            []
           const asyncRetryPath = Array.isArray(rawAsyncRetryPath)
             ? rawAsyncRetryPath.map(String).filter(Boolean)
             : []

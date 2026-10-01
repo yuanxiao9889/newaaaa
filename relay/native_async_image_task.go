@@ -18,9 +18,84 @@ import (
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	kitdto "github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/service"
+	"github.com/tidwall/gjson"
 )
 
 const NativeAsyncImageFormat = "native_async_image"
+
+// NativeImageTaskError is a confirmed upstream terminal failure, distinct from
+// polling transport errors and failures downloading an already generated image.
+type NativeImageTaskError struct {
+	Message    string
+	Code       string
+	Type       string
+	StatusCode int
+	Retryable  bool
+}
+
+func (e *NativeImageTaskError) Error() string { return e.Message }
+
+func nativeImageTaskFailure(status string, body []byte, apiKey string) *NativeImageTaskError {
+	value := gjson.GetBytes(body, "error")
+	message := value.Get("message").String()
+	if value.Type == gjson.String {
+		message = value.String()
+	}
+	if message == "" {
+		message = "native image task failed"
+	}
+	failure := &NativeImageTaskError{
+		Message: message, Code: value.Get("code").String(),
+		Type: value.Get("type").String(), StatusCode: int(value.Get("status_code").Int()),
+	}
+	if apiKey != "" {
+		for _, field := range []*string{&failure.Message, &failure.Code, &failure.Type} {
+			*field = strings.ReplaceAll(*field, apiKey, "[redacted]")
+		}
+	}
+	if failure.StatusCode == 0 {
+		failure.StatusCode = int(value.Get("status").Int())
+	}
+	if status != "failed" && status != "failure" && status != "error" {
+		return failure
+	}
+	// Permanent errors take precedence over broad upstream server-error codes.
+	description := strings.ToLower(failure.Code + " " + failure.Type + " " + failure.Message)
+	for _, permanent := range []string{"content_filter", "content_policy", "moderation", "safety", "unsafe", "policy", "sensitive", "nsfw", "审核", "违规", "敏感", "invalid", "bad_request", "parameter", "参数", "suspended", "violat"} {
+		if strings.Contains(description, permanent) {
+			return failure
+		}
+	}
+	if value.Get("retryable").Type == gjson.False {
+		return failure
+	}
+	classification := failure.Code
+	if classification == "" {
+		classification = failure.Type
+	}
+	switch strings.ToLower(classification) {
+	case "rate_limit_exceeded", "rate_limit_error", "too_many_requests", "429":
+		failure.Retryable, failure.StatusCode = true, http.StatusTooManyRequests
+	case "server_error", "internal_error", "internal_server_error", "service_unavailable", "overloaded_error", "500", "502", "503":
+		failure.Retryable = true
+	}
+	if failure.StatusCode == 429 || failure.StatusCode == 500 || failure.StatusCode == 502 || failure.StatusCode == 503 {
+		failure.Retryable = true
+	}
+	// Compatibility for providers returning a message without an error code.
+	if failure.Code == "" && failure.StatusCode == 0 {
+		switch strings.ToLower(strings.TrimSpace(failure.Message)) {
+		case "请求过于频繁,请稍后重试", "请求过于频繁，请稍后重试", "too many requests", "rate limit exceeded":
+			failure.Code, failure.StatusCode, failure.Retryable = "rate_limit_exceeded", http.StatusTooManyRequests, true
+		case "generation failed: generate error: an error occurred.", "service unavailable", "internal server error":
+			failure.Code, failure.Retryable = "upstream_generation_failed", true
+		}
+	}
+	if failure.Retryable && failure.StatusCode == 0 {
+		failure.StatusCode = http.StatusBadGateway
+	}
+	return failure
+}
 
 // NativeAsyncImageSnapshot stores resumable request provenance, never credentials.
 type NativeAsyncImageSnapshot struct {
@@ -77,8 +152,9 @@ func parseNativeAsyncImageSnapshot(resp *http.Response, info *relaycommon.RelayI
 	return &snapshot, nil
 }
 
-// SaveNativeAsyncImageSnapshot replaces the replayable POST with a GET-only resume
-// snapshot. A resumed worker must never submit an already accepted task again.
+// SaveNativeAsyncImageSnapshot selects a GET-only resume snapshot. The original
+// request, when retained in ImageRetry, may only be used after a confirmed
+// retryable terminal failure, never to replay an already accepted task.
 func SaveNativeAsyncImageSnapshot(task *model.Task, snapshot *NativeAsyncImageSnapshot) error {
 	body, err := common.Marshal(snapshot)
 	if err != nil {
@@ -193,22 +269,13 @@ func pollNativeAsyncImageResult(ctx context.Context, client *http.Client, entry 
 				var payload struct {
 					Status string          `json:"status"`
 					Data   []dto.ImageData `json:"data"`
-					Error  struct {
-						Message string `json:"message"`
-					} `json:"error"`
 				}
 				if common.Unmarshal(body, &payload) != nil {
 					return nil, fmt.Errorf("invalid native image task status response")
 				}
 				switch strings.ToLower(strings.TrimSpace(payload.Status)) {
 				case "failed", "failure", "error", "expired", "cancelled", "canceled":
-					message := payload.Error.Message
-					if message == "" {
-						message = "native image task failed"
-					}
-					// Channel credentials must never leak through an upstream error message.
-					message = strings.ReplaceAll(message, entry.apiKey, "[redacted]")
-					return nil, fmt.Errorf("%s", message)
+					return nil, nativeImageTaskFailure(strings.ToLower(strings.TrimSpace(payload.Status)), body, entry.apiKey)
 				case "succeeded", "success", "completed":
 					for _, item := range payload.Data {
 						if strings.TrimSpace(item.Url) != "" || strings.TrimSpace(item.B64Json) != "" {

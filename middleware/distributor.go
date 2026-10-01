@@ -45,6 +45,7 @@ func Distribute() func(c *gin.Context) {
 			abortWithOpenAiMessage(c, http.StatusBadRequest, i18n.T(c, i18n.MsgDistributorInvalidRequest, map[string]any{"Error": err.Error()}))
 			return
 		}
+		service.AppendImageRequestFilter(c)
 		if pin, found, overridden := constraints.ResolvedPin(); found {
 			for _, lost := range overridden {
 				logger.LogWarn(c, fmt.Sprintf(

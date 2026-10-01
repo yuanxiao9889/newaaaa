@@ -207,6 +207,7 @@ import {
 import { ParamOverrideEditorDialog } from '../dialogs/param-override-editor-dialog'
 import { StatusCodeRiskDialog } from '../dialogs/status-code-risk-dialog'
 import { ImageAdapterSettings } from '../image-adapter-settings'
+import { ImageRequestFilterSettings } from '../image-request-filter-settings'
 import { ModelMappingEditor } from '../model-mapping-editor'
 import { ResponsesWebSocketSetting } from '../responses-websocket-setting'
 import { UpstreamModelSelection } from '../upstream-model-selection'
@@ -280,6 +281,8 @@ const SENSITIVE_FORM_FIELDS = [
   'multi_image_reference_enabled',
   'image_adapter',
   'image_adapter_enabled',
+  'image_request_filter',
+  'image_request_filter_enabled',
   'system_prompt',
   'system_prompt_override',
   'allow_service_tier',
@@ -1622,6 +1625,10 @@ export function ChannelMutateDrawer({
 
   const taskPollingFields = (
     <>
+      <ImageRequestFilterSettings
+        form={form}
+        disabled={sensitiveLocked || isSubmitting}
+      />
       {currentType === 1 && (
         <ImageAdapterSettings
           form={form}

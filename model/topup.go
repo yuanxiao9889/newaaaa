@@ -45,8 +45,9 @@ const (
 )
 
 const (
-	affiliateTopUpRewardRate  = 0.10
-	affiliateTopUpRewardLimit = 5
+	affiliateTopUpRewardRate    = 0.05
+	affiliateVIPTopUpRewardRate = 0.10
+	affiliateTopUpRewardLimit   = 3
 )
 
 var (
@@ -614,17 +615,6 @@ func grantAffiliateTopUpRewardTx(tx *gorm.DB, topUp *TopUp) error {
 		return nil
 	}
 
-	rewardQuota, quotaClamp := common.QuotaFromDecimalChecked(decimal.NewFromFloat(topUp.Money).
-		Mul(decimal.NewFromFloat(affiliateTopUpRewardRate)).
-		Mul(decimal.NewFromFloat(common.QuotaPerUnit)).
-		Truncate(0))
-	if quotaClamp != nil {
-		return quotaClamp
-	}
-	if rewardQuota <= 0 {
-		return nil
-	}
-
 	var existingCount int64
 	if err := tx.Model(&AffiliateRewardRecord{}).Where("top_up_id = ? OR trade_no = ?", topUp.Id, topUp.TradeNo).Count(&existingCount).Error; err != nil {
 		return err
@@ -659,6 +649,21 @@ func grantAffiliateTopUpRewardTx(tx *gorm.DB, topUp *TopUp) error {
 		if rewardedCount >= affiliateTopUpRewardLimit {
 			return nil
 		}
+	}
+
+	rewardRate := affiliateTopUpRewardRate
+	if inviter.IsVIP {
+		rewardRate = affiliateVIPTopUpRewardRate
+	}
+	rewardQuota, quotaClamp := common.QuotaFromDecimalChecked(decimal.NewFromFloat(topUp.Money).
+		Mul(decimal.NewFromFloat(rewardRate)).
+		Mul(decimal.NewFromFloat(common.QuotaPerUnit)).
+		Truncate(0))
+	if quotaClamp != nil {
+		return quotaClamp
+	}
+	if rewardQuota <= 0 {
+		return nil
 	}
 
 	record := &AffiliateRewardRecord{

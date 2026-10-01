@@ -84,6 +84,8 @@ const CONFIGURATION_BLOCKS = {
       'multi_image_reference_enabled',
       'image_adapter',
       'image_adapter_enabled',
+      'image_request_filter',
+      'image_request_filter_enabled',
     ],
   },
   upstreamModelDetection: {
@@ -174,7 +176,8 @@ export function getChannelConfigurationState(
       (values.http2_connection_shards ?? 1) > 1 ||
       values.disable_task_polling_sleep ||
       values.multi_image_reference_enabled ||
-      values.image_adapter_enabled
+      values.image_adapter_enabled ||
+      values.image_request_filter_enabled
     ),
     upstreamModelDetection:
       MODEL_FETCHABLE_TYPES.has(values.type) &&

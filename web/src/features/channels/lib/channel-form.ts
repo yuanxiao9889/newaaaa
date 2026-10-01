@@ -40,6 +40,7 @@ import {
   validateAdvancedCustomConfig,
 } from './advanced-custom'
 import { getImageAdapterConfigError } from './image-adapter'
+import { getImageRequestFilterError } from './image-request-filter'
 
 // ============================================================================
 // Form Validation Schema
@@ -270,6 +271,8 @@ export const channelFormSchema = z
     multi_image_reference_enabled: z.boolean().optional(),
     image_adapter_enabled: z.boolean().optional(),
     image_adapter: z.string().optional(),
+    image_request_filter_enabled: z.boolean().optional(),
+    image_request_filter: z.string().optional(),
     responses_websocket_enabled: z.boolean().optional(),
     system_prompt: z.string().optional(),
     system_prompt_override: z.boolean().optional(),
@@ -293,6 +296,13 @@ export const channelFormSchema = z
     upstream_model_update_ignored_models: z.string().optional(),
   })
   .superRefine((data, ctx) => {
+    const imageRequestFilterError = getImageRequestFilterError(
+      data.image_request_filter,
+      data.image_request_filter_enabled === true
+    )
+    if (imageRequestFilterError) {
+      addRequiredIssue(ctx, 'image_request_filter', imageRequestFilterError)
+    }
     const imageAdapterError = getImageAdapterConfigError(
       data.image_adapter,
       data.image_adapter_enabled === true
@@ -484,6 +494,8 @@ export const CHANNEL_FORM_DEFAULT_VALUES: ChannelFormValues = {
   multi_image_reference_enabled: false,
   image_adapter_enabled: false,
   image_adapter: '',
+  image_request_filter_enabled: false,
+  image_request_filter: '',
   responses_websocket_enabled: false,
   system_prompt: '',
   system_prompt_override: false,
@@ -529,6 +541,8 @@ export function transformChannelToFormDefaults(
     multi_image_reference_enabled: false,
     image_adapter_enabled: false,
     image_adapter: '',
+    image_request_filter_enabled: false,
+    image_request_filter: '',
     responses_websocket_enabled: false,
     system_prompt: '',
     system_prompt_override: false,
@@ -552,6 +566,19 @@ export function transformChannelToFormDefaults(
         multi_image_reference_enabled:
           parsed.multi_image_reference_enabled === true,
         image_adapter_enabled: parsed.image_adapter?.enabled === true,
+        image_request_filter_enabled:
+          parsed.image_request_filter?.enabled === true,
+        image_request_filter: parsed.image_request_filter
+          ? JSON.stringify(
+              Object.fromEntries(
+                Object.entries(parsed.image_request_filter).filter(
+                  ([key]) => key !== 'enabled'
+                )
+              ),
+              null,
+              2
+            )
+          : '',
         image_adapter: parsed.image_adapter
           ? JSON.stringify(
               Object.fromEntries(
@@ -678,7 +705,14 @@ export function transformChannelToFormDefaults(
  */
 export function buildSettingJSON(formData: ChannelFormValues): string {
   const imageAdapter = parseOptionalJson(formData.image_adapter)
+  const imageRequestFilter = parseOptionalJson(formData.image_request_filter)
   const settingObj: Record<string, unknown> = {
+    image_request_filter: isJsonObjectValue(imageRequestFilter)
+      ? {
+          ...imageRequestFilter,
+          enabled: formData.image_request_filter_enabled === true,
+        }
+      : undefined,
     image_adapter: isJsonObjectValue(imageAdapter)
       ? { ...imageAdapter, enabled: formData.image_adapter_enabled === true }
       : undefined,

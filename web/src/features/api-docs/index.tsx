@@ -53,6 +53,7 @@ import {
 } from './data'
 import { midjourneyNavItems } from './midjourney-data'
 import { MidjourneyDocs } from './midjourney-docs'
+import { buildOpenAISamples } from './openai-samples'
 
 type ModelOperation = 'generate' | 'edit'
 
@@ -151,37 +152,6 @@ function resolveBaseUrl(status: unknown) {
 function endpointFor(model: ImageModelDoc) {
   if (model.family === 'openai') return '/v1/images/generations'
   return `/v1beta/models/${encodeURIComponent(model.model)}:generateContent`
-}
-
-function buildOpenAISamples(
-  model: ImageModelDoc,
-  baseUrl: string,
-  operation: ModelOperation
-): CodeSamples {
-  if (operation === 'edit') {
-    return {
-      curl: `curl '${baseUrl}/v1/images/edits' \\
-  -H 'Authorization: Bearer $NEW_API_KEY' \\
-  -F 'model=${model.model}' \\
-  -F 'prompt=Keep the character identity and change the scene to sunrise' \\
-  -F 'n=1' \\
-  -F 'image[]=@reference-1.png' \\
-  -F 'image[]=@reference-2.png' \\
-  -F 'size=2048x1152' \\
-  -F 'quality=medium'`,
-      python: `import os\n\nimport requests\n\nwith open("reference-1.png", "rb") as first, open("reference-2.png", "rb") as second:\n    response = requests.post(\n        "${baseUrl}/v1/images/edits",\n        headers={"Authorization": f"Bearer {os.environ['NEW_API_KEY']}"},\n        data={\n            "model": "${model.model}",\n            "prompt": "Keep the character identity and change the scene to sunrise",\n            "n": "1",\n            "size": "2048x1152",\n            "quality": "medium",\n        },\n        files=[\n            ("image[]", ("reference-1.png", first, "image/png")),\n            ("image[]", ("reference-2.png", second, "image/png")),\n        ],\n        timeout=180,\n    )\n\nresponse.raise_for_status()\nprint(response.json())`,
-      javascript: `import { readFile } from 'node:fs/promises'\n\nconst form = new FormData()\nform.append('model', '${model.model}')\nform.append('prompt', 'Keep the character identity and change the scene to sunrise')\nform.append('n', '1')\nform.append('size', '2048x1152')\nform.append('quality', 'medium')\nform.append('image[]', new Blob([await readFile('reference-1.png')], { type: 'image/png' }), 'reference-1.png')\nform.append('image[]', new Blob([await readFile('reference-2.png')], { type: 'image/png' }), 'reference-2.png')\n\nconst response = await fetch('${baseUrl}/v1/images/edits', {\n  method: 'POST',\n  headers: { Authorization: \`Bearer \${process.env.NEW_API_KEY}\` },\n  body: form,\n})\n\nif (!response.ok) throw new Error(await response.text())\nconsole.log(await response.json())`,
-    }
-  }
-
-  return {
-    curl: `curl '${baseUrl}/v1/images/generations' \\
-  -H 'Authorization: Bearer $NEW_API_KEY' \\
-  -H 'Content-Type: application/json' \\
-  -d '{\n    "model": "${model.model}",\n    "prompt": "Cinematic storyboard frame of a detective in a rainy neon alley",\n    "n": 1,\n    "size": "2048x1152",\n    "quality": "medium"\n  }'`,
-    python: `import os\n\nimport requests\n\npayload = {\n    "model": "${model.model}",\n    "prompt": "Cinematic storyboard frame of a detective in a rainy neon alley",\n    "n": 1,\n    "size": "2048x1152",\n    "quality": "medium",\n}\nresponse = requests.post(\n    "${baseUrl}/v1/images/generations",\n    headers={"Authorization": f"Bearer {os.environ['NEW_API_KEY']}"},\n    json=payload,\n    timeout=180,\n)\nresponse.raise_for_status()\nprint(response.json())`,
-    javascript: `const response = await fetch('${baseUrl}/v1/images/generations', {\n  method: 'POST',\n  headers: {\n    Authorization: \`Bearer \${process.env.NEW_API_KEY}\`,\n    'Content-Type': 'application/json',\n  },\n  body: JSON.stringify({\n    model: '${model.model}',\n    prompt: 'Cinematic storyboard frame of a detective in a rainy neon alley',\n    n: 1,\n    size: '2048x1152',\n    quality: 'medium',\n  }),\n})\n\nif (!response.ok) throw new Error(await response.text())\nconsole.log(await response.json())`,
-  }
 }
 
 function buildGrokSamples(
@@ -842,21 +812,21 @@ function DocsNavigation({ onNavigate }: { onNavigate?: () => void }) {
       icon: ImageIcon,
       items: imageModels
         .filter((model) => model.family === 'openai')
-        .map((model) => [`model-${model.id}`, model.model]),
+        .map((model) => [`model-${model.id}`, model.title ?? model.model]),
     },
     {
       label: 'OOpii image models',
       icon: Sparkles,
       items: imageModels
         .filter((model) => model.family === 'oopii')
-        .map((model) => [`model-${model.id}`, model.model]),
+        .map((model) => [`model-${model.id}`, model.title ?? model.model]),
     },
     {
       label: 'Gemini image models',
       icon: Layers3,
       items: imageModels
         .filter((model) => model.family === 'gemini')
-        .map((model) => [`model-${model.id}`, model.model]),
+        .map((model) => [`model-${model.id}`, model.title ?? model.model]),
     },
     {
       label: 'Midjourney task API',
@@ -948,6 +918,13 @@ function ModelSection({
       'Dou 5.0 Pro expects an exact pixel size such as 2048x1152. Use the upload endpoint for local references, then poll the generation ID returned with HTTP 202.'
     )
   }
+  if (model.modelIds) {
+    resolutionNote = t(
+      model.resolutions.length === 1
+        ? 'apiDocs.image25.oneKSize'
+        : 'apiDocs.image25.sizeDescription'
+    )
+  }
   let protocolLabel = 'OOpii async'
   if (model.family === 'openai') protocolLabel = 'OpenAI Images'
   if (model.family === 'gemini') protocolLabel = 'Gemini API'
@@ -966,7 +943,7 @@ function ModelSection({
             </span>
           </div>
           <h2 className='font-mono text-2xl font-semibold tracking-tight break-all sm:text-3xl'>
-            {model.model}
+            {model.title ?? model.model}
           </h2>
           <p className='text-muted-foreground mt-3 max-w-3xl text-sm leading-7'>
             {t(model.summary)}
@@ -976,6 +953,24 @@ function ModelSection({
           {protocolLabel}
         </Badge>
       </div>
+
+      {model.modelIds && (
+        <div className='mt-5'>
+          <h3 className='text-sm font-semibold'>
+            {t('apiDocs.image25.modelIds')}
+          </h3>
+          <ul className='mt-2 space-y-1 text-sm'>
+            {model.modelIds.map((id) => (
+              <li key={id}>
+                <code className='break-all'>{id}</code>
+              </li>
+            ))}
+          </ul>
+          <p className='text-muted-foreground mt-2 text-sm'>
+            {t('apiDocs.image25.groupNote')}
+          </p>
+        </div>
+      )}
 
       <div className='mt-6 grid gap-4 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]'>
         <div className='border-border/70 bg-card rounded-xl border p-5'>
@@ -1107,6 +1102,17 @@ function ModelSection({
           title={`${model.model} ? ${t(operation === 'generate' ? 'Generate image' : 'Edit image')}`}
         />
       </div>
+      {model.modelIds && (
+        <div className='mt-6'>
+          <h3 className='mb-3 text-lg font-semibold'>
+            {t('apiDocs.image25.transparentExample')}
+          </h3>
+          <CodeExample
+            samples={buildOpenAISamples(model, baseUrl, operation, true)}
+            title={t('apiDocs.image25.transparentExample')}
+          />
+        </div>
+      )}
       <div className='border-primary/20 bg-primary/5 mt-4 rounded-xl border px-4 py-3 text-sm'>
         <span className='font-medium'>{t('Image response path')}:</span>{' '}
         <code className='break-all'>{model.responsePath}</code>
@@ -1203,7 +1209,16 @@ export function ApiDocs() {
                 </p>
                 <div className='mt-8 grid gap-4 sm:grid-cols-3'>
                   {[
-                    [String(imageModels.length), 'Documented models'],
+                    [
+                      String(
+                        imageModels.reduce(
+                          (count, model) =>
+                            count + (model.modelIds?.length ?? 1),
+                          0
+                        )
+                      ),
+                      'Documented models',
+                    ],
                     ['3', 'Compatible protocols'],
                     ['3', 'Example languages'],
                   ].map(([value, label]) => (
@@ -1254,9 +1269,7 @@ export function ApiDocs() {
                   id='oopii-model-catalog'
                   eyebrow='OOpii'
                   title={t('Current OOpii catalog snapshot')}
-                  description={t(
-                    '50 models returned by OOpii /v1/models during the latest compatibility sync. Text, image, video, and Midjourney families are grouped below; endpoint labels describe the upstream model-list metadata and do not replace new-api channel abilities.'
-                  )}
+                  description={t('apiDocs.image25.catalogNote')}
                 />
                 <div className='mt-6 grid gap-6'>
                   {(

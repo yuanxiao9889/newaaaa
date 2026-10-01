@@ -1,0 +1,1189 @@
+{
+  "cases": [
+    {
+      "name": "choose final MP4 after intermediate",
+      "hook": "parseTaskResult",
+      "args": [
+        {
+          "taskId": "task_upstream"
+        },
+        {
+          "code": "success",
+          "data": {
+            "task_id": "task_upstream",
+            "status": "SUCCESS",
+            "data": {
+              "results": [
+                {
+                  "url": "https://cdn.example.com/intermediate.",
+                  "outputType": ""
+                },
+                {
+                  "url": "https://cdn.example.com/final.mp4",
+                  "outputType": "mp4"
+                }
+              ]
+            },
+            "result_url": "https://cdn.example.com/intermediate."
+          }
+        }
+      ],
+      "expected": {
+        "status": "SUCCESS",
+        "progress": "100%",
+        "url": "https://cdn.example.com/final.mp4"
+      }
+    },
+    {
+      "name": "result order does not matter",
+      "hook": "parseTaskResult",
+      "args": [
+        {
+          "taskId": "task_upstream"
+        },
+        {
+          "code": "success",
+          "data": {
+            "task_id": "task_upstream",
+            "status": "SUCCESS",
+            "data": {
+              "results": [
+                {
+                  "url": "https://cdn.example.com/final.mp4",
+                  "outputType": "mp4"
+                },
+                {
+                  "url": "https://cdn.example.com/intermediate.",
+                  "outputType": ""
+                }
+              ]
+            },
+            "result_url": "https://cdn.example.com/intermediate."
+          }
+        }
+      ],
+      "expected": {
+        "status": "SUCCESS",
+        "progress": "100%",
+        "url": "https://cdn.example.com/final.mp4"
+      }
+    },
+    {
+      "name": "reject wrong task identity",
+      "hook": "parseTaskResult",
+      "args": [
+        {
+          "taskId": "other"
+        },
+        {
+          "code": "success",
+          "data": {
+            "task_id": "task_upstream",
+            "status": "SUCCESS",
+            "data": {
+              "results": [
+                {
+                  "url": "https://cdn.example.com/intermediate.",
+                  "outputType": ""
+                },
+                {
+                  "url": "https://cdn.example.com/final.mp4",
+                  "outputType": "mp4"
+                }
+              ]
+            },
+            "result_url": "https://cdn.example.com/intermediate."
+          }
+        }
+      ],
+      "expected": {
+        "status": "UNKNOWN",
+        "reason": "invalid Huiqu task response"
+      }
+    },
+    {
+      "name": "do not map API error to generation failure",
+      "hook": "parseTaskResult",
+      "args": [
+        {
+          "taskId": "task_upstream"
+        },
+        {
+          "code": "error"
+        }
+      ],
+      "expected": {
+        "status": "UNKNOWN",
+        "reason": "invalid Huiqu task response"
+      }
+    },
+    {
+      "name": "status IN_PROGRESS",
+      "hook": "parseTaskResult",
+      "args": [
+        {
+          "taskId": "task_upstream"
+        },
+        {
+          "code": "success",
+          "data": {
+            "task_id": "task_upstream",
+            "status": "IN_PROGRESS",
+            "data": {
+              "results": [
+                {
+                  "url": "https://cdn.example.com/intermediate.",
+                  "outputType": ""
+                },
+                {
+                  "url": "https://cdn.example.com/final.mp4",
+                  "outputType": "mp4"
+                }
+              ]
+            },
+            "result_url": "https://cdn.example.com/intermediate.",
+            "progress": "40%"
+          }
+        }
+      ],
+      "expected": {
+        "status": "IN_PROGRESS",
+        "progress": "40%"
+      }
+    },
+    {
+      "name": "status FUTURE",
+      "hook": "parseTaskResult",
+      "args": [
+        {
+          "taskId": "task_upstream"
+        },
+        {
+          "code": "success",
+          "data": {
+            "task_id": "task_upstream",
+            "status": "FUTURE",
+            "data": {
+              "results": [
+                {
+                  "url": "https://cdn.example.com/intermediate.",
+                  "outputType": ""
+                },
+                {
+                  "url": "https://cdn.example.com/final.mp4",
+                  "outputType": "mp4"
+                }
+              ]
+            },
+            "result_url": "https://cdn.example.com/intermediate.",
+            "progress": "40%"
+          }
+        }
+      ],
+      "expected": {
+        "status": "UNKNOWN",
+        "reason": "unrecognized Huiqu task status"
+      }
+    },
+    {
+      "name": "status FAILURE",
+      "hook": "parseTaskResult",
+      "args": [
+        {
+          "taskId": "task_upstream"
+        },
+        {
+          "code": "success",
+          "data": {
+            "task_id": "task_upstream",
+            "status": "FAILURE",
+            "data": {
+              "results": [
+                {
+                  "url": "https://cdn.example.com/intermediate.",
+                  "outputType": ""
+                },
+                {
+                  "url": "https://cdn.example.com/final.mp4",
+                  "outputType": "mp4"
+                }
+              ]
+            },
+            "result_url": "https://cdn.example.com/intermediate.",
+            "progress": "40%"
+          }
+        }
+      ],
+      "expected": {
+        "status": "FAILURE",
+        "reason": "Huiqu H3 video generation failed"
+      }
+    },
+    {
+      "name": "no final video preserves successful generation",
+      "hook": "parseTaskResult",
+      "args": [
+        {
+          "taskId": "task_upstream"
+        },
+        {
+          "code": "success",
+          "data": {
+            "task_id": "task_upstream",
+            "status": "SUCCESS",
+            "data": {
+              "results": []
+            },
+            "result_url": "https://cdn.example.com/intermediate."
+          }
+        }
+      ],
+      "expected": {
+        "status": "SUCCESS",
+        "progress": "100%"
+      }
+    },
+    {
+      "name": "no final video cannot download",
+      "hook": "buildContentRequest",
+      "args": [
+        {
+          "artifactKey": "video",
+          "data": {
+            "code": "success",
+            "data": {
+              "task_id": "task_upstream",
+              "status": "SUCCESS",
+              "data": {
+                "results": []
+              },
+              "result_url": "https://cdn.example.com/intermediate."
+            }
+          },
+          "clientRequest": {
+            "method": "GET"
+          }
+        }
+      ],
+      "expectedError": "artifact_gone"
+    },
+    {
+      "name": "audio node preserves successful generation",
+      "hook": "parseTaskResult",
+      "args": [
+        {
+          "taskId": "task_upstream"
+        },
+        {
+          "code": "success",
+          "data": {
+            "task_id": "task_upstream",
+            "status": "SUCCESS",
+            "data": {
+              "results": [
+                {
+                  "url": "https://cdn.example.com/final.mp4",
+                  "outputType": "mp3"
+                }
+              ]
+            },
+            "result_url": "https://cdn.example.com/intermediate."
+          }
+        }
+      ],
+      "expected": {
+        "status": "SUCCESS",
+        "progress": "100%"
+      }
+    },
+    {
+      "name": "audio node cannot download",
+      "hook": "buildContentRequest",
+      "args": [
+        {
+          "artifactKey": "video",
+          "data": {
+            "code": "success",
+            "data": {
+              "task_id": "task_upstream",
+              "status": "SUCCESS",
+              "data": {
+                "results": [
+                  {
+                    "url": "https://cdn.example.com/final.mp4",
+                    "outputType": "mp3"
+                  }
+                ]
+              },
+              "result_url": "https://cdn.example.com/intermediate."
+            }
+          },
+          "clientRequest": {
+            "method": "GET"
+          }
+        }
+      ],
+      "expectedError": "artifact_gone"
+    },
+    {
+      "name": "protected content preserves successful generation",
+      "hook": "parseTaskResult",
+      "args": [
+        {
+          "taskId": "task_upstream"
+        },
+        {
+          "code": "success",
+          "data": {
+            "task_id": "task_upstream",
+            "status": "SUCCESS",
+            "data": {
+              "results": [
+                {
+                  "url": "https://ivd.example.com/v1/videos/t/content",
+                  "outputType": "mp4"
+                }
+              ]
+            },
+            "result_url": "https://cdn.example.com/intermediate."
+          }
+        }
+      ],
+      "expected": {
+        "status": "SUCCESS",
+        "progress": "100%"
+      }
+    },
+    {
+      "name": "protected content cannot download",
+      "hook": "buildContentRequest",
+      "args": [
+        {
+          "artifactKey": "video",
+          "data": {
+            "code": "success",
+            "data": {
+              "task_id": "task_upstream",
+              "status": "SUCCESS",
+              "data": {
+                "results": [
+                  {
+                    "url": "https://ivd.example.com/v1/videos/t/content",
+                    "outputType": "mp4"
+                  }
+                ]
+              },
+              "result_url": "https://cdn.example.com/intermediate."
+            }
+          },
+          "clientRequest": {
+            "method": "GET"
+          }
+        }
+      ],
+      "expectedError": "artifact_gone"
+    },
+    {
+      "name": "embedded credentials preserves successful generation",
+      "hook": "parseTaskResult",
+      "args": [
+        {
+          "taskId": "task_upstream"
+        },
+        {
+          "code": "success",
+          "data": {
+            "task_id": "task_upstream",
+            "status": "SUCCESS",
+            "data": {
+              "results": [
+                {
+                  "url": "https://secret@cdn.example.com/video.mp4",
+                  "outputType": "mp4"
+                }
+              ]
+            },
+            "result_url": "https://cdn.example.com/intermediate."
+          }
+        }
+      ],
+      "expected": {
+        "status": "SUCCESS",
+        "progress": "100%"
+      }
+    },
+    {
+      "name": "embedded credentials cannot download",
+      "hook": "buildContentRequest",
+      "args": [
+        {
+          "artifactKey": "video",
+          "data": {
+            "code": "success",
+            "data": {
+              "task_id": "task_upstream",
+              "status": "SUCCESS",
+              "data": {
+                "results": [
+                  {
+                    "url": "https://secret@cdn.example.com/video.mp4",
+                    "outputType": "mp4"
+                  }
+                ]
+              },
+              "result_url": "https://cdn.example.com/intermediate."
+            }
+          },
+          "clientRequest": {
+            "method": "GET"
+          }
+        }
+      ],
+      "expectedError": "artifact_gone"
+    },
+    {
+      "name": "HTTP URL preserves successful generation",
+      "hook": "parseTaskResult",
+      "args": [
+        {
+          "taskId": "task_upstream"
+        },
+        {
+          "code": "success",
+          "data": {
+            "task_id": "task_upstream",
+            "status": "SUCCESS",
+            "data": {
+              "results": [
+                {
+                  "url": "http://cdn.example.com/video.mp4",
+                  "outputType": "mp4"
+                }
+              ]
+            },
+            "result_url": "https://cdn.example.com/intermediate."
+          }
+        }
+      ],
+      "expected": {
+        "status": "SUCCESS",
+        "progress": "100%"
+      }
+    },
+    {
+      "name": "HTTP URL cannot download",
+      "hook": "buildContentRequest",
+      "args": [
+        {
+          "artifactKey": "video",
+          "data": {
+            "code": "success",
+            "data": {
+              "task_id": "task_upstream",
+              "status": "SUCCESS",
+              "data": {
+                "results": [
+                  {
+                    "url": "http://cdn.example.com/video.mp4",
+                    "outputType": "mp4"
+                  }
+                ]
+              },
+              "result_url": "https://cdn.example.com/intermediate."
+            }
+          },
+          "clientRequest": {
+            "method": "GET"
+          }
+        }
+      ],
+      "expectedError": "artifact_gone"
+    },
+    {
+      "name": "ambiguous videos preserves successful generation",
+      "hook": "parseTaskResult",
+      "args": [
+        {
+          "taskId": "task_upstream"
+        },
+        {
+          "code": "success",
+          "data": {
+            "task_id": "task_upstream",
+            "status": "SUCCESS",
+            "data": {
+              "results": [
+                {
+                  "url": "https://cdn.example.com/final.mp4",
+                  "outputType": "mp4"
+                },
+                {
+                  "url": "https://cdn.example.com/another.mp4",
+                  "outputType": "mp4"
+                }
+              ]
+            },
+            "result_url": "https://cdn.example.com/intermediate."
+          }
+        }
+      ],
+      "expected": {
+        "status": "SUCCESS",
+        "progress": "100%"
+      }
+    },
+    {
+      "name": "ambiguous videos cannot download",
+      "hook": "buildContentRequest",
+      "args": [
+        {
+          "artifactKey": "video",
+          "data": {
+            "code": "success",
+            "data": {
+              "task_id": "task_upstream",
+              "status": "SUCCESS",
+              "data": {
+                "results": [
+                  {
+                    "url": "https://cdn.example.com/final.mp4",
+                    "outputType": "mp4"
+                  },
+                  {
+                    "url": "https://cdn.example.com/another.mp4",
+                    "outputType": "mp4"
+                  }
+                ]
+              },
+              "result_url": "https://cdn.example.com/intermediate."
+            }
+          },
+          "clientRequest": {
+            "method": "GET"
+          }
+        }
+      ],
+      "expectedError": "artifact_gone"
+    },
+    {
+      "name": "query uses configured host legacy endpoint",
+      "hook": "buildQueryRequest",
+      "args": [
+        {
+          "taskId": "task_upstream",
+          "baseUrl": "https://provider.example.com/",
+          "apiKey": "fixture-key"
+        }
+      ],
+      "expected": {
+        "url": "https://provider.example.com/v1/video/generations/task_upstream",
+        "method": "GET",
+        "headers": {
+          "Authorization": "Bearer fixture-key"
+        }
+      }
+    },
+    {
+      "name": "credentialless CDN GET",
+      "hook": "buildContentRequest",
+      "args": [
+        {
+          "artifactKey": "video",
+          "data": {
+            "code": "success",
+            "data": {
+              "task_id": "task_upstream",
+              "status": "SUCCESS",
+              "data": {
+                "results": [
+                  {
+                    "url": "https://cdn.example.com/intermediate.",
+                    "outputType": ""
+                  },
+                  {
+                    "url": "https://cdn.example.com/final.mp4",
+                    "outputType": "mp4"
+                  }
+                ]
+              },
+              "result_url": "https://cdn.example.com/intermediate."
+            }
+          },
+          "apiKey": "fixture-secret",
+          "clientRequest": {
+            "method": "GET",
+            "headers": {
+              "Authorization": "Bearer caller"
+            }
+          }
+        }
+      ],
+      "expected": {
+        "url": "https://cdn.example.com/final.mp4",
+        "method": "GET",
+        "credentialless": true
+      }
+    },
+    {
+      "name": "credentialless CDN HEAD",
+      "hook": "buildContentRequest",
+      "args": [
+        {
+          "artifactKey": "video",
+          "data": {
+            "code": "success",
+            "data": {
+              "task_id": "task_upstream",
+              "status": "SUCCESS",
+              "data": {
+                "results": [
+                  {
+                    "url": "https://cdn.example.com/intermediate.",
+                    "outputType": ""
+                  },
+                  {
+                    "url": "https://cdn.example.com/final.mp4",
+                    "outputType": "mp4"
+                  }
+                ]
+              },
+              "result_url": "https://cdn.example.com/intermediate."
+            }
+          },
+          "apiKey": "fixture-secret",
+          "clientRequest": {
+            "method": "HEAD",
+            "headers": {
+              "Authorization": "Bearer caller"
+            }
+          }
+        }
+      ],
+      "expected": {
+        "url": "https://cdn.example.com/final.mp4",
+        "method": "HEAD",
+        "credentialless": true
+      }
+    },
+    {
+      "name": "render only public video fields",
+      "hook": "protocols",
+      "args": [
+        {},
+        {
+          "status": "SUCCESS",
+          "data": {
+            "code": "success",
+            "data": {
+              "task_id": "task_upstream",
+              "status": "SUCCESS",
+              "data": {
+                "results": [
+                  {
+                    "url": "https://cdn.example.com/intermediate.",
+                    "outputType": ""
+                  },
+                  {
+                    "url": "https://cdn.example.com/final.mp4",
+                    "outputType": "mp4"
+                  }
+                ]
+              },
+              "result_url": "https://cdn.example.com/intermediate."
+            }
+          }
+        }
+      ],
+      "expected": {
+        "url": "https://cdn.example.com/final.mp4",
+        "result_url": "https://cdn.example.com/final.mp4",
+        "metadata": {
+          "url": "https://cdn.example.com/final.mp4"
+        }
+      },
+      "path": [
+        "openai_video",
+        "render"
+      ]
+    },
+    {
+      "name": "list final artifact",
+      "hook": "listArtifacts",
+      "args": [
+        {
+          "status": "SUCCESS",
+          "data": {
+            "code": "success",
+            "data": {
+              "task_id": "task_upstream",
+              "status": "SUCCESS",
+              "data": {
+                "results": [
+                  {
+                    "url": "https://cdn.example.com/intermediate.",
+                    "outputType": ""
+                  },
+                  {
+                    "url": "https://cdn.example.com/final.mp4",
+                    "outputType": "mp4"
+                  }
+                ]
+              },
+              "result_url": "https://cdn.example.com/intermediate."
+            }
+          }
+        }
+      ],
+      "expected": [
+        {
+          "key": "video",
+          "type": "video",
+          "mimeType": "video/mp4"
+        }
+      ]
+    },
+    {
+      "name": "preserve reference inputs",
+      "hook": "protocols",
+      "args": [
+        {
+          "operation": "create",
+          "model": "Minimax-H3-10s",
+          "body": {
+            "kind": "json",
+            "value": {
+              "model": "Minimax-H3-10s",
+              "prompt": "fixture prompt",
+              "metadata": {
+                "reference_videos": [
+                  "https://cdn.example.com/input.mp4"
+                ]
+              }
+            }
+          }
+        }
+      ],
+      "expected": {
+        "kind": "submit",
+        "model": "Minimax-H3-10s",
+        "action": "text_to_video",
+        "requestBody": {
+          "model": "Minimax-H3-10s",
+          "prompt": "fixture prompt",
+          "metadata": {
+            "reference_videos": [
+              "https://cdn.example.com/input.mp4"
+            ]
+          }
+        }
+      },
+      "path": [
+        "openai_video",
+        "decodeRequest"
+      ]
+    },
+    {
+      "name": "reject {'seconds': 0}",
+      "hook": "protocols",
+      "args": [
+        {
+          "operation": "create",
+          "model": "Minimax-H3-10s",
+          "body": {
+            "kind": "json",
+            "value": {
+              "model": "Minimax-H3-10s",
+              "prompt": "fixture prompt",
+              "metadata": {
+                "reference_videos": [
+                  "https://cdn.example.com/input.mp4"
+                ]
+              },
+              "seconds": 0
+            }
+          }
+        }
+      ],
+      "expectedError": "seconds must",
+      "path": [
+        "openai_video",
+        "decodeRequest"
+      ]
+    },
+    {
+      "name": "reject {'duration': 3601}",
+      "hook": "protocols",
+      "args": [
+        {
+          "operation": "create",
+          "model": "Minimax-H3-10s",
+          "body": {
+            "kind": "json",
+            "value": {
+              "model": "Minimax-H3-10s",
+              "prompt": "fixture prompt",
+              "metadata": {
+                "reference_videos": [
+                  "https://cdn.example.com/input.mp4"
+                ]
+              },
+              "duration": 3601
+            }
+          }
+        }
+      ],
+      "expectedError": "duration must",
+      "path": [
+        "openai_video",
+        "decodeRequest"
+      ]
+    },
+    {
+      "name": "reject {'seconds': 10, 'duration': 1e+100}",
+      "hook": "protocols",
+      "args": [
+        {
+          "operation": "create",
+          "model": "Minimax-H3-10s",
+          "body": {
+            "kind": "json",
+            "value": {
+              "model": "Minimax-H3-10s",
+              "prompt": "fixture prompt",
+              "metadata": {
+                "reference_videos": [
+                  "https://cdn.example.com/input.mp4"
+                ]
+              },
+              "seconds": 10,
+              "duration": 1e+100
+            }
+          }
+        }
+      ],
+      "expectedError": "duration must",
+      "path": [
+        "openai_video",
+        "decodeRequest"
+      ]
+    },
+    {
+      "name": "reject {'n': 2}",
+      "hook": "protocols",
+      "args": [
+        {
+          "operation": "create",
+          "model": "Minimax-H3-10s",
+          "body": {
+            "kind": "json",
+            "value": {
+              "model": "Minimax-H3-10s",
+              "prompt": "fixture prompt",
+              "metadata": {
+                "reference_videos": [
+                  "https://cdn.example.com/input.mp4"
+                ]
+              },
+              "n": 2
+            }
+          }
+        }
+      ],
+      "expectedError": "one video",
+      "path": [
+        "openai_video",
+        "decodeRequest"
+      ]
+    },
+    {
+      "name": "reject {'metadata': {'duration': 1e+100}}",
+      "hook": "protocols",
+      "args": [
+        {
+          "operation": "create",
+          "model": "Minimax-H3-10s",
+          "body": {
+            "kind": "json",
+            "value": {
+              "model": "Minimax-H3-10s",
+              "prompt": "fixture prompt",
+              "metadata": {
+                "duration": 1e+100
+              }
+            }
+          }
+        }
+      ],
+      "expectedError": "duration must",
+      "path": [
+        "openai_video",
+        "decodeRequest"
+      ]
+    },
+    {
+      "name": "reject other channel model",
+      "hook": "protocols",
+      "args": [
+        {
+          "operation": "create",
+          "model": "sora-2",
+          "body": {
+            "kind": "json",
+            "value": {
+              "model": "Minimax-H3-10s",
+              "prompt": "fixture prompt",
+              "metadata": {
+                "reference_videos": [
+                  "https://cdn.example.com/input.mp4"
+                ]
+              }
+            }
+          }
+        }
+      ],
+      "expectedError": "unsupported Huiqu",
+      "path": [
+        "openai_video",
+        "decodeRequest"
+      ]
+    },
+    {
+      "name": "submit retains mapped model and metadata",
+      "hook": "buildSubmitRequest",
+      "args": [
+        {
+          "requestBody": {
+            "model": "Minimax-H3-10s",
+            "prompt": "fixture prompt",
+            "metadata": {
+              "reference_videos": [
+                "https://cdn.example.com/input.mp4"
+              ]
+            }
+          },
+          "upstreamModel": "Minimax-H3-768p-933-10s",
+          "baseUrl": "https://provider.example.com",
+          "apiKey": "fixture-key"
+        }
+      ],
+      "expected": {
+        "url": "https://provider.example.com/v1/videos",
+        "method": "POST",
+        "headers": {
+          "Authorization": "Bearer fixture-key",
+          "Content-Type": "application/json"
+        },
+        "body": {
+          "model": "Minimax-H3-768p-933-10s",
+          "prompt": "fixture prompt",
+          "metadata": {
+            "reference_videos": [
+              "https://cdn.example.com/input.mp4"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "keep per call billing ratios",
+      "hook": "extractUsage",
+      "args": [
+        {
+          "requestBody": {
+            "model": "Minimax-H3-10s",
+            "prompt": "fixture prompt",
+            "metadata": {
+              "reference_videos": [
+                "https://cdn.example.com/input.mp4"
+              ]
+            }
+          },
+          "upstreamModel": "Minimax-H3-768p-933-10s",
+          "baseUrl": "https://provider.example.com",
+          "apiKey": "fixture-key",
+          "usagePurpose": "billing_ratios"
+        }
+      ],
+      "expected": null
+    },
+    {
+      "name": "single video usage fact",
+      "hook": "extractUsage",
+      "args": [
+        {
+          "requestBody": {
+            "model": "Minimax-H3-10s",
+            "prompt": "fixture prompt",
+            "metadata": {
+              "reference_videos": [
+                "https://cdn.example.com/input.mp4"
+              ]
+            }
+          },
+          "upstreamModel": "Minimax-H3-768p-933-10s",
+          "baseUrl": "https://provider.example.com",
+          "apiKey": "fixture-key",
+          "usagePurpose": "facts"
+        }
+      ],
+      "expected": {
+        "video_count": 1
+      }
+    },
+    {
+      "name": "capture upstream task id",
+      "hook": "parseSubmitResponse",
+      "args": [
+        {},
+        {
+          "body": {
+            "id": "upstream",
+            "status": "queued"
+          }
+        }
+      ],
+      "expected": {
+        "taskId": "upstream",
+        "taskData": {
+          "id": "upstream",
+          "status": "queued"
+        }
+      }
+    },
+    {
+      "name": "reject missing submit id",
+      "hook": "parseSubmitResponse",
+      "args": [
+        {},
+        {
+          "body": {}
+        }
+      ],
+      "expectedError": "task_id is empty"
+    },
+    {
+      "name": "decode multipart references",
+      "hook": "protocols",
+      "path": [
+        "openai_video",
+        "decodeRequest"
+      ],
+      "args": [
+        {
+          "operation": "create",
+          "model": "Minimax-H3-15s",
+          "body": {
+            "kind": "multipart",
+            "fields": {
+              "prompt": [
+                "fixture"
+              ],
+              "seconds": [
+                "15"
+              ],
+              "metadata": [
+                "{\"reference_videos\":[\"https://example.com/input.mp4\"]}"
+              ]
+            },
+            "files": []
+          }
+        }
+      ],
+      "expected": {
+        "kind": "submit",
+        "model": "Minimax-H3-15s",
+        "action": "text_to_video",
+        "requestBody": {
+          "prompt": "fixture",
+          "seconds": "15",
+          "metadata": {
+            "reference_videos": [
+              "https://example.com/input.mp4"
+            ]
+          },
+          "model": "Minimax-H3-15s"
+        }
+      }
+    },
+    {
+      "name": "reject duplicate multipart field",
+      "hook": "protocols",
+      "path": [
+        "openai_video",
+        "decodeRequest"
+      ],
+      "args": [
+        {
+          "operation": "create",
+          "model": "Minimax-H3-15s",
+          "body": {
+            "kind": "multipart",
+            "fields": {
+              "prompt": [
+                "fixture"
+              ],
+              "seconds": [
+                "10",
+                "15"
+              ],
+              "metadata": [
+                "{\"reference_videos\":[\"https://example.com/input.mp4\"]}"
+              ]
+            },
+            "files": []
+          }
+        }
+      ],
+      "expectedError": "seconds must be provided once"
+    },
+    {
+      "name": "multipart file becomes bounded JSON file reference",
+      "hook": "buildSubmitRequest",
+      "args": [
+        {
+          "baseUrl": "https://provider.example.com",
+          "apiKey": "fixture-key",
+          "upstreamModel": "Minimax-H3-768p-933-15s",
+          "requestBody": {
+            "prompt": "fixture",
+            "metadata": {
+              "reference_videos": [
+                "https://example.com/input.mp4"
+              ]
+            }
+          },
+          "files": [
+            {
+              "field": "input_reference",
+              "ref": "file:0",
+              "filename": "input.png"
+            }
+          ]
+        }
+      ],
+      "expected": {
+        "url": "https://provider.example.com/v1/videos",
+        "method": "POST",
+        "headers": {
+          "Authorization": "Bearer fixture-key",
+          "Content-Type": "application/json"
+        },
+        "body": {
+          "prompt": "fixture",
+          "metadata": {
+            "reference_videos": [
+              "https://example.com/input.mp4"
+            ]
+          },
+          "model": "Minimax-H3-768p-933-15s",
+          "images": [
+            {
+              "__fileRef": "file:0",
+              "encoding": "dataUrl"
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

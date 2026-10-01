@@ -89,17 +89,18 @@ type TaskPrivateData struct {
 	ExpiresAt int64  `json:"expires_at,omitempty"`
 	SourceURL string `json:"source_url,omitempty"`
 
-	InternalAsync      bool     `json:"internal_async,omitempty"`
-	RequestBodyPath    string   `json:"request_body_path,omitempty"`
-	RequestContentType string   `json:"request_content_type,omitempty"`
-	RequestBodySize    int64    `json:"request_body_size,omitempty"`
-	RequestMethod      string   `json:"request_method,omitempty"`
-	RequestPath        string   `json:"request_path,omitempty"`
-	RequestQuery       string   `json:"request_query,omitempty"`
-	RequestRelayFormat string   `json:"request_relay_format,omitempty"`
-	WorkerAttempts     int      `json:"worker_attempts,omitempty"`
-	WorkerHeartbeatAt  int64    `json:"worker_heartbeat_at,omitempty"`
-	ChannelRetryPath   []string `json:"channel_retry_path,omitempty"`
+	InternalAsync      bool                  `json:"internal_async,omitempty"`
+	RequestBodyPath    string                `json:"request_body_path,omitempty"`
+	RequestContentType string                `json:"request_content_type,omitempty"`
+	RequestBodySize    int64                 `json:"request_body_size,omitempty"`
+	RequestMethod      string                `json:"request_method,omitempty"`
+	RequestPath        string                `json:"request_path,omitempty"`
+	RequestQuery       string                `json:"request_query,omitempty"`
+	RequestRelayFormat string                `json:"request_relay_format,omitempty"`
+	WorkerAttempts     int                   `json:"worker_attempts,omitempty"`
+	WorkerHeartbeatAt  int64                 `json:"worker_heartbeat_at,omitempty"`
+	ChannelRetryPath   []string              `json:"channel_retry_path,omitempty"`
+	ImageRetry         *AsyncImageRetryState `json:"image_retry,omitempty"`
 
 	BillingState        string                    `json:"billing_state,omitempty"`
 	UsageAccountingMode string                    `json:"usage_accounting_mode,omitempty"`
@@ -121,6 +122,31 @@ type TaskPrivateData struct {
 	PluginState json.RawMessage `json:"plugin_state,omitempty"`
 	// PollFailures counts consecutive unrecognized or transient poll outcomes.
 	PollFailures int `json:"poll_failures,omitempty"`
+}
+
+// AsyncImageRetryState keeps the original client request separate from the
+// current upstream polling snapshot. Submitting is persisted before each POST;
+// an interrupted POST must never be replayed without knowing its outcome.
+type AsyncImageRetryState struct {
+	BodyPath    string                     `json:"body_path,omitempty"`
+	BodySize    int64                      `json:"body_size,omitempty"`
+	RelayFormat string                     `json:"relay_format,omitempty"`
+	Constraints rootdto.ChannelConstraints `json:"constraints"`
+	Submitting  bool                       `json:"submitting,omitempty"`
+	Details     []AsyncImageRetryDetail    `json:"details,omitempty"`
+}
+
+type AsyncImageRetryDetail struct {
+	Attempt     int    `json:"attempt"`
+	ChannelID   int    `json:"channel_id"`
+	ChannelName string `json:"channel_name,omitempty"`
+	ChannelType int    `json:"channel_type,omitempty"`
+	Status      string `json:"status"`
+	StatusCode  int    `json:"status_code,omitempty"`
+	ErrorType   string `json:"error_type,omitempty"`
+	ErrorCode   string `json:"error_code,omitempty"`
+	Error       string `json:"error,omitempty"`
+	AttemptedAt int64  `json:"attempted_at"`
 }
 
 type TaskExecutionSnapshot struct {
@@ -547,6 +573,34 @@ func (t *Task) UpdateWithStatus(fromStatus TaskStatus) (bool, error) {
 		return false, result.Error
 	}
 	return result.RowsAffected > 0, nil
+}
+
+// UpdateInternalAsyncImageTask fences resumed workers as well as terminal
+// transitions. A stale worker cannot overwrite a newer attempt or a refund.
+func (t *Task) UpdateInternalAsyncImageTask(fromStatus TaskStatus, workerAttempts int) (bool, error) {
+	if t.PrivateData.ImageRetry == nil {
+		return t.UpdateWithStatus(fromStatus)
+	}
+	won := false
+	err := DB.Transaction(func(tx *gorm.DB) error {
+		var current Task
+		if err := lockForUpdate(tx).First(&current, t.ID).Error; err != nil {
+			return err
+		}
+		if current.Status != fromStatus || current.PrivateData.WorkerAttempts != workerAttempts {
+			return nil
+		}
+		if t.PrivateData.WorkerAttempts != workerAttempts && fromStatus == TaskStatusInProgress &&
+			current.PrivateData.WorkerHeartbeatAt > time.Now().Unix()-int64(common.GetAsyncImageWorkerStaleMinutes()*60) {
+			return nil
+		}
+		if err := tx.Model(t).Select("*").Updates(t).Error; err != nil {
+			return err
+		}
+		won = true
+		return nil
+	})
+	return won, err
 }
 
 // TaskBulkUpdateByID performs an unconditional bulk UPDATE by primary key IDs.

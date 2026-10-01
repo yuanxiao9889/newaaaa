@@ -36,18 +36,7 @@ var internalAsyncImageWorkerSerial atomic.Int64
 var internalAsyncImageWorkerGeneration atomic.Int64
 var internalAsyncImageTimeoutSweepAt atomic.Int64
 
-type internalAsyncChannelRetryDetail struct {
-	Attempt     int    `json:"attempt"`
-	ChannelID   int    `json:"channel_id"`
-	ChannelName string `json:"channel_name,omitempty"`
-	ChannelType int    `json:"channel_type,omitempty"`
-	Status      string `json:"status"`
-	StatusCode  int    `json:"status_code,omitempty"`
-	ErrorType   string `json:"error_type,omitempty"`
-	ErrorCode   string `json:"error_code,omitempty"`
-	Error       string `json:"error,omitempty"`
-	AttemptedAt int64  `json:"attempted_at"`
-}
+type internalAsyncChannelRetryDetail = model.AsyncImageRetryDetail
 
 func StartInternalAsyncImageWorkerLoop() {
 	common.SysLog(fmt.Sprintf("internal async image worker supervisor started: workers=%d max_unfinished=%d", common.GetAsyncImageWorkerConcurrency(), common.GetAsyncImageMaxUnfinishedTasks()))
@@ -149,7 +138,7 @@ func claimInternalAsyncImageTask(task *model.Task) bool {
 	}
 	task.PrivateData.WorkerAttempts++
 	task.PrivateData.WorkerHeartbeatAt = now
-	won, err := task.UpdateWithStatus(oldStatus)
+	won, err := task.UpdateInternalAsyncImageTask(oldStatus, task.PrivateData.WorkerAttempts-1)
 	if err != nil {
 		logger.LogError(context.Background(), fmt.Sprintf("claim internal async image task %s failed: %s", task.TaskID, err.Error()))
 		return false
@@ -158,6 +147,8 @@ func claimInternalAsyncImageTask(task *model.Task) bool {
 }
 
 func executeInternalAsyncImageTask(ctx context.Context, task *model.Task) error {
+	ctx, finishDelivery := service.TrackAsyncImageDelivery(ctx, task.TaskID, task.PrivateData.WorkerAttempts)
+	defer finishDelivery()
 	imageResponseBody, channelID, proxy, usage, err := runInternalAsyncImageRelay(ctx, task)
 	if err != nil {
 		if errors.Is(err, context.DeadlineExceeded) {
@@ -211,7 +202,7 @@ func executeInternalAsyncImageTask(ctx context.Context, task *model.Task) error 
 
 	task.Status = model.TaskStatusSuccess
 	snapshotPath := clearInternalAsyncImageRequestSnapshotFields(task)
-	won, updateErr := task.UpdateWithStatus(model.TaskStatusInProgress)
+	won, updateErr := task.UpdateInternalAsyncImageTask(model.TaskStatusInProgress, task.PrivateData.WorkerAttempts)
 	if updateErr != nil || !won {
 		if task.Quota != preSettlementQuota {
 			if rollbackErr := service.AdjustTaskQuotaForFinalSettlement(ctx, task, preSettlementQuota, "rollback after task status transition failure"); rollbackErr != nil {
@@ -224,7 +215,7 @@ func executeInternalAsyncImageTask(ctx context.Context, task *model.Task) error 
 		logger.LogWarn(ctx, fmt.Sprintf("internal async image task %s already transitioned, skip settle", task.TaskID))
 		return nil
 	}
-	removeInternalAsyncImageRequestSnapshot(snapshotPath)
+	removeInternalAsyncImageRequestSnapshot(snapshotPath...)
 	if err = service.ConfirmTaskBillingSettled(ctx, task, task.Quota, "async image stored", quotaClamp); err != nil {
 		return fmt.Errorf("confirm async image billing failed: %w", err)
 	}
@@ -232,6 +223,9 @@ func executeInternalAsyncImageTask(ctx context.Context, task *model.Task) error 
 }
 
 func runInternalAsyncImageRelay(ctx context.Context, task *model.Task) ([]byte, int, string, *dto.Usage, error) {
+	if task.PrivateData.ImageRetry != nil {
+		return runRetryableAsyncImageRelay(ctx, task)
+	}
 	if task.PrivateData.RequestRelayFormat == relay.NativeAsyncImageFormat {
 		body, channelID, proxy, err := relay.ResumeNativeAsyncImageTask(ctx, task)
 		return body, channelID, proxy, nil, err
@@ -338,6 +332,7 @@ func runInternalAsyncOpenAIImageRelayOnce(ctx context.Context, task *model.Task,
 		return c, recorder, channel, channelErr, nil
 	}
 	addUsedChannel(c, channel.Id)
+	c.Request = c.Request.WithContext(service.BeginUpstreamDelivery(c.Request.Context(), channel.Id, retryParam.GetRetry()+1))
 	relayInfo.Request = imageReq
 	return c, recorder, channel, relay.ImageHelper(c, relayInfo), nil
 }
@@ -353,6 +348,7 @@ func runInternalAsyncGeminiImageRelayOnce(ctx context.Context, task *model.Task,
 		return c, recorder, channel, channelErr, nil
 	}
 	addUsedChannel(c, channel.Id)
+	c.Request = c.Request.WithContext(service.BeginUpstreamDelivery(c.Request.Context(), channel.Id, retryParam.GetRetry()+1))
 	relayInfo.Request = geminiReq
 	return c, recorder, channel, geminiRelayHandler(c, relayInfo), nil
 }
@@ -391,6 +387,7 @@ func buildInternalAsyncImageContext(ctx context.Context, task *model.Task, body 
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}
+	service.AppendImageRequestFilter(c)
 	if task.Properties.OriginModelName == "" {
 		task.Properties.OriginModelName = imageReq.Model
 		common.SetContextKey(c, constant.ContextKeyOriginalModel, imageReq.Model)
@@ -495,6 +492,7 @@ func recordInternalAsyncImageFinalErrorLog(c *gin.Context, task *model.Task, cha
 	other.SetPublic("is_task", true)
 	other.SetPublic("async_task", true)
 	other.SetPublic("task_id", task.TaskID)
+	other.SetAdmin("upstream_delivery", service.AsyncImageDeliverySnapshot(task.TaskID, task.PrivateData.WorkerAttempts))
 	other.SetAdmin("channel_id", channelID)
 	other.SetAdmin("channel_name", channelName)
 	other.SetAdmin("channel_type", channelType)
@@ -651,7 +649,7 @@ func failInternalAsyncImageTask(ctx context.Context, task *model.Task, reason st
 	task.FinishTime = now
 	task.Data = service.BuildFailedAsyncImageTaskData(task)
 	snapshotPath := clearInternalAsyncImageRequestSnapshotFields(task)
-	won, err := task.UpdateWithStatus(model.TaskStatusInProgress)
+	won, err := task.UpdateInternalAsyncImageTask(model.TaskStatusInProgress, task.PrivateData.WorkerAttempts)
 	if err != nil {
 		logger.LogError(ctx, fmt.Sprintf("fail internal async image task %s update failed: %s", task.TaskID, err.Error()))
 		return
@@ -660,7 +658,7 @@ func failInternalAsyncImageTask(ctx context.Context, task *model.Task, reason st
 		logger.LogWarn(ctx, fmt.Sprintf("internal async image task %s already transitioned, skip refund", task.TaskID))
 		return
 	}
-	removeInternalAsyncImageRequestSnapshot(snapshotPath)
+	removeInternalAsyncImageRequestSnapshot(snapshotPath...)
 	if err := service.RefundTaskQuota(ctx, task, reason); err != nil {
 		logger.LogError(ctx, fmt.Sprintf("refund internal async image task %s failed: %s", task.TaskID, err.Error()))
 	}
@@ -676,11 +674,16 @@ func formatInternalAsyncFailureReason(task *model.Task, reason string) string {
 	return fmt.Sprintf("%s\nAsync Channel Retry Path: %s", reason, strings.Join(task.PrivateData.ChannelRetryPath, " -> "))
 }
 
-func clearInternalAsyncImageRequestSnapshotFields(task *model.Task) string {
+func clearInternalAsyncImageRequestSnapshotFields(task *model.Task) []string {
 	if task == nil {
-		return ""
+		return nil
 	}
-	snapshotPath := task.PrivateData.RequestBodyPath
+	snapshotPaths := []string{task.PrivateData.RequestBodyPath}
+	if replay := task.PrivateData.ImageRetry; replay != nil {
+		snapshotPaths = append(snapshotPaths, replay.BodyPath)
+		replay.BodyPath, replay.BodySize, replay.RelayFormat = "", 0, ""
+		replay.Submitting = false
+	}
 	task.PrivateData.RequestBodyPath = ""
 	task.PrivateData.RequestContentType = ""
 	task.PrivateData.RequestBodySize = 0
@@ -688,11 +691,13 @@ func clearInternalAsyncImageRequestSnapshotFields(task *model.Task) string {
 	task.PrivateData.RequestPath = ""
 	task.PrivateData.RequestQuery = ""
 	task.PrivateData.RequestRelayFormat = ""
-	return snapshotPath
+	return snapshotPaths
 }
 
-func removeInternalAsyncImageRequestSnapshot(snapshotPath string) {
-	if snapshotPath != "" {
-		_ = os.Remove(snapshotPath)
+func removeInternalAsyncImageRequestSnapshot(snapshotPaths ...string) {
+	for _, snapshotPath := range snapshotPaths {
+		if snapshotPath != "" {
+			_ = os.Remove(snapshotPath)
+		}
 	}
 }

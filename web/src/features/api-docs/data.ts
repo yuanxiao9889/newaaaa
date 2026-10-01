@@ -16,6 +16,8 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import { buildImage25Docs, image25Groups } from './image25-data'
+
 export type ModelProtocol =
   | 'OpenAI Images'
   | 'Gemini generateContent'
@@ -39,6 +41,8 @@ export type EndpointDoc = {
 export type ImageModelDoc = {
   id: string
   model: string
+  title?: string
+  modelIds?: string[]
   protocol: ModelProtocol
   family: 'openai' | 'gemini' | 'oopii'
   summary: string
@@ -178,7 +182,8 @@ const douParameters: ParameterDoc[] = [
     type: 'string',
     required: 'Optional reference',
     values: 'HIGH',
-    description: 'Optional reference adherence setting supported by Dou 5.0 Pro.',
+    description:
+      'Optional reference adherence setting supported by Dou 5.0 Pro.',
   },
   {
     name: 'size',
@@ -491,6 +496,13 @@ export const oopiiModelGroups: Record<
     },
   ],
   image: [
+    ...image25Groups.flatMap((group) =>
+      group.modelIds.map((id) => ({
+        id,
+        owner: 'openai',
+        endpoints: ['openai'],
+      }))
+    ),
     {
       id: 'all-image-2',
       owner: 'openai',
@@ -669,6 +681,7 @@ export const oopiiModelGroups: Record<
 }
 
 export const imageModels: ImageModelDoc[] = [
+  ...buildImage25Docs(allImageParameters, openAIEndpoints, gptImageRatios),
   {
     id: 'all-image-2',
     model: 'all-image-2',

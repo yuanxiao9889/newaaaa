@@ -17,7 +17,6 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import type { TFunction } from 'i18next'
-
 import {
   Copy,
   Check,
@@ -35,6 +34,7 @@ import {
 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
+import { CopyButton } from '@/components/copy-button'
 import { Dialog } from '@/components/dialog'
 import { StatusBadge, type StatusBadgeProps } from '@/components/status-badge'
 import { Button } from '@/components/ui/button'
@@ -75,6 +75,7 @@ import {
 import { USAGE_BILLING_PATH, type LogOtherData } from '../../types'
 import { PluginAuthorLink } from '../plugin-author-link'
 import { DetailRow, DetailSection } from './log-detail-layout'
+import { UpstreamDeliveryDetails } from './upstream-delivery-details'
 
 // Maps a channel-update changed-field token (as recorded by the backend audit)
 // to its i18n label key for display in the audit details.
@@ -597,9 +598,34 @@ export function DetailsDialog(props: DetailsDialogProps) {
     props.log.type !== 6 &&
     (other?.request_path || conversionChain.length > 0)
 
-  const useChannel = other?.admin_info?.use_channel
+  const useChannel =
+    adminInfo?.async_channel_retry_path ??
+    other?.async_channel_retry_path ??
+    adminInfo?.use_channel
   const channelChain =
-    useChannel && useChannel.length > 0 ? useChannel.join(' → ') : undefined
+    Array.isArray(useChannel) && useChannel.length > 0
+      ? useChannel.join(' → ')
+      : undefined
+  const rawRetryDetails =
+    adminInfo?.async_channel_retry_details ?? other?.async_channel_retry_details
+  const retryDetails =
+    props.isAdmin && Array.isArray(rawRetryDetails)
+      ? rawRetryDetails.filter(Boolean).map((detail, index) => {
+          const channel = detail.channel_id
+            ? `${detail.channel_id}${detail.channel_name ? ` (${detail.channel_name})` : ''}`
+            : '-'
+          const fields = [
+            `#${detail.attempt ?? index + 1}`,
+            `channel=${channel}`,
+            detail.status_code != null
+              ? `status_code=${detail.status_code}`
+              : '',
+            detail.error_code ? `error_code=${detail.error_code}` : '',
+            detail.error_type ? `error_type=${detail.error_type}` : '',
+          ].filter(Boolean)
+          return `${fields.join(', ')}${detail.error ? `\n${detail.error}` : ''}`
+        })
+      : []
   const reasoningEffortVariant = getReasoningEffortVariant(
     other?.reasoning_effort
   )
@@ -771,6 +797,42 @@ export function DetailsDialog(props: DetailsDialogProps) {
               </div>
             </div>
           </DetailSection>
+        )}
+
+        {retryDetails.length > 0 && (
+          <DetailSection
+            icon={<AlertTriangle className='size-3.5' aria-hidden='true' />}
+            label={t('Retry Failure Details')}
+            variant='danger'
+          >
+            <div className='relative min-w-0'>
+              <CopyButton
+                value={retryDetails.join('\n\n')}
+                className='absolute top-0 right-0 size-5'
+                iconClassName='size-3'
+                aria-label={t('Copy {{field}}', {
+                  field: t('Retry Failure Details'),
+                })}
+              />
+              <ol
+                aria-label={t('Retry Failure Details')}
+                className='min-w-0 space-y-2 pr-6'
+              >
+                {retryDetails.map((detail) => (
+                  <li
+                    key={detail}
+                    className='bg-background/70 min-w-0 rounded border p-2 font-mono text-xs leading-relaxed break-all whitespace-pre-wrap sm:wrap-break-word'
+                  >
+                    {detail}
+                  </li>
+                ))}
+              </ol>
+            </div>
+          </DetailSection>
+        )}
+
+        {props.isAdmin && adminInfo?.upstream_delivery && (
+          <UpstreamDeliveryDetails attempts={adminInfo.upstream_delivery} />
         )}
 
         {/* Quota saturation marker (admin only) */}

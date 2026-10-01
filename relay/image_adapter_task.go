@@ -60,6 +60,9 @@ func normalizeConfiguredImageTaskResponse(body []byte, config *dto.ImageAdapterT
 		return nil, fmt.Errorf("unrecognized configured image task status")
 	}
 	envelope := map[string]any{"status": canonical}
+	if canonical == "failed" && (status == "expired" || status == "cancelled" || status == "canceled") {
+		envelope["status"] = status
+	}
 	if canonical == "failed" {
 		message := "upstream image task failed"
 		if config.ErrorPath != "" {
@@ -70,7 +73,19 @@ func normalizeConfiguredImageTaskResponse(body []byte, config *dto.ImageAdapterT
 				message = nested.String()
 			}
 		}
-		envelope["error"] = map[string]string{"message": message}
+		errorInfo := map[string]any{"message": message}
+		if config.ErrorPath != "" {
+			value := gjson.GetBytes(body, config.ErrorPath)
+			for _, field := range []string{"code", "type", "status", "status_code"} {
+				if nested := value.Get(field); nested.Type == gjson.String || nested.Type == gjson.Number {
+					errorInfo[field] = nested.Value()
+				}
+			}
+			if retryable := value.Get("retryable"); retryable.Type == gjson.False {
+				errorInfo["retryable"] = false
+			}
+		}
+		envelope["error"] = errorInfo
 	}
 	if canonical == "completed" {
 		image := dto.ImageData{}

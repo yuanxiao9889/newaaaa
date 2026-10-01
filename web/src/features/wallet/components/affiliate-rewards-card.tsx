@@ -80,7 +80,13 @@ export function AffiliateRewardsCard({
               {t('Referral Program')}
             </h3>
             <p className='text-muted-foreground line-clamp-1 text-xs'>
-              {t('Earn 10% when invited users complete valid wallet top-ups.')}
+              {user?.is_vip
+                ? t(
+                    'Earn 10% when invited users complete valid wallet top-ups.'
+                  )
+                : t(
+                    'Earn 5% when invited users complete valid wallet top-ups.'
+                  )}
             </p>
           </div>
         </div>
@@ -137,9 +143,15 @@ export function AffiliateRewardsCard({
         <div className='grid gap-2 border-t pt-3 text-xs sm:grid-cols-2 lg:col-span-3 lg:grid-cols-4'>
           <RewardRule
             icon={<BadgePercent className='size-3.5' />}
-            text={t(
-              'Inviter reward is 10% of each invited user wallet top-up payment.'
-            )}
+            text={
+              user?.is_vip
+                ? t(
+                    'Inviter reward is 10% of each invited user wallet top-up payment.'
+                  )
+                : t(
+                    'Inviter reward is 5% of each invited user wallet top-up payment.'
+                  )
+            }
           />
           <RewardRule
             icon={<ListChecks className='size-3.5' />}
@@ -149,7 +161,7 @@ export function AffiliateRewardsCard({
                     'VIP benefit: referral rewards have no count limit per invited user.'
                   )
                 : t(
-                    'Rewards are granted only for the first 5 successful top-ups from each invited user.'
+                    'Rewards are granted only for the first 3 successful top-ups from each invited user.'
                   )
             }
           />

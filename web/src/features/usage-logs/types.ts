@@ -119,9 +119,12 @@ export interface ToolSurchargeItem {
 
 export interface LogOtherData {
   admin_info?: {
+    upstream_delivery?: UpstreamDelivery[]
     is_multi_key?: boolean
     multi_key_index?: number
     use_channel?: Array<number | string>
+    async_channel_retry_path?: LogOtherData['async_channel_retry_path']
+    async_channel_retry_details?: LogOtherData['async_channel_retry_details']
     local_count_tokens?: boolean
     usage_billing_path?: UsageBillingPath | string
     channel_affinity?: ChannelAffinityInfo
@@ -552,4 +555,28 @@ export interface UserInfo {
   aff_count?: number
   aff_quota?: number
   remark?: string
+}
+
+export interface UpstreamDelivery {
+  task_id: string
+  worker_attempt: number
+  attempt: number
+  channel_id: number
+  stage: string
+  started_at: number
+  updated_at: number
+  elapsed_ms: number
+  host?: string
+  method?: string
+  peer_address?: string
+  failure_stage?: string
+  connection_ready: boolean
+  connection_reused: boolean
+  request_written: boolean
+  write_count: number
+  response_received: boolean
+  status_code?: number
+  upstream_request_id?: string
+  response_complete: boolean
+  error_kind?: string
 }

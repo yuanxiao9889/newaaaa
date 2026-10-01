@@ -209,7 +209,9 @@ func serveImageTaskContent(c *gin.Context, task *model.Task) {
 
 	c.Header("Content-Type", mimeType)
 	c.Header("Content-Length", strconv.FormatInt(fileInfo.Size(), 10))
-	c.Header("Cache-Control", "private, max-age=3600")
+	if c.Writer.Header().Get("Cache-Control") == "" {
+		c.Header("Cache-Control", "private, max-age=3600")
+	}
 	c.Header("X-Content-Type-Options", "nosniff")
 	c.Header("Content-Disposition", fmt.Sprintf("inline; filename=\"%s%s\"", task.TaskID, filepath.Ext(task.PrivateData.LocalPath)))
 	http.ServeContent(c.Writer, c.Request, filepath.Base(task.PrivateData.LocalPath), fileInfo.ModTime(), file)

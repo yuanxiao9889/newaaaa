@@ -22,6 +22,7 @@ import {
   useState,
   type ReactElement,
   type ReactNode,
+  type Ref,
 } from 'react'
 
 import { Main } from './main'
@@ -51,6 +52,7 @@ SectionPageLayoutBreadcrumb.displayName = 'SectionPageLayout.Breadcrumb'
 
 export type SectionPageLayoutProps = {
   children: ReactNode
+  contentRef?: Ref<HTMLDivElement>
   fixedContent?: boolean
   stackActionsOnMobile?: boolean
 }
@@ -106,6 +108,7 @@ export function SectionPageLayout(props: SectionPageLayoutProps) {
         </div>
 
         <div
+          ref={props.contentRef}
           className={
             props.fixedContent
               ? 'min-h-0 flex-1 overflow-hidden px-3 pt-1 pb-3 sm:px-4 sm:pt-1.5 sm:pb-4'

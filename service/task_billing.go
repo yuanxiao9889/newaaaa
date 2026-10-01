@@ -177,6 +177,9 @@ func taskAdjustTokenQuota(ctx context.Context, task *model.Task, delta int) erro
 // taskBillingOther 从 task 的 BillingContext 构建日志 Other 字段。
 func taskBillingOther(task *model.Task) *model.LogOther {
 	other := model.NewLogOther()
+	if delivery := AsyncImageDeliverySnapshot(task.TaskID, task.PrivateData.WorkerAttempts); len(delivery) > 0 {
+		other.SetAdmin("upstream_delivery", delivery)
+	}
 	if bc := task.PrivateData.BillingContext; bc != nil {
 		other.SetPublic("model_price", bc.ModelPrice)
 		if bc.FixedPriceUnit != "" {
@@ -210,6 +213,9 @@ func taskBillingOther(task *model.Task) *model.LogOther {
 	if len(task.PrivateData.ChannelRetryPath) > 0 {
 		retryPath := append([]string(nil), task.PrivateData.ChannelRetryPath...)
 		other.SetAdmin("async_channel_retry_path", retryPath)
+		if retry := task.PrivateData.ImageRetry; retry != nil && len(retry.Details) > 0 {
+			other.SetAdmin("async_channel_retry_details", retry.Details)
+		}
 		other.SetAdmin("use_channel", retryPath)
 	}
 	if task.PrivateData.PromptTokens > 0 {

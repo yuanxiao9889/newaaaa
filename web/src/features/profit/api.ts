@@ -1,4 +1,5 @@
 import { api } from '@/lib/api'
+
 import type {
   ProfitCostPrice,
   ProfitCostPricePrefill,
@@ -13,16 +14,24 @@ const secureConfig = {
   disableDuplicate: true,
 }
 
-export async function getProfitSummary(params: ProfitQueryParams = {}) {
+export async function getProfitSummary(
+  params: ProfitQueryParams = {},
+  signal?: AbortSignal
+) {
   const res = await api.get('/api/profit/summary', {
     params,
+    signal,
     ...secureConfig,
   })
   return res.data as { success: boolean; data: ProfitReport; message?: string }
 }
 
-export async function getProfitCostPrices(reveal = false) {
+export async function getProfitCostPrices(
+  reveal = false,
+  signal?: AbortSignal
+) {
   const res = await api.get('/api/profit/cost-prices', {
+    signal,
     params: reveal ? { reveal: true } : undefined,
     ...secureConfig,
   })
@@ -35,9 +44,11 @@ export async function getProfitCostPrices(reveal = false) {
 
 export async function getProfitCostPricePrefill(
   channelId: number,
-  modelName?: string
+  modelName?: string,
+  signal?: AbortSignal
 ) {
   const res = await api.get('/api/profit/cost-price-prefill', {
+    signal,
     params: { channel_id: channelId, model_name: modelName || undefined },
     ...secureConfig,
   })

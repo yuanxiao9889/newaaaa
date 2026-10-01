@@ -509,8 +509,10 @@ func doRequest(c *gin.Context, req *http.Request, info *common.RelayInfo) (*http
 		req = req.WithContext(c.Request.Context())
 	}
 
+	req, recordDelivery := service.TraceUpstreamDelivery(req)
 	client, err := service.GetHttpClientWithProxySettings(info.ChannelSetting.Proxy, info.ChannelSetting)
 	if err != nil {
+		recordDelivery(nil, err)
 		return nil, fmt.Errorf("new proxy http client failed: %w", err)
 	}
 	// Clients are cached and shared across channels, so override redirect
@@ -551,6 +553,7 @@ func doRequest(c *gin.Context, req *http.Request, info *common.RelayInfo) (*http
 	}
 
 	resp, err := relayClient.Do(req)
+	recordDelivery(resp, err)
 	if err != nil {
 		logger.LogError(c, "do request failed: "+err.Error())
 		return nil, newDoRequestError(req, err)

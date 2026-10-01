@@ -112,6 +112,7 @@ func CacheGetRandomSatisfiedChannel(param *RetryParam) (*model.Channel, string, 
 	var err error
 	selectGroup := param.TokenGroup
 	userGroup := common.GetContextKeyString(param.Ctx, constant.ContextKeyUserGroup)
+	AppendImageRequestFilter(param.Ctx)
 	filters := GetChannelConstraints(param.Ctx).Filters
 
 	if param.TokenGroup == "auto" {

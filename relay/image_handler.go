@@ -24,6 +24,7 @@ import (
 )
 
 func ImageHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *types.NewAPIError) {
+	c.Set("async_image_original_content_type", c.Request.Header.Get("Content-Type"))
 	info.InitChannelMeta(c)
 	info.BillingImageCount = nil
 	info.ImageRequestCount = 0

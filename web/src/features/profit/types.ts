@@ -32,8 +32,8 @@ export type ProfitReport = {
   start_timestamp: number
   end_timestamp: number
   summary: ProfitMetric
-  series: ProfitSeriesItem[]
-  breakdown: ProfitBreakdownItem[]
+  series: ProfitSeriesItem[] | null
+  breakdown: ProfitBreakdownItem[] | null
   generated_at: number
   quota_per_unit: number
   currency: string

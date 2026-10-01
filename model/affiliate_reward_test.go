@@ -66,8 +66,8 @@ func TestRechargeEpay_GrantsAffiliateRewardFromPaymentMoney(t *testing.T) {
 	assert.False(t, alreadyDone)
 
 	inviter := getAffiliateUser(t, 1)
-	assert.Equal(t, 1234, inviter.AffQuota)
-	assert.Equal(t, 1234, inviter.AffHistoryQuota)
+	assert.Equal(t, 617, inviter.AffQuota)
+	assert.Equal(t, 617, inviter.AffHistoryQuota)
 	assert.Equal(t, int64(1), countAffiliateRewards(t, 2))
 	assert.Equal(t, 20000, getAffiliateUser(t, 2).Quota)
 }
@@ -90,12 +90,12 @@ func TestRechargeEpay_AffiliateRewardIsIdempotent(t *testing.T) {
 	assert.True(t, alreadyDone)
 
 	inviter := getAffiliateUser(t, 1)
-	assert.Equal(t, 1000, inviter.AffQuota)
-	assert.Equal(t, 1000, inviter.AffHistoryQuota)
+	assert.Equal(t, 500, inviter.AffQuota)
+	assert.Equal(t, 500, inviter.AffHistoryQuota)
 	assert.Equal(t, int64(1), countAffiliateRewards(t, 2))
 }
 
-func TestRechargeEpay_AffiliateRewardLimitedToFirstFiveTopUpsPerInvitee(t *testing.T) {
+func TestRechargeEpay_AffiliateRewardLimitedToFirstThreeTopUpsPerInvitee(t *testing.T) {
 	truncateTables(t)
 	originalQuotaPerUnit := common.QuotaPerUnit
 	common.QuotaPerUnit = 1000
@@ -112,9 +112,9 @@ func TestRechargeEpay_AffiliateRewardLimitedToFirstFiveTopUpsPerInvitee(t *testi
 	}
 
 	inviter := getAffiliateUser(t, 1)
-	assert.Equal(t, 5000, inviter.AffQuota)
-	assert.Equal(t, 5000, inviter.AffHistoryQuota)
-	assert.Equal(t, int64(5), countAffiliateRewards(t, 2))
+	assert.Equal(t, 1500, inviter.AffQuota)
+	assert.Equal(t, 1500, inviter.AffHistoryQuota)
+	assert.Equal(t, int64(3), countAffiliateRewards(t, 2))
 }
 
 func TestRechargeEpay_AffiliateRewardSkippedWithoutInviterOrPositiveReward(t *testing.T) {
@@ -209,13 +209,15 @@ func TestWalletRechargePaths_GrantAffiliateRewardFromPaymentMoney(t *testing.T) 
 				tradeNo := fmt.Sprintf("%s-%d", tc.tradeNo, i)
 				insertAffiliateTopUp(t, tradeNo, 2, 20, 12.34, tc.provider)
 				require.NoError(t, tc.complete(tradeNo))
-				wantRewards := min(i+1, 5)
+				wantRewards := min(i+1, 3)
+				wantQuota := 617 * wantRewards
 				if i == 6 {
-					wantRewards = 6
+					wantRewards = 4
+					wantQuota = 3085 // Three ordinary rewards at 5%, then one VIP reward at 10%.
 				}
 				inviter := getAffiliateUser(t, 1)
-				assert.Equal(t, 1234*wantRewards, inviter.AffQuota)
-				assert.Equal(t, 1234*wantRewards, inviter.AffHistoryQuota)
+				assert.Equal(t, wantQuota, inviter.AffQuota)
+				assert.Equal(t, wantQuota, inviter.AffHistoryQuota)
 				assert.EqualValues(t, wantRewards, countAffiliateRewards(t, 2))
 			}
 		})

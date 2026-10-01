@@ -34,7 +34,7 @@ const user: UserWalletData = {
   group: 'default',
 }
 
-it('updates the reward limit explanation when VIP membership changes', () => {
+it('updates the reward rate and limit when VIP membership changes', () => {
   const props = {
     user,
     affiliateLink: 'https://example.test/register?aff=inviter',
@@ -43,7 +43,12 @@ it('updates the reward limit explanation when VIP membership changes', () => {
   const view = render(<AffiliateRewardsCard {...props} />)
   expect(
     screen.getByText(
-      'Rewards are granted only for the first 5 successful top-ups from each invited user.'
+      'Rewards are granted only for the first 3 successful top-ups from each invited user.'
+    )
+  ).toBeInTheDocument()
+  expect(
+    screen.getByText(
+      'Inviter reward is 5% of each invited user wallet top-up payment.'
     )
   ).toBeInTheDocument()
   view.rerender(
@@ -56,7 +61,7 @@ it('updates the reward limit explanation when VIP membership changes', () => {
   ).toBeInTheDocument()
   expect(
     screen.queryByText(
-      'Rewards are granted only for the first 5 successful top-ups from each invited user.'
+      'Rewards are granted only for the first 3 successful top-ups from each invited user.'
     )
   ).not.toBeInTheDocument()
   expect(
@@ -64,4 +69,15 @@ it('updates the reward limit explanation when VIP membership changes', () => {
       'Inviter reward is 10% of each invited user wallet top-up payment.'
     )
   ).toBeInTheDocument()
+  view.rerender(<AffiliateRewardsCard {...props} />)
+  expect(
+    screen.getByText(
+      'Inviter reward is 5% of each invited user wallet top-up payment.'
+    )
+  ).toBeInTheDocument()
+  expect(
+    screen.queryByText(
+      'Earn 10% when invited users complete valid wallet top-ups.'
+    )
+  ).not.toBeInTheDocument()
 })
