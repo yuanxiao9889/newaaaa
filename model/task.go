@@ -101,6 +101,7 @@ type TaskPrivateData struct {
 	WorkerHeartbeatAt  int64                 `json:"worker_heartbeat_at,omitempty"`
 	ChannelRetryPath   []string              `json:"channel_retry_path,omitempty"`
 	ImageRetry         *AsyncImageRetryState `json:"image_retry,omitempty"`
+	VideoRetry         *VideoTaskRetryState  `json:"video_retry,omitempty"`
 
 	BillingState        string                    `json:"billing_state,omitempty"`
 	UsageAccountingMode string                    `json:"usage_accounting_mode,omitempty"`
@@ -587,6 +588,9 @@ func (t *Task) UpdateQuota() error {
 // falls back to INSERT ON CONFLICT when the WHERE-guarded UPDATE matches
 // zero rows, which silently bypasses the CAS guard.
 func (t *Task) UpdateWithStatus(fromStatus TaskStatus) (bool, error) {
+	if t.PrivateData.VideoRetry != nil {
+		return t.updateVideoTaskWithStatus(fromStatus)
+	}
 	result := DB.Model(t).Where("status = ?", fromStatus).Select("*").Updates(t)
 	if result.Error != nil {
 		return false, result.Error

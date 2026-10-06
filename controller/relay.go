@@ -565,6 +565,7 @@ func executeTaskSubmissionWith(
 	submit taskSubmitAttempt,
 ) (*taskSubmissionOutcome, *taskdto.TaskError) {
 	policy := service.RequestPolicy(c)
+	videoRetry := captureVideoTaskRetry(c, relayInfo)
 	diagnostics := newTaskPluginSubmitDiagnostics(c)
 	diagnostics.start(relayInfo)
 	var result *relay.TaskSubmitResult
@@ -634,6 +635,7 @@ func executeTaskSubmissionWith(
 		c.Request.Body = io.NopCloser(bodyStorage)
 
 		stage = "submit"
+		relayInfo.RetryIndex = retryParam.GetRetry()
 		result, taskErr = submit(c, relayInfo)
 		if requestErr := c.Request.Context().Err(); requestErr != nil {
 			diagnostics.cancelled("after_submit", retryParam.GetRetry()+1)
@@ -721,6 +723,16 @@ func executeTaskSubmissionWith(
 	task.PrivateData.ActualQuota = result.Quota
 	task.PrivateData.BillingUpdatedAt = time.Now().Unix()
 	task.PrivateData.ChannelRetryPath = append([]string(nil), c.GetStringSlice("use_channel")...)
+	if videoRetry != nil && (result.Immediate == nil || result.Immediate.Status != model.TaskStatusSuccess && result.Immediate.Status != model.TaskStatusFailure) {
+		videoRetry.AcceptedAt = time.Now().Unix()
+		videoRetry.Action = relayInfo.Action
+		videoRetry.Attempt = len(task.PrivateData.ChannelRetryPath)
+		if relayInfo.QuotaClamp != nil {
+			videoRetry.RecordQuotaClamp(relayInfo.QuotaClamp)
+			logger.LogWarn(c, fmt.Sprintf("video task %s quota saturated: %s", task.TaskID, relayInfo.QuotaClamp))
+		}
+		task.PrivateData.VideoRetry = videoRetry
+	}
 	task.PrivateData.BillingContext = &model.TaskBillingContext{
 		ModelPrice:      relayInfo.PriceData.ModelPrice,
 		FixedPriceUnit:  relayInfo.PriceData.FixedPriceUnit,
@@ -810,7 +822,14 @@ func executeTaskSubmissionWith(
 	} else {
 		policy.AddEvent(service.PolicyEvent{Decision: service.PolicyDecision{Action: "stop", Reason: "task_failed", Source: "upstream"}})
 	}
-	if err := service.LogTaskConsumption(c, relayInfo, task); err != nil {
+	if task.PrivateData.VideoRetry != nil {
+		// A replacement may use a different channel and price. Attribute usage
+		// once on final completion, retaining the already-paid reservation.
+		task.PrivateData.VideoRetry.Ready = true
+		if _, err := task.UpdateWithStatus(task.Status); err != nil {
+			logger.LogError(c, "enable video task retry failed: "+err.Error())
+		}
+	} else if err := service.LogTaskConsumption(c, relayInfo, task); err != nil {
 		logger.LogError(c, "task usage accounting deferred until completion: "+err.Error())
 	}
 	if immediate := result.Immediate; immediate != nil && (task.Status == model.TaskStatusSuccess || task.Status == model.TaskStatusFailure) {

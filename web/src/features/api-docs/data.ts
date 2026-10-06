@@ -17,6 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { buildImage25Docs, image25Groups } from './image25-data'
+import { videoGroups } from './video-data'
 
 export type ModelProtocol =
   | 'OpenAI Images'
@@ -549,28 +550,15 @@ export const oopiiModelGroups: Record<
       endpoints: ['openai-async'],
     },
   ],
-  video: [
-    {
-      id: 'MiniMax-H3',
-      owner: 'openai',
-      endpoints: ['openai'],
-    },
-    {
-      id: 'MiniMax-H3-C',
-      owner: 'openai',
-      endpoints: ['openai'],
-    },
-    {
-      id: 'ok-imagine-video',
-      owner: 'openai',
-      endpoints: ['openai'],
-    },
-    {
-      id: 'ok-video-1.5-preview',
-      owner: 'openai',
-      endpoints: ['openai-video', 'openai'],
-    },
-  ],
+  video: videoGroups.flatMap((group) =>
+    group.variants.flatMap((variant) =>
+      variant.models.map((id) => ({
+        id,
+        owner: 'oopii',
+        endpoints: ['openai-video'],
+      }))
+    )
+  ),
   midjourney: [
     {
       id: 'mj_fast_custom_zoom',

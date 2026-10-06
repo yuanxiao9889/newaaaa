@@ -89,6 +89,13 @@ func sweepTimedOutTasks(ctx context.Context) {
 	timedOutCount := 0
 
 	for _, task := range tasks {
+		if retry := task.PrivateData.VideoRetry; retry != nil && (retry.Submitting ||
+			!retry.Ready && retry.AcceptedAt > 0 && now-retry.AcceptedAt < VideoTaskRetrySubmitTimeoutSeconds) {
+			if _, err := prepareVideoTaskForPolling(ctx, task); err != nil {
+				logger.LogError(ctx, fmt.Sprintf("recover video task %s resubmission failed: %v", task.TaskID, err))
+			}
+			continue
+		}
 		isLegacy := task.SubmitTime > 0 && task.SubmitTime < model.TaskRefundLegacyCutoff
 
 		oldStatus := task.Status
@@ -167,6 +174,13 @@ func RunTaskPollingOnce(ctx context.Context, report func(processed, total int)) 
 		taskM := make(map[string]*model.Task)
 		nullTaskIds := make([]int64, 0)
 		for _, task := range tasks {
+			poll, err := prepareVideoTaskForPolling(ctx, task)
+			if err != nil {
+				logger.LogError(ctx, fmt.Sprintf("prepare video task %s polling failed: %v", task.TaskID, err))
+			}
+			if err != nil || !poll {
+				continue
+			}
 			upstreamID := task.GetUpstreamTaskID()
 			if upstreamID == "" {
 				// 统计失败的未完成任务
@@ -254,10 +268,22 @@ func updateBatchTasks(ctx context.Context, adaptor BatchTaskPollingAdaptor, chan
 		baseURL = constant.GetChannelBaseURL(ch.Type)
 	}
 	tasks := make([]*model.Task, 0, len(taskIds))
+	polledTasks := make(map[string]*model.Task, len(taskIds))
 	for _, upstreamID := range taskIds {
 		if task := taskM[upstreamID]; task != nil {
+			poll, err := prepareVideoTaskForPolling(ctx, task)
+			if err != nil {
+				return err
+			}
+			if !poll {
+				continue
+			}
 			tasks = append(tasks, task)
+			polledTasks[upstreamID] = task
 		}
+	}
+	if len(tasks) == 0 {
+		return nil
 	}
 	// The channel type tells plugin adaptors whether the upstream is another
 	// New API gateway, the same signal submission derives from the request.
@@ -293,7 +319,7 @@ func updateBatchTasks(ctx context.Context, adaptor BatchTaskPollingAdaptor, chan
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
-		task := taskM[upstreamID]
+		task := polledTasks[upstreamID]
 		if task == nil {
 			logger.LogWarn(ctx, fmt.Sprintf("Batch task response ignored: unknown task_id=%s", upstreamID))
 			continue
@@ -312,6 +338,15 @@ func updateBatchTasks(ctx context.Context, adaptor BatchTaskPollingAdaptor, chan
 				common.SysLog("UpdateSunoTask task error: " + err.Error())
 			}
 			continue
+		}
+		if parsedStatus == model.TaskStatusFailure && task.PrivateData.VideoRetry != nil && RetryVideoTaskFunc != nil {
+			handled, err := RetryVideoTaskFunc(ctx, task, &responseItem.TaskInfo)
+			if err != nil {
+				return err
+			}
+			if handled {
+				continue
+			}
 		}
 		if isNonTerminalPollStatus(parsedStatus) {
 			task.PrivateData.PollFailures = 0
@@ -412,6 +447,19 @@ func updateVideoTasks(ctx context.Context, platform constant.TaskPlatform, chann
 		var failedIDs []int64
 		for _, upstreamID := range taskIds {
 			if t, ok := taskM[upstreamID]; ok {
+				if t.PrivateData.VideoRetry != nil {
+					poll, prepareErr := prepareVideoTaskForPolling(ctx, t)
+					if prepareErr != nil {
+						logger.LogError(ctx, fmt.Sprintf("prepare video task %s polling failed: %v", t.TaskID, prepareErr))
+						continue
+					}
+					if poll {
+						if failErr := failVideoTaskRetry(ctx, t, fmt.Sprintf("Failed to get channel info, channel ID: %d", channelId)); failErr != nil {
+							logger.LogError(ctx, fmt.Sprintf("fail video task %s after missing channel: %v", t.TaskID, failErr))
+						}
+					}
+					continue
+				}
 				failedIDs = append(failedIDs, t.ID)
 			}
 		}
@@ -474,6 +522,10 @@ func updateVideoSingleTask(ctx context.Context, adaptor TaskPollingAdaptor, ch *
 		logger.LogError(ctx, fmt.Sprintf("Task %s not found in taskM", taskId))
 		return fmt.Errorf("task %s not found", taskId)
 	}
+	poll, err := prepareVideoTaskForPolling(ctx, task)
+	if err != nil || !poll {
+		return err
+	}
 	key := ch.Key
 
 	privateData := task.PrivateData
@@ -535,6 +587,12 @@ func updateVideoSingleTask(ctx context.Context, adaptor TaskPollingAdaptor, ch *
 	}
 	if classifyPollHTTP(resp.StatusCode) == pollClassOtherClient && isNonTerminalPollStatus(parsedStatus) {
 		return recordPollFailure(ctx, adaptor, task, snap.Status, pollClassUnrecognized, resp.StatusCode, unrecognizedPollDetail(taskResult.Reason, responseBody))
+	}
+	if parsedStatus == model.TaskStatusFailure && task.PrivateData.VideoRetry != nil && RetryVideoTaskFunc != nil {
+		handled, err := RetryVideoTaskFunc(ctx, task, taskResult)
+		if err != nil || handled {
+			return err
+		}
 	}
 
 	task.Data = redactVideoResponseBody(responseBody)

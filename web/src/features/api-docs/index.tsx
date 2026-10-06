@@ -54,6 +54,8 @@ import {
 import { midjourneyNavItems } from './midjourney-data'
 import { MidjourneyDocs } from './midjourney-docs'
 import { buildOpenAISamples } from './openai-samples'
+import { videoGroups } from './video-data'
+import { VideoDocs } from './video-docs'
 
 type ModelOperation = 'generate' | 'edit'
 
@@ -100,37 +102,6 @@ const textApiRoutes = [
     models:
       'gemini-3.1-pro-preview, gemini-3.1-pro-preview-c, gemini-3.5-flash, gemini-3.5-flash-c',
   },
-] as const
-
-const videoModelRows = [
-  [
-    'MiniMax-H3',
-    '5-15',
-    '21:9, 16:9, 4:3, 1:1, 3:4, 9:16',
-    '1440P',
-    'Up to 5 images and up to 3 reference audio URLs; no reference video. Prompt limit: 2,000 Unicode characters.',
-  ],
-  [
-    'MiniMax-H3-C',
-    '10, 15',
-    '21:9, 16:9, 4:3, 1:1, 3:4, 9:16',
-    '2k',
-    'firstFrame requires 1 image; reference requires 2-5 images. No reference audio or video. Upstream model: MiniMax H3.',
-  ],
-  [
-    'ok-video-1.5-preview',
-    '10, 15',
-    '16:9, 9:16',
-    '720p',
-    'A reference image is required; reference video and audio are not supported.',
-  ],
-  [
-    'ok-imagine-video',
-    '10, 16, 20',
-    '16:9, 9:16, 1:1',
-    '480p, 720p, 1080p',
-    'textToVideo accepts no image; firstFrame requires 1 image; reference accepts one or more images.',
-  ],
 ] as const
 
 function resolveBaseUrl(status: unknown) {
@@ -555,109 +526,6 @@ if (Date.now() >= deadline) throw new Error('Task polling timed out')`,
   }
 }
 
-function buildVideoSamples(baseUrl: string): CodeSamples {
-  const curl = [
-    `curl '${baseUrl}/v1/videos' \\`,
-    "  -H 'Authorization: Bearer $NEW_API_KEY' \\",
-    "  -H 'Content-Type: application/json' \\",
-    "  -d '{",
-    '    "model": "MiniMax-H3",',
-    '    "prompt": "A cinematic aerial shot crossing a misty mountain ridge at sunrise",',
-    '    "duration": 10,',
-    '    "aspect_ratio": "16:9",',
-    '    "resolution": "1440P"',
-    "  }'",
-    '',
-    `curl '${baseUrl}/v1/videos/{task_id}' \\`,
-    "  -H 'Authorization: Bearer $NEW_API_KEY'",
-    '',
-    `curl '${baseUrl}/v1/videos/{task_id}/content' \\`,
-    "  -H 'Authorization: Bearer $NEW_API_KEY' \\",
-    '  --output result.mp4',
-  ].join('\n')
-
-  return {
-    curl,
-    python: `import os
-import time
-from pathlib import Path
-
-import requests
-
-base_url = "${baseUrl}"
-headers = {"Authorization": f"Bearer {os.environ['NEW_API_KEY']}"}
-response = requests.post(
-    f"{base_url}/v1/videos",
-    headers=headers,
-    json={
-        "model": "MiniMax-H3",
-        "prompt": "A cinematic aerial shot crossing a misty mountain ridge at sunrise",
-        "duration": 10,
-        "aspect_ratio": "16:9",
-        "resolution": "1440P",
-    },
-    timeout=120,
-)
-response.raise_for_status()
-task_id = response.json().get("task_id") or response.json()["id"]
-
-while True:
-    task = requests.get(f"{base_url}/v1/videos/{task_id}", headers=headers, timeout=30)
-    task.raise_for_status()
-    status = task.json().get("status", "").lower()
-    if status in {"completed", "succeeded", "success", "done"}:
-        content = requests.get(
-            f"{base_url}/v1/videos/{task_id}/content",
-            headers=headers,
-            timeout=300,
-        )
-        content.raise_for_status()
-        Path("result.mp4").write_bytes(content.content)
-        break
-    if status in {"failed", "error", "cancelled", "expired"}:
-        raise RuntimeError(task.text)
-    time.sleep(5)`,
-    javascript: `import { writeFile } from 'node:fs/promises'
-
-const baseURL = '${baseUrl}'
-const headers = {
-  Authorization: \`Bearer \${process.env.NEW_API_KEY}\`,
-  'Content-Type': 'application/json',
-}
-const submitted = await fetch(\`\${baseURL}/v1/videos\`, {
-  method: 'POST',
-  headers,
-  body: JSON.stringify({
-    model: 'MiniMax-H3',
-    prompt: 'A cinematic aerial shot crossing a misty mountain ridge at sunrise',
-    duration: 10,
-    aspect_ratio: '16:9',
-    resolution: '1440P',
-  }),
-})
-if (!submitted.ok) throw new Error(await submitted.text())
-const body = await submitted.json()
-const taskId = body.task_id ?? body.id
-
-while (true) {
-  const response = await fetch(\`\${baseURL}/v1/videos/\${taskId}\`, { headers })
-  if (!response.ok) throw new Error(await response.text())
-  const task = await response.json()
-  const status = String(task.status ?? '').toLowerCase()
-  if (['completed', 'succeeded', 'success', 'done'].includes(status)) {
-    const content = await fetch(\`\${baseURL}/v1/videos/\${taskId}/content\`, { headers })
-    if (!content.ok) throw new Error(await content.text())
-    await writeFile('result.mp4', Buffer.from(await content.arrayBuffer()))
-    break
-  }
-  if (['failed', 'error', 'cancelled', 'expired'].includes(status)) {
-    throw new Error(JSON.stringify(task))
-  }
-  await new Promise((resolve) => setTimeout(resolve, 5000))
-}`,
-  }
-}
-
 function buildCompressionSamples(): CodeSamples {
   return {
     curl: `# Resize and strip metadata before upload (ImageMagick)
@@ -806,6 +674,11 @@ function DocsNavigation({ onNavigate }: { onNavigate?: () => void }) {
       label: 'OOpii upstream model catalog',
       icon: FileJson,
       items: oopiiReferenceItems,
+    },
+    {
+      label: 'apiDocs.video.title',
+      icon: Workflow,
+      items: videoGroups.map((group) => [group.id, group.title]),
     },
     {
       label: 'OpenAI Images models',
@@ -1139,7 +1012,6 @@ export function ApiDocs() {
     [baseUrl]
   )
   const compressionSamples = useMemo(() => buildCompressionSamples(), [])
-  const videoSamples = useMemo(() => buildVideoSamples(baseUrl), [baseUrl])
 
   return (
     <PublicLayout>
@@ -1411,99 +1283,7 @@ export function ApiDocs() {
                 </div>
               </section>
 
-              <section className='mt-16'>
-                <SectionHeading
-                  id='video-api'
-                  eyebrow='OOpii'
-                  title={t('Video task API')}
-                  description={t(
-                    'OOpii video tasks are asynchronous. Submit to /v1/videos, poll /v1/videos/{task_id}, and download completed bytes from /v1/videos/{task_id}/content. new-api exposes the public task ID and keeps the upstream task ID internal.'
-                  )}
-                />
-                <div className='mt-6 grid gap-3'>
-                  {[
-                    ['POST', '/v1/videos', 'Submit video task'],
-                    ['GET', '/v1/videos/{task_id}', 'Poll video task'],
-                    [
-                      'GET',
-                      '/v1/videos/{task_id}/content',
-                      'Download video content',
-                    ],
-                  ].map(([method, path, purpose]) => (
-                    <div
-                      key={path}
-                      className='border-border/70 bg-card grid gap-3 rounded-xl border p-4 sm:grid-cols-[70px_minmax(0,1fr)_220px] sm:items-center'
-                    >
-                      <Badge className='w-fit'>{method}</Badge>
-                      <code className='overflow-x-auto'>{path}</code>
-                      <span className='text-muted-foreground text-sm'>
-                        {t(purpose)}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-                <div className='border-border/70 mt-6 overflow-hidden rounded-xl border'>
-                  <ScrollArea className='w-full'>
-                    <table className='w-full min-w-[980px] text-left text-sm'>
-                      <thead className='bg-muted/45 text-muted-foreground'>
-                        <tr>
-                          {[
-                            'Model',
-                            'Duration / seconds',
-                            'Ratio / aspect_ratio',
-                            'Resolution',
-                            'References and modes',
-                          ].map((heading) => (
-                            <th key={heading} className='px-4 py-3 font-medium'>
-                              {t(heading)}
-                            </th>
-                          ))}
-                        </tr>
-                      </thead>
-                      <tbody className='divide-border divide-y'>
-                        {videoModelRows.map(
-                          ([
-                            model,
-                            duration,
-                            ratio,
-                            resolution,
-                            references,
-                          ]) => (
-                            <tr key={model} className='align-top'>
-                              <td className='px-4 py-3'>
-                                <code className='text-primary'>{model}</code>
-                              </td>
-                              <td className='px-4 py-3'>{duration}</td>
-                              <td className='px-4 py-3'>
-                                <code>{ratio}</code>
-                              </td>
-                              <td className='px-4 py-3'>
-                                <code>{resolution}</code>
-                              </td>
-                              <td className='text-muted-foreground px-4 py-3 leading-6'>
-                                {t(references)}
-                              </td>
-                            </tr>
-                          )
-                        )}
-                      </tbody>
-                    </table>
-                    <ScrollBar orientation='horizontal' />
-                  </ScrollArea>
-                </div>
-                <div className='mt-6'>
-                  <CodeExample
-                    samples={videoSamples}
-                    title={t('Submit video task')}
-                  />
-                </div>
-                <div className='mt-4 rounded-xl border border-amber-500/25 bg-amber-500/5 p-4 text-sm leading-6'>
-                  <strong>{t('Legacy compatibility model')}:</strong>{' '}
-                  {t(
-                    'OK-video is retained for compatibility but is not present in the current OOpii /v1/models response.'
-                  )}
-                </div>
-              </section>
+              <VideoDocs baseUrl={baseUrl} />
 
               <div className='mt-16 space-y-16'>
                 {imageModels.map((model, index) => (

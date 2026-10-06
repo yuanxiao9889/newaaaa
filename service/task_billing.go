@@ -227,6 +227,14 @@ func taskBillingOther(task *model.Task) *model.LogOther {
 		if retry := task.PrivateData.ImageRetry; retry != nil && len(retry.Details) > 0 {
 			other.SetAdmin("async_channel_retry_details", retry.Details)
 		}
+		if retry := task.PrivateData.VideoRetry; retry != nil {
+			if len(retry.Details) > 0 {
+				other.SetAdmin("async_channel_retry_details", retry.Details)
+			}
+			if len(retry.QuotaSaturation) > 0 {
+				other.SetAdmin("quota_saturation", retry.QuotaSaturation)
+			}
+		}
 		other.SetAdmin("use_channel", retryPath)
 	}
 	if task.PrivateData.PromptTokens > 0 {

@@ -7,11 +7,14 @@ import (
 	"errors"
 	"fmt"
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/middleware"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/service"
+	"github.com/alicebob/miniredis/v2"
 	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
+	"github.com/go-redis/redis/v8"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gorm.io/driver/mysql"
@@ -84,7 +87,6 @@ type legacyToken struct {
 	CrossGroupRetry    bool
 	DeletedAt          gorm.DeletedAt `gorm:"index"`
 }
-
 
 func (legacyToken) TableName() string {
 	return "tokens"
@@ -1044,5 +1046,156 @@ func TestGetTokenUsagePeriodStatsReturnsOwnedTokenUsageByPeriod(t *testing.T) {
 	}
 	if customUsageByTokenID[firstToken.Id] != 25 || customUsageByTokenID[secondToken.Id] != 70 {
 		t.Fatalf("unexpected custom token usage: %+v", customUsage.Items)
+	}
+}
+
+// Exercise the refill through the management handler, then authenticate with
+// the unchanged credential. Each external database is isolated by the fixture.
+func TestUpdateTokenQuotaRecoveryDatabaseMatrix(t *testing.T) {
+	for _, database := range []struct {
+		name, env string
+		typ       common.DatabaseType
+	}{
+		{"sqlite", "", common.DatabaseTypeSQLite},
+		{"mysql", "AUDIT_MYSQL_DSN", common.DatabaseTypeMySQL},
+		{"postgres", "AUDIT_POSTGRES_DSN", common.DatabaseTypePostgreSQL},
+	} {
+		t.Run(database.name, func(t *testing.T) {
+			dsn := os.Getenv(database.env)
+			if database.env != "" && dsn == "" {
+				t.Skip(database.env + " is not configured")
+			}
+			previousDB, previousLog := model.DB, model.LOG_DB
+			previousMainType, previousLogType := common.MainDatabaseType(), common.LogDatabaseType()
+			t.Setenv("LOG_SQL_DSN", "")
+			previousRedis, previousRDB, previousMaster, previousBatch := common.RedisEnabled, common.RDB, common.IsMasterNode, common.BatchUpdateEnabled
+			t.Cleanup(func() {
+				model.DB, model.LOG_DB = previousDB, previousLog
+				common.SetDatabaseTypes(previousMainType, previousLogType)
+				common.IsMasterNode = false
+				require.NoError(t, model.InitLogDB())
+				model.LOG_DB = previousLog
+				common.RedisEnabled, common.RDB, common.IsMasterNode, common.BatchUpdateEnabled = previousRedis, previousRDB, previousMaster, previousBatch
+			})
+			common.RedisEnabled, common.IsMasterNode, common.BatchUpdateEnabled = false, false, false
+			db, _ := newAuditTestDatabase(t, database.name, dsn)
+			model.DB = db
+			common.SetDatabaseTypes(database.typ, database.typ)
+			require.NoError(t, db.AutoMigrate(&model.Token{}))
+			require.NoError(t, model.InitLogDB()) // Initialize production column quoting.
+			versionSQL := "SELECT version()"
+			if database.name == "sqlite" {
+				versionSQL = "SELECT sqlite_version()"
+			}
+			var version string
+			require.NoError(t, db.Raw(versionSQL).Scan(&version).Error)
+			t.Logf("database version: %s", version)
+			for _, withRedis := range []bool{false, true} {
+				t.Run(fmt.Sprintf("redis=%v", withRedis), func(t *testing.T) {
+					common.RedisEnabled = withRedis
+					var server *miniredis.Miniredis
+					if withRedis {
+						server = miniredis.RunT(t)
+						client := redis.NewClient(&redis.Options{Addr: server.Addr()})
+						common.RDB = client
+						t.Cleanup(func() { require.NoError(t, client.Close()) })
+					}
+					for _, tc := range []struct {
+						name                                                                   string
+						initialStatus, quota, requestStatus                                    int
+						expired, unlimited, statusOnly, otherOwner, deleted, reject, recovered bool
+					}{
+						{name: "consume_to_zero_then_refill", initialStatus: common.TokenStatusEnabled, quota: 100, recovered: true},
+						{name: "historical_exhausted_then_refill", initialStatus: common.TokenStatusExhausted, quota: 100, recovered: true},
+						{name: "exhausted_then_unlimited", initialStatus: common.TokenStatusExhausted, unlimited: true, recovered: true},
+						{name: "full_payload_includes_enabled_status", initialStatus: common.TokenStatusExhausted, quota: 100, requestStatus: common.TokenStatusEnabled, recovered: true},
+						{name: "zero_stays_exhausted", initialStatus: common.TokenStatusExhausted},
+						{name: "expired_deadline_stays_blocked", initialStatus: common.TokenStatusExhausted, quota: 100, expired: true},
+						{name: "unlimited_does_not_bypass_expiry", initialStatus: common.TokenStatusExhausted, unlimited: true, expired: true},
+						{name: "manual_disable_preserved", initialStatus: common.TokenStatusDisabled, quota: 100, requestStatus: common.TokenStatusEnabled},
+						{name: "expired_status_preserved", initialStatus: common.TokenStatusExpired, quota: 100, expired: true},
+						{name: "status_only_cannot_smuggle_quota", initialStatus: common.TokenStatusExhausted, quota: 100, requestStatus: common.TokenStatusEnabled, statusOnly: true, reject: true},
+						{name: "other_owner_cannot_refill", initialStatus: common.TokenStatusExhausted, quota: 100, otherOwner: true, reject: true},
+						{name: "deleted_token_cannot_refill", initialStatus: common.TokenStatusExhausted, quota: 100, deleted: true, reject: true},
+						{name: "negative_quota_rejected", initialStatus: common.TokenStatusExhausted, quota: -1, reject: true},
+					} {
+						t.Run(tc.name, func(t *testing.T) {
+							token := model.Token{UserId: 1, Key: common.GetRandomString(48), Name: "quota-recovery", Status: tc.initialStatus, ExpiredTime: -1}
+							if tc.expired {
+								token.ExpiredTime = common.GetTimestamp() - 3600
+							}
+							if tc.initialStatus == common.TokenStatusEnabled {
+								token.RemainQuota = 100
+							}
+							require.NoError(t, db.Create(&token).Error)
+							if tc.initialStatus == common.TokenStatusEnabled {
+								_, err := model.ValidateUserToken(token.Key)
+								require.NoError(t, err)
+								reserved, err := model.TryReserveTokenQuotaImmediately(token.Id, token.Key, 100, false)
+								require.NoError(t, err)
+								require.True(t, reserved)
+							}
+							if tc.deleted {
+								require.NoError(t, token.Delete())
+							}
+							_, err := model.ValidateUserToken(token.Key)
+							require.ErrorIs(t, err, model.ErrTokenInvalid)
+							var before model.Token
+							require.NoError(t, db.Unscoped().First(&before, token.Id).Error)
+							target := "/api/token/"
+							if tc.statusOnly {
+								target += "?status_only=true"
+							}
+							userID := token.UserId
+							if tc.otherOwner {
+								userID++
+							}
+							body := map[string]any{"id": token.Id, "name": token.Name, "expired_time": token.ExpiredTime, "remain_quota": tc.quota, "unlimited_quota": tc.unlimited, "group": "default"}
+							if tc.requestStatus != 0 {
+								body["status"] = tc.requestStatus
+							}
+							ctx, recorder := newAuthenticatedContext(t, http.MethodPut, target, body, userID)
+							UpdateToken(ctx)
+							response := decodeAPIResponse(t, recorder)
+							require.Equal(t, !tc.reject, response.Success, response.Message)
+							var saved model.Token
+							require.NoError(t, db.Unscoped().First(&saved, token.Id).Error)
+							assert.Equal(t, before.Key, saved.Key)
+							assert.Equal(t, before.UsedQuota, saved.UsedQuota, "refilling must not reset consumption accounting")
+							assert.Equal(t, before.DeletedAt, saved.DeletedAt)
+							assert.NotContains(t, recorder.Body.String(), token.Key)
+							if tc.reject {
+								assert.Equal(t, before.Status, saved.Status)
+								assert.Equal(t, before.RemainQuota, saved.RemainQuota)
+								return
+							}
+							assert.Equal(t, tc.quota, saved.RemainQuota)
+							assert.Equal(t, tc.unlimited, saved.UnlimitedQuota)
+							wantStatus := before.Status
+							if tc.recovered {
+								wantStatus = common.TokenStatusEnabled
+							}
+							assert.Equal(t, wantStatus, saved.Status)
+							_, err = model.ValidateUserToken(token.Key)
+							if tc.recovered {
+								assert.NoError(t, err)
+								if server != nil {
+									server.FastForward(11 * time.Second)
+									_, err = model.ValidateUserToken(token.Key)
+									assert.NoError(t, err, "recovered state must survive cache repopulation")
+								}
+							} else {
+								assert.ErrorIs(t, err, model.ErrTokenInvalid)
+							}
+							if before.Status != saved.Status {
+								params := tokenAuditParams(ctx)
+								assert.Contains(t, params["changed_fields"], "status", "automatic recovery must be auditable")
+							}
+							assert.True(t, common.GetContextKeyBool(ctx, constant.ContextKeyTokenAuditSucceeded))
+						})
+					}
+				})
+			}
+		})
 	}
 }

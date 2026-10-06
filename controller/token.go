@@ -560,7 +560,7 @@ func UpdateToken(c *gin.Context) {
 	}
 	params["name"] = cleanToken.Name
 	previous := *cleanToken
-	if token.Status == common.TokenStatusEnabled {
+	if statusOnly != "" && token.Status == common.TokenStatusEnabled {
 		if cleanToken.Status == common.TokenStatusExpired && cleanToken.ExpiredTime <= common.GetTimestamp() && cleanToken.ExpiredTime != -1 {
 			common.ApiErrorI18n(c, i18n.MsgTokenExpiredCannotEnable)
 			return
@@ -578,6 +578,13 @@ func UpdateToken(c *gin.Context) {
 		cleanToken.ExpiredTime = token.ExpiredTime
 		cleanToken.RemainQuota = token.RemainQuota
 		cleanToken.UnlimitedQuota = token.UnlimitedQuota
+		// Refilling quota restores only an exhausted, unexpired token. Explicitly
+		// disabled or expired tokens still require a separate status change.
+		if cleanToken.Status == common.TokenStatusExhausted &&
+			(cleanToken.UnlimitedQuota || cleanToken.RemainQuota > 0) &&
+			(cleanToken.ExpiredTime == -1 || cleanToken.ExpiredTime >= common.GetTimestamp()) {
+			cleanToken.Status = common.TokenStatusEnabled
+		}
 		cleanToken.ModelLimitsEnabled = token.ModelLimitsEnabled
 		cleanToken.ModelLimits = token.ModelLimits
 		cleanToken.AllowIps = token.AllowIps
@@ -607,6 +614,7 @@ func UpdateToken(c *gin.Context) {
 			changed bool
 		}{
 			{"name", previous.Name != cleanToken.Name},
+			{"status", previous.Status != cleanToken.Status},
 			{"expired_time", previous.ExpiredTime != cleanToken.ExpiredTime},
 			{"remain_quota", previous.RemainQuota != cleanToken.RemainQuota},
 			{"unlimited_quota", previous.UnlimitedQuota != cleanToken.UnlimitedQuota},
