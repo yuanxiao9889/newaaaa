@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
@@ -22,6 +23,7 @@ import (
 	"github.com/QuantumNous/new-api/model"
 	pluginruntime "github.com/QuantumNous/new-api/pkg/jsplugin"
 	"github.com/QuantumNous/new-api/relay"
+	taskjs "github.com/QuantumNous/new-api/relay/channel/task/jsplugin"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	kitdto "github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/service"
@@ -538,7 +540,7 @@ func TestImmediateTaskSettlementDatabase(t *testing.T) {
 	const source = `
 export const meta={apiVersion:1,key:"generic-settlement",name:"Generic settlement",version:"1.0.0",author:{name:"Test"},models:["document-model"],fetchMode:"per_task",usageSchema:{units:{type:"number",unit:"count"}}};
 export function buildSubmitRequest(ctx){return {url:ctx.baseUrl+"/compile",body:ctx.requestBody};}
-export function parseSubmitResponse(ctx,resp){return {taskId:"vendor-job",taskData:resp.body,immediate:{status:resp.body.status,reason:"provider rejected job"}};}
+export function parseSubmitResponse(ctx,resp){return {taskId:"vendor-job",taskData:resp.body,immediate:{status:resp.body.status,reason:"provider rejected job",tokenUsage:{prompt_tokens:100,completion_tokens:200,total_tokens:300}}};}
 export function extractUsage(){return {units:4};}
 export function extractUsageOnComplete(ctx,result,body){return body.usage;}
 export function parseTaskResult(){throw new Error("completed submissions must not poll");}
@@ -618,12 +620,163 @@ export function buildQueryRequest(){throw new Error("completed submissions must 
 			require.NoError(t, common.UnmarshalJsonStr(logs[0].Other, &other))
 			if tc.status == "SUCCESS" {
 				assert.Equal(t, tc.count, other["usage_facts"].(map[string]any)["units"])
+				assert.Equal(t, 100, logs[0].PromptTokens)
+				assert.Equal(t, 200, logs[0].CompletionTokens)
+				assert.Equal(t, 300, stored.PrivateData.TotalTokens)
+			} else {
+				assert.Zero(t, stored.PrivateData.TotalTokens)
+				assert.Zero(t, logs[0].CompletionTokens)
+			}
+			if tc.name == "partial" {
+				require.NoError(t, service.SettleTaskBillingOnComplete(c, taskjs.New(plugin), &stored, outcome.Result.Immediate))
+				var logCount int64
+				require.NoError(t, db.Model(&model.Log{}).Where("user_id = ?", user.Id).Count(&logCount).Error)
+				assert.EqualValues(t, 1, logCount, "immediate usage was already recorded on submission")
 			}
 			assert.False(t, c.Writer.Written(), "presentation must follow persistence and settlement")
 			require.NoError(t, info.Billing.Settle(want))
 			info.Billing.Refund(c)
 			require.NoError(t, db.First(&updated, user.Id).Error)
 			assert.Equal(t, initial-want, updated.Quota, "terminal settlement is idempotent")
+		})
+	}
+}
+
+func TestVideoTaskTokenUsage(t *testing.T) {
+	const genericSource = `
+export const meta={apiVersion:1,key:"token-test",name:"Token test",version:"1.0.0",author:{name:"Test"},models:["video-test"],fetchMode:"per_task"};
+export function buildSubmitRequest(ctx){return {url:ctx.baseUrl+"/submit",body:{}};}
+export function parseSubmitResponse(ctx,resp){return {taskId:"vendor-job",immediate:{status:"SUCCESS",tokenUsage:resp.body}};}
+export function buildQueryRequest(ctx){return {url:ctx.baseUrl+"/query"};}
+export function parseTaskResult(ctx,body){return {status:"SUCCESS",tokenUsage:body};}
+export function parseBatchResult(ctx,body){return [{taskId:"vendor-job",status:"SUCCESS",tokenUsage:body}];}
+`
+	for _, tc := range []struct {
+		name, plugin, mode, body  string
+		submit                    bool
+		prompt, completion, total int
+	}{
+		{name: "doubao_final", plugin: "doubao", body: `{"status":"succeeded","usage":{"prompt_tokens":100,"completion_tokens":200,"total_tokens":300}}`, prompt: 100, completion: 200, total: 300},
+		{name: "doubao_submit", plugin: "doubao", submit: true, body: `{"status":"succeeded","usage":{"completion_tokens":200,"total_tokens":200}}`, completion: 200, total: 200},
+		{name: "total_only", body: `{"total_tokens":300}`, total: 300},
+		{name: "missing_total", body: `{"prompt_tokens":100,"completion_tokens":200}`, prompt: 100, completion: 200, total: 300},
+		{name: "immediate", mode: "immediate", body: `{"completion_tokens":200}`, completion: 200, total: 200},
+		{name: "batch", mode: "batch", body: `{"completion_tokens":200}`, completion: 200, total: 200},
+		{name: "missing_usage", plugin: "doubao", body: `{"status":"succeeded"}`},
+		{name: "missing_submit_usage", plugin: "doubao", submit: true, body: `{"status":"succeeded"}`},
+		{name: "credits_are_not_tokens", plugin: "kling", body: `{"data":{"task_status":"succeed","task_id":"vendor-job","final_unit_deduction":"12.3"}}`},
+		{name: "malformed", body: `{"completion_tokens":"invalid"}`},
+		{name: "negative", body: `{"completion_tokens":-1}`},
+		{name: "fractional", body: `{"completion_tokens":1.5}`},
+		{name: "oversized", body: `{"completion_tokens":2147483648}`},
+		{name: "sum_overflow", body: `{"prompt_tokens":2147483647,"completion_tokens":1}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			db := setupAsyncImageWorkerTestDB(t)
+			require.NoError(t, db.AutoMigrate(&model.Channel{}, &model.QuotaData{}))
+			oldBatch, oldConsume, oldExport, oldMemory := common.BatchUpdateEnabled, common.LogConsumeEnabled, common.DataExportEnabled, common.MemoryCacheEnabled
+			common.BatchUpdateEnabled, common.LogConsumeEnabled, common.DataExportEnabled, common.MemoryCacheEnabled = false, true, true, false
+			model.CacheQuotaDataLock.Lock()
+			oldCache := model.CacheQuotaData
+			model.CacheQuotaData = make(map[string]*model.QuotaData)
+			model.CacheQuotaDataLock.Unlock()
+			t.Cleanup(func() {
+				common.BatchUpdateEnabled, common.LogConsumeEnabled, common.DataExportEnabled, common.MemoryCacheEnabled = oldBatch, oldConsume, oldExport, oldMemory
+				model.CacheQuotaDataLock.Lock()
+				model.CacheQuotaData = oldCache
+				model.CacheQuotaDataLock.Unlock()
+			})
+			user := model.User{Id: 61, Username: "video_token_test", Quota: 999000}
+			ch := model.Channel{Id: 63, Name: "video provider"}
+			if tc.submit {
+				user.UsedQuota, user.RequestCount, ch.UsedQuota = 1000, 1, 1000
+			}
+			require.NoError(t, db.Create(&user).Error)
+			require.NoError(t, db.Create(&ch).Error)
+			task := &model.Task{TaskID: model.GenerateTaskID(), UserId: user.Id, ChannelId: ch.Id, Quota: 1000, Status: model.TaskStatusSuccess, Group: "default", Properties: model.Properties{OriginModelName: "video-test"}, PrivateData: model.TaskPrivateData{UpstreamTaskID: "vendor-job", UsageAccountingMode: model.TaskUsageAccountingFinal, PreConsumedQuota: 1000, BillingContext: &model.TaskBillingContext{PerCallBilling: true}}}
+			if tc.submit {
+				task.PrivateData.UsageAccountingMode = model.TaskUsageAccountingSubmit
+				require.NoError(t, model.RecordTaskBillingLog(model.RecordTaskBillingLogParams{UserId: user.Id, ChannelId: ch.Id, ModelName: "video-test", LogType: model.LogTypeConsume, Quota: 1000, Other: model.NewLogOther()}))
+			}
+			require.NoError(t, db.Create(task).Error)
+			source := genericSource
+			if tc.plugin != "" {
+				body, err := os.ReadFile("../plugins/tasks/" + tc.plugin + "/plugin.js")
+				require.NoError(t, err)
+				source = string(body)
+			}
+			plugin, err := pluginruntime.CompilePlugin(source, pluginruntime.Options{})
+			require.NoError(t, err)
+			adaptor := taskjs.New(plugin)
+			info := taskSubmissionRelayInfo(nil)
+			info.OriginModelName, info.UpstreamModelName = "video-test", "video-test"
+			adaptor.Init(info)
+			resp := &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(tc.body))}
+			var result *relaycommon.TaskInfo
+			switch tc.mode {
+			case "immediate":
+				parsed, taskErr := adaptor.ParseResponse(taskSubmissionTestContext(), resp, info)
+				require.Nil(t, taskErr)
+				result = parsed.Immediate
+			case "batch":
+				parsed, err := adaptor.ParseBatchResult([]*model.Task{task}, resp, []byte(tc.body))
+				require.NoError(t, err)
+				require.Contains(t, parsed, "vendor-job")
+				result = &parsed["vendor-job"].TaskInfo
+			default:
+				result, err = adaptor.ParseTaskResult(task, resp, []byte(tc.body))
+				require.NoError(t, err)
+			}
+			require.NotNil(t, result)
+			assert.Equal(t, "SUCCESS", result.Status)
+			if tc.plugin == "kling" {
+				assert.Positive(t, result.TotalTokens)
+				assert.Nil(t, result.TokenUsage)
+			}
+			require.NoError(t, service.SettleTaskBillingOnComplete(context.Background(), adaptor, task, result))
+			var stored model.Task
+			require.NoError(t, db.First(&stored, task.ID).Error)
+			assert.Equal(t, service.TaskBillingStateSettled, stored.PrivateData.BillingState)
+			assert.Equal(t, 1000, stored.Quota, "token reporting must preserve per-call pricing")
+			view := relay.TaskModel2DtoWithOptions(&stored, false, false)
+			assert.False(t, view.InternalAsync)
+			assert.Equal(t, tc.prompt, view.PromptTokens)
+			assert.Equal(t, tc.completion, view.CompletionTokens)
+			assert.Equal(t, tc.total, view.TotalTokens)
+			if tc.total > 0 {
+				require.NotNil(t, view.UsageDetails)
+				assert.Equal(t, tc.total, view.UsageDetails.TotalTokens)
+			}
+			require.NoError(t, service.SettleTaskBillingOnComplete(context.Background(), adaptor, &stored, result))
+			require.NoError(t, db.First(&user, user.Id).Error)
+			assert.Equal(t, 999000, user.Quota)
+			assert.Equal(t, 1000, user.UsedQuota)
+			assert.Equal(t, 1, user.RequestCount)
+			var logs []model.Log
+			require.NoError(t, model.LOG_DB.Where("user_id = ?", user.Id).Order("id").Find(&logs).Error)
+			wantLogs := 1
+			if tc.submit && tc.total > 0 {
+				wantLogs++
+			}
+			require.Len(t, logs, wantLogs)
+			last := logs[len(logs)-1]
+			assert.Equal(t, tc.prompt, last.PromptTokens)
+			assert.Equal(t, tc.completion, last.CompletionTokens)
+			if tc.total > 0 {
+				var other map[string]any
+				require.NoError(t, common.UnmarshalJsonStr(last.Other, &other))
+				assert.Equal(t, float64(tc.total), other["total_tokens"])
+				if tc.submit {
+					assert.Zero(t, last.Quota)
+					assert.Equal(t, true, other["usage_only"])
+				}
+			}
+			model.SaveQuotaDataCache()
+			var totals struct{ Count, Quota, TokenUsed int }
+			require.NoError(t, db.Model(&model.QuotaData{}).Where("user_id = ?", user.Id).Select("SUM(count) AS count, SUM(quota) AS quota, SUM(token_used) AS token_used").Scan(&totals).Error)
+			assert.Equal(t, 1, totals.Count)
+			assert.Equal(t, 1000, totals.Quota)
+			assert.Equal(t, tc.prompt+tc.completion, totals.TokenUsed)
 		})
 	}
 }
@@ -885,7 +1038,7 @@ func TestVideoTaskRetryFailureBoundaries(t *testing.T) {
 			wantFailure := true
 			switch name {
 			case "late failure":
-				task.PrivateData.VideoRetry.AcceptedAt = time.Now().Unix() - 46
+				task.PrivateData.VideoRetry.AcceptedAt = time.Now().Unix() - 71
 			case "retry budget exhausted":
 				common.RetryTimes = 0
 			case "no unused channel":
@@ -1065,8 +1218,9 @@ func TestVideoTaskRetryEligibilityWindowAndBudget(t *testing.T) {
 		want     bool
 	}{
 		{"first accepted second", 0, 1, model.TaskStatusSubmitted, true},
-		{"45 seconds inclusive", 45, 1, model.TaskStatusSubmitted, true},
-		{"46 seconds expired", 46, 1, model.TaskStatusSubmitted, false},
+		{"65 seconds eligible", 65, 1, model.TaskStatusInProgress, true},
+		{"70 seconds inclusive", 70, 1, model.TaskStatusSubmitted, true},
+		{"71 seconds expired", 71, 1, model.TaskStatusSubmitted, false},
 		{"future timestamp", -1, 1, model.TaskStatusSubmitted, false},
 		{"one remaining attempt", 2, 3, model.TaskStatusInProgress, true},
 		{"initial attempts consume budget", 2, 4, model.TaskStatusSubmitted, false},

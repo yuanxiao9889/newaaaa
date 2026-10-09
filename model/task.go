@@ -112,6 +112,7 @@ type TaskPrivateData struct {
 	PromptTokens        int                       `json:"prompt_tokens,omitempty"`
 	CompletionTokens    int                       `json:"completion_tokens,omitempty"`
 	TotalTokens         int                       `json:"total_tokens,omitempty"`
+	TokenUsageLogged    bool                      `json:"token_usage_logged,omitempty"`
 	UsageDetails        *rootdto.TaskUsageDetails `json:"usage_details,omitempty"`
 	// ResponsesBackground records that the openai_responses create request
 	// asked for background:true. Every task is durable and survives client

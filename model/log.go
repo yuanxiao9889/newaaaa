@@ -1,8 +1,8 @@
 package model
 
 import (
-"encoding/json"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"github.com/QuantumNous/new-api/common"
@@ -67,6 +67,7 @@ type RecordConsumeLogParams struct {
 }
 
 type RecordTaskBillingLogParams struct {
+	UsageOnly        bool // Late usage for a task already counted at submission.
 	UserId           int
 	LogType          int
 	Content          string
@@ -483,7 +484,11 @@ func RecordTaskBillingLog(params RecordTaskBillingLogParams) error {
 		switch params.LogType {
 		case LogTypeConsume:
 			quotaData.Quota = params.Quota
-			LogQuotaData(quotaData)
+			if params.UsageOnly {
+				LogQuotaDataDelta(quotaData, 0)
+			} else {
+				LogQuotaData(quotaData)
+			}
 		case LogTypeRefund:
 			quotaData.Quota = -params.Quota
 			LogQuotaDataDelta(quotaData, 0)
@@ -768,15 +773,24 @@ func DeleteOldLogBatch(ctx context.Context, targetTimestamp int64, limit int) (i
 }
 
 func FormatUserLogsForResponse(logs []*Log, startIdx int) {
- formatUserLogs(logs, startIdx)
- for _, log := range logs {
-  log.ChannelId = 0
-  var other map[string]json.RawMessage
-  if err := common.UnmarshalJsonStr(log.Other, &other); err != nil { log.Other = "{}"; continue }
-  for _, key := range []string{"request_path", "request_conversion", "status_code", "error_type", "error_code", "stream_status"} { delete(other, key) }
-  encoded, err := common.Marshal(other)
-  if err != nil { log.Other = "{}" } else { log.Other = string(encoded) }
- }
+	formatUserLogs(logs, startIdx)
+	for _, log := range logs {
+		log.ChannelId = 0
+		var other map[string]json.RawMessage
+		if err := common.UnmarshalJsonStr(log.Other, &other); err != nil {
+			log.Other = "{}"
+			continue
+		}
+		for _, key := range []string{"request_path", "request_conversion", "status_code", "error_type", "error_code", "stream_status"} {
+			delete(other, key)
+		}
+		encoded, err := common.Marshal(other)
+		if err != nil {
+			log.Other = "{}"
+		} else {
+			log.Other = string(encoded)
+		}
+	}
 }
 
 func hydrateLogDisplayNames(logs []*Log) {

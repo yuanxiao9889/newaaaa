@@ -725,6 +725,13 @@ func SettleTaskBillingOnComplete(ctx context.Context, adaptor TaskPollingAdaptor
 		return nil
 	}
 	failed := task.Status == model.TaskStatusFailure || taskResult.Status == string(model.TaskStatusFailure)
+	if !failed && taskResult.TokenUsage != nil {
+		usage := taskResult.TokenUsage
+		task.PrivateData.PromptTokens = usage.PromptTokens
+		task.PrivateData.CompletionTokens = usage.CompletionTokens
+		task.PrivateData.TotalTokens = usage.TotalTokens
+		task.PrivateData.UsageDetails = BuildTaskUsageDetails(usage)
+	}
 	bc := task.PrivateData.BillingContext
 	if !failed && task.PrivateData.BillingError != "" && task.PrivateData.ActualQuota >= 0 && task.PrivateData.ActualQuota != task.Quota {
 		if err := RecalculateTaskQuota(ctx, task, task.PrivateData.ActualQuota, "retry deferred submit settlement"); err != nil {

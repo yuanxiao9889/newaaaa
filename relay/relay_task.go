@@ -780,13 +780,13 @@ func TaskModel2DtoWithOptions(task *model.Task, includeData bool, includeInterna
 		taskDto.PreConsumedQuota = task.PrivateData.PreConsumedQuota
 		taskDto.ActualQuota = task.PrivateData.ActualQuota
 		taskDto.BillingError = task.PrivateData.BillingError
-		taskDto.PromptTokens = task.PrivateData.PromptTokens
-		taskDto.CompletionTokens = task.PrivateData.CompletionTokens
-		taskDto.TotalTokens = task.PrivateData.TotalTokens
-		taskDto.UsageDetails = task.PrivateData.UsageDetails
 		if includeInternalChannelInfo {
 			taskDto.ChannelRetryPath = append([]string(nil), task.PrivateData.ChannelRetryPath...)
 		}
 	}
+	taskDto.PromptTokens = task.PrivateData.PromptTokens
+	taskDto.CompletionTokens = task.PrivateData.CompletionTokens
+	taskDto.TotalTokens = task.PrivateData.TotalTokens
+	taskDto.UsageDetails = task.PrivateData.UsageDetails
 	return taskDto
 }

@@ -51,7 +51,7 @@ func OpenaiImageHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.
 	// 写入新的 response body
 	service.IOCopyBytesGracefully(c, resp, responseBody)
 
-	normalizeOpenAIUsage(&usageResp.Usage)
+	service.NormalizeOpenAIImageUsage(&usageResp.Usage)
 	applyUsagePostProcessing(info, &usageResp.Usage, responseBody)
 	return &usageResp.Usage, nil
 }
@@ -95,36 +95,6 @@ func openaiImageDataHasField(item gjson.Result, field string) bool {
 	return value.Type == gjson.String && value.Raw != `""`
 }
 
-// normalizeOpenAIUsage maps the OpenAI Images usage shape (input_tokens /
-// output_tokens / input_tokens_details / output_tokens_details) onto the
-// canonical prompt/completion fields. It is used only on the OpenAI image
-// relay paths (generations/edits, streaming and non-streaming): the image
-// API never returns prompt_tokens / completion_tokens, so the overwrite (=)
-// semantics here are equivalent to the previous additive (+=) behavior while
-// avoiding any future double-counting if both field sets are ever populated.
-// Do not reuse this on chat/embedding paths without revisiting the overwrite
-// semantics.
-func normalizeOpenAIUsage(usage *dto.Usage) {
-	if usage == nil {
-		return
-	}
-	if usage.InputTokens != 0 {
-		usage.PromptTokens = usage.InputTokens
-	}
-	if usage.OutputTokens != 0 {
-		usage.CompletionTokens = usage.OutputTokens
-	}
-	if usage.InputTokensDetails != nil {
-		usage.PromptTokensDetails = usage.InputTokensDetails.Clone()
-	}
-	if usage.OutputTokensDetails != nil {
-		usage.CompletionTokenDetails = *usage.OutputTokensDetails
-	}
-	if usage.TotalTokens == 0 {
-		usage.TotalTokens = usage.PromptTokens + usage.CompletionTokens
-	}
-}
-
 func OpenaiImageStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Response) (*dto.Usage, *types.NewAPIError) {
 	if resp == nil || resp.Body == nil {
 		logger.LogError(c, "invalid image stream response")
@@ -161,7 +131,7 @@ func OpenaiImageStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp 
 			Usage dto.Usage `json:"usage"`
 		}
 		if err := common.Unmarshal(raw, &chunk); err == nil {
-			normalizeOpenAIUsage(&chunk.Usage)
+			service.NormalizeOpenAIImageUsage(&chunk.Usage)
 			if service.ValidUsage(&chunk.Usage) {
 				usage = &chunk.Usage
 			}
@@ -280,7 +250,7 @@ func openaiImageJSONAsStreamHandler(c *gin.Context, info *relaycommon.RelayInfo,
 	if oaiError := usageResp.GetOpenAIError(); oaiError != nil && oaiError.Type != "" {
 		return nil, types.WithOpenAIError(*oaiError, resp.StatusCode)
 	}
-	normalizeOpenAIUsage(&usageResp.Usage)
+	service.NormalizeOpenAIImageUsage(&usageResp.Usage)
 	applyUsagePostProcessing(info, &usageResp.Usage, responseBody)
 
 	info.UpdateImageCount(openaiImageResponseCount(responseBody))

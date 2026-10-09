@@ -98,9 +98,18 @@ func LogTaskConsumption(c *gin.Context, info *relaycommon.RelayInfo, task *model
 	}
 	appendTaskLogInfo(task, other)
 	attachQuotaSaturation(c, info, other)
+	var promptTokens, completionTokens int
+	if task != nil {
+		promptTokens, completionTokens = task.PrivateData.PromptTokens, task.PrivateData.CompletionTokens
+		if task.PrivateData.TotalTokens > 0 {
+			other.SetPublic("total_tokens", task.PrivateData.TotalTokens)
+			other.SetPublic("usage_details", task.PrivateData.UsageDetails)
+		}
+	}
 	if task != nil && task.ID > 0 {
 		previous := task.PrivateData
 		task.PrivateData.UsageAccountingMode = model.TaskUsageAccountingSubmit
+		task.PrivateData.TokenUsageLogged = task.PrivateData.TotalTokens > 0 || promptTokens > 0 || completionTokens > 0
 		if err := model.ApplyTaskBillingAccounting(task, info.PriceData.Quota, 1); err != nil {
 			task.PrivateData = previous
 			return err
@@ -114,14 +123,16 @@ func LogTaskConsumption(c *gin.Context, info *relaycommon.RelayInfo, task *model
 		model.UpdateChannelUsedQuota(info.ChannelId, info.PriceData.Quota)
 	}
 	model.RecordConsumeLog(c, info.UserId, model.RecordConsumeLogParams{
-		ChannelId: info.ChannelId,
-		ModelName: info.OriginModelName,
-		TokenName: tokenName,
-		Quota:     info.PriceData.Quota,
-		Content:   logContent,
-		TokenId:   info.TokenId,
-		Group:     info.UsingGroup,
-		Other:     other,
+		PromptTokens:     promptTokens,
+		CompletionTokens: completionTokens,
+		ChannelId:        info.ChannelId,
+		ModelName:        info.OriginModelName,
+		TokenName:        tokenName,
+		Quota:            info.PriceData.Quota,
+		Content:          logContent,
+		TokenId:          info.TokenId,
+		Group:            info.UsingGroup,
+		Other:            other,
 	})
 	return nil
 }
@@ -715,11 +726,22 @@ func ConfirmTaskBillingSettled(ctx context.Context, task *model.Task, actualQuot
 		markTaskBillingError(ctx, task, "persist final task accounting failed: "+err.Error())
 		return err
 	}
-	if task.PrivateData.GetUsageAccountingMode() == model.TaskUsageAccountingSubmit {
-		return nil
+	logQuota := actualQuota
+	usageOnly := task.PrivateData.GetUsageAccountingMode() == model.TaskUsageAccountingSubmit
+	if usageOnly {
+		if task.PrivateData.TokenUsageLogged || (task.PrivateData.TotalTokens == 0 && task.PrivateData.PromptTokens == 0 && task.PrivateData.CompletionTokens == 0) {
+			return nil
+		}
+		// The submit log already accounted for the charge. Record late usage
+		// without charging or incrementing the request count a second time.
+		logQuota = 0
+		content = "异步任务用量补录"
 	}
 
 	other := taskBillingOther(task)
+	if usageOnly {
+		other.SetPublic("usage_only", true)
+	}
 	other.SetPublic("is_task", true)
 	other.SetPublic("task_id", task.TaskID)
 	other.SetPublic("billing_state", TaskBillingStateSettled)
@@ -729,12 +751,13 @@ func ConfirmTaskBillingSettled(ctx context.Context, task *model.Task, actualQuot
 		attachQuotaSaturationToOther(other, clamp)
 	}
 	if err := model.RecordTaskBillingLog(model.RecordTaskBillingLogParams{
+		UsageOnly:        usageOnly,
 		UserId:           task.UserId,
 		LogType:          model.LogTypeConsume,
 		Content:          content,
 		ChannelId:        task.ChannelId,
 		ModelName:        taskModelName(task),
-		Quota:            actualQuota,
+		Quota:            logQuota,
 		PromptTokens:     task.PrivateData.PromptTokens,
 		CompletionTokens: task.PrivateData.CompletionTokens,
 		TokenId:          task.PrivateData.TokenId,

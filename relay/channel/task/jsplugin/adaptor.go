@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"io"
 	"maps"
@@ -61,16 +62,17 @@ type submitResponse struct {
 	State     any         `json:"state"`
 }
 type taskResult struct {
-	Code             int     `json:"code"`
-	TaskID           string  `json:"taskId"`
-	Status           string  `json:"status"`
-	Progress         string  `json:"progress"`
-	Reason           string  `json:"reason"`
-	URL              string  `json:"url"`
-	RemoteURL        string  `json:"remoteUrl"`
-	CompletionTokens float64 `json:"completionTokens"`
-	TotalTokens      float64 `json:"totalTokens"`
-	State            any     `json:"state"`
+	Code             int             `json:"code"`
+	TaskID           string          `json:"taskId"`
+	Status           string          `json:"status"`
+	Progress         string          `json:"progress"`
+	Reason           string          `json:"reason"`
+	URL              string          `json:"url"`
+	RemoteURL        string          `json:"remoteUrl"`
+	CompletionTokens float64         `json:"completionTokens"`
+	TotalTokens      float64         `json:"totalTokens"`
+	TokenUsage       json.RawMessage `json:"tokenUsage"`
+	State            any             `json:"state"`
 }
 
 var taskArtifactKeyPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._~-]{0,127}$`)
@@ -550,6 +552,7 @@ func (a *TaskAdaptor) ParseResponse(c *gin.Context, resp *http.Response, info *r
 		Status: parsed.Immediate.Status, Progress: parsed.Immediate.Progress,
 		Reason: parsed.Immediate.Reason, Url: parsed.Immediate.URL, RemoteUrl: parsed.Immediate.RemoteURL,
 		CompletionTokens: positiveInt(parsed.Immediate.CompletionTokens), TotalTokens: positiveInt(parsed.Immediate.TotalTokens),
+		TokenUsage: parseTaskTokenUsage(parsed.Immediate.TokenUsage),
 	}
 	response.Immediate = immediate
 	if immediate.Status != model.TaskStatusSuccess || !a.hasHook(c.Request.Context(), "extractUsageOnComplete") {
@@ -696,17 +699,18 @@ func (a *TaskAdaptor) ParseBatchResult(tasks []*model.Task, resp *http.Response,
 		return nil, err
 	}
 	var parsed []struct {
-		TaskID     string `json:"taskId"`
-		Action     string `json:"action"`
-		Status     string `json:"status"`
-		Progress   string `json:"progress"`
-		Reason     string `json:"reason"`
-		URL        string `json:"url"`
-		SubmitTime int64  `json:"submitTime"`
-		StartTime  int64  `json:"startTime"`
-		FinishTime int64  `json:"finishTime"`
-		Data       any    `json:"data"`
-		State      any    `json:"state"`
+		TaskID     string          `json:"taskId"`
+		Action     string          `json:"action"`
+		Status     string          `json:"status"`
+		Progress   string          `json:"progress"`
+		Reason     string          `json:"reason"`
+		URL        string          `json:"url"`
+		SubmitTime int64           `json:"submitTime"`
+		StartTime  int64           `json:"startTime"`
+		FinishTime int64           `json:"finishTime"`
+		TokenUsage json.RawMessage `json:"tokenUsage"`
+		Data       any             `json:"data"`
+		State      any             `json:"state"`
 	}
 	if err = convert(value, &parsed); err != nil {
 		logger.LogDebug(context.Background(), "task_plugin subsystem=adaptor event=parse_batch_failed plugin=%q reason=invalid_result body_bytes=%d elapsed_ms=%d", a.plugin.Meta.Key, len(body), time.Since(started).Milliseconds())
@@ -719,6 +723,7 @@ func (a *TaskAdaptor) ParseBatchResult(tasks []*model.Task, resp *http.Response,
 			continue
 		}
 		info := relaycommon.TaskInfo{TaskID: item.TaskID, Status: item.Status, Progress: item.Progress, Reason: item.Reason, Url: item.URL}
+		info.TokenUsage = parseTaskTokenUsage(item.TokenUsage)
 		if item.State != nil {
 			pluginState, marshalErr := common.Marshal(item.State)
 			if marshalErr != nil || len(pluginState) > maxTaskPluginPersistedJSONBytes {
@@ -760,6 +765,30 @@ func (a *TaskAdaptor) ParseBatchResult(tasks []*model.Task, resp *http.Response,
 	return results, nil
 }
 
+// Invalid optional usage must not turn an otherwise completed task into a failure.
+// Legacy completionTokens/totalTokens can represent credits, so never use them here.
+func parseTaskTokenUsage(raw json.RawMessage) *kitdto.Usage {
+	if len(raw) == 0 || string(raw) == "null" {
+		return nil
+	}
+	var counts struct {
+		Prompt     int64 `json:"prompt_tokens"`
+		Completion int64 `json:"completion_tokens"`
+		Total      int64 `json:"total_tokens"`
+	}
+	if err := common.Unmarshal(raw, &counts); err != nil || counts.Prompt < 0 || counts.Completion < 0 || counts.Total < 0 || counts.Prompt > math.MaxInt32 || counts.Completion > math.MaxInt32 || counts.Total > math.MaxInt32 || counts.Prompt+counts.Completion > math.MaxInt32 {
+		common.SysError("task plugin returned invalid token usage; ignoring token counts")
+		return nil
+	}
+	if counts.Total == 0 {
+		counts.Total = counts.Prompt + counts.Completion
+	}
+	if counts.Total == 0 {
+		return nil
+	}
+	return &kitdto.Usage{PromptTokens: int(counts.Prompt), CompletionTokens: int(counts.Completion), TotalTokens: int(counts.Total)}
+}
+
 func (a *TaskAdaptor) ParseTaskResult(task *model.Task, resp *http.Response, body []byte) (*relaycommon.TaskInfo, error) {
 	started := time.Now()
 	input := any(string(body))
@@ -795,6 +824,7 @@ func (a *TaskAdaptor) ParseTaskResult(task *model.Task, resp *http.Response, bod
 		RemoteUrl:        parsed.RemoteURL,
 		CompletionTokens: positiveInt(parsed.CompletionTokens),
 		TotalTokens:      positiveInt(parsed.TotalTokens),
+		TokenUsage:       parseTaskTokenUsage(parsed.TokenUsage),
 	}
 	if pluginState, present := encodeReturnedPluginState(value); present {
 		if len(pluginState) > maxTaskPluginPersistedJSONBytes {

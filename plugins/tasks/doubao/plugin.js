@@ -301,7 +301,7 @@ export const meta = {
     en: "Volcengine Doubao Seedance video generation and Seedream image generation",
     zh: "火山引擎豆包 Seedance 视频生成与 Seedream 图片生成",
   },
-  version: "1.2.1",
+  version: "1.2.2",
   author: { name: "QuantumNous" },
   channelTypes: [54, 45], // VolcEngine-type channels serve Ark video models with the same wire format
   models: Object.keys(VIDEO_MODELS).concat(Object.keys(IMAGE_MODELS)),
@@ -898,6 +898,12 @@ export function parseTaskResult(ctx, body) {
   if (body.status === "succeeded") {
     const result = { status: "SUCCESS", progress: "100%", url: body.content && body.content.video_url ? body.content.video_url : "" };
     const usage = body.usage || {};
+    // Actual tokens for logs; legacy fields below retain their billing semantics.
+    result.tokenUsage = {
+      prompt_tokens: usage.prompt_tokens,
+      completion_tokens: usage.completion_tokens,
+      total_tokens: usage.total_tokens,
+    };
     const completionTokens = Number(usage.completion_tokens || 0);
     const totalTokens = Number(usage.total_tokens || 0);
     if (Number.isFinite(completionTokens) && completionTokens > 0) result.completionTokens = completionTokens;

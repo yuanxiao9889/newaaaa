@@ -269,17 +269,19 @@ type TaskSubmitReq struct {
 }
 
 type TaskInfo struct {
-	Code             int             `json:"code"`
-	TaskID           string          `json:"task_id"`
-	Status           string          `json:"status"`
-	Reason           string          `json:"reason,omitempty"`
-	Url              string          `json:"url,omitempty"`
-	RemoteUrl        string          `json:"remote_url,omitempty"`
-	Progress         string          `json:"progress,omitempty"`
-	CompletionTokens int             `json:"completion_tokens,omitempty"` // 用于按倍率计费
-	TotalTokens      int             `json:"total_tokens,omitempty"`      // 用于按倍率计费
-	UsageFacts       map[string]any  `json:"usage_facts,omitempty"`
-	PluginState      json.RawMessage `json:"plugin_state,omitempty"`
+	Code             int            `json:"code"`
+	TaskID           string         `json:"task_id"`
+	Status           string         `json:"status"`
+	Reason           string         `json:"reason,omitempty"`
+	Url              string         `json:"url,omitempty"`
+	RemoteUrl        string         `json:"remote_url,omitempty"`
+	Progress         string         `json:"progress,omitempty"`
+	CompletionTokens int            `json:"completion_tokens,omitempty"` // 用于按倍率计费
+	TotalTokens      int            `json:"total_tokens,omitempty"`      // 用于按倍率计费
+	UsageFacts       map[string]any `json:"usage_facts,omitempty"`
+	// TokenUsage contains actual upstream tokens, independent of legacy billing units.
+	TokenUsage  *dto.Usage      `json:"-"`
+	PluginState json.RawMessage `json:"plugin_state,omitempty"`
 }
 
 // UpdateImageCount replaces the billable quantity without changing the frozen

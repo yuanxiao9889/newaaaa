@@ -10,7 +10,7 @@ import (
 )
 
 const (
-	VideoTaskRetryWindowSeconds        int64 = 45
+	VideoTaskRetryWindowSeconds        int64 = 70
 	VideoTaskRetrySubmitTimeoutSeconds int64 = 600
 )
 

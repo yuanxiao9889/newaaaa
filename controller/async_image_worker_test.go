@@ -35,6 +35,7 @@ import (
 	"github.com/QuantumNous/new-api/relay/helper"
 	kitdto "github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/service"
+	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/QuantumNous/new-api/setting/system_setting"
 	"github.com/QuantumNous/new-api/types"
 	"github.com/glebarez/sqlite"
@@ -103,6 +104,28 @@ func setupAsyncImageWorkerTestDB(t *testing.T) *gorm.DB {
 		common.RedisEnabled = originalRedisEnabled
 		constant.ErrorLogEnabled = originalErrorLogEnabled
 	})
+
+	if logDSN := os.Getenv("NATIVE_BILLING_TEST_LOG_DSN"); logDSN != "" {
+		require.Contains(t, logDSN, "native_billing_test")
+		var dialect gorm.Dialector = sqlite.Open(logDSN)
+		switch os.Getenv("NATIVE_BILLING_TEST_DIALECT") {
+		case "mysql":
+			dialect = mysql.Open(logDSN)
+		case "postgres":
+			dialect = postgres.Open(logDSN)
+		}
+		logDB, err := gorm.Open(dialect, &gorm.Config{})
+		require.NoError(t, err)
+		require.NoError(t, logDB.AutoMigrate(&model.Log{}))
+		require.NoError(t, logDB.Where("user_id = ?", 61).Delete(&model.Log{}).Error)
+		model.LOG_DB = logDB
+		t.Cleanup(func() {
+			sqlDB, err := logDB.DB()
+			require.NoError(t, err)
+			require.NoError(t, sqlDB.Close())
+			model.LOG_DB = db
+		})
+	}
 
 	return db
 }
@@ -308,21 +331,60 @@ func TestImageAdapterChannelUpdateValidatesEffectiveSettings(t *testing.T) {
 // Exercise the production adoption -> durable reload -> image store -> billing
 // chain with an already reserved balance and a real HTTP upstream.
 func TestNativeAsyncImageFinalBilling(t *testing.T) {
+	const modelName = "native-image-billing-test"
+	originalCompletion := ratio_setting.CompletionRatio2JSONString()
+	originalCache := ratio_setting.CacheRatio2JSONString()
+	originalImage := ratio_setting.ImageRatio2JSONString()
+	require.NoError(t, ratio_setting.UpdateCompletionRatioByJSONString(`{"native-image-billing-test":5}`))
+	require.NoError(t, ratio_setting.UpdateCacheRatioByJSONString(`{"native-image-billing-test":0.5}`))
+	require.NoError(t, ratio_setting.UpdateImageRatioByJSONString(`{"native-image-billing-test":2}`))
+	t.Cleanup(func() {
+		require.NoError(t, ratio_setting.UpdateCompletionRatioByJSONString(originalCompletion))
+		require.NoError(t, ratio_setting.UpdateCacheRatioByJSONString(originalCache))
+		require.NoError(t, ratio_setting.UpdateImageRatioByJSONString(originalImage))
+	})
+	const imageUsage = `{"input_tokens":100,"output_tokens":200,"input_tokens_details":{"cached_tokens":10,"image_tokens":20,"cached_tokens_details":{"text_tokens":10,"image_tokens":0}},"output_tokens_details":{"image_tokens":200}}`
 	for _, tc := range []struct {
 		name        string
 		status      string
 		invalid     bool
 		wantSuccess bool
 		configured  bool
+		usage       string
+		contentOnly bool
+		retry       bool
+		perCall     bool
+		wantQuota   int
+		wantInput   int
+		wantOutput  int
 	}{
 		{name: "upstream_suspended", status: "failed"},
 		{name: "valid_image", status: "succeeded", wantSuccess: true},
 		{name: "invalid_image_bytes", status: "succeeded", invalid: true},
 		{name: "configured_adapter_image", status: "done", configured: true, wantSuccess: true},
 		{name: "configured_adapter_string_failure", status: "broken", configured: true},
+		{name: "configured_usage_refund", status: "done", configured: true, wantSuccess: true, usage: imageUsage, wantQuota: 6690, wantInput: 100, wantOutput: 200},
+		{name: "configured_usage_content_download", status: "done", configured: true, contentOnly: true, wantSuccess: true, usage: imageUsage, wantQuota: 6690, wantInput: 100, wantOutput: 200},
+		{name: "retry_resume_usage", status: "done", configured: true, retry: true, wantSuccess: true, usage: imageUsage, wantQuota: 6690, wantInput: 100, wantOutput: 200},
+		{name: "native_usage_extra_charge", status: "succeeded", wantSuccess: true, usage: `{"prompt_tokens":100,"completion_tokens":30000,"total_tokens":30100}`, wantQuota: 900600, wantInput: 100, wantOutput: 30000},
+		{name: "usage_saturation_is_audited", status: "done", configured: true, wantSuccess: true, usage: `{"input_tokens":100,"output_tokens":100000000}`, wantQuota: 2147483647, wantInput: 100, wantOutput: 100000000},
+		{name: "per_call_keeps_price_and_records_usage", status: "done", configured: true, perCall: true, wantSuccess: true, usage: imageUsage, wantInput: 100, wantOutput: 200},
+		{name: "null_usage_keeps_reservation", status: "done", configured: true, wantSuccess: true, usage: `null`},
+		{name: "empty_usage_keeps_reservation", status: "done", configured: true, wantSuccess: true, usage: `{}`},
+		{name: "invalid_usage_keeps_reservation", status: "done", configured: true, wantSuccess: true, usage: `{"input_tokens":"invalid"}`},
+		{name: "failed_image_with_usage_refunds", status: "succeeded", invalid: true, usage: imageUsage},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			db := setupAsyncImageWorkerTestDB(t)
+			if tc.name == "valid_image" {
+				query := "SELECT version()"
+				if common.UsingMainDatabase(common.DatabaseTypeSQLite) {
+					query = "SELECT sqlite_version()"
+				}
+				var version string
+				require.NoError(t, db.Raw(query).Scan(&version).Error)
+				t.Logf("database=%s version=%s separate_log_database=%t", common.MainDatabaseType(), version, model.LOG_DB != db)
+			}
 			require.NoError(t, db.AutoMigrate(&model.Channel{}, &model.QuotaData{}))
 			oldBatch, oldLog := common.BatchUpdateEnabled, common.LogConsumeEnabled
 			common.BatchUpdateEnabled = false
@@ -356,15 +418,23 @@ func TestNativeAsyncImageFinalBilling(t *testing.T) {
 					return
 				}
 				w.Header().Set("Content-Type", "application/json")
+				usageJSON := ""
+				if tc.usage != "" {
+					usageJSON = `,"usage":` + tc.usage
+				}
 				if tc.configured {
 					if r.URL.Path != "/configured/upstream-test/status" {
 						w.WriteHeader(http.StatusNotFound)
 						return
 					}
-					_, _ = fmt.Fprintf(w, `{"job":{"state":%q,"error":"adapter rejected request native-upstream-key","output":{"image":%q}}}`, tc.status, base64.StdEncoding.EncodeToString(imageBytes.Bytes()))
+					encodedImage := base64.StdEncoding.EncodeToString(imageBytes.Bytes())
+					if tc.contentOnly {
+						encodedImage = ""
+					}
+					_, _ = fmt.Fprintf(w, `{"job":{"state":%q,"error":"adapter rejected request native-upstream-key","output":{"image":%q}}%s}`, tc.status, encodedImage, usageJSON)
 					return
 				}
-				_, _ = fmt.Fprintf(w, `{"status":%q,"error":{"message":"invalid image_url: upload init failed: You are suspended for violating our user agreement."}}`, tc.status)
+				_, _ = fmt.Fprintf(w, `{"status":%q,"error":{"message":"invalid image_url: upload init failed: You are suspended for violating our user agreement."}%s}`, tc.status, usageJSON)
 			}))
 			defer upstream.Close()
 			base := upstream.URL
@@ -383,22 +453,33 @@ func TestNativeAsyncImageFinalBilling(t *testing.T) {
 					SuccessStates:   []string{"done"},
 					FailureStates:   []string{"broken"},
 				}
+				if tc.contentOnly {
+					snapshot.ContentURL = base + "/task/content"
+					snapshot.Task.ContentURLTemplate = "/task/{task_id}/content"
+				}
 			}
 			recorder := httptest.NewRecorder()
 			c, _ := gin.CreateTestContext(recorder)
 			c.Request = httptest.NewRequest(http.MethodPost, "/v1/images/generations", nil)
 			c.Set("token_name", "native-test")
-			info := &relaycommon.RelayInfo{UserId: 61, TokenId: 62, UsingGroup: "default", OriginModelName: "dou-5-0-pro", FinalPreConsumedQuota: 150000, ChannelMeta: &relaycommon.ChannelMeta{ChannelId: 63}}
+			info := &relaycommon.RelayInfo{UserId: 61, TokenId: 62, UsingGroup: "default", OriginModelName: modelName, FinalPreConsumedQuota: 150000, ChannelMeta: &relaycommon.ChannelMeta{ChannelId: 63}}
+			info.PriceData.ModelRatio = 6
+			info.PriceData.ModelPrice = -1
+			info.PriceData.GroupRatioInfo.GroupRatio = 1
+			if tc.perCall {
+				info.PriceData.UsePrice = true
+				info.PriceData.ModelPrice = 0.3
+			}
 			// Reservation has already happened in the request BillingSession. Adoption
 			// must preserve it without posting a second reserve or a consumption log.
-			require.Nil(t, relay.SubmitInternalAsyncImageTask(c, info, &dto.ImageRequest{Model: "dou-5-0-pro"}, snapshot))
+			require.Nil(t, relay.SubmitInternalAsyncImageTask(c, info, &dto.ImageRequest{Model: modelName}, snapshot))
 			require.Equal(t, http.StatusOK, recorder.Code)
 			var task model.Task
 			require.NoError(t, db.First(&task).Error)
 			require.Equal(t, service.TaskBillingStatePending, task.PrivateData.BillingState)
 			require.Equal(t, 150000, task.Quota)
 			var consumes int64
-			require.NoError(t, db.Model(&model.Log{}).Where("type = ?", model.LogTypeConsume).Count(&consumes).Error)
+			require.NoError(t, model.LOG_DB.Model(&model.Log{}).Where("type = ?", model.LogTypeConsume).Count(&consumes).Error)
 			require.Zero(t, consumes)
 			saved, err := os.ReadFile(task.PrivateData.RequestBodyPath)
 			require.NoError(t, err)
@@ -411,6 +492,11 @@ func TestNativeAsyncImageFinalBilling(t *testing.T) {
 				require.NotEqual(t, snapshot.ID, task.TaskID)
 			}
 			// Reloaded state, with no process-local native task registration, is enough.
+			if tc.retry {
+				task.PrivateData.ImageRetry = &model.AsyncImageRetryState{}
+				require.NoError(t, model.UpdateTaskPrivateData(task.ID, task.PrivateData))
+				require.NoError(t, db.First(&task, task.ID).Error)
+			}
 			require.True(t, claimInternalAsyncImageTask(&task))
 			err = executeInternalAsyncImageTask(context.Background(), &task)
 			if tc.wantSuccess {
@@ -423,17 +509,47 @@ func TestNativeAsyncImageFinalBilling(t *testing.T) {
 			require.NoError(t, db.First(&user, 61).Error)
 			var token model.Token
 			require.NoError(t, db.First(&token, 62).Error)
-			require.NoError(t, db.Model(&model.Log{}).Where("type = ?", model.LogTypeConsume).Count(&consumes).Error)
+			require.NoError(t, model.LOG_DB.Model(&model.Log{}).Where("type = ?", model.LogTypeConsume).Count(&consumes).Error)
 			if tc.wantSuccess {
+				wantQuota := tc.wantQuota
+				if wantQuota == 0 {
+					wantQuota = 150000
+				}
 				require.Equal(t, model.TaskStatus(model.TaskStatusSuccess), task.Status)
 				require.Equal(t, service.TaskBillingStateSettled, task.PrivateData.BillingState)
-				require.Equal(t, 850000, user.Quota)
-				require.Equal(t, 850000, token.RemainQuota)
+				assert.Equal(t, wantQuota, task.Quota)
+				assert.Equal(t, wantQuota, task.PrivateData.ActualQuota)
+				assert.Equal(t, 1000000-wantQuota, user.Quota)
+				assert.Equal(t, 1000000-wantQuota, token.RemainQuota)
+				assert.Equal(t, wantQuota, user.UsedQuota)
+				assert.Equal(t, wantQuota, token.UsedQuota)
+				assert.Equal(t, tc.wantInput, task.PrivateData.PromptTokens)
+				assert.Equal(t, tc.wantOutput, task.PrivateData.CompletionTokens)
 				require.EqualValues(t, 1, consumes)
+				var consume model.Log
+				require.NoError(t, model.LOG_DB.Where("type = ?", model.LogTypeConsume).First(&consume).Error)
+				assert.Equal(t, wantQuota, consume.Quota)
+				assert.Equal(t, tc.wantInput, consume.PromptTokens)
+				assert.Equal(t, tc.wantOutput, consume.CompletionTokens)
+				if tc.name == "usage_saturation_is_audited" {
+					assert.Contains(t, consume.Other, `"quota_saturation"`)
+				}
+				if tc.usage == imageUsage {
+					require.NotNil(t, task.PrivateData.UsageDetails)
+					assert.Equal(t, 300, task.PrivateData.TotalTokens)
+					assert.Equal(t, 10, task.PrivateData.UsageDetails.PromptTokensDetails.CachedTokens)
+					assert.Equal(t, 20, task.PrivateData.UsageDetails.PromptTokensDetails.ImageTokens)
+					assert.Equal(t, 200, task.PrivateData.UsageDetails.CompletionTokenDetails.ImageTokens)
+					require.NotNil(t, task.PrivateData.UsageDetails.PromptTokensDetails.CachedTokensDetails)
+					require.NotNil(t, task.PrivateData.UsageDetails.PromptTokensDetails.CachedTokensDetails.ImageTokens)
+					assert.Zero(t, *task.PrivateData.UsageDetails.PromptTokensDetails.CachedTokensDetails.ImageTokens)
+					assert.Contains(t, consume.Other, `"cache_tokens":10`)
+					assert.Contains(t, consume.Other, `"image_input":20`)
+				}
 				stored, err := os.ReadFile(task.PrivateData.LocalPath)
 				require.NoError(t, err)
 				require.Equal(t, imageBytes.Bytes(), stored)
-				require.NoError(t, service.ConfirmTaskBillingSettled(context.Background(), &task, 150000, "duplicate terminal notification"))
+				require.NoError(t, service.ConfirmTaskBillingSettled(context.Background(), &task, wantQuota, "duplicate terminal notification"))
 			} else {
 				require.Equal(t, model.TaskStatus(model.TaskStatusFailure), task.Status)
 				require.Equal(t, service.TaskBillingStateRefunded, task.PrivateData.BillingState)
@@ -454,11 +570,11 @@ func TestNativeAsyncImageFinalBilling(t *testing.T) {
 			require.Equal(t, token.RemainQuota, reloadedToken.RemainQuota)
 			require.Equal(t, token.UsedQuota, reloadedToken.UsedQuota)
 			var finalConsumes int64
-			require.NoError(t, db.Model(&model.Log{}).Where("type = ?", model.LogTypeConsume).Count(&finalConsumes).Error)
+			require.NoError(t, model.LOG_DB.Model(&model.Log{}).Where("type = ?", model.LogTypeConsume).Count(&finalConsumes).Error)
 			require.Equal(t, consumes, finalConsumes)
 			require.Zero(t, posts)
 			require.Positive(t, gets)
-			if tc.configured {
+			if tc.configured && !tc.contentOnly {
 				require.Equal(t, 1, gets)
 			}
 		})
@@ -1056,24 +1172,7 @@ func TestAsyncImageRetry(t *testing.T) {
 				require.NoError(t, db.Raw(query).Scan(&version).Error)
 				t.Logf("database=%s version=%s", common.MainDatabaseType(), version)
 			}
-			if logDSN := os.Getenv("NATIVE_BILLING_TEST_LOG_DSN"); logDSN != "" {
-				require.Contains(t, logDSN, "native_billing_test")
-				var dialect gorm.Dialector = mysql.Open(logDSN)
-				if os.Getenv("NATIVE_BILLING_TEST_DIALECT") == "postgres" {
-					dialect = postgres.Open(logDSN)
-				}
-				logDB, err := gorm.Open(dialect, &gorm.Config{})
-				require.NoError(t, err)
-				require.NoError(t, logDB.AutoMigrate(&model.Log{}))
-				require.NoError(t, logDB.Where("user_id = ?", 61).Delete(&model.Log{}).Error)
-				model.LOG_DB = logDB
-				t.Cleanup(func() {
-					sqlDB, err := logDB.DB()
-					require.NoError(t, err)
-					require.NoError(t, sqlDB.Close())
-					model.LOG_DB = db
-				})
-			}
+
 			require.NoError(t, db.AutoMigrate(&model.Channel{}, &model.Ability{}, &model.QuotaData{}))
 			require.NoError(t, db.Where("channel_id IN ?", []int{701, 809}).Delete(&model.Ability{}).Error)
 			oldRetry, oldMemory, oldBatch, oldLog := common.RetryTimes, common.MemoryCacheEnabled, common.BatchUpdateEnabled, common.LogConsumeEnabled

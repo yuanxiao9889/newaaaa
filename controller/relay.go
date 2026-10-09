@@ -758,6 +758,13 @@ func executeTaskSubmissionWith(
 		if immediate.Status == model.TaskStatusFailure {
 			task.FailReason = immediate.Reason
 		}
+		if immediate.Status == model.TaskStatusSuccess && immediate.TokenUsage != nil {
+			usage := immediate.TokenUsage
+			task.PrivateData.PromptTokens = usage.PromptTokens
+			task.PrivateData.CompletionTokens = usage.CompletionTokens
+			task.PrivateData.TotalTokens = usage.TotalTokens
+			task.PrivateData.UsageDetails = service.BuildTaskUsageDetails(usage)
+		}
 		if immediate.Url != "" {
 			task.PrivateData.ResultURL = immediate.Url
 		} else if immediate.Status == model.TaskStatusSuccess {

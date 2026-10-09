@@ -88,3 +88,29 @@ func PrepareImageBillingForRequest(c *gin.Context, info *relaycommon.RelayInfo, 
 	info.FinalPreConsumedQuota = info.Billing.GetPreConsumedQuota()
 	return nil
 }
+
+// NormalizeOpenAIImageUsage maps the OpenAI Images usage shape (input_tokens /
+// output_tokens / input_tokens_details / output_tokens_details) onto the
+// canonical prompt/completion fields for synchronous and asynchronous images.
+// Non-zero input/output counts take precedence over compatibility aliases;
+// they are never added together. Chat/embedding usage has different semantics.
+func NormalizeOpenAIImageUsage(usage *dto.Usage) {
+	if usage == nil {
+		return
+	}
+	if usage.InputTokens != 0 {
+		usage.PromptTokens = usage.InputTokens
+	}
+	if usage.OutputTokens != 0 {
+		usage.CompletionTokens = usage.OutputTokens
+	}
+	if usage.InputTokensDetails != nil {
+		usage.PromptTokensDetails = usage.InputTokensDetails.Clone()
+	}
+	if usage.OutputTokensDetails != nil {
+		usage.CompletionTokenDetails = *usage.OutputTokensDetails
+	}
+	if usage.TotalTokens == 0 {
+		usage.TotalTokens = usage.PromptTokens + usage.CompletionTokens
+	}
+}

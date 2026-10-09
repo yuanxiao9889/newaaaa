@@ -25,6 +25,7 @@ import (
 	"github.com/QuantumNous/new-api/types"
 
 	"github.com/gin-gonic/gin"
+	"github.com/tidwall/gjson"
 )
 
 const (
@@ -186,16 +187,34 @@ func executeInternalAsyncImageTask(ctx context.Context, task *model.Task) error 
 
 	preSettlementQuota := task.Quota
 	var quotaClamp *common.QuotaClamp
+	if usage == nil && task.PrivateData.RequestRelayFormat == relay.NativeAsyncImageFormat {
+		// All native task paths (including durable resume and channel retry)
+		// return the completed envelope instead of going through DoResponse.
+		if raw := gjson.GetBytes(imageResponseBody, "usage"); raw.IsObject() {
+			var reported dto.Usage
+			if err := common.Unmarshal([]byte(raw.Raw), &reported); err != nil {
+				logger.LogWarn(ctx, fmt.Sprintf("async image task %s returned invalid usage; keeping reserved quota", task.TaskID))
+			} else {
+				service.NormalizeOpenAIImageUsage(&reported)
+				if service.ValidUsage(&reported) {
+					usage = &reported
+				}
+			}
+		}
+	}
 	if usage != nil {
 		task.PrivateData.PromptTokens = usage.PromptTokens
 		task.PrivateData.CompletionTokens = usage.CompletionTokens
 		task.PrivateData.TotalTokens = usage.TotalTokens
 		task.PrivateData.UsageDetails = service.BuildTaskUsageDetails(usage)
-		actualQuota, clamp := service.CalculateTaskQuotaByUsageChecked(task, usage)
-		quotaClamp = clamp
-		if actualQuota > 0 {
-			if err = service.AdjustTaskQuotaForFinalSettlement(ctx, task, actualQuota, "async image usage settlement"); err != nil {
-				return fmt.Errorf("async image usage settlement failed: %w", err)
+		// A provider reporting tokens does not change a per-call price.
+		if bc := task.PrivateData.BillingContext; bc == nil || !bc.PerCallBilling {
+			actualQuota, clamp := service.CalculateTaskQuotaByUsageChecked(task, usage)
+			quotaClamp = clamp
+			if actualQuota > 0 {
+				if err = service.AdjustTaskQuotaForFinalSettlement(ctx, task, actualQuota, "async image usage settlement"); err != nil {
+					return fmt.Errorf("async image usage settlement failed: %w", err)
+				}
 			}
 		}
 	}

@@ -307,7 +307,16 @@ func pollNativeAsyncImageResult(ctx context.Context, client *http.Client, entry 
 							return body, nil
 						}
 					}
-					return fetchNativeAsyncImageResult(ctx, client, entry)
+					result, err := fetchNativeAsyncImageResult(ctx, client, entry)
+					if err != nil {
+						return nil, err
+					}
+					// The content endpoint returns image bytes; billing usage belongs
+					// to the completed status response and must survive the download.
+					if usage := gjson.GetBytes(body, "usage"); usage.Exists() {
+						return sjson.SetRawBytes(result, "usage", []byte(usage.Raw))
+					}
+					return result, nil
 				case "pending", "submitted", "queued", "processing", "running", "in_progress":
 				default:
 					return nil, fmt.Errorf("unrecognized native image task status")

@@ -1,6 +1,7 @@
 package relay
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/url"
 	"strings"
@@ -88,6 +89,11 @@ func normalizeConfiguredImageTaskResponse(body []byte, config *dto.ImageAdapterT
 		envelope["error"] = errorInfo
 	}
 	if canonical == "completed" {
+		// Keep the provider's usage alongside the translated image envelope.
+		// Missing usage must remain missing, rather than becoming zero tokens.
+		if usage := gjson.GetBytes(body, "usage"); usage.Exists() {
+			envelope["usage"] = json.RawMessage(usage.Raw)
+		}
 		image := dto.ImageData{}
 		if config.ResultURLPath != "" {
 			if value := gjson.GetBytes(body, config.ResultURLPath); value.Type == gjson.String {
