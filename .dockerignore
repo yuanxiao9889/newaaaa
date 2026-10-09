@@ -9,4 +9,9 @@ docs
 .gocache
 /web/node_modules
 /web/dist
+/output
+/server-baseline
+/backups
+/server-backups
+/downloads
 !THIRD-PARTY-LICENSES.md

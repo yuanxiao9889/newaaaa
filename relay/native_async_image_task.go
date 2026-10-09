@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -24,6 +25,10 @@ import (
 )
 
 const NativeAsyncImageFormat = "native_async_image"
+
+// ErrNativeImageResultUnavailable distinguishes an already completed upstream
+// job with an unavailable artifact from an uncertain task still being polled.
+var ErrNativeImageResultUnavailable = errors.New("completed native image result unavailable")
 
 // NativeImageTaskError is a confirmed upstream terminal failure, distinct from
 // polling transport errors and failures downloading an already generated image.
@@ -309,7 +314,7 @@ func pollNativeAsyncImageResult(ctx context.Context, client *http.Client, entry 
 					}
 					result, err := fetchNativeAsyncImageResult(ctx, client, entry)
 					if err != nil {
-						return nil, err
+						return nil, fmt.Errorf("%w: %v", ErrNativeImageResultUnavailable, err)
 					}
 					// The content endpoint returns image bytes; billing usage belongs
 					// to the completed status response and must survive the download.

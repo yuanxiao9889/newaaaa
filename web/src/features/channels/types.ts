@@ -95,6 +95,7 @@ export interface ChannelSettings {
 }
 
 export interface ChannelOtherSettings {
+  auto_switch_enabled?: boolean
   azure_responses_version?: string
   vertex_key_type?: 'json' | 'api_key'
   openrouter_enterprise?: boolean
@@ -114,6 +115,27 @@ export interface ChannelOtherSettings {
   upstream_model_update_last_check_time?: number
   upstream_model_update_last_detected_models?: string[]
   advanced_custom?: AdvancedCustomConfig
+}
+
+export interface ChannelAutoSwitchStatus {
+  enabled: boolean
+  policy: {
+    failure_threshold: number
+    recovery_successes: number
+    cooldown_seconds: number
+    window_seconds: number
+  }
+  scopes: {
+    group: string
+    model: string
+    request_path: string
+    participant_count: number
+    status: 'waiting' | 'ready' | 'healthy' | 'cooling' | 'probing'
+    cooldown_until: number
+    probe_successes: number
+    consecutive_failures: number
+    last_reason: string
+  }[]
 }
 
 export interface AdvancedCustomConfig {

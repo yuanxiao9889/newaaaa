@@ -22,7 +22,8 @@ import (
 )
 
 // serveTaskPluginImageProtocol answers an OpenAI Images API request that a
-// task plugin claimed. The API is synchronous: the durable submission runs
+// task plugin claimed. Explicit async requests use the internal image queue.
+// Otherwise the durable submission runs
 // first on a context that survives a client disconnect, an asynchronous
 // upstream task is then polled inside the request until it is terminal or the
 // protocol timeout elapses, and the plugin's render hook finally shapes the
@@ -33,6 +34,10 @@ func serveTaskPluginImageProtocol(c *gin.Context, pinned pluginruntime.PinnedEnd
 	protocolRequest, ok := requestValue.(pluginruntime.ProtocolRequestContext)
 	if !exists || !ok || protocolRequest.Protocol != pinned.Protocol || pinned.Plugin == nil {
 		respondPluginProtocolError(c, http.StatusInternalServerError, "task_protocol_error", "Task protocol request failed")
+		return
+	}
+	if relay.IsAsyncImageRequest(c) && common.GetAsyncImageInternalTaskEnabled() {
+		enqueueTaskPluginImage(c)
 		return
 	}
 	clientRequest := c.Request

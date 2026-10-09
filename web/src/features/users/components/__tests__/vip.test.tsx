@@ -124,8 +124,11 @@ it('keeps the dialog open on server failure and permits retry', async () => {
 })
 
 it('disables confirmation and cancellation while the update is pending', async () => {
-  const pending = Promise.withResolvers<{ data: { success: boolean } }>()
-  const put = vi.spyOn(api, 'put').mockReturnValue(pending.promise)
+  let resolvePending!: (value: { data: { success: boolean } }) => void
+  const pending = new Promise<{ data: { success: boolean } }>((resolve) => {
+    resolvePending = resolve
+  })
+  const put = vi.spyOn(api, 'put').mockReturnValue(pending)
   const { onSuccess, event } = renderVIPDialog()
   await event.click(screen.getByRole('button', { name: 'Enable VIP' }))
   expect(screen.getByRole('button', { name: 'Enable VIP' })).toBeDisabled()
@@ -133,7 +136,7 @@ it('disables confirmation and cancellation while the update is pending', async (
   await event.keyboard('{Escape}')
   expect(screen.getByRole('alertdialog')).toBeInTheDocument()
   expect(put).toHaveBeenCalledOnce()
-  pending.resolve({ data: { success: true } })
+  resolvePending({ data: { success: true } })
   await waitFor(() => expect(onSuccess).toHaveBeenCalledOnce())
 })
 

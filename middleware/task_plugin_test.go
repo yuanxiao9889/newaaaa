@@ -944,8 +944,8 @@ func TestTaskPluginImageEndpointPreservesInternalAsyncQueue(t *testing.T) {
 				name, enabled, query string
 				wantPinned           bool
 			}{
-				{"local async", "true", "?async=true", false},
-				{"local async numeric", "true", "?async=1", false},
+				{"local async", "true", "?async=true", true},
+				{"local async numeric", "true", "?async=1", true},
 				{"queue disabled", "false", "?async=true", true},
 				{"synchronous", "true", "", true},
 				{"explicit synchronous", "true", "?async=false", true},
@@ -962,14 +962,13 @@ func TestTaskPluginImageEndpointPreservesInternalAsyncQueue(t *testing.T) {
 						reached = true
 						_, pinned := c.Get(jsplugin.ContextKeyPinnedEndpoint)
 						assert.Equal(t, tc.wantPinned, pinned)
-						if !tc.wantPinned {
-							assert.Empty(t, c.GetString("expected_task_plugin_key"))
-							_, decoded := c.Get("task_request")
-							assert.False(t, decoded, "the worker must receive the original image request")
-							data, err := io.ReadAll(c.Request.Body)
-							require.NoError(t, err)
-							assert.JSONEq(t, body, string(data))
-						}
+						// Async admission now uses plugin validation/billing, while
+						// the worker still receives the original replayable body.
+						storage, err := common.GetBodyStorage(c)
+						require.NoError(t, err)
+						data, err := storage.Bytes()
+						require.NoError(t, err)
+						assert.JSONEq(t, body, string(data))
 						c.Status(http.StatusNoContent)
 					})
 					request := httptest.NewRequest(http.MethodPost, endpoint+tc.query, strings.NewReader(body))

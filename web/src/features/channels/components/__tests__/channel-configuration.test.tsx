@@ -47,7 +47,14 @@ import {
   CHANNEL_TYPE_SGLANG,
   CHANNEL_TYPE_VLLM,
 } from '../../constants'
+import {
+  CHANNEL_FORM_DEFAULT_VALUES,
+  transformChannelToFormDefaults,
+  transformFormDataToCreatePayload,
+  transformFormDataToUpdatePayload,
+} from '../../lib/channel-form'
 import { channelSchema, type Channel } from '../../types'
+import { ChannelAutoSwitchStatus } from '../channel-auto-switch-status'
 import { ChannelPluginExtensions } from '../channel-plugin-extensions'
 import { ChannelsProvider } from '../channels-provider'
 import { ChannelMutateDrawer } from '../drawers/channel-mutate-drawer'
@@ -1146,6 +1153,7 @@ test('quick options and detailed settings share changes across tabs and save the
     responses_websocket_enabled: true,
   })
   editingChannel.settings = JSON.stringify({
+    auto_switch_enabled: true,
     upstream_model_update_check_enabled: true,
     upstream_model_update_auto_sync_enabled: true,
   })
@@ -1158,6 +1166,7 @@ test('quick options and detailed settings share changes across tabs and save the
   await screen.findByDisplayValue('Existing channel')
   const quick = within(screen.getByRole('group', { name: 'Quick options' }))
   for (const name of [
+    'Automatic switching',
     'Pass Through Body',
     'Detect model updates',
     'Responses WebSocket',
@@ -1227,6 +1236,7 @@ test('quick options and detailed settings share changes across tabs and save the
     responses_websocket_enabled: false,
   })
   expect(JSON.parse(payload.settings)).toMatchObject({
+    auto_switch_enabled: false,
     upstream_model_update_check_enabled: true,
     upstream_model_update_auto_sync_enabled: true,
   })
@@ -1237,7 +1247,7 @@ test('quick options show only applicable shortcuts when the provider changes', a
   render(<ConfigurationHarness />)
   await user.click(screen.getByRole('option', { name: 'OpenAI Built-in #1' }))
   let quick = within(screen.getByRole('group', { name: 'Quick options' }))
-  expect(quick.getAllByRole('switch')).toHaveLength(5)
+  expect(quick.getAllByRole('switch')).toHaveLength(6)
   expect(
     quick.queryByRole('switch', { name: 'Force Format' })
   ).not.toBeInTheDocument()
@@ -1255,7 +1265,7 @@ test('quick options show only applicable shortcuts when the provider changes', a
   await user.click(screen.getByRole('button', { name: 'Change provider' }))
   await user.click(screen.getByRole('option', { name: /^DeepSeek / }))
   quick = within(screen.getByRole('group', { name: 'Quick options' }))
-  expect(quick.getAllByRole('switch')).toHaveLength(4)
+  expect(quick.getAllByRole('switch')).toHaveLength(5)
   expect(
     quick.queryByRole('switch', { name: 'Responses WebSocket' })
   ).not.toBeInTheDocument()
@@ -1264,10 +1274,142 @@ test('quick options show only applicable shortcuts when the provider changes', a
   await user.click(screen.getByRole('button', { name: 'Change provider' }))
   await user.click(screen.getByRole('option', { name: /Video A/ }))
   quick = within(screen.getByRole('group', { name: 'Quick options' }))
-  expect(quick.getAllByRole('switch')).toHaveLength(1)
+  expect(quick.getAllByRole('switch')).toHaveLength(2)
   expect(
     quick.getByRole('switch', { name: 'Auto-disable channel' })
   ).toBeChecked()
+})
+
+test('automatic switching persists opt-in and opt-out without changing manual priorities or unrelated settings', () => {
+  editingChannel.priority = 8
+  editingChannel.settings = JSON.stringify({
+    auto_switch_enabled: true,
+    custom_provider_option: 'preserved',
+  })
+  const loaded = transformChannelToFormDefaults(editingChannel)
+  expect(loaded.auto_switch_enabled).toBe(true)
+  const disabled = transformFormDataToUpdatePayload(
+    { ...loaded, auto_switch_enabled: false },
+    editingChannel.id
+  )
+  expect(JSON.parse(disabled.settings ?? '{}')).toMatchObject({
+    auto_switch_enabled: false,
+    custom_provider_option: 'preserved',
+  })
+  expect(disabled.priority).toBe(8)
+  const created = transformFormDataToCreatePayload({
+    ...CHANNEL_FORM_DEFAULT_VALUES,
+    auto_switch_enabled: true,
+  })
+  expect(JSON.parse(created.channel.settings ?? '{}').auto_switch_enabled).toBe(
+    true
+  )
+  editingChannel.settings = '{}'
+  expect(
+    transformChannelToFormDefaults(editingChannel).auto_switch_enabled
+  ).toBe(false)
+})
+
+test('automatic switching status distinguishes unavailable backups, cooldown and recovery probes', async () => {
+  const originalGet = vi.mocked(api.get).getMockImplementation()
+  vi.mocked(api.get).mockImplementation(async (url, config) => {
+    if (url !== '/api/channel/42/auto_switch') return originalGet?.(url, config)
+    return {
+      data: {
+        success: true,
+        data: {
+          enabled: true,
+          policy: {
+            failure_threshold: 3,
+            recovery_successes: 3,
+            cooldown_seconds: 300,
+            window_seconds: 600,
+          },
+          scopes: [
+            {
+              group: 'default',
+              model: 'single-model',
+              request_path: '',
+              participant_count: 1,
+              status: 'waiting',
+              cooldown_until: 0,
+              probe_successes: 0,
+              consecutive_failures: 0,
+              last_reason: '',
+            },
+            {
+              group: 'default',
+              model: 'video-cooling',
+              request_path: '/v1/videos',
+              participant_count: 2,
+              status: 'cooling',
+              cooldown_until: 1791500000,
+              probe_successes: 0,
+              consecutive_failures: 3,
+              last_reason: 'service_unavailable',
+            },
+            {
+              group: 'default',
+              model: 'video-recovering',
+              request_path: '/v1/videos',
+              participant_count: 2,
+              status: 'probing',
+              cooldown_until: 0,
+              probe_successes: 2,
+              consecutive_failures: 0,
+              last_reason: '',
+            },
+          ],
+        },
+      },
+    }
+  })
+  render(
+    <QueryClientProvider client={client}>
+      <ChannelAutoSwitchStatus channelId={42} open savedEnabled />
+    </QueryClientProvider>
+  )
+  expect(
+    await screen.findByText('Waiting for a compatible backup')
+  ).toBeVisible()
+  expect(screen.getByText('Cooling down')).toBeVisible()
+  expect(screen.getByText('Verifying recovery')).toBeVisible()
+  expect(screen.getByText('Participating channels: 1')).toBeVisible()
+  expect(
+    screen.getByText('Consecutive failures: 0 / 3; recovery successes: 2 / 3')
+  ).toBeVisible()
+  expect(screen.getByText(/Recovery probe available after/)).toBeVisible()
+})
+
+test('automatic switching status does not fetch for an unsaved opt-in or a closed drawer', () => {
+  const view = render(
+    <QueryClientProvider client={client}>
+      <ChannelAutoSwitchStatus channelId={42} open savedEnabled={false} />
+    </QueryClientProvider>
+  )
+  expect(
+    screen.getByText('Save this channel to view automatic switching status.')
+  ).toBeVisible()
+  expect(api.get).not.toHaveBeenCalled()
+  view.rerender(
+    <QueryClientProvider client={client}>
+      <ChannelAutoSwitchStatus channelId={42} open={false} savedEnabled />
+    </QueryClientProvider>
+  )
+  expect(api.get).not.toHaveBeenCalled()
+})
+
+test('automatic switching status offers retry after a failed fetch', async () => {
+  vi.mocked(api.get).mockRejectedValueOnce(new Error('offline'))
+  render(
+    <QueryClientProvider client={client}>
+      <ChannelAutoSwitchStatus channelId={42} open savedEnabled />
+    </QueryClientProvider>
+  )
+  expect(
+    await screen.findByText('Unable to load automatic switching status')
+  ).toBeVisible()
+  expect(screen.getByRole('button', { name: 'Retry' })).toBeEnabled()
 })
 
 test('editing opens the shared configuration and omits an unchanged key on update', async () => {
@@ -2623,7 +2765,7 @@ test('on wide screens the quick options move into the header as a compact toggle
   await screen.findByDisplayValue('Existing channel')
   const quick = screen.getByRole('group', { name: 'Quick options' })
   expect(quick.closest('[data-slot="sheet-header"]')).not.toBeNull()
-  expect(within(quick).getAllByRole('switch')).toHaveLength(5)
+  expect(within(quick).getAllByRole('switch')).toHaveLength(6)
   // Second header row: status badge and description on the left, toggles right.
   const statusRow = quick.parentElement
   if (!statusRow) throw new Error('status row missing')

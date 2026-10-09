@@ -86,7 +86,8 @@ func TestBuiltInTaskPluginResponsesAndUsageContracts(t *testing.T) {
 			actualKeys = append(actualKeys, entry.Name())
 		}
 	}
-	assert.ElementsMatch(t, append(append([]string(nil), expectedKeys...), "huiqu-h3"), actualKeys)
+	// Local task plugins may extend the embedded catalog without replacing the factories.
+	assert.Subset(t, actualKeys, append(append([]string(nil), expectedKeys...), "huiqu-h3", "tencent-hy-image"))
 
 	for _, key := range expectedKeys {
 		t.Run(key, func(t *testing.T) {

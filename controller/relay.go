@@ -352,7 +352,7 @@ func processChannelError(c *gin.Context, channelError types.ChannelError, err *t
 	logger.LogError(c, fmt.Sprintf("channel error (channel #%d, status code: %d): %s", channelError.ChannelId, err.StatusCode, common.LocalLogPreview(err.MaskSensitiveErrorWithStatusCode())))
 	// 不要使用context获取渠道信息，异步处理时可能会出现渠道信息不一致的情况
 	// do not use context to get channel info, there may be inconsistent channel info when processing asynchronously
-	if service.ShouldDisableChannel(err) && channelError.AutoBan {
+	if service.ShouldDisableChannelForRequest(c, channelError.ChannelId, err) && channelError.AutoBan {
 		gopool.Go(func() {
 			service.DisableChannel(channelError, err.MaskSensitiveErrorWithStatusCode())
 		})
@@ -565,10 +565,12 @@ func executeTaskSubmissionWith(
 	submit taskSubmitAttempt,
 ) (*taskSubmissionOutcome, *taskdto.TaskError) {
 	policy := service.RequestPolicy(c)
+	defer service.ReleaseAutoSwitchAttempt(c)
 	videoRetry := captureVideoTaskRetry(c, relayInfo)
 	diagnostics := newTaskPluginSubmitDiagnostics(c)
 	diagnostics.start(relayInfo)
 	var result *relay.TaskSubmitResult
+	var acceptedHealth *model.ChannelAutoSwitchTicket
 	var taskErr *taskdto.TaskError
 	durable := false
 	stage := "start"
@@ -602,6 +604,7 @@ func executeTaskSubmissionWith(
 		var channel *model.Channel
 
 		if lockedCh, ok := relayInfo.LockedChannel.(*model.Channel); ok && lockedCh != nil {
+			service.ReleaseAutoSwitchAttempt(c)
 			channel = lockedCh
 			policy.BeginAttempt(channel, relayInfo.UsingGroup)
 			if retryParam.GetRetry() > 0 {
@@ -637,9 +640,17 @@ func executeTaskSubmissionWith(
 		stage = "submit"
 		relayInfo.RetryIndex = retryParam.GetRetry()
 		result, taskErr = submit(c, relayInfo)
+		if taskErr == nil && result != nil {
+			acceptedHealth = service.AutoSwitchAttempt(c)
+			// An accepted job owns the probe even if local persistence or
+			// billing later fails. Only a definite final result can complete it.
+			service.DetachAutoSwitchAttempt(c)
+			service.RecordAutoSwitchTaskResult(c, &model.Task{PrivateData: model.TaskPrivateData{AutoSwitch: acceptedHealth}}, result.Immediate)
+		}
 		if requestErr := c.Request.Context().Err(); requestErr != nil {
 			diagnostics.cancelled("after_submit", retryParam.GetRetry()+1)
 			taskErr = service.TaskErrorWrapperLocal(requestErr, "request_cancelled", http.StatusRequestTimeout)
+			service.RecordAutoSwitchTaskSubmissionFailure(c, taskErr)
 			break
 		}
 		if taskErr == nil {
@@ -650,6 +661,7 @@ func executeTaskSubmissionWith(
 		taskAPIError := taskSubmissionAPIError(taskErr)
 		relayInfo.LastError = taskAPIError
 		decision := decideTaskRetry(c, taskErr, common.RetryTimes-retryParam.GetRetry())
+		service.RecordAutoSwitchTaskSubmissionFailure(c, taskErr)
 		service.RecordPolicyFailure(c, channel.Id, taskAPIError, decision)
 		if !taskErr.LocalError {
 			processChannelError(c,
@@ -677,6 +689,7 @@ func executeTaskSubmissionWith(
 		return nil, taskErr
 	}
 	if result == nil {
+		service.DetachAutoSwitchAttempt(c)
 		taskErr = service.TaskErrorWrapperLocal(errors.New("task submission returned no result"), "task_submit_failed", http.StatusInternalServerError)
 		diagnostics.failed("submit", "missing_result", taskErr, false)
 		return nil, taskErr
@@ -707,6 +720,12 @@ func executeTaskSubmissionWith(
 
 	stage = "insert"
 	task := model.InitTask(result.Platform, relayInfo)
+	// Synchronous plugins finish their upstream work before this durable
+	// barrier. Preserve the actual request start instead of timing the INSERT.
+	if !relayInfo.StartTime.IsZero() && relayInfo.StartTime.Unix() <= task.SubmitTime {
+		task.SubmitTime = relayInfo.StartTime.Unix()
+		task.StartTime = task.SubmitTime
+	}
 	task.PrivateData.Execution = service.TaskExecutionSnapshotFromContext(c)
 	if c.GetBool("native_task_adaptor") {
 		task.PrivateData.Execution = nil
@@ -723,6 +742,7 @@ func executeTaskSubmissionWith(
 	task.PrivateData.ActualQuota = result.Quota
 	task.PrivateData.BillingUpdatedAt = time.Now().Unix()
 	task.PrivateData.ChannelRetryPath = append([]string(nil), c.GetStringSlice("use_channel")...)
+	task.PrivateData.AutoSwitch = acceptedHealth
 	if videoRetry != nil && (result.Immediate == nil || result.Immediate.Status != model.TaskStatusSuccess && result.Immediate.Status != model.TaskStatusFailure) {
 		videoRetry.AcceptedAt = time.Now().Unix()
 		videoRetry.Action = relayInfo.Action
@@ -946,6 +966,8 @@ func decideTaskRetry(c *gin.Context, taskErr *taskdto.TaskError, retryTimes int)
 		stop.Reason = "request_completed"
 	case taskErr.NoRetry:
 		stop.Reason = "task_accepted"
+	case service.AutoSwitchAttempt(c) != nil && c.GetBool("auto_switch_task_dispatched") && !c.GetBool("auto_switch_task_rejected"):
+		stop.Reason = "submission_unconfirmed"
 	case service.ShouldSkipRetryAfterChannelAffinityFailure(c):
 		stop.Reason, stop.Source = "strict_session", "session_rule"
 		if source := service.RequestPolicy(c).SessionModeSource; source != "" {

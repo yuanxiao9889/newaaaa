@@ -16,12 +16,11 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { Link } from '@tanstack/react-router'
-import { ArrowRight } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
-import { AnimateInView } from '@/components/animate-in-view'
-import { Button } from '@/components/ui/button'
+import { cn } from '@/lib/utils'
+
+import { HeroButtons } from '../hero-buttons'
 
 interface CTAProps {
   className?: string
@@ -31,54 +30,31 @@ interface CTAProps {
 export function CTA(props: CTAProps) {
   const { t } = useTranslation()
 
-  if (props.isAuthenticated) {
-    return null
-  }
-
   return (
-    <section className='relative z-10 overflow-hidden px-6 py-24 md:py-32'>
-      {/* Gradient mesh background */}
-      <div
-        aria-hidden
-        className='absolute inset-0 -z-10 opacity-20 dark:opacity-[0.08]'
-        style={{
-          background: [
-            'radial-gradient(ellipse 50% 50% at 30% 50%, oklch(0.7 0.15 250 / 70%) 0%, transparent 70%)',
-            'radial-gradient(ellipse 40% 40% at 70% 40%, oklch(0.65 0.12 200 / 50%) 0%, transparent 70%)',
-          ].join(', '),
-        }}
-      />
-
-      <AnimateInView
-        className='mx-auto max-w-2xl text-center'
-        animation='scale-in'
-      >
-        <h2 className='text-2xl leading-tight font-bold tracking-tight md:text-4xl'>
+    <section
+      className={cn('home-section home-cta home-inverted', props.className)}
+      aria-labelledby='home-cta-title'
+    >
+      <div className='home-shell relative'>
+        <p className='home-eyebrow mb-10'>03 / {t('Start building')}</p>
+        <h2 id='home-cta-title' className='home-heading'>
           {t('Ready to simplify')}
           <br />
-          <span className='bg-gradient-to-r from-blue-400 via-violet-400 to-purple-500 bg-clip-text text-transparent'>
+          <span className='home-heading-secondary'>
             {t('your AI integration?')}
           </span>
         </h2>
-        <p className='text-muted-foreground/80 mx-auto mt-5 max-w-md text-sm leading-relaxed md:text-base'>
-          {t(
-            'Deploy your own gateway and start routing requests through your configured upstream services.'
-          )}
-        </p>
-        <div className='mt-8 flex items-center justify-center gap-3'>
-          <Button className='group rounded-lg' render={<Link to='/sign-up' />}>
-            {t('Get Started')}
-            <ArrowRight className='ml-1 size-3.5 transition-transform duration-200 group-hover:translate-x-0.5' />
-          </Button>
-          <Button
-            variant='outline'
-            className='border-border/50 hover:border-border hover:bg-muted/50 rounded-lg'
-            render={<Link to='/pricing' />}
-          >
-            {t('View Pricing')}
-          </Button>
+        <div className='mt-12 grid gap-8 md:grid-cols-2 md:items-end'>
+          <p className='max-w-md text-base leading-8'>
+            {t(
+              'Deploy your own gateway and start routing requests through your configured upstream services.'
+            )}
+          </p>
+          <div className='flex flex-wrap items-center gap-3 md:justify-end'>
+            <HeroButtons isAuthenticated={!!props.isAuthenticated} />
+          </div>
         </div>
-      </AnimateInView>
+      </div>
     </section>
   )
 }

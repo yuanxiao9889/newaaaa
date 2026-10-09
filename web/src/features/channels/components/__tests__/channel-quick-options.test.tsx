@@ -51,6 +51,7 @@ type HarnessProps = {
   values?: Partial<ChannelFormValues>
   confirm: (kind: PassthroughKind) => Promise<boolean>
   onSave?: (values: ChannelFormValues) => void
+  disabled?: boolean
 }
 
 function QuickOptionsHarness(props: HarnessProps) {
@@ -81,11 +82,17 @@ function QuickOptionsHarness(props: HarnessProps) {
             <ChannelQuickOptions
               channelType={channelType}
               sensitiveLocked={false}
-              disabled={false}
+              disabled={props.disabled ?? false}
               layout={props.layout}
               confirmEnablePassthrough={props.confirm}
             />
             <button type='submit'>Save</button>
+            <button
+              type='button'
+              onClick={() => form.reset(CHANNEL_FORM_DEFAULT_VALUES)}
+            >
+              Reset
+            </button>
           </form>
         </Form>
       </RouterContextProvider>
@@ -99,6 +106,67 @@ const BODY_SWITCH = { name: 'Pass Through Body' }
 beforeEach(() => {
   vi.spyOn(api, 'get').mockResolvedValue({
     data: { success: true, data: {} },
+  })
+})
+
+describe('automatic switching quick option', () => {
+  test.each([2, 5])(
+    'is hidden for legacy Midjourney channel type %s',
+    (channelType) => {
+      render(
+        <QuickOptionsHarness
+          channelType={channelType}
+          values={{ auto_switch_enabled: true }}
+          confirm={() => Promise.resolve(true)}
+        />
+      )
+      expect(
+        screen.queryByRole('switch', { name: 'Automatic switching' })
+      ).not.toBeInTheDocument()
+    }
+  )
+
+  test.each(['stacked', 'inline'] as const)(
+    '%s layout saves an opt-in independently of auto-disable and resets it to off',
+    async (layout) => {
+      const user = userEvent.setup()
+      const saved: ChannelFormValues[] = []
+      render(
+        <QuickOptionsHarness
+          layout={layout}
+          channelType={CHANNEL_TYPE_TASK_PLUGIN}
+          values={{ auto_ban: 0 }}
+          confirm={() => Promise.resolve(true)}
+          onSave={(values) => saved.push(values)}
+        />
+      )
+      const toggle = screen.getByRole('switch', { name: 'Automatic switching' })
+      expect(toggle).not.toBeChecked()
+      toggle.focus()
+      await user.keyboard(' ')
+      expect(toggle).toBeChecked()
+      await user.click(screen.getByRole('button', { name: 'Save' }))
+      await waitFor(() => expect(saved).toHaveLength(1))
+      expect(saved[0]).toMatchObject({ auto_switch_enabled: true, auto_ban: 0 })
+      await user.click(screen.getByRole('button', { name: 'Reset' }))
+      expect(toggle).not.toBeChecked()
+    }
+  )
+
+  test('a disabled form preserves the persisted automatic switching setting', async () => {
+    const user = userEvent.setup()
+    render(
+      <QuickOptionsHarness
+        disabled
+        values={{ auto_switch_enabled: true }}
+        confirm={() => Promise.resolve(true)}
+      />
+    )
+    const toggle = screen.getByRole('switch', { name: 'Automatic switching' })
+    expect(toggle).toBeChecked()
+    expect(toggle).toHaveAttribute('aria-disabled', 'true')
+    await user.click(toggle)
+    expect(toggle).toBeChecked()
   })
 })
 

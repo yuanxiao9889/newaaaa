@@ -207,6 +207,7 @@ import {
   nextTaskPluginBaseUrl,
 } from '../../lib/task-plugin-base-url'
 import type { Channel } from '../../types'
+import { ChannelAutoSwitchStatus } from '../channel-auto-switch-status'
 import { ChannelPluginExtensions } from '../channel-plugin-extensions'
 import { ChannelQuickOptions } from '../channel-quick-options'
 import { ChannelTypeLogo } from '../channel-type-badge'
@@ -2304,6 +2305,16 @@ export function ChannelMutateDrawer({
           </FormItem>
         )}
       />
+      {formValues.auto_switch_enabled && (
+        <ChannelAutoSwitchStatus
+          channelId={channelId}
+          open={open}
+          savedEnabled={
+            parseSettingsRecord(channelData?.data?.settings)
+              .auto_switch_enabled === true
+          }
+        />
+      )}
     </div>
   )
 

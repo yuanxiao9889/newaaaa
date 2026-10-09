@@ -69,21 +69,29 @@ export function ChannelQuickOptions(props: ChannelQuickOptionsProps) {
   const id = useId()
   const formContext = useFormContext<ChannelFormValues>()
   const form = props.form ?? formContext
-  const [passthrough, headerOverride, autoBan, modelCheck, websocket] =
-    useWatch({
-      control: form.control,
-      name: [
-        'pass_through_body_enabled',
-        'header_override',
-        'auto_ban',
-        'upstream_model_update_check_enabled',
-        'responses_websocket_enabled',
-      ],
-    })
+  const [
+    passthrough,
+    headerOverride,
+    autoBan,
+    autoSwitch,
+    modelCheck,
+    websocket,
+  ] = useWatch({
+    control: form.control,
+    name: [
+      'pass_through_body_enabled',
+      'header_override',
+      'auto_ban',
+      'auto_switch_enabled',
+      'upstream_model_update_check_enabled',
+      'responses_websocket_enabled',
+    ],
+  })
   const sensitiveDisabled = props.sensitiveLocked || props.disabled
   const setOption = (
     name:
       | 'pass_through_body_enabled'
+      | 'auto_switch_enabled'
       | 'upstream_model_update_check_enabled'
       | 'responses_websocket_enabled',
     value: boolean
@@ -152,6 +160,19 @@ export function ChannelQuickOptions(props: ChannelQuickOptionsProps) {
       }),
     disabled: props.disabled,
   })
+  // Legacy Midjourney tasks do not yet report durable final health outcomes.
+  if (props.channelType !== 2 && props.channelType !== 5) {
+    options.push({
+      key: 'auto-switch',
+      label: t('Automatic switching'),
+      description: t(
+        'Enable on at least two compatible channels in the same group and model. Repeated failures temporarily lower priority; successful recovery probes restore administrator priority.'
+      ),
+      checked: autoSwitch === true,
+      onCheckedChange: (value) => setOption('auto_switch_enabled', value),
+      disabled: props.disabled,
+    })
+  }
   if (MODEL_FETCHABLE_TYPES.has(props.channelType)) {
     options.push({
       key: 'model-check',

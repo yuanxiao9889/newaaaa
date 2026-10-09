@@ -1142,6 +1142,7 @@ func TestAsyncImageRetry(t *testing.T) {
 		retries, wantPosts                                       int
 		success, queued, backupFails, pinned, interrupted, cache bool
 		resume, invalidResult, multipart                         bool
+		autoSwitch, missingResult                                bool
 		pollStatus                                               int
 	}{
 		{name: "mapped native failover", failure: `{"code":"server_error","type":"provider_error","message":"temporary failure"}`, retries: 3, wantPosts: 1, success: true},
@@ -1160,6 +1161,12 @@ func TestAsyncImageRetry(t *testing.T) {
 		{name: "result storage failure does not generate again", retries: 3, invalidResult: true},
 		{name: "poll rejection does not generate again", retries: 3, pollStatus: 401},
 		{name: "multipart reference survives failover", failure: `{"code":"server_error","message":"busy"}`, retries: 3, wantPosts: 1, success: true, multipart: true},
+		{name: "automatic health follows native terminal failure and backup result", failure: `{"code":"service_unavailable","message":"temporary failure"}`, retries: 3, wantPosts: 1, success: true, autoSwitch: true},
+		{name: "automatic health ignores queued acceptance", failure: `{"status_code":503,"message":"unavailable"}`, retries: 3, wantPosts: 2, success: true, queued: true, autoSwitch: true},
+		{name: "automatic health ignores content rejection", failure: `{"code":"server_error","message":"content_policy violation"}`, retries: 3, autoSwitch: true},
+		{name: "automatic health keeps uncertain native attempt pending", retries: 3, pollStatus: 401, autoSwitch: true},
+		{name: "automatic health rejects invalid generated image", retries: 3, invalidResult: true, autoSwitch: true},
+		{name: "automatic health releases completed job with missing artifact", retries: 3, missingResult: true, autoSwitch: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			db := setupAsyncImageWorkerTestDB(t)
@@ -1174,6 +1181,11 @@ func TestAsyncImageRetry(t *testing.T) {
 			}
 
 			require.NoError(t, db.AutoMigrate(&model.Channel{}, &model.Ability{}, &model.QuotaData{}))
+			if tc.autoSwitch {
+				require.NoError(t, db.AutoMigrate(&model.ChannelAutoSwitchState{}, &model.ChannelAutoSwitchAttempt{}))
+				require.NoError(t, db.Session(&gorm.Session{AllowGlobalUpdate: true}).Delete(&model.ChannelAutoSwitchAttempt{}).Error)
+				require.NoError(t, db.Where("channel_id IN ?", []int{701, 809}).Delete(&model.ChannelAutoSwitchState{}).Error)
+			}
 			require.NoError(t, db.Where("channel_id IN ?", []int{701, 809}).Delete(&model.Ability{}).Error)
 			oldRetry, oldMemory, oldBatch, oldLog := common.RetryTimes, common.MemoryCacheEnabled, common.BatchUpdateEnabled, common.LogConsumeEnabled
 			common.RetryTimes, common.MemoryCacheEnabled, common.BatchUpdateEnabled, common.LogConsumeEnabled = tc.retries, tc.cache, false, true
@@ -1222,6 +1234,10 @@ func TestAsyncImageRetry(t *testing.T) {
 					_, _ = io.WriteString(w, `{"status":"completed","data":[{"b64_json":"invalid image bytes"}]}`)
 					return
 				}
+				if tc.missingResult {
+					_, _ = io.WriteString(w, `{"status":"completed","data":[]}`)
+					return
+				}
 				if strings.HasSuffix(r.URL.Path, "/first") || tc.backupFails {
 					fmt.Fprintf(w, `{"status":"failed","error":%s}`, tc.failure)
 					return
@@ -1245,8 +1261,11 @@ func TestAsyncImageRetry(t *testing.T) {
 				mapping, err := common.Marshal(map[string]string{"custom-image-alias": upstreamModel})
 				require.NoError(t, err)
 				channel := &model.Channel{Id: id, Name: upstreamModel, Type: constant.ChannelTypeOpenAI, Key: "retry-upstream-key", Models: "custom-image-alias", Group: "default", Status: common.ChannelStatusEnabled, Priority: common.GetPointer(int64(5)), Weight: common.GetPointer(uint(1)), BaseURL: common.GetPointer(upstream.URL), Setting: common.GetPointer(string(setting)), ModelMapping: common.GetPointer(string(mapping))}
-				if tc.queued && i == 1 {
+				if (tc.queued || tc.autoSwitch) && i == 1 {
 					channel.Priority = common.GetPointer(int64(4))
+				}
+				if tc.autoSwitch {
+					channel.OtherSettings = `{"auto_switch_enabled":true}`
 				}
 				require.NoError(t, db.Create(channel).Error)
 				require.NoError(t, channel.AddAbilities(db))
@@ -1276,6 +1295,14 @@ func TestAsyncImageRetry(t *testing.T) {
 			if tc.pinned {
 				service.GetChannelConstraints(c).AddPin(dto.ChannelPin{ChannelId: 701, Source: dto.PinSourceToken, Rank: dto.PinRankToken, RetryMode: dto.PinRetrySingleAttempt})
 			}
+			var initialTicket *model.ChannelAutoSwitchTicket
+			if tc.autoSwitch {
+				selected, _, err := service.CacheGetRandomSatisfiedChannel(&service.RetryParam{Ctx: c, TokenGroup: "default", ModelName: "custom-image-alias", RequestPath: c.Request.URL.Path})
+				require.NoError(t, err)
+				require.Equal(t, 701, selected.Id)
+				initialTicket = service.AutoSwitchAttempt(c)
+				require.NotNil(t, initialTicket)
+			}
 			info := &relaycommon.RelayInfo{UserId: 61, TokenId: 62, UsingGroup: "default", OriginModelName: "custom-image-alias", FinalPreConsumedQuota: 150000, ChannelMeta: &relaycommon.ChannelMeta{ChannelId: 701, UpstreamModelName: "upstream-first"}}
 			if tc.multipart {
 				info.RelayMode = relayconstant.RelayModeImagesEdits
@@ -1290,6 +1317,19 @@ func TestAsyncImageRetry(t *testing.T) {
 			var task model.Task
 			require.NoError(t, db.First(&task).Error)
 			require.NotNil(t, task.PrivateData.ImageRetry)
+			if tc.autoSwitch {
+				assert.Nil(t, service.AutoSwitchAttempt(c), "HTTP completion must not record queue or native acceptance as success")
+				var attempt model.ChannelAutoSwitchAttempt
+				require.NoError(t, db.First(&attempt, "id = ?", initialTicket.ID).Error)
+				if tc.queued {
+					assert.Nil(t, task.PrivateData.AutoSwitch)
+					assert.EqualValues(t, "released", attempt.Outcome)
+				} else {
+					require.NotNil(t, task.PrivateData.AutoSwitch)
+					assert.Equal(t, initialTicket.ID, task.PrivateData.AutoSwitch.ID)
+					assert.Zero(t, attempt.CompletedAt, "accepted native task remains pending")
+				}
+			}
 			originalPath := task.PrivateData.ImageRetry.BodyPath
 			nativePath := task.PrivateData.RequestBodyPath
 			original, err := os.ReadFile(originalPath)
@@ -1318,6 +1358,25 @@ func TestAsyncImageRetry(t *testing.T) {
 			}
 			var stored model.Task
 			require.NoError(t, db.First(&stored, task.ID).Error)
+			if tc.autoSwitch {
+				states, err := model.GetChannelAutoSwitchStates([]int{701, 809}, "default", "custom-image-alias", "/v1/images/generations")
+				require.NoError(t, err)
+				if tc.success {
+					assert.EqualValues(t, 1, states[701].WindowFailures)
+					assert.EqualValues(t, 1, states[809].WindowTotal)
+					assert.Zero(t, states[809].WindowFailures)
+				} else {
+					assert.Zero(t, states[701].WindowFailures)
+					assert.Zero(t, states[701].WindowTotal)
+					var attempt model.ChannelAutoSwitchAttempt
+					require.NoError(t, db.First(&attempt, "id = ?", initialTicket.ID).Error)
+					if tc.pollStatus != 0 {
+						assert.Zero(t, attempt.CompletedAt, "uncertain polling must not release an accepted attempt")
+					} else {
+						assert.Equal(t, model.ChannelAutoSwitchNeutral, attempt.Outcome)
+					}
+				}
+			}
 			require.Len(t, postedModels, tc.wantPosts)
 			for _, ok := range requestChecks {
 				assert.True(t, ok, "retry must reconstruct original parameters")
@@ -1391,6 +1450,51 @@ func TestAsyncImageRetry(t *testing.T) {
 			assert.Len(t, postedModels, beforePosts)
 		})
 	}
+}
+
+func TestAsyncImageAcceptedProbeSurvivesSnapshotFailure(t *testing.T) {
+	db := setupAsyncImageWorkerTestDB(t)
+	require.NoError(t, db.AutoMigrate(&model.Channel{}, &model.Ability{}, &model.ChannelAutoSwitchState{}, &model.ChannelAutoSwitchAttempt{}))
+	oldMemory := common.MemoryCacheEnabled
+	common.MemoryCacheEnabled = false
+	t.Cleanup(func() { common.MemoryCacheEnabled = oldMemory })
+	for i, id := range []int{163, 174} {
+		channel := model.Channel{Id: id, Type: constant.ChannelTypeOpenAI, Key: "fixture", Status: common.ChannelStatusEnabled,
+			Models: "probe-image", Group: "default", Priority: common.GetPointer(int64(2 - i)), OtherSettings: `{"auto_switch_enabled":true}`}
+		require.NoError(t, db.Create(&channel).Error)
+		require.NoError(t, channel.AddAbilities(db))
+	}
+	failedAt := time.Now().Add(-10 * time.Minute)
+	for range 3 {
+		ticket, err := model.BeginChannelAutoSwitchAttempt(163, "default", "probe-image", "/v1/images/generations", failedAt)
+		require.NoError(t, err)
+		require.NotNil(t, ticket)
+		require.NoError(t, model.RecordChannelAutoSwitchResult(*ticket, model.ChannelAutoSwitchFailure, "upstream_unavailable", failedAt))
+	}
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/images/generations", strings.NewReader(`{"model":"probe-image"}`))
+	c.Request.Header.Set("Content-Type", "application/json")
+	defer common.CleanupBodyStorage(c)
+	channel, _, err := service.CacheGetRandomSatisfiedChannel(&service.RetryParam{Ctx: c, TokenGroup: "default", ModelName: "probe-image"})
+	require.NoError(t, err)
+	require.Equal(t, 163, channel.Id)
+	ticket := service.AutoSwitchAttempt(c)
+	require.NotNil(t, ticket)
+	require.True(t, ticket.Probe)
+	blockedDirectory := filepath.Join(t.TempDir(), "file-blocks-request-directory")
+	require.NoError(t, os.WriteFile(blockedDirectory, []byte("fixture"), 0600))
+	t.Setenv("ASYNC_IMAGE_REQUEST_STORAGE_PATH", blockedDirectory)
+	info := &relaycommon.RelayInfo{UsingGroup: "default", OriginModelName: "probe-image", ChannelMeta: &relaycommon.ChannelMeta{ChannelId: 163}}
+	apiErr := relay.SubmitInternalAsyncImageTask(c, info, &dto.ImageRequest{Model: "probe-image"}, &relay.NativeAsyncImageSnapshot{ID: "accepted", ChannelID: 163})
+	require.NotNil(t, apiErr)
+	service.ReleaseAutoSwitchAttempt(c)
+	var attempt model.ChannelAutoSwitchAttempt
+	require.NoError(t, db.First(&attempt, "id = ?", ticket.ID).Error)
+	assert.Zero(t, attempt.CompletedAt, "a local snapshot error cannot release an already accepted probe")
+	states, err := model.GetChannelAutoSwitchStates([]int{163}, "default", "probe-image", "/v1/images/generations")
+	require.NoError(t, err)
+	assert.Equal(t, ticket.ID, states[163].ProbeAttemptID)
+	assert.Zero(t, states[163].ProbeSuccesses)
 }
 
 func TestAsyncImageRetryWorkerOwnership(t *testing.T) {

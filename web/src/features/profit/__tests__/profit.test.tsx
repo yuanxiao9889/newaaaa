@@ -681,8 +681,10 @@ it('keeps cost price status unknown while loading or after a fetch failure', asy
       unpriced_count: 1,
     },
   ]
-  const { promise: pendingPrices, reject: rejectPrices } =
-    Promise.withResolvers<never>()
+  let rejectPrices!: (reason: Error) => void
+  const pendingPrices = new Promise<never>((_resolve, reject) => {
+    rejectPrices = reject
+  })
   const original = vi.mocked(api.get).getMockImplementation()
   if (!original) throw new Error('API fixture was not initialized')
   vi.mocked(api.get).mockImplementation((url, config) =>

@@ -7,16 +7,81 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
+	"github.com/QuantumNous/new-api/model"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relaykit/dto"
+	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/gin-gonic/gin"
+	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
 )
+
+func TestOaiResponsesHandlerOnlyCompletedGenerationConfirmsChannelHealth(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	previousDB, previousType := model.DB, common.MainDatabaseType()
+	database, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	sqlDB, err := database.DB()
+	require.NoError(t, err)
+	sqlDB.SetMaxOpenConns(1)
+	require.NoError(t, database.AutoMigrate(&model.ChannelAutoSwitchState{}, &model.ChannelAutoSwitchAttempt{}))
+	model.DB = database
+	common.SetMainDatabaseType(common.DatabaseTypeSQLite)
+	t.Cleanup(func() {
+		model.DB = previousDB
+		common.SetMainDatabaseType(previousType)
+		require.NoError(t, sqlDB.Close())
+	})
+
+	for i, test := range []struct {
+		name        string
+		body        string
+		wantOutcome model.ChannelAutoSwitchOutcome
+	}{
+		{"completed", `{"status":"completed","output":[]}`, model.ChannelAutoSwitchSuccess},
+		{"queued", `{"status":"queued","output":[]}`, ""},
+		{"in progress", `{"status":"in_progress","output":[]}`, ""},
+		{"background without status", `{"background":true,"output":[]}`, ""},
+		{"failed without error", `{"status":"failed","output":[]}`, model.ChannelAutoSwitchNeutral},
+		{"cancelled without error", `{"status":"cancelled","output":[]}`, model.ChannelAutoSwitchNeutral},
+		{"incomplete", `{"status":"incomplete","output":[]}`, model.ChannelAutoSwitchNeutral},
+		{"missing status", `{"output":[]}`, model.ChannelAutoSwitchNeutral},
+		{"unknown status", `{"status":"unknown","output":[]}`, model.ChannelAutoSwitchNeutral},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			ticket, err := model.BeginChannelAutoSwitchAttempt(i+1, "default", "responses-model", "/v1/responses", time.Now())
+			require.NoError(t, err)
+			require.NotNil(t, ticket)
+			w := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(w)
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+			c.Set("channel_auto_switch_attempt", ticket)
+			resp := &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       io.NopCloser(strings.NewReader(test.body)),
+				Header:     http.Header{"Content-Type": []string{"application/json"}},
+			}
+
+			_, apiErr := OaiResponsesHandler(c, &relaycommon.RelayInfo{}, resp)
+			require.Nil(t, apiErr)
+			service.MarkRequestPolicySuccess(c, nil)
+
+			var attempt model.ChannelAutoSwitchAttempt
+			require.NoError(t, database.First(&attempt, "id = ?", ticket.ID).Error)
+			assert.Equal(t, test.wantOutcome, attempt.Outcome)
+			assert.Equal(t, test.wantOutcome != "", attempt.CompletedAt > 0)
+			assert.Nil(t, service.AutoSwitchAttempt(c))
+			assert.Equal(t, test.body, w.Body.String())
+		})
+	}
+}
 
 func TestOaiResponsesHandlerCountsOutputCallsNotDeclarations(t *testing.T) {
 	gin.SetMode(gin.TestMode)

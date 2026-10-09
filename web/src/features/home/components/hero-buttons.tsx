@@ -17,7 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { Link } from '@tanstack/react-router'
-import { ArrowRight } from 'lucide-react'
+import { ArrowUpRight } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
 import { Button } from '@/components/ui/button'
@@ -26,27 +26,23 @@ interface HeroButtonsProps {
   isAuthenticated: boolean
 }
 
-/**
- * Hero section action buttons
- */
-export function HeroButtons({ isAuthenticated }: HeroButtonsProps) {
+export function HeroButtons(props: HeroButtonsProps) {
   const { t } = useTranslation()
-  if (isAuthenticated) {
-    return (
-      <Button size='lg' render={<Link to='/dashboard' />}>
-        {t('Go to Dashboard')} <ArrowRight className='ml-2 h-5 w-5' />
-      </Button>
-    )
-  }
-
   return (
     <>
-      <Button size='lg' render={<Link to='/sign-up' />}>
-        {t('Get Started')}
-        <ArrowRight className='ml-2 h-5 w-5' />
+      <Button
+        className='home-action home-action-primary gap-8'
+        render={<Link to={props.isAuthenticated ? '/dashboard' : '/sign-up'} />}
+      >
+        {props.isAuthenticated ? t('Go to Dashboard') : t('Get Started')}
+        <ArrowUpRight className='size-4' aria-hidden='true' />
       </Button>
-      <Button size='lg' variant='outline' render={<Link to='/sign-in' />}>
-        {t('Sign In')}
+      <Button
+        className='home-action home-action-secondary'
+        variant='outline'
+        render={<Link to='/pricing' />}
+      >
+        {t('View Pricing')}
       </Button>
     </>
   )

@@ -148,12 +148,15 @@ func CacheGetRandomSatisfiedChannel(param *RetryParam) (*model.Channel, string, 
 			}
 			logger.LogDebug(param.Ctx, "Auto selecting group: %s, priorityRetry: %d", autoGroup, priorityRetry)
 
-			channel, _ = model.GetRandomSatisfiedChannel(
+			channel, err = selectAutoSwitchChannel(param.Ctx,
 				autoGroup,
 				param.ModelName,
 				priorityRetry,
 				filters,
 			)
+			if err != nil {
+				return nil, autoGroup, err
+			}
 			if channel == nil {
 				// Current group has no available channel for this model, try next group
 				// 当前分组没有该模型的可用渠道，尝试下一个分组
@@ -191,7 +194,7 @@ func CacheGetRandomSatisfiedChannel(param *RetryParam) (*model.Channel, string, 
 			break
 		}
 	} else {
-		channel, err = model.GetRandomSatisfiedChannel(
+		channel, err = selectAutoSwitchChannel(param.Ctx,
 			param.TokenGroup,
 			param.ModelName,
 			param.GetRetry(),
@@ -317,6 +320,11 @@ func SelectChannelForRequest(c *gin.Context, modelName string, retry *RetryParam
 			affinitySatisfied := false
 			if err == nil && preferred != nil && preferred.Status == common.ChannelStatusEnabled {
 				affinitySatisfied, _ = model.ChannelSatisfiesFilters(preferred, modelName, constraints.Filters)
+				// Soft affinity must not pin traffic to a cooling automatic
+				// channel or prevent recovery to the administrator's priority.
+				if preferred.GetOtherSettings().AutoSwitchEnabled && RequestPolicy(c).SessionMode != "strict" {
+					affinitySatisfied = false
+				}
 			}
 			if affinitySatisfied {
 				if usingGroup == "auto" {

@@ -26,6 +26,7 @@ import type {
   BatchDeleteParams,
   BatchSetTagParams,
   Channel,
+  ChannelAutoSwitchStatus,
   ChannelBalanceResponse,
   ChannelOpsResponse,
   ChannelTestResponse,
@@ -139,6 +140,17 @@ export async function searchChannels(
 export async function getChannel(id: number): Promise<GetChannelResponse> {
   const res = await api.get(`/api/channel/${id}`)
   return res.data
+}
+
+export async function getChannelAutoSwitchStatus(
+  id: number,
+  signal?: AbortSignal
+): Promise<ChannelAutoSwitchStatus> {
+  const response = await api.get<{
+    success: boolean
+    data: ChannelAutoSwitchStatus
+  }>(`/api/channel/${id}/auto_switch`, { signal })
+  return requireServerSuccess(response.data).data
 }
 
 /**

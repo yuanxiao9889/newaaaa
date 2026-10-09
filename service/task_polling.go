@@ -121,6 +121,7 @@ func sweepTimedOutTasks(ctx context.Context) {
 			continue
 		}
 		timedOutCount++
+		RecordAutoSwitchTaskFailure(ctx, task, 0, "upstream_poll_timeout", reason)
 		if !isLegacy && task.Quota != 0 {
 			if err := RefundTaskQuota(ctx, task, reason); err != nil {
 				logger.LogError(ctx, fmt.Sprintf("sweepTimedOutTasks refund failed for task %s: %v", task.TaskID, err))
@@ -721,6 +722,7 @@ func SettleTaskBillingOnComplete(ctx context.Context, adaptor TaskPollingAdaptor
 	if task == nil || taskResult == nil {
 		return fmt.Errorf("missing task settlement result")
 	}
+	RecordAutoSwitchTaskResult(ctx, task, taskResult)
 	if task.PrivateData.BillingState == TaskBillingStateSettled || task.PrivateData.BillingState == TaskBillingStateRefunded {
 		return nil
 	}

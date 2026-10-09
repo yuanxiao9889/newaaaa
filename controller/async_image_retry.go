@@ -44,10 +44,14 @@ func runRetryableAsyncImageRelay(ctx context.Context, task *model.Task) ([]byte,
 			}
 			var failure *relay.NativeImageTaskError
 			if !errors.As(err, &failure) {
+				if errors.Is(err, relay.ErrNativeImageResultUnavailable) {
+					service.RecordAutoSwitchTaskFailure(ctx, task, 0, "", "image_result_unavailable")
+				}
 				// Transport uncertainty, timeout and result-download errors cannot
 				// establish that upstream generation failed. Never submit again.
 				return nil, channelID, usedProxy, nil, err
 			}
+			service.RecordAutoSwitchTaskFailure(ctx, task, failure.StatusCode, failure.Code+" "+failure.Type, failure.Message)
 			proxy = usedProxy
 			upstreamErrorType = failure.Type
 			channel, err = model.GetChannelById(channelID, true)
@@ -90,6 +94,7 @@ func runRetryableAsyncImageRelay(ctx context.Context, task *model.Task) ([]byte,
 			if err != nil {
 				return nil, task.ChannelId, "", nil, err
 			}
+			defer service.ReleaseAutoSwitchAttempt(c)
 			constraints := service.GetChannelConstraints(c)
 			constraints.Pins = append(constraints.Pins, retry.Constraints.Pins...)
 			constraints.Filters = append(constraints.Filters, retry.Constraints.Filters...)
@@ -119,6 +124,7 @@ func runRetryableAsyncImageRelay(ctx context.Context, task *model.Task) ([]byte,
 			task.ChannelId = channel.Id
 			task.PrivateData.ChannelRetryPath = append(task.PrivateData.ChannelRetryPath, strconv.Itoa(channel.Id))
 			task.PrivateData.UpstreamTaskID = ""
+			task.PrivateData.AutoSwitch = service.AutoSwitchAttempt(c)
 			retry.Submitting = true
 			if err := persistAsyncImageAttempt(task); err != nil {
 				common.CleanupBodyStorage(c)
@@ -136,6 +142,9 @@ func runRetryableAsyncImageRelay(ctx context.Context, task *model.Task) ([]byte,
 			task.Properties.UpstreamModelName = info.UpstreamModelName
 			retry.Submitting = false
 			if apiErr == nil {
+				// A valid synchronous response is checked by the worker; an
+				// accepted native job must retain its ticket until polling ends.
+				service.DetachAutoSwitchAttempt(c)
 				if value, accepted := c.Get(relay.NativeAsyncImageFormat); accepted {
 					snapshot, ok := value.(*relay.NativeAsyncImageSnapshot)
 					if !ok {
@@ -155,6 +164,7 @@ func runRetryableAsyncImageRelay(ctx context.Context, task *model.Task) ([]byte,
 				}
 				return recorder.Body.Bytes(), channel.Id, proxy, usage, nil
 			}
+			service.RecordAutoSwitchRequestResult(c, false, apiErr)
 		}
 		apiErr = service.NormalizeViolationFeeError(apiErr)
 		detail := buildInternalAsyncChannelRetryDetail(len(task.PrivateData.ChannelRetryPath), channel, apiErr)

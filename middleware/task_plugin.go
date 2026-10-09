@@ -317,14 +317,6 @@ func PrepareTaskPluginRoute() gin.HandlerFunc {
 // through so the existing endpoint remains responsible for its validation.
 func PinTaskPluginEndpoint() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		// Explicit internal image jobs must retain the original request for the
-		// durable worker, before plugin decoding or model canonicalization.
-		protocol, _, protocolPath := pluginruntime.LookupHostProtocolOperation(c.Request.Method, c.Request.URL.Path)
-		async, _ := strconv.ParseBool(strings.TrimSpace(c.Query("async")))
-		if protocolPath && protocol == pluginruntime.ProtocolOpenAIImage && async && common.GetAsyncImageInternalTaskEnabled() {
-			c.Next()
-			return
-		}
 		generation := pluginruntime.DefaultRegistry.Generation()
 		if generation == nil {
 			c.Next()

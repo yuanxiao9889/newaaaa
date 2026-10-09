@@ -101,6 +101,7 @@ func RecordPolicyFailure(c *gin.Context, channelID int, err *types.NewAPIError, 
 	if c == nil || err == nil {
 		return
 	}
+	RecordAutoSwitchRequestResult(c, false, err)
 	source := "upstream"
 	switch {
 	case types.IsChannelError(err):
@@ -117,7 +118,7 @@ func RecordPolicyFailure(c *gin.Context, channelID int, err *types.NewAPIError, 
 	}
 	state.AddEvent(event)
 	event.Decision, event.Health = decision, "unchanged"
-	if source != "local" && c.GetBool("auto_ban") && ShouldDisableChannel(err) {
+	if source != "local" && c.GetBool("auto_ban") && ShouldDisableChannelForRequest(c, channelID, err) {
 		event.Health = "channel_disable_requested"
 		if common.GetContextKeyBool(c, constant.ContextKeyChannelIsMultiKey) {
 			event.Health = "key_disable_requested"
@@ -133,6 +134,7 @@ func MarkRequestPolicySuccess(c *gin.Context, stream *relaycommon.StreamStatus) 
 	}
 	state.OutcomeRecorded = true
 	state.Successful = stream == nil || stream.IsNormalEnd() && !stream.HasErrors() && (stream.ResponseOutcome() == "" || stream.ResponseOutcome() == "completed")
+	RecordAutoSwitchRequestResult(c, state.Successful, nil)
 	decision := PolicyDecision{Action: "success", Reason: "request_completed", Source: "upstream"}
 	if !state.Successful {
 		decision = PolicyDecision{Action: "stop", Reason: "stream_not_successful", Source: "system"}

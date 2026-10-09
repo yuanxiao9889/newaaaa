@@ -161,19 +161,25 @@ func executeInternalAsyncImageTask(ctx context.Context, task *model.Task) error 
 
 	imageResp, err := parseInternalAsyncImageResponse(task, imageResponseBody)
 	if err != nil {
+		service.RecordAutoSwitchTaskFailure(ctx, task, 0, "", "image_result_unavailable")
 		failInternalAsyncImageTask(ctx, task, "parse image response failed: "+err.Error())
 		return err
 	}
 	assetRef := firstImageAssetRef(imageResp)
 	if assetRef == "" {
+		service.RecordAutoSwitchTaskFailure(ctx, task, 0, "", "image_result_unavailable")
 		err = fmt.Errorf("upstream returned no image result")
 		failInternalAsyncImageTask(ctx, task, err.Error())
 		return err
 	}
 	if err = service.StoreAsyncImageResult(task, proxy, assetRef); err != nil {
+		service.RecordAutoSwitchTaskFailure(ctx, task, 0, "", "image_result_unavailable")
 		failInternalAsyncImageTask(ctx, task, "store async image result failed: "+err.Error())
 		return err
 	}
+	// An accepted task ID is insufficient. Count success only after the
+	// provider result has been downloaded and validated as an actual image.
+	service.RecordAutoSwitchTaskResult(ctx, task, &relaycommon.TaskInfo{Status: model.TaskStatusSuccess})
 
 	now := time.Now().Unix()
 	task.ChannelId = channelID
@@ -187,6 +193,11 @@ func executeInternalAsyncImageTask(ctx context.Context, task *model.Task) error 
 
 	preSettlementQuota := task.Quota
 	var quotaClamp *common.QuotaClamp
+	if task.PrivateData.RequestRelayFormat == relay.PluginAsyncImageFormat {
+		if err := service.AdjustTaskQuotaForFinalSettlement(ctx, task, task.PrivateData.ActualQuota, "plugin image usage settlement"); err != nil {
+			return fmt.Errorf("plugin image usage settlement failed: %w", err)
+		}
+	}
 	if usage == nil && task.PrivateData.RequestRelayFormat == relay.NativeAsyncImageFormat {
 		// All native task paths (including durable resume and channel retry)
 		// return the completed envelope instead of going through DoResponse.
@@ -242,11 +253,21 @@ func executeInternalAsyncImageTask(ctx context.Context, task *model.Task) error 
 }
 
 func runInternalAsyncImageRelay(ctx context.Context, task *model.Task) ([]byte, int, string, *dto.Usage, error) {
+	if task.PrivateData.RequestRelayFormat == relay.PluginAsyncImageFormat {
+		body, proxy, err := runQueuedTaskPluginImage(ctx, task)
+		return body, task.ChannelId, proxy, nil, err
+	}
 	if task.PrivateData.ImageRetry != nil {
 		return runRetryableAsyncImageRelay(ctx, task)
 	}
 	if task.PrivateData.RequestRelayFormat == relay.NativeAsyncImageFormat {
 		body, channelID, proxy, err := relay.ResumeNativeAsyncImageTask(ctx, task)
+		var failure *relay.NativeImageTaskError
+		if errors.As(err, &failure) {
+			service.RecordAutoSwitchTaskFailure(ctx, task, failure.StatusCode, failure.Code+" "+failure.Type, failure.Message)
+		} else if errors.Is(err, relay.ErrNativeImageResultUnavailable) {
+			service.RecordAutoSwitchTaskFailure(ctx, task, 0, "", "image_result_unavailable")
+		}
 		return body, channelID, proxy, nil, err
 	}
 	body, err := os.ReadFile(task.PrivateData.RequestBodyPath)
@@ -274,6 +295,7 @@ func runInternalAsyncImageRelay(ctx context.Context, task *model.Task) ([]byte, 
 			return nil, 0, "", nil, err
 		}
 		if c != nil {
+			defer service.ReleaseAutoSwitchAttempt(c)
 			lastCtx = c
 			if usageValue, ok := c.Get("async_image_usage"); ok {
 				if usage, ok := usageValue.(*dto.Usage); ok {
@@ -292,6 +314,8 @@ func runInternalAsyncImageRelay(ctx context.Context, task *model.Task) ([]byte, 
 				return nil, 0, "", nil, fmt.Errorf("internal async image relay selected no channel")
 			}
 			setInternalAsyncChannelRetryPath(task, retryPath)
+			task.PrivateData.AutoSwitch = service.AutoSwitchAttempt(c)
+			service.DetachAutoSwitchAttempt(c)
 			if value, ok := c.Get(relay.NativeAsyncImageFormat); ok {
 				snapshot, ok := value.(*relay.NativeAsyncImageSnapshot)
 				if !ok {
@@ -306,11 +330,18 @@ func runInternalAsyncImageRelay(ctx context.Context, task *model.Task) ([]byte, 
 				}
 				removeInternalAsyncImageRequestSnapshot(oldPath)
 				body, channelID, proxy, err := relay.ResumeNativeAsyncImageTask(ctx, task)
+				var failure *relay.NativeImageTaskError
+				if errors.As(err, &failure) {
+					service.RecordAutoSwitchTaskFailure(ctx, task, failure.StatusCode, failure.Code+" "+failure.Type, failure.Message)
+				} else if errors.Is(err, relay.ErrNativeImageResultUnavailable) {
+					service.RecordAutoSwitchTaskFailure(ctx, task, 0, "", "image_result_unavailable")
+				}
 				return body, channelID, proxy, nil, err
 			}
 			return recorder.Body.Bytes(), channel.Id, lastProxy, lastUsage, nil
 		}
 		lastErr = service.NormalizeViolationFeeError(newAPIError)
+		service.RecordAutoSwitchRequestResult(c, false, lastErr)
 		retryDetails = append(retryDetails, buildInternalAsyncChannelRetryDetail(retryParam.GetRetry()+1, channel, lastErr))
 		if channel != nil {
 			c.Set(suppressRelayErrorLogContextKey, true)

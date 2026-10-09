@@ -347,8 +347,10 @@ func migrateDB() error {
 		common.SysError("failed to migrate options primary key: " + err.Error())
 	}
 
-	models := []interface{}{
+	models := []any{
 		&Channel{},
+		&ChannelAutoSwitchState{},
+		&ChannelAutoSwitchAttempt{},
 		&Token{},
 		&User{},
 		&UserSession{},

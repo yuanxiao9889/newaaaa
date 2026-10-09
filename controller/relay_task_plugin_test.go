@@ -592,6 +592,7 @@ export function buildQueryRequest(){throw new Error("completed submissions must 
 			info.IsPlayground = true
 			info.UserSetting.BillingPreference = "wallet_only"
 			info.PublicTaskID = model.GenerateTaskID()
+			info.StartTime = time.Now().Add(-37 * time.Second)
 			info.LockedChannel = &ch
 			outcome, taskErr := executeTaskSubmission(c, info)
 			require.Nil(t, taskErr)
@@ -604,6 +605,9 @@ export function buildQueryRequest(){throw new Error("completed submissions must 
 			assert.Equal(t, want, stored.Quota)
 			assert.Equal(t, model.TaskStatus(tc.status), stored.Status)
 			assert.Positive(t, stored.FinishTime)
+			assert.Equal(t, info.StartTime.Unix(), stored.SubmitTime)
+			assert.Equal(t, info.StartTime.Unix(), stored.StartTime)
+			assert.GreaterOrEqual(t, stored.FinishTime-stored.SubmitTime, int64(37))
 			assert.Equal(t, float64(4), info.TieredBillingSnapshot.EstimatedQuotaBeforeGroup/(0.01*common.QuotaPerUnit))
 			if tc.status == "SUCCESS" {
 				assert.Equal(t, tc.count, stored.PrivateData.BillingContext.TieredSnapshot.UsageFacts["units"])
@@ -826,6 +830,8 @@ type videoRetryTestFixture struct {
 	channels      [2]model.Channel
 	submitCalls   [2]atomic.Int32
 	pollStatus    [2]string
+	pollReason    [2]string
+	autoSwitch    bool
 	pollHTTP      [2]int
 	submitStatus  [2]string
 	malformed     [2]bool
@@ -834,12 +840,13 @@ type videoRetryTestFixture struct {
 	releaseSubmit chan struct{}
 }
 
-func newVideoRetryTestFixture(t *testing.T) *videoRetryTestFixture {
+func newVideoRetryTestFixture(t *testing.T, autoSwitch ...bool) *videoRetryTestFixture {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
 	service.InitHttpClient()
-	db, dialect := openTaskDialectDatabase(t, &model.User{}, &model.Channel{}, &model.Ability{}, &model.Task{}, &model.Log{})
+	db, dialect := openTaskDialectDatabase(t, &model.User{}, &model.Channel{}, &model.Ability{}, &model.Task{}, &model.Log{}, &model.ChannelAutoSwitchState{}, &model.ChannelAutoSwitchAttempt{})
 	f := &videoRetryTestFixture{db: db, pollStatus: [2]string{"FAILURE", "SUCCESS"}}
+	f.autoSwitch = len(autoSwitch) > 0 && autoSwitch[0]
 	oldDB, oldLogDB := model.DB, model.LOG_DB
 	oldMain, oldLog := common.MainDatabaseType(), common.LogDatabaseType()
 	oldRedis, oldMemory, oldBatch, oldConsume, oldExport := common.RedisEnabled, common.MemoryCacheEnabled, common.BatchUpdateEnabled, common.LogConsumeEnabled, common.DataExportEnabled
@@ -877,7 +884,7 @@ export function buildSubmitRequest(ctx){return {url:ctx.baseUrl+"/submit",body:{
 export function parseSubmitResponse(ctx,resp){let result={taskId:resp.body.id,taskData:resp.body};if(resp.body.immediate){result.immediate={status:resp.body.immediate,reason:"replacement rejected"};}return result;}
 export function extractUsage(ctx){return {seconds:Number(ctx.requestBody.seconds)};}
 export function buildQueryRequest(ctx){return {url:ctx.baseUrl+"/query/"+ctx.taskId,method:"GET"};}
-export function parseTaskResult(ctx,body){return {status:body.status,reason:"provider rejected video",url:body.url};}
+export function parseTaskResult(ctx,body){return {status:body.status,reason:body.reason||"provider rejected video",url:body.url};}
 export function extractUsageOnComplete(ctx,result,body){return {seconds:body.seconds};}
 export function listArtifacts(){return [];}
 export function buildContentRequest(){return {};}
@@ -906,13 +913,18 @@ export function buildContentRequest(){return {};}
 			if f.pollHTTP[i] > 0 {
 				w.WriteHeader(f.pollHTTP[i])
 			}
-			_, _ = fmt.Fprintf(w, `{"status":%q,"url":"https://cdn.example/video.mp4","seconds":3}`, f.pollStatus[i])
+			_, _ = fmt.Fprintf(w, `{"status":%q,"reason":%q,"url":"https://cdn.example/video.mp4","seconds":3}`, f.pollStatus[i], f.pollReason[i])
 		}))
 		t.Cleanup(server.Close)
 		channel := model.Channel{Type: constant.ChannelTypeTaskPlugin, Name: key, Key: "test-key", BaseURL: &server.URL, Status: common.ChannelStatusEnabled, Models: "retry-video", Group: "default", ModelMapping: common.GetPointer(fmt.Sprintf(`{"retry-video":"upstream-video-%d"}`, i))}
 		channel.SetSetting(kitdto.ChannelSettings{TaskPluginKey: key})
+		if f.autoSwitch {
+			channel.Id = []int{163, 174}[i]
+			channel.Priority = common.GetPointer(int64(1 - i))
+			channel.SetOtherSettings(kitdto.ChannelOtherSettings{AutoSwitchEnabled: true})
+		}
 		require.NoError(t, db.Create(&channel).Error)
-		require.NoError(t, db.Create(&model.Ability{Group: "default", Model: "retry-video", ChannelId: channel.Id, Enabled: true}).Error)
+		require.NoError(t, db.Create(&model.Ability{Group: "default", Model: "retry-video", ChannelId: channel.Id, Enabled: true, Priority: channel.Priority}).Error)
 		f.channels[i] = channel
 	}
 	return f
@@ -948,7 +960,14 @@ func (f *videoRetryTestFixture) submit(t *testing.T, multipartBody bool) *model.
 	middleware.PinTaskPluginEndpoint()(c)
 	middleware.PrepareTaskPluginEndpoint()(c)
 	require.False(t, c.IsAborted())
-	require.Nil(t, middleware.SetupContextForSelectedChannel(c, &f.channels[0], "retry-video"))
+	selected := &f.channels[0]
+	if f.autoSwitch {
+		var selectErr *service.ChannelSelectError
+		selected, _, selectErr = service.SelectChannelForRequest(c, "retry-video", &service.RetryParam{Ctx: c, TokenGroup: "default", ModelName: "retry-video"})
+		require.Nil(t, selectErr)
+		require.NotNil(t, selected)
+	}
+	require.Nil(t, middleware.SetupContextForSelectedChannel(c, selected, "retry-video"))
 	info := &relaycommon.RelayInfo{UserId: f.user.Id, UserGroup: "default", UsingGroup: "default", TokenGroup: "default", UserQuota: f.user.Quota, OriginModelName: "retry-video", IsPlayground: true, TaskRelayInfo: &relaycommon.TaskRelayInfo{PublicTaskID: model.GenerateTaskID(), Action: c.GetString("task_action")}}
 	info.UserSetting.BillingPreference = "wallet_only"
 	outcome, taskErr := executeTaskSubmission(c, info)
@@ -1027,6 +1046,307 @@ func TestVideoTaskRetryAcrossChannelsAndFinalSettlement(t *testing.T) {
 			assert.Equal(t, int32(1), f.submitCalls[1].Load())
 		})
 	}
+}
+
+func TestChannelAutoSwitchVideoLifecycle(t *testing.T) {
+	f := newVideoRetryTestFixture(t, true)
+	f.pollReason[0] = "service unavailable"
+	// Failures arrive after the safe resubmission window. They must still
+	// protect future requests without duplicating these accepted jobs.
+	for range 3 {
+		task := f.submit(t, false)
+		require.Equal(t, 163, task.ChannelId)
+		require.NotNil(t, task.PrivateData.AutoSwitch)
+		task.PrivateData.VideoRetry.AcceptedAt = time.Now().Unix() - service.VideoTaskRetryWindowSeconds - 1
+		won, err := task.UpdateWithStatus(task.Status)
+		require.NoError(t, err)
+		require.True(t, won)
+		task = f.poll(t, task)
+		require.Equal(t, model.TaskStatus(model.TaskStatusFailure), task.Status)
+	}
+	assert.Equal(t, int32(3), f.submitCalls[0].Load())
+	assert.Zero(t, f.submitCalls[1].Load(), "late failures cannot submit a replacement")
+	states, err := model.ListChannelAutoSwitchStates(163)
+	require.NoError(t, err)
+	require.Len(t, states, 1)
+	assert.Equal(t, model.ChannelAutoSwitchCooling, states[0].Status)
+	backup := f.submit(t, false)
+	require.Equal(t, 174, backup.ChannelId)
+	backup = f.poll(t, backup)
+	require.Equal(t, model.TaskStatus(model.TaskStatusSuccess), backup.Status)
+	// Advance the eligibility time, without sleeping or bypassing the atomic
+	// probe claim. Only one accepted probe may be outstanding across requests.
+	require.NoError(t, f.db.Model(&model.ChannelAutoSwitchState{}).Where("channel_id = ?", 163).Update("cooldown_until", time.Now().Unix()-1).Error)
+	f.pollStatus[0] = "SUCCESS"
+	for i := range 3 {
+		probe := f.submit(t, false)
+		require.Equal(t, 163, probe.ChannelId)
+		require.True(t, probe.PrivateData.AutoSwitch.Probe)
+		states, err = model.ListChannelAutoSwitchStates(163)
+		require.NoError(t, err)
+		assert.Equal(t, i, states[0].ProbeSuccesses, "an accepted task ID is not success")
+		concurrent := f.submit(t, false)
+		require.Equal(t, 174, concurrent.ChannelId, "backup handles traffic while probe is in flight")
+		f.poll(t, concurrent)
+		probe = f.poll(t, probe)
+		require.Equal(t, model.TaskStatus(model.TaskStatusSuccess), probe.Status)
+	}
+	restored := f.submit(t, false)
+	require.Equal(t, 163, restored.ChannelId, "three final successes restore administrator priority")
+	assert.False(t, restored.PrivateData.AutoSwitch.Probe)
+	f.poll(t, restored)
+	for i, ch := range f.channels {
+		var stored model.Channel
+		require.NoError(t, f.db.First(&stored, ch.Id).Error)
+		assert.Equal(t, int64(1-i), *stored.Priority, "manual priority is never rewritten")
+		assert.Equal(t, common.ChannelStatusEnabled, stored.Status)
+	}
+	var user model.User
+	require.NoError(t, f.db.First(&user, f.user.Id).Error)
+	wantCharge := common.QuotaRound(8 * 3 * 0.01 * common.QuotaPerUnit)
+	assert.Equal(t, f.user.Quota-wantCharge, user.Quota, "three failed jobs refunded; eight successes charged once")
+	assert.Equal(t, wantCharge, user.UsedQuota)
+}
+
+func TestChannelAutoSwitchAdmissionAndFailureClasses(t *testing.T) {
+	for _, tc := range []struct {
+		name, reason string
+		onlyOne      bool
+	}{
+		{"single opted channel", "service unavailable", true},
+		{"content rejection", "content_policy_violation", false},
+		{"ambiguous generation rejection", "video generation failed", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newVideoRetryTestFixture(t, true)
+			f.pollReason[0] = tc.reason
+			if tc.onlyOne {
+				require.NoError(t, f.db.Model(&model.Channel{}).Where("id = ?", 174).Update("settings", "{}").Error)
+			}
+			for range 3 {
+				task := f.submit(t, false)
+				require.Equal(t, 163, task.ChannelId)
+				if tc.onlyOne {
+					assert.Nil(t, task.PrivateData.AutoSwitch)
+				}
+				task.PrivateData.VideoRetry.AcceptedAt = time.Now().Unix() - service.VideoTaskRetryWindowSeconds - 1
+				won, err := task.UpdateWithStatus(task.Status)
+				require.NoError(t, err)
+				require.True(t, won)
+				f.poll(t, task)
+			}
+			states, err := model.ListChannelAutoSwitchStates(163)
+			require.NoError(t, err)
+			if tc.onlyOne {
+				assert.Empty(t, states)
+			} else {
+				require.Len(t, states, 1)
+				assert.Equal(t, model.ChannelAutoSwitchHealthy, states[0].Status)
+				assert.Zero(t, states[0].ConsecutiveFailures)
+			}
+		})
+	}
+}
+
+func TestChannelAutoSwitchRoutingConstraints(t *testing.T) {
+	for _, cached := range []bool{false, true} {
+		t.Run(fmt.Sprintf("memory_cache=%t", cached), func(t *testing.T) {
+			f := newVideoRetryTestFixture(t, true)
+			now := time.Now()
+			for range 3 {
+				ticket, err := model.BeginChannelAutoSwitchAttempt(163, "default", "retry-video", "/v1/videos", now)
+				require.NoError(t, err)
+				require.NotNil(t, ticket)
+				require.NoError(t, model.RecordChannelAutoSwitchResult(*ticket, model.ChannelAutoSwitchFailure, "upstream_unavailable", now))
+			}
+			common.MemoryCacheEnabled = cached
+			if cached {
+				model.InitChannelCache()
+			}
+			for _, tc := range []struct {
+				name                       string
+				pin, strict, excludeBackup bool
+				path                       string
+				want                       int
+			}{
+				{name: "ordinary fallback", path: "/v1/videos", want: 174},
+				{name: "explicit pin", pin: true, path: "/v1/videos", want: 163},
+				{name: "strict session", strict: true, path: "/v1/videos", want: 163},
+				{name: "request excludes backup", excludeBackup: true, path: "/v1/videos", want: 0},
+				{name: "other protocol isolated", path: "/v1/images/generations", want: 163},
+			} {
+				t.Run(tc.name, func(t *testing.T) {
+					c, _ := gin.CreateTestContext(httptest.NewRecorder())
+					c.Request = httptest.NewRequest(http.MethodPost, tc.path, nil)
+					if tc.pin {
+						service.GetChannelConstraints(c).AddPin(dto.ChannelPin{ChannelId: 163, Source: dto.PinSourceToken, Rank: dto.PinRankToken})
+					}
+					if tc.strict {
+						service.RequestPolicy(c).SessionMode = "strict"
+					}
+					if tc.excludeBackup {
+						service.GetChannelConstraints(c).AddFilter(dto.ChannelFilter{Kind: dto.FilterChannelIdentity, ExcludedChannelIDs: []int{174}})
+					}
+					ch, _, selectErr := service.SelectChannelForRequest(c, "retry-video", &service.RetryParam{Ctx: c, TokenGroup: "default", ModelName: "retry-video"})
+					defer service.ReleaseAutoSwitchAttempt(c)
+					if tc.want == 0 {
+						assert.Nil(t, ch)
+						require.NotNil(t, selectErr)
+						return
+					}
+					require.Nil(t, selectErr)
+					require.NotNil(t, ch)
+					assert.Equal(t, tc.want, ch.Id)
+					if tc.pin || tc.strict {
+						assert.Nil(t, service.AutoSwitchAttempt(c))
+					}
+				})
+			}
+			// Disabling a channel administratively still overrides its flag.
+			require.NoError(t, f.db.Model(&model.Channel{}).Where("id = ?", 163).Update("status", common.ChannelStatusManuallyDisabled).Error)
+			require.NoError(t, f.db.Model(&model.Ability{}).Where("channel_id = ?", 163).Update("enabled", false).Error)
+			if cached {
+				model.InitChannelCache()
+			}
+			c, _ := gin.CreateTestContext(httptest.NewRecorder())
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/videos", nil)
+			ch, _, selectErr := service.SelectChannelForRequest(c, "retry-video", &service.RetryParam{Ctx: c, TokenGroup: "default", ModelName: "retry-video"})
+			require.Nil(t, selectErr)
+			require.NotNil(t, ch)
+			assert.Equal(t, 174, ch.Id)
+			require.NotNil(t, service.AutoSwitchAttempt(c), "a disabled peer still participates in configured automatic mode")
+			service.ReleaseAutoSwitchAttempt(c)
+			// Turning the peer's switch off explicitly returns the remaining
+			// channel to ordinary routing, even after it has health history.
+			require.NoError(t, f.db.Model(&model.Channel{}).Where("id = ?", 163).Update("settings", "{}").Error)
+			if cached {
+				model.InitChannelCache()
+			}
+			c, _ = gin.CreateTestContext(httptest.NewRecorder())
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/videos", nil)
+			ch, _, selectErr = service.SelectChannelForRequest(c, "retry-video", &service.RetryParam{Ctx: c, TokenGroup: "default", ModelName: "retry-video"})
+			require.Nil(t, selectErr)
+			require.NotNil(t, ch)
+			assert.Equal(t, 174, ch.Id)
+			assert.Nil(t, service.AutoSwitchAttempt(c))
+		})
+	}
+}
+
+func TestChannelAutoSwitchTimedOutProbe(t *testing.T) {
+	f := newVideoRetryTestFixture(t, true)
+	now := time.Now().Add(-10 * time.Minute)
+	for range 3 {
+		ticket, err := model.BeginChannelAutoSwitchAttempt(163, "default", "retry-video", "/v1/videos", now)
+		require.NoError(t, err)
+		require.NotNil(t, ticket)
+		require.NoError(t, model.RecordChannelAutoSwitchResult(*ticket, model.ChannelAutoSwitchFailure, "upstream_unavailable", now))
+	}
+	task := f.submit(t, false)
+	require.True(t, task.PrivateData.AutoSwitch.Probe)
+	task.SubmitTime = time.Now().Add(-2 * time.Minute).Unix()
+	won, err := task.UpdateWithStatus(task.Status)
+	require.NoError(t, err)
+	require.True(t, won)
+	previousTimeout := constant.TaskTimeoutMinutes
+	constant.TaskTimeoutMinutes = 1
+	t.Cleanup(func() { constant.TaskTimeoutMinutes = previousTimeout })
+	service.RunTaskPollingOnce(context.Background(), nil)
+	stored := f.load(t, task.TaskID)
+	assert.Equal(t, model.TaskStatus(model.TaskStatusFailure), stored.Status)
+	states, err := model.ListChannelAutoSwitchStates(163)
+	require.NoError(t, err)
+	require.Len(t, states, 1)
+	assert.Equal(t, model.ChannelAutoSwitchCooling, states[0].Status)
+	assert.Empty(t, states[0].ProbeAttemptID, "the terminal timeout must complete its probe")
+	assert.Equal(t, "upstream_unavailable", states[0].LastReason)
+	var user model.User
+	require.NoError(t, f.db.First(&user, f.user.Id).Error)
+	assert.Equal(t, f.user.Quota, user.Quota)
+	assert.Equal(t, int32(1), f.submitCalls[0].Load(), "timeout never resubmits an accepted job")
+	assert.Zero(t, f.submitCalls[1].Load())
+}
+
+func TestChannelAutoSwitchStatusIncludesMatchedModel(t *testing.T) {
+	f := newVideoRetryTestFixture(t, true)
+	for _, ch := range f.channels {
+		require.NoError(t, f.db.Model(&model.Channel{}).Where("id = ?", ch.Id).Update("models", "gpt-4o-gizmo-*").Error)
+		require.NoError(t, f.db.Model(&model.Ability{}).Where("channel_id = ?", ch.Id).Update("model", "gpt-4o-gizmo-*").Error)
+	}
+	for range 3 {
+		ticket, err := model.BeginChannelAutoSwitchAttempt(163, "default", "gpt-4o-gizmo-example", "/v1/chat/completions", time.Now())
+		require.NoError(t, err)
+		require.NotNil(t, ticket)
+		require.NoError(t, model.RecordChannelAutoSwitchResult(*ticket, model.ChannelAutoSwitchFailure, "upstream_unavailable", time.Now()))
+	}
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Params = gin.Params{{Key: "id", Value: "163"}}
+	GetChannelAutoSwitch(c)
+	var response struct {
+		Success bool
+		Data    struct {
+			Scopes []struct{ Model, Status string }
+		}
+	}
+	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &response))
+	require.True(t, response.Success)
+	require.Len(t, response.Data.Scopes, 2)
+	assert.Equal(t, "gpt-4o-gizmo-example", response.Data.Scopes[1].Model)
+	assert.Equal(t, "cooling", response.Data.Scopes[1].Status)
+}
+
+func TestChannelAutoSwitchMalformedAcceptedProbe(t *testing.T) {
+	f := newVideoRetryTestFixture(t, true)
+	now := time.Now().Add(-10 * time.Minute)
+	for range 3 {
+		ticket, err := model.BeginChannelAutoSwitchAttempt(163, "default", "retry-video", "/v1/videos", now)
+		require.NoError(t, err)
+		require.NotNil(t, ticket)
+		require.NoError(t, model.RecordChannelAutoSwitchResult(*ticket, model.ChannelAutoSwitchFailure, "upstream_unavailable", now))
+	}
+	f.malformed[0] = true
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/videos", strings.NewReader(`{"model":"retry-video","prompt":"a lighthouse","seconds":4}`))
+	c.Request.Header.Set("Content-Type", "application/json")
+	common.SetContextKey(c, constant.ContextKeyUserId, f.user.Id)
+	common.SetContextKey(c, constant.ContextKeyUsingGroup, "default")
+	common.SetContextKey(c, constant.ContextKeyUserGroup, "default")
+	common.SetContextKey(c, constant.ContextKeyTokenGroup, "default")
+	middleware.PinTaskPluginEndpoint()(c)
+	middleware.PrepareTaskPluginEndpoint()(c)
+	require.False(t, c.IsAborted())
+	c.Set("auto_switch_task_dispatched", true)
+	ch, _, selectErr := service.SelectChannelForRequest(c, "retry-video", &service.RetryParam{Ctx: c, TokenGroup: "default", ModelName: "retry-video"})
+	require.Nil(t, selectErr)
+	require.Equal(t, 163, ch.Id)
+	require.True(t, service.AutoSwitchAttempt(c).Probe)
+	assert.False(t, c.GetBool("auto_switch_task_dispatched"), "a new selection clears dispatch evidence from the previous attempt")
+	service.ReleaseAutoSwitchAttempt(c)
+	statesBefore, err := model.ListChannelAutoSwitchStates(163)
+	require.NoError(t, err)
+	require.Len(t, statesBefore, 1)
+	assert.Empty(t, statesBefore[0].ProbeAttemptID, "local rejection before dispatch releases the unsent probe")
+	ch, _, selectErr = service.SelectChannelForRequest(c, "retry-video", &service.RetryParam{Ctx: c, TokenGroup: "default", ModelName: "retry-video"})
+	require.Nil(t, selectErr)
+	require.True(t, service.AutoSwitchAttempt(c).Probe)
+	require.Nil(t, middleware.SetupContextForSelectedChannel(c, ch, "retry-video"))
+	info := &relaycommon.RelayInfo{UserId: f.user.Id, UserGroup: "default", UsingGroup: "default", TokenGroup: "default", UserQuota: f.user.Quota, OriginModelName: "retry-video", IsPlayground: true, TaskRelayInfo: &relaycommon.TaskRelayInfo{PublicTaskID: model.GenerateTaskID(), Action: c.GetString("task_action")}}
+	info.UserSetting.BillingPreference = "wallet_only"
+	outcome, taskErr := executeTaskSubmission(c, info)
+	common.CleanupBodyStorage(c)
+	require.NotNil(t, taskErr)
+	assert.Nil(t, outcome)
+	assert.Equal(t, int32(1), f.submitCalls[0].Load())
+	assert.Zero(t, f.submitCalls[1].Load(), "unknown acceptance must not trigger another POST")
+	states, err := model.ListChannelAutoSwitchStates(163)
+	require.NoError(t, err)
+	require.Len(t, states, 1)
+	assert.Equal(t, model.ChannelAutoSwitchProbing, states[0].Status)
+	assert.NotEmpty(t, states[0].ProbeAttemptID, "parsing failure cannot release a possibly running probe")
+	backup := f.submit(t, false)
+	assert.Equal(t, 174, backup.ChannelId, "other requests continue on backup while outcome is unknown")
+	f.poll(t, backup)
 }
 
 func TestVideoTaskRetryFailureBoundaries(t *testing.T) {

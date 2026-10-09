@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
@@ -34,6 +35,23 @@ func OaiResponsesHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http
 	}
 	if oaiError := responsesResponse.GetOpenAIError(); oaiError != nil && oaiError.Type != "" {
 		return nil, types.WithOpenAIError(*oaiError, resp.StatusCode)
+	}
+
+	// A successful HTTP submission is not necessarily a completed generation.
+	// Native background jobs have no local poller, so retain their durable probe
+	// lease until expiry instead of allowing another probe while the job may run.
+	switch strings.ToLower(strings.TrimSpace(gjson.GetBytes(responseBody, "status").String())) {
+	case "completed":
+	case "queued", "in_progress":
+		service.DetachAutoSwitchAttempt(c)
+	case "failed", "cancelled", "canceled", "incomplete":
+		service.RecordAutoSwitchRequestResult(c, false, nil)
+	default:
+		if gjson.GetBytes(responseBody, "background").Bool() {
+			service.DetachAutoSwitchAttempt(c)
+		} else {
+			service.RecordAutoSwitchRequestResult(c, false, nil)
+		}
 	}
 
 	info.ObserveResponseModel(responsesResponse.Model)

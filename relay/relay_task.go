@@ -194,12 +194,19 @@ func ApplyOriginTaskAffinity(c *gin.Context, info *relaycommon.RelayInfo) *dto.T
 	return ApplyChannelPin(c, info)
 }
 
-// RelayTaskSubmit 完成 task 提交的全部流程（每次尝试调用一次）：
-// 刷新渠道元数据 → 确定 platform/adaptor → 验证请求 →
-// 估算计费(EstimateBilling) → 计算价格 → 预扣费（仅首次）→
-// 构建/发送/解析上游请求 → 提交后计费调整(AdjustBillingOnSubmit)。
-// 共享控制器编排负责未落库退款、最终额度预留、落库和结算。
-func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (*TaskSubmitResult, *dto.TaskError) {
+type PreparedTaskSubmission struct {
+	platform constant.TaskPlatform
+	adaptor  channel.TaskAdaptor
+}
+
+// PrepareTaskSubmission validates and reserves a task without contacting the provider.
+func PrepareTaskSubmission(c *gin.Context, info *relaycommon.RelayInfo) (*PreparedTaskSubmission, *dto.TaskError) {
+	return prepareTaskSubmission(c, info, true)
+}
+
+func prepareTaskSubmission(c *gin.Context, info *relaycommon.RelayInfo, reserve bool) (*PreparedTaskSubmission, *dto.TaskError) {
+	c.Set("auto_switch_task_dispatched", false)
+	c.Set("auto_switch_task_rejected", false)
 	info.InitChannelMeta(c)
 
 	// 1. 确定 platform → 创建适配器 → 验证请求
@@ -251,6 +258,10 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (*TaskSubmitRe
 
 	// 4. 价格计算：基础模型价格
 	info.OriginModelName = modelName
+	// Queue workers reuse their admission-time price and reservation.
+	if !reserve {
+		return &PreparedTaskSubmission{platform: platform, adaptor: adaptor}, nil
+	}
 	preservedRatios := info.PriceData.OtherRatios()
 	var priceData types.PriceData
 	var err error
@@ -357,6 +368,38 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (*TaskSubmitRe
 		}
 	}
 
+	return &PreparedTaskSubmission{platform: platform, adaptor: adaptor}, nil
+}
+
+// RelayTaskSubmit 完成 task 提交的全部流程（每次尝试调用一次）：
+// 刷新渠道元数据 → 确定 platform/adaptor → 验证请求 →
+// 估算计费(EstimateBilling) → 计算价格 → 预扣费（仅首次）→
+// 构建/发送/解析上游请求 → 提交后计费调整(AdjustBillingOnSubmit)。
+// 共享控制器编排负责未落库退款、最终额度预留、落库和结算。
+func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (*TaskSubmitResult, *dto.TaskError) {
+	prepared, taskErr := PrepareTaskSubmission(c, info)
+	if taskErr != nil {
+		return nil, taskErr
+	}
+	return prepared.submit(c, info)
+}
+
+// RelayQueuedTaskSubmit reconstructs the adaptor while preserving queue billing.
+func RelayQueuedTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (*TaskSubmitResult, *dto.TaskError) {
+	expectedModel := info.UpstreamModelName
+	prepared, taskErr := prepareTaskSubmission(c, info, false)
+	if taskErr != nil {
+		return nil, taskErr
+	}
+	if info.UpstreamModelName != expectedModel {
+		return nil, service.TaskErrorWrapperLocal(fmt.Errorf("queued task model mapping changed"), "model_mapping_changed", http.StatusBadRequest)
+	}
+	return prepared.submit(c, info)
+}
+
+func (p *PreparedTaskSubmission) submit(c *gin.Context, info *relaycommon.RelayInfo) (*TaskSubmitResult, *dto.TaskError) {
+	adaptor, platform := p.adaptor, p.platform
+
 	// 8. 构建请求体
 	requestBody, err := adaptor.BuildRequestBody(c, info)
 	if err != nil {
@@ -364,6 +407,7 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (*TaskSubmitRe
 	}
 
 	// 9. 发送请求
+	c.Set("auto_switch_task_dispatched", true)
 	resp, err := adaptor.DoRequest(c, info, requestBody)
 	if err != nil {
 		return nil, service.TaskErrorWrapper(err, "do_request_failed", http.StatusInternalServerError)
@@ -375,6 +419,7 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (*TaskSubmitRe
 	// Any 2xx is a successful submission: task APIs commonly answer 201 Created
 	// or 202 Accepted, and parseSubmitResponse receives the exact status code.
 	if resp.StatusCode/100 != 2 {
+		c.Set("auto_switch_task_rejected", true)
 		responseBody, _ := io.ReadAll(resp.Body)
 		return nil, service.TaskErrorWrapper(fmt.Errorf("%s", string(responseBody)), "fail_to_fetch_task", resp.StatusCode)
 	}

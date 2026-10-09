@@ -205,6 +205,7 @@ func canRetryVideoTask(task *model.Task, failure *relaycommon.TaskInfo, now int6
 }
 
 func retryVideoTask(ctx context.Context, task *model.Task, failure *relaycommon.TaskInfo) (bool, error) {
+	service.RecordAutoSwitchTaskResult(ctx, task, failure)
 	now := time.Now().Unix()
 	if !canRetryVideoTask(task, failure, now) {
 		return false, nil
@@ -226,6 +227,7 @@ func retryVideoTask(ctx context.Context, task *model.Task, failure *relaycommon.
 		c, info, buildErr := buildVideoTaskRetryContext(ctx, task)
 		if c != nil {
 			defer common.CleanupBodyStorage(c)
+			defer service.ReleaseAutoSwitchAttempt(c)
 		}
 		if buildErr != nil {
 			failure.Reason += "; video channel retry stopped: " + buildErr.Error()
@@ -256,6 +258,7 @@ func retryVideoTask(ctx context.Context, task *model.Task, failure *relaycommon.
 			logger.LogWarn(c, fmt.Sprintf("video task %s retry quota saturated: %s", task.TaskID, info.QuotaClamp))
 		}
 		if taskErr != nil {
+			service.RecordAutoSwitchTaskSubmissionFailure(c, taskErr)
 			task.PrivateData.VideoRetry.Details = append(task.PrivateData.VideoRetry.Details, model.AsyncImageRetryDetail{
 				Attempt: len(task.PrivateData.ChannelRetryPath), ChannelID: channel.Id, ChannelName: channel.Name,
 				ChannelType: channel.Type, Status: model.TaskStatusFailure, StatusCode: taskErr.StatusCode,
@@ -270,6 +273,7 @@ func retryVideoTask(ctx context.Context, task *model.Task, failure *relaycommon.
 			continue
 		}
 		if result == nil {
+			service.DetachAutoSwitchAttempt(c)
 			failure.Reason = "video channel submission outcome is unknown"
 			break
 		}
@@ -295,6 +299,9 @@ func retryVideoTask(ctx context.Context, task *model.Task, failure *relaycommon.
 			task.PrivateData.Execution = nil
 		}
 		task.PrivateData.UpstreamTaskID, task.PrivateData.ResultURL = result.UpstreamTaskID, ""
+		task.PrivateData.AutoSwitch = service.AutoSwitchAttempt(c)
+		service.DetachAutoSwitchAttempt(c)
+		service.RecordAutoSwitchTaskResult(ctx, task, result.Immediate)
 		task.PrivateData.Key = ""
 		if channel.Type == constant.ChannelTypeGemini || channel.Type == constant.ChannelTypeVertexAi || channel.Type == constant.ChannelTypeNewAPI {
 			task.PrivateData.Key = info.ApiKey

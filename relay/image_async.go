@@ -13,6 +13,7 @@ import (
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
+	pluginruntime "github.com/QuantumNous/new-api/pkg/jsplugin"
 	"github.com/QuantumNous/new-api/relay/channel/task/taskcommon"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
@@ -21,6 +22,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 )
+
+const PluginAsyncImageFormat = "task_plugin_image"
 
 func IsAsyncImageRequest(c *gin.Context) bool {
 	if c == nil {
@@ -88,6 +91,17 @@ func asyncImageTaskAction(relayMode int) string {
 }
 
 func SubmitInternalAsyncImageTask(c *gin.Context, info *relaycommon.RelayInfo, request *dto.ImageRequest, native ...*NativeAsyncImageSnapshot) (ret *types.NewAPIError) {
+	var autoSwitch *model.ChannelAutoSwitchTicket
+	if len(native) > 0 && native[0] != nil {
+		// The upstream already accepted this job. Even a local persistence
+		// failure must not free its recovery probe for another generation.
+		autoSwitch = service.AutoSwitchAttempt(c)
+		service.DetachAutoSwitchAttempt(c)
+	} else {
+		// Queue admission has not contacted a provider; the worker will select
+		// and own the actual upstream attempt when it starts the job.
+		service.ReleaseAutoSwitchAttempt(c)
+	}
 	if err := validateAsyncImageTaskRequest(info, request); err != nil {
 		return err
 	}
@@ -107,8 +121,11 @@ func SubmitInternalAsyncImageTask(c *gin.Context, info *relaycommon.RelayInfo, r
 	if info.TaskRelayInfo == nil {
 		info.TaskRelayInfo = &relaycommon.TaskRelayInfo{}
 	}
-	info.TaskRelayInfo.PublicTaskID = model.GenerateTaskID()
+	if info.TaskRelayInfo.PublicTaskID == "" {
+		info.TaskRelayInfo.PublicTaskID = model.GenerateTaskID()
+	}
 	task := model.InitTask(constant.TaskPlatformInternalImage, info)
+	task.PrivateData.AutoSwitch = autoSwitch
 	task.Action = asyncImageTaskAction(info.RelayMode)
 	task.Status = model.TaskStatusSubmitted
 	task.Progress = taskcommon.ProgressSubmitted
@@ -131,6 +148,12 @@ func SubmitInternalAsyncImageTask(c *gin.Context, info *relaycommon.RelayInfo, r
 		task.PrivateData.RequestContentType, _ = original.(string)
 	}
 	task.PrivateData.RequestRelayFormat = string(types.RelayFormatOpenAIImage)
+	if value, exists := c.Get(pluginruntime.ContextKeyPinnedEndpoint); exists {
+		if pinned, ok := value.(pluginruntime.PinnedEndpoint); ok && pinned.Protocol == pluginruntime.ProtocolOpenAIImage {
+			task.PrivateData.RequestRelayFormat = PluginAsyncImageFormat
+			task.PrivateData.Execution = service.TaskExecutionSnapshotFromContext(c)
+		}
+	}
 	task.PrivateData.BillingSource = info.BillingSource
 	task.PrivateData.SubscriptionId = info.SubscriptionId
 	task.PrivateData.TokenId = info.TokenId
@@ -149,6 +172,7 @@ func SubmitInternalAsyncImageTask(c *gin.Context, info *relaycommon.RelayInfo, r
 		OtherRatios:     info.PriceData.OtherRatios(),
 		OriginModelName: info.OriginModelName,
 		PerCallBilling:  info.PriceData.UsePrice,
+		TieredSnapshot:  info.TieredBillingSnapshot,
 	}
 	task.Data = service.BuildPendingAsyncImageTaskData(task)
 
@@ -191,6 +215,7 @@ func SubmitInternalAsyncImageTask(c *gin.Context, info *relaycommon.RelayInfo, r
 }
 
 func SubmitInternalAsyncGeminiImageTask(c *gin.Context, info *relaycommon.RelayInfo, request *dto.GeminiChatRequest) (ret *types.NewAPIError) {
+	service.ReleaseAutoSwitchAttempt(c)
 	if err := validateAsyncGeminiImageTaskRequest(request); err != nil {
 		return err
 	}

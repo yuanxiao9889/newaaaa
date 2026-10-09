@@ -615,14 +615,34 @@ func (channel *Channel) Update() error {
 			}
 		}
 	}
-	var err error
-	err = DB.Model(channel).Updates(channel).Error
-	if err != nil {
-		return err
-	}
-	DB.Model(channel).First(channel, "id = ?", channel.Id)
-	err = channel.UpdateAbilities(nil)
-	return err
+	settingsUpdated := channel.OtherSettings != ""
+	return DB.Transaction(func(tx *gorm.DB) error {
+		previousAutoSwitch := false
+		if settingsUpdated {
+			// Take a write lock before reading, including on SQLite, so simultaneous
+			// edits cannot observe the same stale flag and miss a generation reset.
+			if err := tx.Model(&Channel{}).Where("id = ?", channel.Id).UpdateColumn("settings", gorm.Expr("settings")).Error; err != nil {
+				return err
+			}
+			var previous Channel
+			if err := tx.Select("id", "settings").First(&previous, channel.Id).Error; err != nil {
+				return err
+			}
+			previousAutoSwitch = previous.GetOtherSettings().AutoSwitchEnabled
+		}
+		if err := tx.Model(channel).Updates(channel).Error; err != nil {
+			return err
+		}
+		if err := tx.First(channel, channel.Id).Error; err != nil {
+			return err
+		}
+		if settingsUpdated && previousAutoSwitch != channel.GetOtherSettings().AutoSwitchEnabled {
+			if err := resetChannelAutoSwitch(tx, channel.Id); err != nil {
+				return err
+			}
+		}
+		return channel.UpdateAbilities(tx)
+	})
 }
 
 func (channel *Channel) UpdateResponseTime(responseTime int64) {

@@ -46,6 +46,14 @@ This is an AI API gateway/proxy built with Go. It aggregates 40+ upstream AI pro
 - A separate function is appropriate when it represents reusable behavior, a required interface/framework callback, an exported API, a test fixture, or complex business logic that deserves direct tests.
 - If a single-use helper is kept, its name must describe a durable domain concept rather than a mechanical step extracted only to shorten the caller.
 
+### Local Artifacts and Deployment Output
+
+- Generate deployment packages, standalone binaries, source snapshots, server backups, and deployment/test reports outside the Git checkout, even when an in-repository directory is ignored.
+- For this local project, use `E:/new-api-artifacts/` and create a dated task directory there. On other machines, use an explicitly chosen directory outside the repository and its worktrees.
+- Do not recreate `output/` or `server-baseline/` inside the repository, or add links from the repository to external artifact directories. Existing ignore rules are a fallback, not the intended output location.
+- Pass an explicit external destination to build and packaging commands, including `go build -o`. Keep only build outputs required in place by the toolchain, such as the ignored `web/dist` used by `go:embed`; write final deployment archives outside the repository.
+- Before reusing an older deployment script, replace its hard-coded artifact paths and any assumption that the script's parent directory is the source repository. Keep source checkout and artifact destination as separate paths. Do not package the entire working directory recursively; exclude Git metadata, dependencies, databases, logs, backups, and previous artifacts.
+
 ### Authentication Security (OWASP Mandatory)
 
 - Any implementation, modification, or review involving authentication-related flows MUST comply with the applicable requirements of the latest stable [OWASP Application Security Verification Standard (ASVS)](https://owasp.org/www-project-application-security-verification-standard/) and the relevant [OWASP Cheat Sheet Series](https://cheatsheetseries.owasp.org/). This applies to both backend and frontend changes, including registration, login/logout, password changes and recovery, email verification, MFA, WebAuthn/Passkeys, OAuth/OIDC, account linking/unlinking, sessions, JWTs, API credentials, and re-authentication for sensitive actions.

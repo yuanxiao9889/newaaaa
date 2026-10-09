@@ -16,73 +16,71 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { Settings, Zap, BarChart3 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
-import { AnimateInView } from '@/components/animate-in-view'
+import { HeroTerminalDemo } from '../hero-terminal-demo'
 
 export function HowItWorks() {
   const { t } = useTranslation()
-
   const steps = [
     {
-      num: '1',
+      num: '01',
       title: t('Configure'),
-      desc: t(
+      description: t(
         'Add your API keys, set up channels and configure access permissions'
       ),
-      icon: <Settings className='size-6' strokeWidth={1.5} />,
     },
     {
-      num: '2',
+      num: '02',
       title: t('Connect'),
-      desc: t(
+      description: t(
         'Connect through OpenAI, Claude, Gemini, and other compatible API routes'
       ),
-      icon: <Zap className='size-6' strokeWidth={1.5} />,
     },
     {
-      num: '3',
+      num: '03',
       title: t('Monitor'),
-      desc: t('Track usage, costs and performance with real-time analytics'),
-      icon: <BarChart3 className='size-6' strokeWidth={1.5} />,
+      description: t(
+        'Track usage, costs and performance with real-time analytics'
+      ),
     },
   ]
-
   return (
-    <section className='border-border/40 relative z-10 border-t px-6 py-24 md:py-32'>
-      <div className='mx-auto max-w-6xl'>
-        <AnimateInView className='mb-16 text-center md:mb-20'>
-          <p className='text-muted-foreground mb-3 text-xs font-medium tracking-widest uppercase'>
-            {t('How It Works')}
-          </p>
-          <h2 className='text-2xl font-bold tracking-tight md:text-3xl'>
+    <section
+      id='integration'
+      className='home-section home-integration'
+      aria-labelledby='integration-title'
+    >
+      <div className='home-shell grid items-start gap-12 lg:grid-cols-2 lg:gap-20'>
+        <div>
+          <p className='home-eyebrow mb-6'>02 / {t('How It Works')}</p>
+          <h2 id='integration-title' className='home-heading'>
             {t('Three steps to get started')}
           </h2>
-        </AnimateInView>
-
-        <div className='grid gap-8 md:grid-cols-3 md:gap-12'>
-          {steps.map((step, i) => (
-            <AnimateInView
-              key={step.num}
-              delay={i * 150}
-              animation='fade-up'
-              className='relative flex flex-col items-center text-center'
-            >
-              <div className='relative mb-6'>
-                <div className='text-muted-foreground border-border/50 bg-muted/30 flex size-16 items-center justify-center rounded-2xl border transition-colors'>
-                  {step.icon}
-                </div>
-                <div className='bg-foreground text-background absolute -top-2 -right-2 flex size-6 items-center justify-center rounded-full text-xs font-bold'>
+          <ol className='home-steps mt-12 flex flex-col'>
+            {steps.map((step) => (
+              <li
+                key={step.num}
+                className='border-border flex items-start gap-5 border-t py-6'
+              >
+                <span
+                  className='flex size-10 shrink-0 items-center justify-center border border-current font-mono text-xs'
+                  aria-hidden='true'
+                >
                   {step.num}
+                </span>
+                <div>
+                  <h3 className='mb-2 font-serif text-xl'>{step.title}</h3>
+                  <p className='text-muted-foreground max-w-sm text-sm leading-7'>
+                    {step.description}
+                  </p>
                 </div>
-              </div>
-              <h3 className='mb-2 text-base font-semibold'>{step.title}</h3>
-              <p className='text-muted-foreground max-w-[240px] text-sm leading-relaxed'>
-                {step.desc}
-              </p>
-            </AnimateInView>
-          ))}
+              </li>
+            ))}
+          </ol>
+        </div>
+        <div className='min-w-0'>
+          <HeroTerminalDemo />
         </div>
       </div>
     </section>
