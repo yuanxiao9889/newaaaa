@@ -36,6 +36,10 @@ tiktoken_cache
 backups/
 server-backups/
 
+# Local deployment artifacts and server source archives.
+/output/
+/server-baseline/
+
 electron/node_modules
 electron/dist
 /data/
