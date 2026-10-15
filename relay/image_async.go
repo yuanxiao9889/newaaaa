@@ -165,14 +165,16 @@ func SubmitInternalAsyncImageTask(c *gin.Context, info *relaycommon.RelayInfo, r
 	task.PrivateData.BillingError = ""
 	task.PrivateData.BillingUpdatedAt = time.Now().Unix()
 	task.PrivateData.BillingContext = &model.TaskBillingContext{
-		ModelPrice:      info.PriceData.ModelPrice,
-		FixedPriceUnit:  info.PriceData.FixedPriceUnit,
-		GroupRatio:      info.PriceData.GroupRatioInfo.GroupRatio,
-		ModelRatio:      info.PriceData.ModelRatio,
-		OtherRatios:     info.PriceData.OtherRatios(),
-		OriginModelName: info.OriginModelName,
-		PerCallBilling:  info.PriceData.UsePrice,
-		TieredSnapshot:  info.TieredBillingSnapshot,
+		ModelPrice:              info.PriceData.ModelPrice,
+		FixedPriceUnit:          info.PriceData.FixedPriceUnit,
+		GroupRatio:              info.PriceData.GroupRatioInfo.GroupRatio,
+		ModelRatio:              info.PriceData.ModelRatio,
+		OtherRatios:             info.PriceData.OtherRatios(),
+		OriginModelName:         info.OriginModelName,
+		PerCallBilling:          info.PriceData.UsePrice,
+		TieredSnapshot:          info.TieredBillingSnapshot,
+		ImageTokenFallbackQuota: info.ImageTokenFallbackQuota,
+		ImageTokenReserveUSD:    info.ImageTokenReserveUSD,
 	}
 	task.Data = service.BuildPendingAsyncImageTaskData(task)
 

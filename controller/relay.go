@@ -105,14 +105,24 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		if newAPIError != nil {
 			service.RecordRequestPolicyTermination(c, newAPIError)
 			logger.LogError(c, fmt.Sprintf("relay error: %s", common.LocalLogPreview(newAPIError.Error())))
-			newAPIError.SetMessage(common.MessageWithRequestId(newAPIError.Error(), requestId))
+			if c.GetInt("role") < common.RoleAdminUser {
+				publicError := common.ClassifyPublicError(string(newAPIError.GetErrorCode()), newAPIError.Error(), newAPIError.StatusCode,
+					newAPIError.GetErrorType() == types.ErrorTypeNewAPIError)
+				newAPIError = types.NewOpenAIError(
+					errors.New(common.MessageWithRequestId(publicError.Summary(), requestId)),
+					types.ErrorCode(publicError.Code), publicError.StatusCode,
+				)
+			} else {
+				newAPIError.SetMessage(common.MessageWithRequestId(newAPIError.Error(), requestId))
+			}
 			switch relayFormat {
 			case types.RelayFormatOpenAIRealtime:
 				helper.WssError(c, ws, newAPIError.ToOpenAIError())
 			case types.RelayFormatClaude:
+				claudeError := newAPIError.ToClaudeError()
 				c.JSON(newAPIError.StatusCode, gin.H{
 					"type":  "error",
-					"error": newAPIError.ToClaudeError(),
+					"error": gin.H{"type": claudeError.Type, "message": claudeError.Message, "code": newAPIError.GetErrorCode()},
 				})
 			default:
 				c.JSON(newAPIError.StatusCode, gin.H{
@@ -430,19 +440,36 @@ func RelayMidjourney(c *gin.Context) {
 	log.Println(mjErr)
 	if mjErr != nil {
 		policy.Successful = false
-		statusCode := http.StatusBadRequest
-		if mjErr.Code == 30 {
-			mjErr.Result = "当前分组负载已饱和，请稍后再试，或升级账户以提升服务质量。"
-			statusCode = http.StatusTooManyRequests
-		}
-		c.JSON(statusCode, gin.H{
-			"description": fmt.Sprintf("%s %s", mjErr.Description, mjErr.Result),
-			"type":        "upstream_error",
-			"code":        mjErr.Code,
-		})
+		statusCode := respondMidjourneyError(c, mjErr)
 		channelId := c.GetInt("channel_id")
 		logger.LogError(c, fmt.Sprintf("relay error (channel #%d, status code %d): %s", channelId, statusCode, fmt.Sprintf("%s %s", mjErr.Description, mjErr.Result)))
 	}
+}
+
+func respondMidjourneyError(c *gin.Context, mjErr *taskdto.MidjourneyResponse) int {
+	if mjErr.LocalErrorCode == "insufficient_token_quota" || mjErr.LocalErrorCode == "insufficient_user_quota" {
+		publicError := common.ClassifyPublicError(mjErr.LocalErrorCode, "", 0, true)
+		message := common.MessageWithRequestId(publicError.Summary(), c.GetString(common.RequestIdKey))
+		c.Header("X-Error-Code", publicError.Code)
+		c.JSON(publicError.StatusCode, gin.H{
+			"description": message, "message": message, "type": "new_api_error",
+			"code": mjErr.Code, "error_code": publicError.Code,
+		})
+		return publicError.StatusCode
+	}
+	statusCode := http.StatusBadRequest
+	if mjErr.Code == 30 {
+		mjErr.Result = "当前分组负载已饱和，请稍后再试，或升级账户以提升服务质量。"
+		statusCode = http.StatusTooManyRequests
+	}
+	publicError := common.ClassifyPublicError("", mjErr.Description+" "+mjErr.Result, statusCode, false)
+	message := common.MessageWithRequestId(publicError.Summary(), c.GetString(common.RequestIdKey))
+	c.Header("X-Error-Code", publicError.Code)
+	c.JSON(statusCode, gin.H{
+		"description": message, "message": message, "type": "upstream_error",
+		"code": mjErr.Code, "error_code": publicError.Code,
+	})
+	return statusCode
 }
 
 func RelayNotImplemented(c *gin.Context) {
@@ -507,7 +534,7 @@ func RelayTaskPluginEndpoint(c *gin.Context, fallback gin.HandlerFunc) {
 func RelayTaskFetch(c *gin.Context) {
 	relayInfo, err := relaycommon.GenRelayInfo(c, types.RelayFormatTask, nil, nil)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, &taskdto.TaskError{
+		respondTaskError(c, &taskdto.TaskError{
 			Code:       "gen_relay_info_failed",
 			Message:    err.Error(),
 			StatusCode: http.StatusInternalServerError,
@@ -707,7 +734,7 @@ func executeTaskSubmissionWith(
 		diagnostics.reserve("reserve_start", result.Quota)
 		if reserveErr := relayInfo.Billing.Reserve(result.Quota); reserveErr != nil {
 			common.SysError("reserve adjusted task billing error: " + reserveErr.Error())
-			taskErr = service.TaskErrorWrapperLocal(errors.New("insufficient quota for adjusted task cost"), string(types.ErrorCodeInsufficientUserQuota), http.StatusForbidden)
+			taskErr = service.TaskErrorFromAPIError(types.NewError(reserveErr, types.ErrorCodeUpdateDataError, types.ErrOptionWithSkipRetry()))
 			diagnostics.failed("reserve", "insufficient_quota", taskErr, false)
 			return nil, taskErr
 		}
@@ -932,18 +959,29 @@ func presentTaskSubmission(c *gin.Context, outcome *taskSubmissionOutcome) {
 func respondTaskSubmissionError(c *gin.Context, taskErr *taskdto.TaskError) {
 	service.RecordRequestPolicyTermination(c, taskSubmissionAPIError(taskErr))
 	newTaskPluginSubmitDiagnostics(c).presentError(taskErr)
-	if middleware.RespondTaskPluginError(c, taskErr) {
+	if middleware.RespondTaskPluginError(c, publicTaskError(taskErr)) {
 		return
 	}
 	respondTaskError(c, taskErr)
 }
 
-// respondTaskError 统一输出 Task 错误响应（含 429 限流提示改写）
+// respondTaskError writes the public task error projection.
 func respondTaskError(c *gin.Context, taskErr *taskdto.TaskError) {
-	if taskErr.StatusCode == http.StatusTooManyRequests {
-		taskErr.Message = "当前分组上游负载已饱和，请稍后再试"
+	publicError := publicTaskError(taskErr)
+	if requestID := c.GetString(common.RequestIdKey); requestID != "" {
+		publicError.Message = common.MessageWithRequestId(publicError.Message, requestID)
 	}
-	c.JSON(taskErr.StatusCode, taskErr)
+	c.JSON(publicError.StatusCode, publicError)
+}
+
+// Public task errors are a projection: diagnostics retain the original error,
+// while provider messages, codes and payloads never cross this boundary.
+func publicTaskError(taskErr *taskdto.TaskError) *taskdto.TaskError {
+	publicError := common.ClassifyPublicError(taskErr.Code, taskErr.Message, taskErr.StatusCode, taskErr.LocalError)
+	return &taskdto.TaskError{
+		Code: publicError.Code, Message: publicError.Summary(), StatusCode: publicError.StatusCode,
+		LocalError: true, NoRetry: taskErr.NoRetry,
+	}
 }
 
 // taskSubmissionAPIError adapts a task error for the shared relay error paths.

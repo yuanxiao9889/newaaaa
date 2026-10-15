@@ -237,7 +237,7 @@ func TestModelPriceHelperTieredInputPreConsumeMultiplier(t *testing.T) {
 	}
 }
 
-func TestModelPriceHelperUsesFixedAsyncImagePreConsumeForGPTImage2(t *testing.T) {
+func TestModelPriceHelperReservesTokenImagesAndPreservesFreeModels(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	savedModelRatio := ratio_setting.ModelRatio2JSONString()
 	t.Cleanup(func() {
@@ -260,7 +260,7 @@ func TestModelPriceHelperUsesFixedAsyncImagePreConsumeForGPTImage2(t *testing.T)
 
 	priceData, err := ModelPriceHelper(ctx, info, 1, &types.TokenCountMeta{})
 	require.NoError(t, err)
-	require.Equal(t, common.QuotaFromFloat(0.4*common.QuotaPerUnit), priceData.QuotaToPreConsume)
+	require.Equal(t, 750000, priceData.QuotaToPreConsume)
 	require.Equal(t, priceData.QuotaToPreConsume, info.PriceData.QuotaToPreConsume)
 
 	// A zero-priced async image model must remain usable with an empty wallet.
@@ -821,7 +821,8 @@ func TestInputPreConsumeMultiplierLegacyAndRequestPrices(t *testing.T) {
 				info.Billing = reservation
 				operation_setting.GetQuotaSetting().PreConsumeMultiplier = 10
 				require.Nil(t, service.PrepareImageBillingForRequest(ctx, info, 2))
-				assert.Equal(t, 750, reservation.held, "retry must reuse the original fractional multiplier")
+				assert.Equal(t, 1500000, reservation.held, "two images must reserve the per-image floor")
+				assert.Equal(t, 750, info.TieredBillingSnapshot.EstimatedQuotaAfterGroup, "retry must reuse the original fractional multiplier for the billing estimate")
 			}
 		})
 	}

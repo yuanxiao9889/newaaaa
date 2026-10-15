@@ -162,6 +162,11 @@ export function UsageLogsTable({ logCategory }: UsageLogsTableProps) {
   })
 
   const { data, isLoading, isFetching } = useQuery({
+    // Tasks may be submitted from another client while this list is cached.
+    // Refresh on entry/return without polling or changing usage-log behavior.
+    ...(logCategory === 'task'
+      ? { staleTime: 0, refetchOnWindowFocus: 'always' as const }
+      : {}),
     queryKey: [
       'logs',
       logCategory,

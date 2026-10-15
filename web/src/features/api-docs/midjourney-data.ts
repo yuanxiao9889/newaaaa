@@ -53,13 +53,6 @@ export const midjourneyEndpoints: MidjourneyEndpointDoc[] = [
   },
   {
     method: 'POST',
-    path: '/mj/submit/upload-discord-images',
-    purpose: 'Upload data-URL images for later Midjourney operations.',
-    payload: 'base64Array',
-    modelKey: 'mj_upload',
-  },
-  {
-    method: 'POST',
     path: '/mj/submit/action',
     purpose: 'Run a button action returned by a completed task.',
     payload: 'taskId, customId, speedMode?',

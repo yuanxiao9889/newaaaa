@@ -364,7 +364,7 @@ func prepareTaskSubmission(c *gin.Context, info *relaycommon.RelayInfo, reserve 
 		// Channel changes can change the estimate. Reserve before sending a
 		// replacement job, including background video retries using task funds.
 		if err := info.Billing.Reserve(info.PriceData.Quota); err != nil {
-			return nil, service.TaskErrorWrapperLocal(err, "task_quota_reservation_failed", http.StatusForbidden)
+			return nil, service.TaskErrorFromAPIError(types.NewError(err, types.ErrorCodeUpdateDataError, types.ErrOptionWithSkipRetry()))
 		}
 	}
 
@@ -549,46 +549,34 @@ func videoFetchByIDRespBodyBuilder(c *gin.Context) (respBody []byte, taskResp *d
 	isOpenAIVideoAPI := strings.HasPrefix(c.Request.RequestURI, "/v1/videos/")
 
 	// Gemini/Vertex 支持实时查询：用户 fetch 时直接从上游拉取最新状态
-	if realtimeResp := tryRealtimeFetch(originTask, isOpenAIVideoAPI); len(realtimeResp) > 0 {
-		respBody = realtimeResp
-		return
-	}
+	// Refresh the stored state, but do not return the upstream response body.
+	tryRealtimeFetch(originTask, true)
 
-	// OpenAI Video API 格式: 走各 adaptor 的 ConvertToOpenAIVideo
+	// The public status response is host-owned; provider extensions and raw
+	// errors belong to administrator diagnostics.
 	if isOpenAIVideoAPI {
-		adaptor := GetTaskAdaptor(originTask.Platform)
-		if adaptor == nil {
-			taskResp = service.TaskErrorWrapperLocal(fmt.Errorf("invalid channel id: %d", originTask.ChannelId), "invalid_channel_id", http.StatusBadRequest)
-			return
+		video := originTask.ToOpenAIVideo()
+		video.Model = UserTaskModel2ListDto(originTask).ModelName
+		if originTask.Status == model.TaskStatusFailure {
+			publicError := originTask.UserError()
+			video.Error = &dto.OpenAIVideoError{Code: publicError.Code, Message: publicError.Summary()}
 		}
-		if converter, ok := adaptor.(channel.OpenAIVideoConverter); ok {
-			openAIVideoData, err := converter.ConvertToOpenAIVideo(originTask)
-			if err != nil {
-				taskResp = service.TaskErrorWrapper(err, "convert_to_openai_video_failed", http.StatusInternalServerError)
-				return
-			}
-			respBody = openAIVideoData
-			return
+		respBody, err = common.Marshal(video)
+		if err != nil {
+			taskResp = service.TaskErrorWrapper(err, "marshal_response_failed", http.StatusInternalServerError)
 		}
-		taskResp = service.TaskErrorWrapperLocal(fmt.Errorf("not_implemented:%s", originTask.Platform), "not_implemented", http.StatusNotImplemented)
 		return
 	}
 
-	adaptor := GetTaskAdaptor(originTask.Platform)
-	if converter, ok := adaptor.(channel.VideoGenerationConverter); ok {
-		videoGenerationData, err := converter.ConvertToVideoGeneration(originTask)
-		if err != nil {
-			taskResp = service.TaskErrorWrapper(err, "convert_to_video_generation_failed", http.StatusInternalServerError)
-			return
-		}
-		respBody = videoGenerationData
-		return
+	publicTask := UserTaskModel2ListDto(originTask)
+	if originTask.Status == model.TaskStatusSuccess {
+		publicTask.ResultURL = taskcommon.BuildProxyURL(originTask.TaskID)
 	}
 
 	// 通用 TaskDto 格式
 	respBody, err = common.Marshal(dto.TaskResponse[any]{
 		Code: "success",
-		Data: TaskModel2Dto(originTask),
+		Data: publicTask,
 	})
 	if err != nil {
 		taskResp = service.TaskErrorWrapper(err, "marshal_response_failed", http.StatusInternalServerError)
@@ -786,6 +774,14 @@ func taskModelName(task *model.Task) string {
 
 func TaskModel2DtoWithOptions(task *model.Task, includeData bool, includeInternalChannelInfo bool) *dto.TaskDto {
 	modelName := taskModelName(task)
+	properties := task.Properties
+	if !includeInternalChannelInfo {
+		modelName = task.Properties.OriginModelName
+		if modelName == "" && task.PrivateData.BillingContext != nil {
+			modelName = task.PrivateData.BillingContext.OriginModelName
+		}
+		properties = model.Properties{OriginModelName: modelName}
+	}
 	taskDto := &dto.TaskDto{
 		ID:                task.ID,
 		CreatedAt:         task.CreatedAt,
@@ -797,7 +793,7 @@ func TaskModel2DtoWithOptions(task *model.Task, includeData bool, includeInterna
 		TokenId:           task.GetTokenID(),
 		TokenName:         task.TokenName,
 		ModelName:         modelName,
-		UpstreamModelName: task.Properties.UpstreamModelName,
+		UpstreamModelName: properties.UpstreamModelName,
 		Quota:             task.Quota,
 		Action:            constant.NormalizeTaskAction(task.Action),
 		Status:            string(task.Status),
@@ -807,7 +803,7 @@ func TaskModel2DtoWithOptions(task *model.Task, includeData bool, includeInterna
 		StartTime:         task.StartTime,
 		FinishTime:        task.FinishTime,
 		Progress:          task.Progress,
-		Properties:        task.Properties,
+		Properties:        properties,
 		Username:          task.Username,
 	}
 	if includeInternalChannelInfo {
@@ -833,5 +829,42 @@ func TaskModel2DtoWithOptions(task *model.Task, includeData bool, includeInterna
 	taskDto.CompletionTokens = task.PrivateData.CompletionTokens
 	taskDto.TotalTokens = task.PrivateData.TotalTokens
 	taskDto.UsageDetails = task.PrivateData.UsageDetails
+	if !includeInternalChannelInfo {
+		// Explicit public allowlist: future diagnostic fields added above must
+		// not become visible just because they were added to the shared DTO.
+		taskDto = &dto.TaskDto{
+			ID: task.ID, CreatedAt: task.CreatedAt, UpdatedAt: task.UpdatedAt,
+			TaskID: task.TaskID, UserId: task.UserId,
+			TokenId: task.GetTokenID(), TokenName: task.TokenName,
+			ModelName: modelName, Properties: properties, Quota: task.Quota,
+			Action: constant.NormalizeTaskAction(task.Action), Status: string(task.Status),
+			SubmitTime: task.SubmitTime, StartTime: task.StartTime, FinishTime: task.FinishTime,
+			Progress: task.Progress, ResultDiscarded: task.PrivateData.ResultDiscarded,
+			BillingState:     task.PrivateData.BillingState,
+			PreConsumedQuota: task.PrivateData.PreConsumedQuota, ActualQuota: task.PrivateData.ActualQuota,
+			PromptTokens: task.PrivateData.PromptTokens, CompletionTokens: task.PrivateData.CompletionTokens,
+			TotalTokens: task.PrivateData.TotalTokens, UsageDetails: task.PrivateData.UsageDetails,
+		}
+		switch taskDto.Action {
+		case constant.TaskActionGeminiImage:
+			taskDto.Action = constant.TaskActionImageGenerate
+		case constant.TaskActionImageGenerate, constant.TaskActionImageEdit,
+			constant.TaskActionImageToVideo,
+			constant.TaskActionTextToVideo, constant.TaskActionFirstTailToVideo,
+			constant.TaskActionReferenceToVideo, constant.TaskActionRemix, "MUSIC", "LYRICS":
+		default:
+			taskDto.Action = ""
+		}
+		progress, err := strconv.Atoi(strings.TrimSuffix(task.Progress, "%"))
+		if err != nil || progress < 0 || progress > 100 {
+			taskDto.Progress = ""
+		}
+		taskDto.FailReason = ""
+		if task.Status == model.TaskStatusFailure {
+			publicError := task.UserError()
+			taskDto.FailReason = publicError.Summary()
+			taskDto.ErrorCode = publicError.Code
+		}
+	}
 	return taskDto
 }

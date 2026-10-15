@@ -49,6 +49,7 @@ function Fixture() {
               enable_free_model_pre_consume: true,
               trust_quota_usd: 10,
               pre_consume_multiplier: 1,
+              image_token_pre_consume_usd: 1.5,
             },
           }}
         />
@@ -78,6 +79,37 @@ async function renderSettings() {
 beforeEach(() => {
   vi.spyOn(api, 'put').mockResolvedValue({ data: { success: true } })
 })
+
+test('image reserve preserves the decimal amount and saves independently', async () => {
+  await renderSettings()
+  const input = screen.getByRole('spinbutton', {
+    name: 'Minimum reserve per token-billed image (USD)',
+  })
+  expect(input).toHaveValue(1.5)
+  fireEvent.change(input, { target: { value: '2.25' } })
+  fireEvent.click(screen.getByRole('button', { name: 'Save Changes' }))
+  await waitFor(() =>
+    expect(api.put).toHaveBeenCalledWith('/api/option/', {
+      key: 'quota_setting.image_token_pre_consume_usd',
+      value: 2.25,
+    })
+  )
+  expect(api.put).toHaveBeenCalledTimes(1)
+})
+
+test.each(['0', '-1', ''])(
+  'invalid image reserve "%s" prevents saving',
+  async (value) => {
+    await renderSettings()
+    const input = screen.getByRole('spinbutton', {
+      name: 'Minimum reserve per token-billed image (USD)',
+    })
+    fireEvent.change(input, { target: { value } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save Changes' }))
+    await waitFor(() => expect(input).toHaveAttribute('aria-invalid', 'true'))
+    expect(api.put).not.toHaveBeenCalled()
+  }
+)
 
 test.each(['0.5', '1.5', '2.5', '0.0001'])(
   'typing multiplier %s preserves the decimal and saves its numeric value',

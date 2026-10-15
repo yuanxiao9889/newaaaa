@@ -33,12 +33,12 @@ type TaskDto struct {
 	CreatedAt         int64           `json:"created_at"`
 	UpdatedAt         int64           `json:"updated_at"`
 	TaskID            string          `json:"task_id"`
-	Platform          string          `json:"platform"`
+	Platform          string          `json:"platform,omitempty"`
 	UserId            int             `json:"user_id"`
-	Group             string          `json:"group"`
+	Group             string          `json:"group,omitempty"`
 	TokenId           int             `json:"token_id,omitempty"`
 	TokenName         string          `json:"token_name,omitempty"`
-	ChannelId         int             `json:"channel_id"`
+	ChannelId         int             `json:"channel_id,omitempty"`
 	ChannelName       string          `json:"channel_name,omitempty"`
 	ModelName         string          `json:"model_name,omitempty"`
 	UpstreamModelName string          `json:"upstream_model_name,omitempty"`
@@ -46,6 +46,7 @@ type TaskDto struct {
 	Action            string          `json:"action"`
 	Status            string          `json:"status"`
 	FailReason        string          `json:"fail_reason"`
+	ErrorCode         string          `json:"error_code,omitempty"`
 	ResultURL         string          `json:"result_url,omitempty"` // 任务结果 URL（视频地址等）
 	SubmitTime        int64           `json:"submit_time"`
 	StartTime         int64           `json:"start_time"`
@@ -69,6 +70,7 @@ type TaskDto struct {
 	TotalTokens          int               `json:"total_tokens,omitempty"`
 	UsageDetails         *TaskUsageDetails `json:"usage_details,omitempty"`
 	LegacyVideoAvailable bool              `json:"legacy_video_available,omitempty"`
+	LegacyAudioAvailable bool              `json:"legacy_audio_available,omitempty"`
 	AdminInfo            *TaskAdminInfo    `json:"admin_info,omitempty"`
 	RootInfo             *TaskRootInfo     `json:"root_info,omitempty"`
 }

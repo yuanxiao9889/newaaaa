@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	appI18n "github.com/QuantumNous/new-api/i18n"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/service/authz"
@@ -21,6 +22,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
+	gormlogger "gorm.io/gorm/logger"
 )
 
 func setupDashboardAuthMiddlewareTest(t *testing.T) {
@@ -545,4 +547,128 @@ func TestApplyWebSocketSubprotocolAuthorizationReadsRepeatedHeaders(t *testing.T
 
 	assert.True(t, applyWebSocketSubprotocolAuthorization(header))
 	assert.Equal(t, "Bearer sk-later-field", header.Get("Authorization"))
+}
+
+func TestTokenAuthDistinguishesExhaustedQuotaWithoutAuthorizingRejectedTokens(t *testing.T) {
+	originalMainType, originalLogType := common.MainDatabaseType(), common.LogDatabaseType()
+	setupDashboardAuthMiddlewareTest(t)
+	require.NoError(t, appI18n.Init())
+	// Initialize the model's dialect-specific key column without opening an
+	// external database or running application startup migrations.
+	t.Setenv("LOG_SQL_DSN", "")
+	originalMaster := common.IsMasterNode
+	common.IsMasterNode = false
+	require.NoError(t, model.InitLogDB())
+	common.IsMasterNode = originalMaster
+	t.Cleanup(func() {
+		common.SetMainDatabaseType(originalMainType)
+		common.IsMasterNode = false
+		require.NoError(t, model.InitLogDB())
+		common.IsMasterNode = originalMaster
+		common.SetLogDatabaseType(originalLogType)
+	})
+	// Missing-token lookups must not print fixture credentials in SQL logs.
+	model.DB = model.DB.Session(&gorm.Session{Logger: gormlogger.Default.LogMode(gormlogger.Silent)})
+	require.NoError(t, model.DB.AutoMigrate(&model.Token{}))
+	user := createMiddlewarePATUser(t, "inference-quota-user", "unused-dashboard-token")
+	require.Zero(t, user.Quota, "wallet funding is checked after authentication, not by TokenAuth")
+	var invalidCredentialResponse string
+
+	for index, tc := range []struct {
+		name                                  string
+		status, remain, wantStatus            int
+		expires                               int64
+		unlimited, missing, noHeader, deleted bool
+	}{
+		{name: "valid token with empty wallet", status: common.TokenStatusEnabled, remain: 1, expires: -1, wantStatus: http.StatusNoContent},
+		{name: "unlimited token with negative counter", status: common.TokenStatusEnabled, remain: -100, expires: -1, unlimited: true, wantStatus: http.StatusNoContent},
+		{name: "zero quota", status: common.TokenStatusEnabled, expires: -1, wantStatus: http.StatusPaymentRequired},
+		{name: "negative quota", status: common.TokenStatusEnabled, remain: -100, expires: -1, wantStatus: http.StatusPaymentRequired},
+		{name: "already exhausted", status: common.TokenStatusExhausted, expires: -1, wantStatus: http.StatusPaymentRequired},
+		{name: "disabled is not a quota error", status: common.TokenStatusDisabled, expires: -1, wantStatus: http.StatusUnauthorized},
+		{name: "expired is not a quota error", status: common.TokenStatusEnabled, expires: 1, wantStatus: http.StatusUnauthorized},
+		{name: "expired status is not a quota error", status: common.TokenStatusExpired, expires: -1, wantStatus: http.StatusUnauthorized},
+		{name: "unlimited disabled", status: common.TokenStatusDisabled, unlimited: true, expires: -1, wantStatus: http.StatusUnauthorized},
+		{name: "exhausted status with positive quota remains invalid", status: common.TokenStatusExhausted, remain: 100, expires: -1, wantStatus: http.StatusUnauthorized},
+		{name: "unknown credential", missing: true, wantStatus: http.StatusUnauthorized},
+		{name: "missing credential", noHeader: true, status: common.TokenStatusEnabled, remain: 1, expires: -1, wantStatus: http.StatusUnauthorized},
+		{name: "deleted credential", deleted: true, status: common.TokenStatusEnabled, expires: -1, wantStatus: http.StatusUnauthorized},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			token := &model.Token{
+				Key: fmt.Sprintf("quotaAuthFixture%d", index), UserId: user.Id,
+				Status: tc.status, RemainQuota: tc.remain, UsedQuota: 37,
+				ExpiredTime: tc.expires, UnlimitedQuota: tc.unlimited,
+			}
+			if !tc.missing {
+				require.NoError(t, model.DB.Create(token).Error)
+				if tc.deleted {
+					require.NoError(t, model.DB.Delete(token).Error)
+				}
+			}
+			downstreamCalls := 0
+			router := gin.New()
+			router.Use(TokenAuth())
+			handler := func(c *gin.Context) {
+				downstreamCalls++
+				assert.Equal(t, token.Id, c.GetInt("token_id"))
+				c.Status(http.StatusNoContent)
+			}
+			router.POST("/v1/images/generations", handler)
+			router.POST("/v1/responses", handler)
+			router.POST("/mj/submit/imagine", handler)
+			router.POST("/:mode/mj/submit/imagine", handler)
+			paths := []string{"/v1/images/generations", "/v1/responses", "/mj/submit/imagine", "/fast/mj/submit/imagine"}
+			for _, path := range paths {
+				request := httptest.NewRequest(http.MethodPost, path, nil)
+				if !tc.noHeader {
+					request.Header.Set("Authorization", "Bearer sk-"+token.Key)
+				}
+				recorder := httptest.NewRecorder()
+				router.ServeHTTP(recorder, request)
+				assert.Equal(t, tc.wantStatus, recorder.Code, path)
+				assert.NotContains(t, recorder.Body.String(), token.Key)
+				if tc.wantStatus == http.StatusNoContent {
+					continue
+				}
+				var payload map[string]any
+				require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &payload))
+				if tc.wantStatus == http.StatusPaymentRequired {
+					assert.Equal(t, "insufficient_token_quota", recorder.Header().Get("X-Error-Code"))
+					assert.Contains(t, recorder.Body.String(), "[insufficient_token_quota]")
+					assert.Contains(t, recorder.Body.String(), "令牌配额不足")
+					if strings.Contains(path, "/mj/") {
+						assert.Equal(t, float64(4), payload["code"], "preserve the MJ numeric error contract")
+						assert.Contains(t, payload["description"], "[insufficient_token_quota]")
+						continue
+					}
+				}
+				errBody, ok := payload["error"].(map[string]any)
+				require.True(t, ok)
+				if tc.wantStatus == http.StatusPaymentRequired {
+					assert.Equal(t, "insufficient_token_quota", errBody["code"])
+				} else {
+					assert.Equal(t, "invalid_token", errBody["code"])
+					assert.Contains(t, errBody["message"], "[invalid_token]")
+					assert.NotContains(t, recorder.Body.String(), "insufficient_token_quota")
+					if invalidCredentialResponse == "" {
+						invalidCredentialResponse = recorder.Body.String()
+					} else {
+						assert.Equal(t, invalidCredentialResponse, recorder.Body.String(), "invalid credentials must not reveal whether they exist, are disabled or expired")
+					}
+				}
+			}
+			if tc.wantStatus == http.StatusNoContent {
+				assert.Equal(t, len(paths), downstreamCalls)
+			} else {
+				assert.Zero(t, downstreamCalls, "every rejected request must stop before relay or billing")
+			}
+			if !tc.missing && !tc.deleted {
+				var persisted model.Token
+				require.NoError(t, model.DB.First(&persisted, token.Id).Error)
+				assert.Equal(t, tc.remain, persisted.RemainQuota)
+				assert.Equal(t, 37, persisted.UsedQuota)
+			}
+		})
+	}
 }

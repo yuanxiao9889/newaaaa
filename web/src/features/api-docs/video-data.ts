@@ -1,4 +1,4 @@
-// Public wire contracts checked against Storyboard's native adapters and catalog revision 12.
+// Public contracts checked against the canvas and enabled relay channels on 2026-10-12.
 export type VideoParameter = {
   name: string
   type: string
@@ -42,6 +42,101 @@ export const videoCommonParameters = [
 ]
 
 export const videoGroups: VideoGroup[] = [
+  {
+    id: 'video-muse',
+    title: 'Muse Video',
+    variants: [
+      {
+        models: ['muse-video'],
+        seconds: '1–30',
+        resolution: '720p',
+        ratios: '16:9, 9:16',
+        limits:
+          'Up to 10 public image URLs. Video and audio references are not supported. A duration of 10 seconds or less is recommended.',
+      },
+    ],
+    parameters: [
+      parameter('duration', 'integer', true, 'durationField'),
+      parameter('aspect_ratio', 'string', true, 'ratioField'),
+      {
+        name: 'images',
+        type: 'string[]',
+        required: false,
+        description:
+          'Use publicly accessible HTTP(S) media URLs. Local paths, private network URLs and login pages cannot be used.',
+      },
+    ],
+    notes: [
+      'Use publicly accessible HTTP(S) media URLs. Local paths, private network URLs and login pages cannot be used.',
+    ],
+    examples: [
+      {
+        title: key('textExample'),
+        body: {
+          model: 'muse-video',
+          prompt: 'A slow camera push through a sunlit forest.',
+          duration: 6,
+          aspect_ratio: '16:9',
+        },
+      },
+      {
+        title: 'Image reference example',
+        body: {
+          model: 'muse-video',
+          prompt: 'Animate the reference character walking through the scene.',
+          duration: 6,
+          aspect_ratio: '16:9',
+          images: [image],
+        },
+      },
+    ],
+  },
+  {
+    id: 'video-wan30',
+    title: 'Wan 3.0',
+    variants: [
+      {
+        models: ['万能视频-3.0-720'],
+        seconds: '5–30',
+        resolution: '720p',
+        ratios: '16:9, 9:16',
+        limits:
+          'Up to 10 images, 5 videos and 5 audio clips; at most 20 references in total. Prompt limit: 20000 characters.',
+      },
+    ],
+    parameters: [
+      parameter('duration', 'integer', true, 'durationField'),
+      parameter('ratio', 'string', true, 'ratioField'),
+      parameter('resolution', 'string', true, 'resolution720'),
+      {
+        name: 'images / videos / audios',
+        type: 'string[]',
+        required: false,
+        description:
+          'Use publicly accessible HTTP(S) media URLs. Local paths, private network URLs and login pages cannot be used.',
+      },
+    ],
+    notes: [
+      'Use duration as an integer, ratio and resolution=720p. Do not substitute seconds, aspect_ratio or content for this model.',
+    ],
+    examples: [
+      {
+        title: key('mixedExample'),
+        body: {
+          model: '万能视频-3.0-720',
+          prompt:
+            'Animate the character using the reference motion and audio rhythm.',
+          duration: 5,
+          ratio: '16:9',
+          resolution: '720p',
+          images: [image],
+          videos: [video],
+          audios: [audio],
+        },
+      },
+    ],
+  },
+
   {
     id: 'video-arrays',
     title: key('arraysTitle'),
@@ -97,11 +192,12 @@ export const videoGroups: VideoGroup[] = [
     title: key('contentTitle'),
     variants: [
       {
-        models: ['全能视频2.5-933-480', '全能视频2.5-933-720'],
+        models: ['全能视频2.5-301010-480', '全能视频2.5-301010-720'],
         seconds: '4–30',
         resolution: '480p / 720p',
-        ratios: `${ratios3}, adaptive`,
-        limits: key('limitsMai25'),
+        ratios: ratios6,
+        limits:
+          'Up to 30 images, 10 videos and 10 audio clips; at most 50 references in total. Use fixed ratios; adaptive, first/last frames, editing and extension are not supported.',
       },
       {
         models: ['全能视频2.5-无视频参考-480', '全能视频2.5-无视频参考-720'],
@@ -137,12 +233,13 @@ export const videoGroups: VideoGroup[] = [
       key('contentFrame'),
       key('contentTags'),
       key('contentDurations'),
+      'For 301010-480/720, use reference_image, reference_video and reference_audio roles only. Do not mix content with images/videos/audios. Video references may change billing; check current pricing.',
     ],
     examples: [
       {
         title: key('contentExample'),
         body: {
-          model: '全能视频2.5-933-720',
+          model: '全能视频2.5-301010-720',
           prompt:
             '@image1 turns toward the camera, following the movement of @video1.',
           seconds: 5,

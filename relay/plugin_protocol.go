@@ -373,6 +373,7 @@ type PluginResponsesMachine struct {
 	totalOutputBytes int
 	usage            *dto.PluginResponsesUsage
 	background       bool
+	publicError      *dto.PluginResponsesError
 }
 
 func NewPluginResponsesMachine(taskID, model string, createdAt int64, limits PluginProtocolLimits) *PluginResponsesMachine {
@@ -396,6 +397,15 @@ func NewPluginResponsesMachine(taskID, model string, createdAt int64, limits Plu
 
 func (m *PluginResponsesMachine) SetBackground(background bool) {
 	m.background = background
+}
+
+// SetPublicError accepts only the host's classified error projection. Never pass
+// provider failure text directly into the Responses state machine.
+func (m *PluginResponsesMachine) SetPublicError(publicError common.PublicError) {
+	m.publicError = &dto.PluginResponsesError{
+		Code:    publicError.Code,
+		Message: publicError.Summary(),
+	}
 }
 
 // PendingResponse is the host-synthesized non-terminal Responses snapshot.
@@ -449,7 +459,7 @@ func (m *PluginResponsesMachine) ApplyTick(result ProtocolEventResult, taskStatu
 	}
 	if strings.EqualFold(strings.TrimSpace(taskStatus), "FAILURE") {
 		m.metadata["task_status"] = pluginResponseStatusFailed
-		return []dto.PluginResponsesStreamEvent{m.fail("server_error", "The task failed.")}, nil
+		return []dto.PluginResponsesStreamEvent{m.fail("generation_failed")}, nil
 	}
 
 	outputTexts := make(map[int]string)
@@ -509,10 +519,12 @@ func (m *PluginResponsesMachine) ApplyTick(result ProtocolEventResult, taskStatu
 		case "output":
 			events = append(events, m.appendOutput(outputTexts[index])...)
 		case "error":
-			events = append(events, m.fail(
-				"server_error",
-				"The task failed.",
-			))
+			code := ""
+			if semantic.Code != nil {
+				code = *semantic.Code
+			}
+			m.SetPublicError(common.ClassifyPublicError(code, *semantic.Message, 0, false))
+			events = append(events, m.fail("generation_failed"))
 			return events, nil
 		}
 	}
@@ -521,7 +533,7 @@ func (m *PluginResponsesMachine) ApplyTick(result ProtocolEventResult, taskStatu
 	case "SUCCESS":
 		events = append(events, m.complete())
 	case "FAILURE":
-		events = append(events, m.fail("server_error", "The task failed."))
+		events = append(events, m.fail("generation_failed"))
 	default:
 		if result.Done {
 			events = append(events, m.incomplete())
@@ -541,7 +553,7 @@ func (m *PluginResponsesMachine) FailureEvent(taskStatus ...string) (dto.PluginR
 		return dto.PluginResponsesStreamEvent{}, errors.New("response is already terminal")
 	}
 	m.setPersistedTaskStatus(taskStatus)
-	return m.fail("server_error", "The task could not be observed."), nil
+	return m.fail("service_unavailable"), nil
 }
 
 func (m *PluginResponsesMachine) TimeoutEvent(taskStatus ...string) (dto.PluginResponsesStreamEvent, error) {
@@ -590,10 +602,7 @@ func (m *PluginResponsesMachine) FinalResponse(payload any, taskStatus string) (
 		return nil, errors.New("final response requires a terminal task")
 	}
 	m.terminal = true
-	response, err := pluginResponseMap(m.responseSnapshot(&dto.PluginResponsesError{
-		Code:    "server_error",
-		Message: "The task failed.",
-	}))
+	response, err := pluginResponseMap(m.responseSnapshot(m.failureError("generation_failed")))
 	if err != nil {
 		return nil, err
 	}
@@ -633,10 +642,7 @@ func (m *PluginResponsesMachine) FailureResponse(taskStatus ...string) (*dto.Plu
 	m.status = pluginResponseStatusFailed
 	m.setPersistedTaskStatus(taskStatus)
 	m.terminal = true
-	return m.responseSnapshot(&dto.PluginResponsesError{
-		Code:    "server_error",
-		Message: "The task could not be observed.",
-	}), nil
+	return m.responseSnapshot(m.failureError("service_unavailable")), nil
 }
 
 // TimeoutResponse is the documented non-stream polling timeout shape. Unlike
@@ -952,15 +958,20 @@ func (m *PluginResponsesMachine) incomplete() dto.PluginResponsesStreamEvent {
 	return m.responseEvent("response.incomplete")
 }
 
-func (m *PluginResponsesMachine) fail(code, message string) dto.PluginResponsesStreamEvent {
+func (m *PluginResponsesMachine) failureError(fallbackCode string) *dto.PluginResponsesError {
+	if m.publicError != nil {
+		return m.publicError
+	}
+	publicError := common.ClassifyPublicError(fallbackCode, "", 0, true)
+	return &dto.PluginResponsesError{Code: publicError.Code, Message: publicError.Summary()}
+}
+
+func (m *PluginResponsesMachine) fail(fallbackCode string) dto.PluginResponsesStreamEvent {
 	m.status = pluginResponseStatusFailed
 	m.terminal = true
 	return m.event(dto.PluginResponsesStreamEvent{
-		Type: "response.failed",
-		Response: m.responseSnapshot(&dto.PluginResponsesError{
-			Code:    code,
-			Message: message,
-		}),
+		Type:     "response.failed",
+		Response: m.responseSnapshot(m.failureError(fallbackCode)),
 	})
 }
 

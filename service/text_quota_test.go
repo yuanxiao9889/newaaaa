@@ -1,8 +1,11 @@
 package service
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"math"
+	"net/http"
 	"net/http/httptest"
 	"os"
 	"testing"
@@ -28,6 +31,87 @@ import (
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 )
+
+func TestTokenQuotaReservationErrorStatus(t *testing.T) {
+	for _, tc := range []struct {
+		name, message string
+		status        int
+	}{
+		{"insufficient token quota", "token quota is not enough, token remain quota: 1, need quota: 2", http.StatusPaymentRequired},
+		{"reservation storage failure", "database unavailable", http.StatusInternalServerError},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			apiErr := tokenQuotaReservationError(errors.New(tc.message))
+			require.NotNil(t, apiErr)
+			assert.Equal(t, tc.status, apiErr.StatusCode)
+			assert.Equal(t, types.ErrorCodePreConsumeTokenQuotaFailed, apiErr.GetErrorCode())
+			assert.Equal(t, types.ErrorTypeNewAPIError, apiErr.GetErrorType())
+		})
+	}
+}
+
+func TestVideoRetryQuotaErrorStatus(t *testing.T) {
+	for _, tc := range []struct {
+		name, source  string
+		wallet, token int
+		code          types.ErrorCode
+		publicCode    string
+	}{
+		{"token", BillingSourceWallet, 100, 0, types.ErrorCodePreConsumeTokenQuotaFailed, "insufficient_token_quota"},
+		{"wallet", BillingSourceWallet, 0, 100, types.ErrorCodeInsufficientUserQuota, "insufficient_user_quota"},
+		{"subscription", BillingSourceSubscription, 100, 100, types.ErrorCodeInsufficientUserQuota, "insufficient_user_quota"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			truncate(t)
+			seedUser(t, 1, tc.wallet)
+			token := &model.Token{Id: 1, UserId: 1, Key: "video-quota-status", Status: common.TokenStatusEnabled, RemainQuota: tc.token, ExpiredTime: -1}
+			require.NoError(t, model.DB.Create(token).Error)
+			seedSubscription(t, 1, 1, 100, 100)
+			task := makeTask(1, 1, 100, 1, tc.source, 1)
+			task.PrivateData.VideoRetry = &model.VideoTaskRetryState{Ready: true, Submitting: true}
+			require.NoError(t, model.DB.Create(task).Error)
+			billing, err := NewVideoTaskRetryBilling(context.Background(), task, &relaycommon.RelayInfo{})
+			require.NoError(t, err)
+			var apiErr *types.NewAPIError
+			require.ErrorAs(t, billing.Reserve(110), &apiErr)
+			assert.Equal(t, http.StatusPaymentRequired, apiErr.StatusCode)
+			assert.Equal(t, tc.code, apiErr.GetErrorCode())
+			assert.Equal(t, types.ErrorTypeNewAPIError, apiErr.GetErrorType())
+			assert.Equal(t, tc.wallet, getUserQuota(t, 1))
+			assert.Equal(t, tc.token, getTokenRemainQuota(t, 1))
+			assert.Zero(t, getTokenUsedQuota(t, 1))
+			var storedTask model.Task
+			require.NoError(t, model.DB.First(&storedTask, task.ID).Error)
+			assert.Equal(t, 100, storedTask.Quota)
+			taskErr := TaskErrorFromAPIError(apiErr)
+			publicError := common.ClassifyPublicError(taskErr.Code, taskErr.Message, taskErr.StatusCode, taskErr.LocalError)
+			assert.Equal(t, tc.publicCode, publicError.Code)
+			assert.Equal(t, http.StatusPaymentRequired, publicError.StatusCode)
+		})
+	}
+}
+
+func TestSubscriptionReserveErrorStatus(t *testing.T) {
+	truncate(t)
+	seedSubscription(t, 1, 1, 100, 100)
+	for _, tc := range []struct {
+		name   string
+		id     int
+		status int
+		code   types.ErrorCode
+	}{
+		{"quota exhausted", 1, http.StatusPaymentRequired, types.ErrorCodeInsufficientUserQuota},
+		{"invalid billing state", 0, http.StatusInternalServerError, types.ErrorCodeUpdateDataError},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			billing := &BillingSession{funding: &SubscriptionFunding{subscriptionId: tc.id}}
+			var apiErr *types.NewAPIError
+			require.ErrorAs(t, billing.reserveFunding(10, true), &apiErr)
+			assert.Equal(t, tc.status, apiErr.StatusCode)
+			assert.Equal(t, tc.code, apiErr.GetErrorCode())
+		})
+	}
+}
 
 // The configured DSNs must point at isolated test databases. Each dialect runs
 // the real reservation, settlement and log paths with the same billing cases.
@@ -187,6 +271,7 @@ func runFixedPriceAccountingCases(t *testing.T, db, logDB *gorm.DB) {
 			if tc.insufficient {
 				require.NotNil(t, apiErr)
 				assert.Equal(t, types.ErrorCodeInsufficientUserQuota, apiErr.GetErrorCode())
+				assert.Equal(t, http.StatusPaymentRequired, apiErr.StatusCode)
 			} else {
 				require.Nil(t, apiErr)
 				held, err := model.GetUserQuota(user.Id, true)
@@ -197,6 +282,7 @@ func runFixedPriceAccountingCases(t *testing.T, db, logDB *gorm.DB) {
 					if tc.reserveInsufficient {
 						require.NotNil(t, reserveErr)
 						assert.Equal(t, types.ErrorCodeInsufficientUserQuota, reserveErr.GetErrorCode())
+						assert.Equal(t, http.StatusPaymentRequired, reserveErr.StatusCode)
 						assert.Equal(t, reservation, info.Billing.GetPreConsumedQuota())
 					} else {
 						require.Nil(t, reserveErr)

@@ -270,8 +270,8 @@ func TestPluginResponsesMachineSanitizesFailure(t *testing.T) {
 		require.NoError(t, err)
 		require.Len(t, events, 1)
 		require.NotNil(t, events[0].Response.Error)
-		assert.Equal(t, "server_error", events[0].Response.Error.Code)
-		assert.Equal(t, "The task failed.", events[0].Response.Error.Message)
+		assert.Equal(t, "generation_failed", events[0].Response.Error.Code)
+		assert.Contains(t, events[0].Response.Error.Message, "[generation_failed]")
 		encoded, marshalErr := common.Marshal(events[0])
 		require.NoError(t, marshalErr)
 		assert.NotContains(t, string(encoded), "secret")
@@ -279,6 +279,7 @@ func TestPluginResponsesMachineSanitizesFailure(t *testing.T) {
 
 	t.Run("database failure ignores plugin output", func(t *testing.T) {
 		machine := NewPluginResponsesMachine("task_db_error", "model", 1, PluginProtocolLimits{})
+		machine.SetPublicError(common.ClassifyPublicError("invalid_image_input", "private-provider", 400, false))
 		_, err := machine.CreatedEvent()
 		require.NoError(t, err)
 		result := ProtocolEventResult{Events: []ProtocolSemanticEvent{
@@ -288,6 +289,8 @@ func TestPluginResponsesMachineSanitizesFailure(t *testing.T) {
 		require.NoError(t, err)
 		require.Len(t, events, 1)
 		assert.Equal(t, "response.failed", events[0].Type)
+		assert.Equal(t, "invalid_image_input", events[0].Response.Error.Code)
+		assert.Contains(t, events[0].Response.Error.Message, "[invalid_image_input]")
 		assert.Empty(t, events[0].Response.Output)
 		encoded, marshalErr := common.Marshal(events[0])
 		require.NoError(t, marshalErr)
@@ -301,8 +304,8 @@ func TestPluginResponsesMachineSanitizesFailure(t *testing.T) {
 		failed, err := machine.FailureEvent("SUCCESS")
 		require.NoError(t, err)
 		assert.Equal(t, 1, failed.SequenceNumber)
-		assert.Equal(t, "server_error", failed.Response.Error.Code)
-		assert.Equal(t, "The task could not be observed.", failed.Response.Error.Message)
+		assert.Equal(t, "service_unavailable", failed.Response.Error.Code)
+		assert.Contains(t, failed.Response.Error.Message, "[service_unavailable]")
 		assert.Equal(t, "failed", failed.Response.Status)
 		assert.Equal(t, "completed", failed.Response.Metadata["task_status"])
 	})
@@ -379,15 +382,17 @@ func TestPluginResponsesMachineNonStreamShapes(t *testing.T) {
 		assert.Equal(t, "hello", part["text"])
 	})
 
-	t.Run("failed is generic", func(t *testing.T) {
+	t.Run("failed preserves the classified public error", func(t *testing.T) {
 		machine := NewPluginResponsesMachine("task_failed", "model", 99, PluginProtocolLimits{})
+		machine.SetPublicError(common.ClassifyPublicError("content_policy_violation", "secret provider", 400, false))
 		response, err := machine.FinalResponse(map[string]any{"secret": "ignored"}, "FAILURE")
 		require.NoError(t, err)
 		assert.Equal(t, "failed", response["status"])
 		assert.Empty(t, response["output"])
 		responseError, ok := response["error"].(map[string]any)
 		require.True(t, ok)
-		assert.Equal(t, "server_error", responseError["code"])
+		assert.Equal(t, "content_policy_violation", responseError["code"])
+		assert.Contains(t, responseError["message"], "[content_policy_violation]")
 		encoded, marshalErr := common.Marshal(response)
 		require.NoError(t, marshalErr)
 		assert.NotContains(t, string(encoded), "secret")

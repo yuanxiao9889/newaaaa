@@ -32,6 +32,8 @@ type MidjourneyResponse struct {
 	Description string `json:"description"`
 	Properties  any    `json:"properties"`
 	Result      string `json:"result"`
+	// LocalErrorCode is host-only provenance, never accepted from provider JSON.
+	LocalErrorCode string `json:"-"`
 }
 
 type MidjourneyUploadResponse struct {

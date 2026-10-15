@@ -121,12 +121,6 @@ const grokEndpoints: EndpointDoc[] = [
 const douEndpoints: EndpointDoc[] = [
   {
     method: 'POST',
-    path: '/v1/uploads/images',
-    contentType: 'multipart/form-data',
-    purpose: 'Upload a reference image and receive a reusable image URL.',
-  },
-  {
-    method: 'POST',
     path: '/v1/images/generations',
     contentType: 'application/json',
     purpose: 'Submit a text-to-image or reference-image generation task.',
@@ -168,7 +162,7 @@ const douParameters: ParameterDoc[] = [
     required: 'Optional reference',
     values: 'HTTPS URL',
     description:
-      'Use for one reference image. Upload local files first with /v1/uploads/images and pass the returned URL here.',
+      'Use a publicly accessible HTTPS URL for the reference image. The URL must remain accessible until the task completes.',
   },
   {
     name: 'image_urls',
@@ -410,93 +404,22 @@ export const oopiiModelGroups: Record<
   OopiiCatalogModel[]
 > = {
   text: [
-    {
-      id: 'all-5.4',
-      owner: 'openai',
-      endpoints: ['openai'],
-    },
-    {
-      id: 'all-5.5',
-      owner: 'openai',
-      endpoints: ['openai'],
-    },
-    {
-      id: 'claude-fable-5',
-      owner: 'claude',
-      endpoints: ['anthropic', 'openai'],
-    },
-    {
-      id: 'claude-opus-4-6',
-      owner: 'claude',
-      endpoints: ['anthropic', 'openai'],
-    },
-    {
-      id: 'claude-opus-4-7',
-      owner: 'claude',
-      endpoints: ['anthropic', 'openai'],
-    },
-    {
-      id: 'claude-opus-4-8',
-      owner: 'claude',
-      endpoints: ['anthropic', 'openai'],
-    },
-    {
-      id: 'claude-sonnet-5',
-      owner: 'claude',
-      endpoints: ['anthropic', 'openai'],
-    },
-    {
-      id: 'gemini-3.1-pro-preview',
-      owner: 'google gemini',
-      endpoints: ['gemini', 'openai'],
-    },
-    {
-      id: 'gemini-3.1-pro-preview-c',
-      owner: 'google gemini',
-      endpoints: ['gemini', 'openai'],
-    },
-    {
-      id: 'gemini-3.5-flash',
-      owner: 'google gemini',
-      endpoints: ['gemini', 'openai'],
-    },
-    {
-      id: 'gemini-3.5-flash-c',
-      owner: 'google gemini',
-      endpoints: ['gemini', 'openai'],
-    },
-    {
-      id: 'gpt-5.4',
-      owner: 'openai',
-      endpoints: ['openai'],
-    },
-    {
-      id: 'gpt-5.5',
-      owner: 'openai',
-      endpoints: ['openai'],
-    },
-    {
-      id: 'gpt-5.6-luna',
-      owner: 'openai',
-      endpoints: ['openai'],
-    },
-    {
-      id: 'gpt-5.6-sol',
-      owner: 'openai',
-      endpoints: ['openai'],
-    },
-    {
-      id: 'gpt-5.6-terra',
-      owner: 'openai',
-      endpoints: ['openai'],
-    },
-    {
-      id: 'grok-4.5',
-      owner: 'openai',
-      endpoints: ['openai'],
-    },
+    { id: 'GPT', owner: 'OpenAI', endpoints: ['openai'] },
+    { id: 'Claude', owner: 'Anthropic', endpoints: ['anthropic', 'openai'] },
+    { id: 'Gemini', owner: 'Google', endpoints: ['gemini', 'openai'] },
+    { id: 'Grok', owner: 'xAI', endpoints: ['openai'] },
+    { id: 'GLM', owner: 'Zhipu AI', endpoints: ['openai'] },
+    { id: 'DeepSeek', owner: 'DeepSeek', endpoints: ['openai'] },
+    { id: 'Kimi', owner: 'Moonshot AI', endpoints: ['openai'] },
   ],
   image: [
+    { id: 'nano-banana-2.1', owner: 'google', endpoints: ['gemini'] },
+    { id: 'gpt-image-2-opi', owner: 'openai', endpoints: ['image-generation'] },
+    {
+      id: 'hy-image-v3.5-preview',
+      owner: 'tencent',
+      endpoints: ['image-generation'],
+    },
     ...image25Groups.flatMap((group) =>
       group.modelIds.map((id) => ({
         id,
@@ -561,114 +484,183 @@ export const oopiiModelGroups: Record<
   ),
   midjourney: [
     {
+      id: 'mj_fast_blend',
+      owner: 'midjourneyplus',
+      endpoints: ['midjourney'],
+    },
+    {
       id: 'mj_fast_custom_zoom',
       owner: 'midjourneyplus',
-      endpoints: ['openai'],
+      endpoints: ['midjourney'],
     },
     {
       id: 'mj_fast_high_variation',
       owner: 'midjourneyplus',
-      endpoints: ['openai'],
+      endpoints: ['midjourney'],
     },
     {
       id: 'mj_fast_imagine',
       owner: 'midjourneyplus',
-      endpoints: ['openai'],
+      endpoints: ['midjourney'],
     },
     {
       id: 'mj_fast_low_variation',
       owner: 'midjourneyplus',
-      endpoints: ['openai'],
+      endpoints: ['midjourney'],
     },
     {
       id: 'mj_fast_modal',
       owner: 'midjourneyplus',
-      endpoints: ['openai'],
+      endpoints: ['midjourney'],
     },
     {
       id: 'mj_fast_pan',
       owner: 'midjourneyplus',
-      endpoints: ['openai'],
-    },
-    {
-      id: 'mj_fast_upload',
-      owner: 'midjourneyplus',
-      endpoints: ['openai'],
+      endpoints: ['midjourney'],
     },
     {
       id: 'mj_fast_upscale',
       owner: 'midjourneyplus',
-      endpoints: ['openai'],
+      endpoints: ['midjourney'],
     },
     {
       id: 'mj_fast_variation',
       owner: 'midjourneyplus',
-      endpoints: ['openai'],
+      endpoints: ['midjourney'],
     },
     {
       id: 'mj_fast_zoom',
       owner: 'midjourneyplus',
-      endpoints: ['openai'],
-    },
-    {
-      id: 'mj_relax_custom_zoom',
-      owner: 'midjourneyplus',
-      endpoints: ['openai'],
-    },
-    {
-      id: 'mj_relax_high_variation',
-      owner: 'midjourneyplus',
-      endpoints: ['openai'],
-    },
-    {
-      id: 'mj_relax_imagine',
-      owner: 'midjourneyplus',
-      endpoints: ['openai'],
-    },
-    {
-      id: 'mj_relax_low_variation',
-      owner: 'midjourneyplus',
-      endpoints: ['openai'],
-    },
-    {
-      id: 'mj_relax_modal',
-      owner: 'midjourneyplus',
-      endpoints: ['openai'],
-    },
-    {
-      id: 'mj_relax_pan',
-      owner: 'midjourneyplus',
-      endpoints: ['openai'],
-    },
-    {
-      id: 'mj_relax_upload',
-      owner: 'midjourneyplus',
-      endpoints: ['openai'],
-    },
-    {
-      id: 'mj_relax_upscale',
-      owner: 'midjourneyplus',
-      endpoints: ['openai'],
-    },
-    {
-      id: 'mj_relax_variation',
-      owner: 'midjourneyplus',
-      endpoints: ['openai'],
-    },
-    {
-      id: 'mj_relax_zoom',
-      owner: 'midjourneyplus',
-      endpoints: ['openai'],
+      endpoints: ['midjourney'],
     },
     {
       id: 'mj_upload',
       owner: 'midjourneyplus',
-      endpoints: ['openai'],
+      endpoints: ['midjourney'],
     },
   ],
 }
 
 export const imageModels: ImageModelDoc[] = [
+  {
+    id: 'gpt-image-2-opi',
+    model: 'gpt-image-2-opi',
+    protocol: 'OpenAI Images',
+    family: 'openai',
+    summary: 'OpenAI Images generation and editing with per-request billing.',
+    recommendedFor:
+      'Storyboard frames, character consistency, and general production image tasks.',
+    endpoints: openAIEndpoints,
+    ratios: gptImageRatios,
+    resolutions: ['1K', '2K', '4K'],
+    parameters: allImageParameters.map((parameter) =>
+      parameter.name === 'quality'
+        ? {
+            ...parameter,
+            values: 'low | medium | high | xhigh | max',
+            description: 'apiDocs.image25.qualityDescription',
+          }
+        : parameter
+    ),
+    supportsEditing: true,
+    responsePath: 'data[0].url or data[0].b64_json',
+    requestNotes: ['apiDocs.image25.perRequest', 'apiDocs.image25.wireFields'],
+  },
+  {
+    id: 'nano-banana-2.1',
+    model: 'nano-banana-2.1',
+    protocol: 'Gemini generateContent',
+    family: 'gemini',
+    summary:
+      'Gemini image generation and reference editing with selectable thinking levels.',
+    recommendedFor:
+      'Detailed image generation and edits that need broad aspect-ratio coverage.',
+    endpoints: geminiEndpoints,
+    ratios: genericImageRatios.filter((ratio) => ratio !== '9:21'),
+    resolutions: ['1K', '2K', '4K'],
+    parameters: [
+      ...geminiParameters,
+      {
+        name: 'generationConfig.thinkingConfig.thinkingLevel',
+        type: 'string',
+        required: 'Optional',
+        values: 'minimal | medium | high',
+        description:
+          'The canvas defaults to medium thinking. Keep this field inside generationConfig.thinkingConfig.',
+      },
+    ],
+    supportsEditing: true,
+    responsePath: 'candidates[].content.parts[].inlineData.data',
+    requestNotes: [
+      'The canvas defaults to medium thinking. Keep this field inside generationConfig.thinkingConfig.',
+    ],
+  },
+  {
+    id: 'hy-image-v3.5-preview',
+    model: 'hy-image-v3.5-preview',
+    protocol: 'OpenAI Images',
+    family: 'openai',
+    summary:
+      'Hunyuan image generation and editing with up to 20 reference images.',
+    recommendedFor:
+      'Storyboard frames, character consistency, and general production image tasks.',
+    endpoints: [
+      {
+        method: 'POST',
+        path: '/v1/images/generations',
+        contentType: 'application/json',
+        purpose:
+          'Generate an image or submit reference image URLs in one JSON request.',
+      },
+      {
+        method: 'POST',
+        path: '/v1/images/edits',
+        contentType: 'application/json / multipart/form-data',
+        purpose: 'Edit or restyle one or more reference images.',
+      },
+    ],
+    ratios: [
+      '1:1',
+      '2:3',
+      '3:2',
+      '3:4',
+      '4:3',
+      '4:5',
+      '5:4',
+      '9:16',
+      '16:9',
+      '21:9',
+    ],
+    resolutions: ['1K', '1.5K', '2K', '4K'],
+    parameters: [
+      ...allImageParameters.filter((parameter) =>
+        ['model', 'prompt', 'n'].includes(parameter.name)
+      ),
+      {
+        name: 'size',
+        type: 'string',
+        required: 'Optional',
+        values: '1536x1536',
+        description:
+          'Use WIDTHxHEIGHT: each edge must be 256–8192 pixels and total area must not exceed 16777216 pixels. The canvas defaults to 1.5K.',
+      },
+      {
+        name: 'image',
+        type: 'string | string[]',
+        required: 'Optional references',
+        values: 'HTTPS URL / HTTPS URL[]',
+        description:
+          'Use up to 20 public PNG or JPEG reference URLs in image. Do not send images, masks, quality, background, or output_format.',
+      },
+    ],
+    supportsEditing: true,
+    responsePath: 'data[0].url',
+    requestNotes: [
+      'Use up to 20 public PNG or JPEG reference URLs in image. Do not send images, masks, quality, background, or output_format.',
+      'Hunyuan returns the image result synchronously. Do not poll a video task ID; read data[0].url from the response.',
+    ],
+  },
+
   ...buildImage25Docs(allImageParameters, openAIEndpoints, gptImageRatios),
   {
     id: 'all-image-2',
@@ -868,7 +860,7 @@ export const imageModels: ImageModelDoc[] = [
       'The API base URL is https://www.oopii.cc. Authenticate with Authorization: Bearer <API_KEY> and optionally X-API-Key: <API_KEY>.',
       'Generation normally returns HTTP 202 and must be polled. A 202 response means the task was accepted, not that the image is ready.',
       'Use top-level image_url for one reference and top-level image_urls for multiple references; do not nest them under parameters.',
-      'Upload JPEG, PNG, or WebP references to /v1/uploads/images using the image multipart field (file is accepted for compatibility). Each image is limited to about 8 MiB.',
+      'Use a publicly accessible HTTPS URL for the reference image. The URL must remain accessible until the task completes.',
       'The canvas may use oopii/dou-5-0-pro internally, but API requests must use dou-5-0-pro.',
     ],
   },

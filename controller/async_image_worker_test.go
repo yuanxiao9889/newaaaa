@@ -21,6 +21,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -34,7 +35,10 @@ import (
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
 	"github.com/QuantumNous/new-api/relay/helper"
 	kitdto "github.com/QuantumNous/new-api/relaykit/dto"
+	kittypes "github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/QuantumNous/new-api/service"
+	"github.com/QuantumNous/new-api/setting/config"
+	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/QuantumNous/new-api/setting/system_setting"
 	"github.com/QuantumNous/new-api/types"
@@ -128,6 +132,150 @@ func setupAsyncImageWorkerTestDB(t *testing.T) *gorm.DB {
 	}
 
 	return db
+}
+
+func TestImageTokenReservation(t *testing.T) {
+	settings := config.GlobalConfig.ExportAllConfigs()
+	ratios, prices := ratio_setting.ModelRatio2JSONString(), ratio_setting.ModelPrice2JSONString()
+	t.Cleanup(func() {
+		require.NoError(t, config.GlobalConfig.LoadFromDB(settings))
+		require.NoError(t, ratio_setting.UpdateModelRatioByJSONString(ratios))
+		require.NoError(t, ratio_setting.UpdateModelPriceByJSONString(prices))
+	})
+	require.NoError(t, config.GlobalConfig.LoadFromDB(map[string]string{
+		"quota_setting.image_token_pre_consume_usd": "1.5",
+		"quota_setting.pre_consume_multiplier":      "1",
+		"group_ratio_setting.group_ratio":           `{"default":1,"discount":0.5,"free":0}`,
+		"billing_setting.billing_mode":              `{"reserve-expression":"tiered_expr","reserve-fixed":"tiered_expr"}`,
+		"billing_setting.billing_expr":              `{"reserve-expression":"tier(\"image\", p * 12 + c * 66)","reserve-fixed":"tier(\"image\", fixed(0.18)) * image_count"}`,
+	}))
+	require.NoError(t, ratio_setting.UpdateModelRatioByJSONString(`{"gpt-image-2.5-flare":6,"reserve-alias":6,"reserve-free":0}`))
+	require.NoError(t, ratio_setting.UpdateModelPriceByJSONString(`{"reserve-per-call":0.18}`))
+	for _, tc := range []struct {
+		name, model, group  string
+		prompt, count, want int
+	}{
+		{"incident", "gpt-image-2.5-flare", "default", 1376, 1, 750000},
+		{"alias", "reserve-alias", "default", 1376, 1, 750000},
+		{"multiple images", "reserve-alias", "default", 1376, 3, 2250000},
+		{"higher input estimate", "reserve-alias", "default", 200000, 1, 1200000},
+		{"discount", "reserve-alias", "discount", 1376, 1, 375000},
+		{"free group", "reserve-alias", "free", 1376, 1, 0},
+		{"free model", "reserve-free", "default", 1376, 1, 0},
+		{"fixed legacy price", "reserve-per-call", "default", 1376, 1, 90000},
+		{"output expression", "reserve-expression", "default", 1376, 2, 1500000},
+		{"fixed expression", "reserve-fixed", "default", 1376, 2, 180000},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c, _ := gin.CreateTestContext(httptest.NewRecorder())
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/images/generations", nil)
+			info := &relaycommon.RelayInfo{OriginModelName: tc.model, UserGroup: tc.group, UsingGroup: tc.group,
+				Request: &dto.ImageRequest{Model: tc.model, N: common.GetPointer(uint(tc.count))}}
+			price, err := helper.ModelPriceHelper(c, info, tc.prompt, &types.TokenCountMeta{})
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, price.QuotaToPreConsume)
+		})
+	}
+	t.Run("reject invalid reserve settings", func(t *testing.T) {
+		for _, value := range []string{"0", "-1", "NaN", "+Inf", "1e309", ""} {
+			assert.Error(t, operation_setting.ValidateQuotaOption("quota_setting.image_token_pre_consume_usd", value))
+		}
+		assert.NoError(t, operation_setting.ValidateQuotaOption("quota_setting.image_token_pre_consume_usd", "1.5"))
+	})
+	t.Run("concurrent admission and refunds", func(t *testing.T) {
+		db := setupAsyncImageWorkerTestDB(t)
+		sqlDB, err := db.DB()
+		require.NoError(t, err)
+		// All three engines use the same atomic conditional update. Serializing
+		// connections also avoids SQLite's unrelated SQLITE_BUSY behavior.
+		sqlDB.SetMaxOpenConns(1)
+		oldBatch := common.BatchUpdateEnabled
+		common.BatchUpdateEnabled = true
+		t.Cleanup(func() { common.BatchUpdateEnabled = oldBatch })
+		user := model.User{Username: "image-reserve-incident", Quota: 1447148, Status: common.UserStatusEnabled}
+		require.NoError(t, db.Create(&user).Error)
+		token := model.Token{UserId: user.Id, Key: "image-reserve-incident", UnlimitedQuota: true, Status: common.TokenStatusEnabled}
+		require.NoError(t, db.Create(&token).Error)
+		type attempt struct {
+			c    *gin.Context
+			info *relaycommon.RelayInfo
+			err  *types.NewAPIError
+		}
+		attempts := make([]attempt, 20)
+		for i := range attempts {
+			c, _ := gin.CreateTestContext(httptest.NewRecorder())
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/images/generations?async=true", nil)
+			info := &relaycommon.RelayInfo{UserId: user.Id, TokenId: token.Id, TokenKey: token.Key, TokenUnlimited: true,
+				OriginModelName: "gpt-image-2.5-flare", UserGroup: "default", UsingGroup: "default", ForcePreConsume: true,
+				UserSetting: dto.UserSetting{BillingPreference: "wallet_only"}, Request: &dto.ImageRequest{Model: "gpt-image-2.5-flare"}}
+			_, err := helper.ModelPriceHelper(c, info, 1376, &types.TokenCountMeta{})
+			require.NoError(t, err)
+			attempts[i] = attempt{c: c, info: info}
+		}
+		start := make(chan struct{})
+		var wg sync.WaitGroup
+		for i := range attempts {
+			wg.Go(func() {
+				<-start
+				a := &attempts[i]
+				a.err = service.PreConsumeBilling(a.c, a.info.PriceData.QuotaToPreConsume, a.info)
+			})
+		}
+		close(start)
+		wg.Wait()
+		var accepted []*attempt
+		for i := range attempts {
+			a := &attempts[i]
+			if a.err == nil {
+				accepted = append(accepted, a)
+			} else {
+				assert.Equal(t, kittypes.ErrorCodeInsufficientUserQuota, a.err.GetErrorCode())
+			}
+		}
+		require.Len(t, accepted, 1, "the 20 simultaneous jobs may reserve only the available wallet")
+		require.NoError(t, db.First(&user, user.Id).Error)
+		assert.Equal(t, 697148, user.Quota)
+		a := accepted[0]
+		// A worker reuses the existing task reservation and rejects larger
+		// channel overrides before any provider request can be sent.
+		a.c.Set("async_image_worker", true)
+		require.Nil(t, service.PrepareImageBillingForRequest(a.c, a.info, 1))
+		require.NotNil(t, service.PrepareImageBillingForRequest(a.c, a.info, 2))
+		require.NoError(t, db.First(&user, user.Id).Error)
+		assert.Equal(t, 697148, user.Quota)
+		require.NoError(t, a.info.Billing.Settle(579383))
+		require.NoError(t, a.info.Billing.Settle(579383))
+		require.NoError(t, db.First(&user, user.Id).Error)
+		assert.Equal(t, 867765, user.Quota, "unused reserve is refunded, actual usage is charged once")
+		require.NoError(t, db.First(&token, token.Id).Error)
+		assert.Equal(t, 579383, token.UsedQuota)
+		retry := &attempts[0]
+		for i := range attempts {
+			if attempts[i].err != nil {
+				retry = &attempts[i]
+				break
+			}
+		}
+		require.Nil(t, service.PreConsumeBilling(retry.c, 750000, retry.info))
+		retry.info.Billing.Refund(retry.c)
+		retry.info.Billing.Refund(retry.c)
+		require.NoError(t, db.First(&user, user.Id).Error)
+		assert.Equal(t, 867765, user.Quota, "failure restores the full reserve once")
+		// A synchronous channel override can top up its active reservation.
+		// Failure must refund both the initial reserve and the top-up.
+		require.NoError(t, db.Model(&user).Update("quota", 2000000).Error)
+		retry.c.Set("async_image_worker", false)
+		require.Nil(t, service.PreConsumeBilling(retry.c, 750000, retry.info))
+		require.Nil(t, service.PrepareImageBillingForRequest(retry.c, retry.info, 2))
+		require.NoError(t, db.First(&user, user.Id).Error)
+		assert.Equal(t, 500000, user.Quota)
+		retry.info.Billing.Refund(retry.c)
+		retry.info.Billing.Refund(retry.c)
+		require.NoError(t, db.First(&user, user.Id).Error)
+		assert.Equal(t, 2000000, user.Quota)
+		require.NoError(t, db.First(&token, token.Id).Error)
+		assert.Equal(t, 579383, token.UsedQuota)
+	})
 }
 
 func TestBuildInternalAsyncBaseContextSuppressesPerAttemptErrorLogs(t *testing.T) {
@@ -355,6 +503,7 @@ func TestNativeAsyncImageFinalBilling(t *testing.T) {
 		retry       bool
 		perCall     bool
 		wantQuota   int
+		fallback    *int
 		wantInput   int
 		wantOutput  int
 	}{
@@ -372,6 +521,8 @@ func TestNativeAsyncImageFinalBilling(t *testing.T) {
 		{name: "null_usage_keeps_reservation", status: "done", configured: true, wantSuccess: true, usage: `null`},
 		{name: "empty_usage_keeps_reservation", status: "done", configured: true, wantSuccess: true, usage: `{}`},
 		{name: "invalid_usage_keeps_reservation", status: "done", configured: true, wantSuccess: true, usage: `{"input_tokens":"invalid"}`},
+		{name: "missing_usage_excludes_image_reserve", status: "done", configured: true, wantSuccess: true, fallback: common.GetPointer(8256), wantQuota: 8256},
+		{name: "zero_fallback_refunds_image_reserve", status: "done", configured: true, wantSuccess: true, fallback: common.GetPointer(0)},
 		{name: "failed_image_with_usage_refunds", status: "succeeded", invalid: true, usage: imageUsage},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -464,6 +615,7 @@ func TestNativeAsyncImageFinalBilling(t *testing.T) {
 			c.Set("token_name", "native-test")
 			info := &relaycommon.RelayInfo{UserId: 61, TokenId: 62, UsingGroup: "default", OriginModelName: modelName, FinalPreConsumedQuota: 150000, ChannelMeta: &relaycommon.ChannelMeta{ChannelId: 63}}
 			info.PriceData.ModelRatio = 6
+			info.ImageTokenFallbackQuota = tc.fallback
 			info.PriceData.ModelPrice = -1
 			info.PriceData.GroupRatioInfo.GroupRatio = 1
 			if tc.perCall {
@@ -512,7 +664,7 @@ func TestNativeAsyncImageFinalBilling(t *testing.T) {
 			require.NoError(t, model.LOG_DB.Model(&model.Log{}).Where("type = ?", model.LogTypeConsume).Count(&consumes).Error)
 			if tc.wantSuccess {
 				wantQuota := tc.wantQuota
-				if wantQuota == 0 {
+				if wantQuota == 0 && tc.fallback == nil {
 					wantQuota = 150000
 				}
 				require.Equal(t, model.TaskStatus(model.TaskStatusSuccess), task.Status)

@@ -552,7 +552,10 @@ export function DetailsDialog(props: DetailsDialogProps) {
       )
     : null
   const operationText = renderAuditContent(other, t)
-  const details = (isTopup ? operationText : null) ?? props.log.content ?? ''
+  const details =
+    !props.isAdmin && props.log.type === 5
+      ? props.log.content || t('Request failed')
+      : ((isTopup ? operationText : null) ?? props.log.content ?? '')
   const auditRoute = isManage && props.isAdmin ? other?.audit_info : undefined
   // Channel update records which fields changed (stable field tokens); render
   // them with their localized labels for admins.
@@ -662,6 +665,9 @@ export function DetailsDialog(props: DetailsDialogProps) {
       <div className='w-full max-w-full min-w-0 space-y-2.5 overflow-x-hidden py-1 sm:space-y-3'>
         {/* Overview section - key identifiers */}
         <div className='min-w-0 space-y-1'>
+          {!props.isAdmin && props.log.model_name && (
+            <DetailRow label={t('Model')} value={props.log.model_name} mono />
+          )}
           {props.log.request_id && (
             <DetailRow
               label={t('Request ID')}
@@ -669,7 +675,7 @@ export function DetailsDialog(props: DetailsDialogProps) {
               mono
             />
           )}
-          {props.log.upstream_request_id && (
+          {props.isAdmin && props.log.upstream_request_id && (
             <DetailRow
               label={t('Upstream Request ID')}
               value={props.log.upstream_request_id}
@@ -880,6 +886,49 @@ export function DetailsDialog(props: DetailsDialogProps) {
           </DetailSection>
         )}
 
+        {props.isAdmin && adminInfo?.moderation_prompt && (
+          <DetailSection
+            label={t('Safety-rejected prompt (admin only)')}
+            variant='danger'
+          >
+            {adminInfo.moderation_prompt.text ? (
+              <>
+                <div className='flex justify-end'>
+                  <CopyButton
+                    value={adminInfo.moderation_prompt.text}
+                    aria-label={t('Copy retained prompt')}
+                    className='size-6'
+                  />
+                </div>
+                <pre className='max-h-64 overflow-auto font-mono text-xs wrap-anywhere whitespace-pre-wrap'>
+                  {adminInfo.moderation_prompt.text}
+                </pre>
+              </>
+            ) : (
+              <p className='text-xs'>
+                {t('Prompt text could not be retained')}
+              </p>
+            )}
+            {adminInfo.moderation_prompt.status !== 'captured' && (
+              <DetailRow
+                label={t('Status')}
+                value={adminInfo.moderation_prompt.status}
+                mono
+              />
+            )}
+            {adminInfo.moderation_prompt.truncated && (
+              <p className='text-muted-foreground text-xs'>
+                {t('Prompt truncated at the retention limit')}
+              </p>
+            )}
+            {adminInfo.moderation_prompt.redacted && (
+              <p className='text-muted-foreground text-xs'>
+                {t('Detected credentials were redacted')}
+              </p>
+            )}
+          </DetailSection>
+        )}
+
         {/* Reject reason (admin only) */}
         {props.isAdmin && adminInfo?.reject_reason && (
           <DetailSection
@@ -919,14 +968,20 @@ export function DetailsDialog(props: DetailsDialogProps) {
           </DetailSection>
         )}
 
-        {other && <AsyncTaskBillingSection log={props.log} other={other} />}
+        {other && (
+          <AsyncTaskBillingSection
+            log={props.log}
+            other={other}
+            isAdmin={props.isAdmin}
+          />
+        )}
         {/* Refund details (type=6) */}
         {isRefund && other && (other.task_id || other.reason) && (
           <DetailSection label={t('Refund Details')}>
             {other.task_id && (
               <DetailRow label={t('Task ID')} value={other.task_id} mono />
             )}
-            {other.reason && (
+            {props.isAdmin && other.reason && (
               <DetailRow label={t('Reason')} value={other.reason} />
             )}
           </DetailSection>
@@ -1177,13 +1232,14 @@ export function DetailsDialog(props: DetailsDialogProps) {
           />
         )}
 
-        {other?.response_model && (
+        {props.isAdmin && other?.response_model && (
           <DetailSection label={t('Response Model')}>
             <ResponseModelDetails observation={other.response_model} />
           </DetailSection>
         )}
         {/* Model mapping for logs without response observations */}
-        {!other?.response_model &&
+        {props.isAdmin &&
+          !other?.response_model &&
           other?.is_model_mapped &&
           other?.upstream_model_name && (
             <DetailSection label={t('Model Mapping')}>
@@ -1260,45 +1316,47 @@ export function DetailsDialog(props: DetailsDialogProps) {
           )}
 
         {/* Stream status details */}
-        {other?.stream_status && other.stream_status.status !== 'ok' && (
-          <DetailSection label={t('Stream Status')}>
-            <DetailRow
-              label={t('Status')}
-              value={
-                <StatusBadge
-                  label={other.stream_status.status || t('Error')}
-                  variant='red'
-                  size='sm'
-                  copyable={false}
+        {props.isAdmin &&
+          other?.stream_status &&
+          other.stream_status.status !== 'ok' && (
+            <DetailSection label={t('Stream Status')}>
+              <DetailRow
+                label={t('Status')}
+                value={
+                  <StatusBadge
+                    label={other.stream_status.status || t('Error')}
+                    variant='red'
+                    size='sm'
+                    copyable={false}
+                  />
+                }
+              />
+              {other.stream_status.end_reason && (
+                <DetailRow
+                  label={t('End Reason')}
+                  value={other.stream_status.end_reason}
                 />
-              }
-            />
-            {other.stream_status.end_reason && (
-              <DetailRow
-                label={t('End Reason')}
-                value={other.stream_status.end_reason}
-              />
-            )}
-            {(other.stream_status.error_count ?? 0) > 0 && (
-              <DetailRow
-                label={t('Soft Errors')}
-                value={String(other.stream_status.error_count)}
-              />
-            )}
-            {other.stream_status.end_error && (
-              <DetailRow
-                label={t('End Error')}
-                value={other.stream_status.end_error}
-              />
-            )}
-            {Array.isArray(other.stream_status.errors) &&
-              other.stream_status.errors.length > 0 && (
-                <pre className='bg-background/60 mt-1 max-h-32 overflow-y-auto rounded border p-2 font-mono text-[11px] leading-relaxed wrap-break-word whitespace-pre-wrap'>
-                  {other.stream_status.errors.join('\n')}
-                </pre>
               )}
-          </DetailSection>
-        )}
+              {(other.stream_status.error_count ?? 0) > 0 && (
+                <DetailRow
+                  label={t('Soft Errors')}
+                  value={String(other.stream_status.error_count)}
+                />
+              )}
+              {other.stream_status.end_error && (
+                <DetailRow
+                  label={t('End Error')}
+                  value={other.stream_status.end_error}
+                />
+              )}
+              {Array.isArray(other.stream_status.errors) &&
+                other.stream_status.errors.length > 0 && (
+                  <pre className='bg-background/60 mt-1 max-h-32 overflow-y-auto rounded border p-2 font-mono text-[11px] leading-relaxed wrap-break-word whitespace-pre-wrap'>
+                    {other.stream_status.errors.join('\n')}
+                  </pre>
+                )}
+            </DetailSection>
+          )}
 
         {/* Subscription billing details */}
         {isSubscription && other && (
@@ -1415,6 +1473,7 @@ function isDisplayableType(type: number): boolean {
 function AsyncTaskBillingSection(props: {
   log: UsageLog
   other: LogOtherData
+  isAdmin: boolean
 }) {
   const { t } = useTranslation()
   const { log, other } = props
@@ -1433,7 +1492,8 @@ function AsyncTaskBillingSection(props: {
         value: other.task_id,
         mono: true,
       },
-      other.reason && { label: t('Reason'), value: other.reason },
+      props.isAdmin &&
+        other.reason && { label: t('Reason'), value: other.reason },
       other.pre_consumed_quota != null && {
         label: t('Pre-consumed'),
         value: formatLogQuota(other.pre_consumed_quota),

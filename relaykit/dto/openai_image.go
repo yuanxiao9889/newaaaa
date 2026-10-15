@@ -232,6 +232,7 @@ type ImageAsyncTaskResponse struct {
 	URLExpiresAt int64  `json:"url_expires_at,omitempty"`
 	ExpiresAt    int64  `json:"expires_at"`
 	Error        string `json:"error,omitempty"`
+	ErrorCode    string `json:"error_code,omitempty"`
 }
 
 type ImageData struct {

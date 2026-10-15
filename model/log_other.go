@@ -2,10 +2,13 @@ package model
 
 import (
 	"encoding/json"
+	"fmt"
 	"maps"
 	"slices"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/dto"
+	"github.com/gin-gonic/gin"
 )
 
 const (
@@ -21,6 +24,7 @@ var legacySensitiveLogOtherKeys = []string{
 	"channel_name",
 	"channel_type",
 	"reject_reason",
+	"moderation_prompt",
 	"async_channel_retry_path",
 	"async_channel_retry_details",
 }
@@ -45,6 +49,22 @@ type LogOther struct {
 
 func NewLogOther() *LogOther {
 	return &LogOther{}
+}
+
+// CaptureModerationRejection stores text only after an explicit safety denial.
+// An ambiguous safety-check failure must not start retaining user prompts.
+func (o *LogOther) CaptureModerationRejection(c *gin.Context, reason string) {
+	if o == nil || reason == "" {
+		return
+	}
+	code := ""
+	if value := o.public["error_code"]; value != nil {
+		code = fmt.Sprint(value)
+	}
+	status, _ := o.public["status_code"].(int)
+	if common.ClassifyPublicError(code, reason, status, false).Code == "content_policy_violation" {
+		o.SetAdmin("moderation_prompt", common.CaptureModerationPrompt(c))
+	}
 }
 
 func isReservedLogOtherKey(key string) bool {
@@ -214,7 +234,7 @@ func normalizeLegacyRejectReason(values map[string]json.RawMessage) bool {
 // formatLogOtherJSON applies the role projection while keeping untouched JSON
 // values as RawMessage. This preserves integers larger than JavaScript's safe
 // range instead of round-tripping them through float64.
-func formatLogOtherJSON(value string, visibility logOtherVisibility) string {
+func formatLogOtherJSON(value string, visibility logOtherVisibility, logType int) string {
 	if value == "" {
 		return ""
 	}
@@ -229,18 +249,55 @@ func formatLogOtherJSON(value string, visibility logOtherVisibility) string {
 
 	changed := false
 	if visibility == logOtherVisibilityUser {
-		for _, key := range []string{logOtherAdminInfoKey, logOtherRootInfoKey, logOtherAuditInfoKey} {
-			if _, exists := values[key]; exists {
-				delete(values, key)
-				changed = true
+		// Fail closed for new metadata and old unscoped diagnostics. Retain
+		// typed billing facts, never arbitrary provider text or nested objects.
+		public := make(map[string]json.RawMessage)
+		for key, raw := range values {
+			allowed := false
+			switch key {
+			case "op", "login_method", "user_agent":
+				// Account history has its own host-authored public descriptors.
+				// Never accept these as an escape hatch on relay/task logs.
+				allowed = logType == LogTypeTopup || logType == LogTypeManage || logType == LogTypeLogin
+			case "audio_input", "audio_output", "text_input", "text_output",
+				"cache_tokens", "image_cache_tokens", "cache_creation_tokens",
+				"cache_creation_tokens_5m", "cache_creation_tokens_1h",
+				"model_ratio", "completion_ratio", "model_price", "group_ratio", "user_group_ratio",
+				"cache_ratio", "cache_creation_ratio", "cache_creation_ratio_5m", "cache_creation_ratio_1h",
+				"audio_ratio", "audio_completion_ratio", "frt", "fixed_price", "image_count",
+				"image_ratio", "image_input", "image_output", "web_search_call_count", "web_search_price",
+				"file_search_call_count", "file_search_price", "audio_input_token_count", "audio_input_price",
+				"image_generation_call_price", "image_generation_call_count", "fee_quota",
+				"pre_consumed_quota", "actual_quota", "subscription_pre_consumed", "subscription_post_delta",
+				"subscription_consumed", "subscription_remain", "subscription_total", "subscription_id", "subscription_plan_id":
+				var number float64
+				allowed = string(raw) != "null" && common.Unmarshal(raw, &number) == nil
+			case "ws", "audio", "image", "web_search", "file_search", "audio_input_seperate_price",
+				"image_generation_call", "violation_fee", "is_task", "async_task", "task_sync", "result_discarded":
+				allowed = string(raw) == "true" || string(raw) == "false"
+			case "task_id":
+				var id string
+				allowed = common.Unmarshal(raw, &id) == nil
+			case "billing_state", "billing_mode", "billing_unit", "billing_source":
+				var state string
+				allowed = common.Unmarshal(raw, &state) == nil && slices.Contains([]string{
+					"pending", "settled", "refunded", "tiered_expr", "fixed", "token", "request", "wallet", "subscription",
+				}, state)
+			case "usage_details":
+				var usage dto.TaskUsageDetails
+				if common.Unmarshal(raw, &usage) == nil {
+					encoded, err := common.Marshal(usage)
+					if err == nil {
+						public[key] = encoded
+					}
+				}
+			}
+			if allowed {
+				public[key] = raw
 			}
 		}
-		for _, key := range legacySensitiveLogOtherKeys {
-			if _, exists := values[key]; exists {
-				delete(values, key)
-				changed = true
-			}
-		}
+		values = public
+		changed = true
 	} else {
 		changed = normalizeLegacyRejectReason(values)
 		if visibility == logOtherVisibilityAdmin {

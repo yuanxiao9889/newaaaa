@@ -14,6 +14,7 @@ import (
 	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/relaykit/relayconvert/reasoning"
 	"github.com/QuantumNous/new-api/relaykit/types"
+	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting/billing_setting"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
@@ -41,6 +42,8 @@ func modelPriceNotConfiguredError(modelName string, userId int) error {
 // https://docs.claude.com/en/docs/build-with-claude/prompt-caching#1-hour-cache-duration
 const claudeCacheCreation1hMultiplier = 6 / 3.75
 
+// Keep the historical missing-usage estimate for these legacy models. The
+// reservation floor below protects every token-billed image independently.
 var fixedAsyncImagePreConsumeUnits = map[string]float64{
 	"gpt-image-2":    0.4,
 	"gpt-image-2-OF": 0.4,
@@ -88,7 +91,19 @@ func ModelPriceHelper(c *gin.Context, info *relaycommon.RelayInfo, promptTokens 
 
 	// Check if this model uses tiered_expr billing
 	if billing_setting.GetBillingMode(billingModelName) == billing_setting.BillingModeTieredExpr {
-		return modelPriceHelperTiered(c, info, billingModelName, promptTokens, groupRatioInfo)
+		price, err := modelPriceHelperTiered(c, info, billingModelName, promptTokens, groupRatioInfo)
+		if err != nil {
+			return price, err
+		}
+		if request, image := info.Request.(*dto.ImageRequest); image {
+			count, countErr := request.ImageCount(false)
+			if countErr != nil {
+				return price, countErr
+			}
+			price.QuotaToPreConsume, err = service.ImageTokenReservationQuota(info, price.QuotaToPreConsume, count)
+			info.PriceData = price
+		}
+		return price, err
 	}
 
 	var preConsumedQuota int
@@ -235,6 +250,17 @@ func ModelPriceHelper(c *gin.Context, info *relaycommon.RelayInfo, promptTokens 
 		logger.LogDebug(c, "model_price_helper result: %s", priceData.ToSetting())
 	}
 	info.PriceData = priceData
+	if request, image := info.Request.(*dto.ImageRequest); image {
+		count, err := request.ImageCount(false)
+		if err != nil {
+			return hosttypes.PriceData{}, err
+		}
+		priceData.QuotaToPreConsume, err = service.ImageTokenReservationQuota(info, priceData.QuotaToPreConsume, count)
+		if err != nil {
+			return hosttypes.PriceData{}, err
+		}
+		info.PriceData = priceData
+	}
 	return priceData, nil
 }
 

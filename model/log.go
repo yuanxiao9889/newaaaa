@@ -2,7 +2,6 @@ package model
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"github.com/QuantumNous/new-api/common"
@@ -162,8 +161,41 @@ func assignDisplayLogIds(logs []*Log, startIdx int) {
 
 func formatUserLogs(logs []*Log, startIdx int) {
 	for i := range logs {
+		logs[i].ChannelId = 0
 		logs[i].ChannelName = ""
-		logs[i].Other = formatLogOtherJSON(logs[i].Other, logOtherVisibilityUser)
+		logs[i].UpstreamRequestId = ""
+		logs[i].Group = ""
+		var publicError *common.PublicError
+		// Free-form relay and settlement text can embed provider identities,
+		// retry paths and upstream payloads, including in historical logs.
+		switch logs[i].Type {
+		case LogTypeError:
+			var diagnostic struct {
+				Code   string `json:"error_code"`
+				Type   string `json:"error_type"`
+				Status int    `json:"status_code"`
+			}
+			_ = common.UnmarshalJsonStr(logs[i].Other, &diagnostic)
+			classified := common.ClassifyPublicError(diagnostic.Code, logs[i].Content, diagnostic.Status, diagnostic.Type == "new_api_error")
+			publicError = &classified
+			logs[i].Content = classified.Summary()
+		case LogTypeConsume, LogTypeRefund, LogTypePreConsumeRollback:
+			logs[i].Content = ""
+		}
+		logs[i].Other = formatLogOtherJSON(logs[i].Other, logOtherVisibilityUser, logs[i].Type)
+		if publicError != nil {
+			// Only insert canonical fields after removing raw provider codes.
+			other := make(map[string]any)
+			_ = common.UnmarshalJsonStr(logs[i].Other, &other)
+			if other == nil {
+				other = make(map[string]any)
+			}
+			other["error_code"] = publicError.Code
+			other["status_code"] = publicError.StatusCode
+			if encoded, err := common.Marshal(other); err == nil {
+				logs[i].Other = string(encoded)
+			}
+		}
 	}
 	assignDisplayLogIds(logs, startIdx)
 }
@@ -172,7 +204,7 @@ func formatUserLogs(logs []*Log, startIdx int) {
 // admin_info. Root callers must not pass their results through this formatter.
 func FormatAdminLogs(logs []*Log) {
 	for i := range logs {
-		logs[i].Other = formatLogOtherJSON(logs[i].Other, logOtherVisibilityAdmin)
+		logs[i].Other = formatLogOtherJSON(logs[i].Other, logOtherVisibilityAdmin, logs[i].Type)
 	}
 }
 
@@ -180,7 +212,7 @@ func FormatAdminLogs(logs []*Log) {
 // without removing root-only diagnostics.
 func FormatRootLogs(logs []*Log) {
 	for i := range logs {
-		logs[i].Other = formatLogOtherJSON(logs[i].Other, logOtherVisibilityRoot)
+		logs[i].Other = formatLogOtherJSON(logs[i].Other, logOtherVisibilityRoot, logs[i].Type)
 	}
 }
 
@@ -325,6 +357,10 @@ func RecordTopupLog(userId int, content string, callerIp string, paymentMethod s
 func RecordErrorLog(c *gin.Context, userId int, channelId int, modelName string, tokenName string, content string, tokenId int, useTimeSeconds int,
 	isStream bool, group string, other *LogOther) {
 	logger.LogInfo(c, fmt.Sprintf("record error log: userId=%d, channelId=%d, modelName=%s, tokenName=%s, content=%s", userId, channelId, modelName, tokenName, common.LocalLogPreview(content)))
+	if other == nil {
+		other = NewLogOther()
+	}
+	other.CaptureModerationRejection(c, content)
 	username := c.GetString("username")
 	requestId := c.GetString(common.RequestIdKey)
 	upstreamRequestId := c.GetString(common.UpstreamRequestIdKey)
@@ -373,6 +409,13 @@ func RecordConsumeLog(c *gin.Context, userId int, params RecordConsumeLogParams)
 		return
 	}
 	logger.LogInfo(c, fmt.Sprintf("record consume log: userId=%d, params=%s", userId, common.GetJsonString(params)))
+	// Attach after console logging: prompt snapshots belong exclusively to the
+	// role-filtered usage log, not the application's general log output.
+	if params.Other != nil {
+		if reason, ok := params.Other.adminInfo["reject_reason"].(string); ok {
+			params.Other.CaptureModerationRejection(c, reason)
+		}
+	}
 	username := c.GetString("username")
 	requestId := c.GetString(common.RequestIdKey)
 	upstreamRequestId := c.GetString(common.UpstreamRequestIdKey)
@@ -774,23 +817,6 @@ func DeleteOldLogBatch(ctx context.Context, targetTimestamp int64, limit int) (i
 
 func FormatUserLogsForResponse(logs []*Log, startIdx int) {
 	formatUserLogs(logs, startIdx)
-	for _, log := range logs {
-		log.ChannelId = 0
-		var other map[string]json.RawMessage
-		if err := common.UnmarshalJsonStr(log.Other, &other); err != nil {
-			log.Other = "{}"
-			continue
-		}
-		for _, key := range []string{"request_path", "request_conversion", "status_code", "error_type", "error_code", "stream_status"} {
-			delete(other, key)
-		}
-		encoded, err := common.Marshal(other)
-		if err != nil {
-			log.Other = "{}"
-		} else {
-			log.Other = string(encoded)
-		}
-	}
 }
 
 func hydrateLogDisplayNames(logs []*Log) {

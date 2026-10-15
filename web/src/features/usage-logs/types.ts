@@ -153,6 +153,12 @@ export interface LogOtherData {
     }
     // Reject / intercept reason (admin only)
     reject_reason?: string
+    moderation_prompt?: {
+      text?: string
+      truncated?: boolean
+      redacted?: boolean
+      status: string
+    }
     task_plugin?: TaskPluginInfo
   }
   root_info?: {
@@ -346,6 +352,7 @@ export interface MidjourneyLog {
 // ============================================================================
 
 export interface TaskLog {
+  legacy_audio_available?: boolean
   id: number
   user_id: number
   username?: string

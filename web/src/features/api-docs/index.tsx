@@ -41,7 +41,6 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { ScrollArea, ScrollBar } from '@/components/ui/scroll-area'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { useStatus } from '@/hooks/use-status'
 import { cn } from '@/lib/utils'
 
 import { CodeExample, type CodeSamples } from './code-example'
@@ -51,6 +50,7 @@ import {
   oopiiModelGroups,
   sizeRows,
 } from './data'
+import { buildHyImageSamples } from './hy-image-samples'
 import { midjourneyNavItems } from './midjourney-data'
 import { MidjourneyDocs } from './midjourney-docs'
 import { buildOpenAISamples } from './openai-samples'
@@ -79,46 +79,27 @@ const textApiRoutes = [
     name: 'OpenAI-compatible chat',
     method: 'POST',
     path: '/v1/chat/completions',
-    models:
-      'gpt-5.4, gpt-5.5, gpt-5.6-sol, gpt-5.6-terra, gpt-5.6-luna, Claude and Gemini OpenAI-compatible routes',
+    models: 'GPT, Claude, Gemini, Grok, GLM, DeepSeek, Kimi',
   },
   {
     name: 'OpenAI Responses',
     method: 'POST',
     path: '/v1/responses',
-    models: 'gpt-5.4, gpt-5.5, gpt-5.6-sol, gpt-5.6-terra, gpt-5.6-luna',
+    models: 'GPT',
   },
   {
     name: 'Anthropic Messages',
     method: 'POST',
     path: '/v1/messages',
-    models:
-      'claude-fable-5, claude-opus-4-6, claude-opus-4-7, claude-opus-4-8, claude-sonnet-5',
+    models: 'Claude',
   },
   {
     name: 'Gemini generateContent',
     method: 'POST',
     path: '/v1beta/models/{model}:generateContent',
-    models:
-      'gemini-3.1-pro-preview, gemini-3.1-pro-preview-c, gemini-3.5-flash, gemini-3.5-flash-c',
+    models: 'Gemini',
   },
 ] as const
-
-function resolveBaseUrl(status: unknown) {
-  const source = status as Record<string, unknown> | null
-  const nested = source?.data as Record<string, unknown> | undefined
-  const candidate =
-    source?.server_address ??
-    source?.serverAddress ??
-    nested?.server_address ??
-    nested?.serverAddress
-
-  if (typeof candidate === 'string' && candidate.trim()) {
-    return candidate.trim().replace(/\/+$/, '')
-  }
-  if (typeof window !== 'undefined') return window.location.origin
-  return 'https://api.example.com'
-}
 
 function endpointFor(model: ImageModelDoc) {
   if (model.family === 'openai') return '/v1/images/generations'
@@ -160,7 +141,7 @@ function buildGrokSamples(
 
   return {
     curl: `curl '${baseUrl}${requestPath}' \\
-  -H 'Authorization: Bearer $NEW_API_KEY' \\
+  -H "Authorization: Bearer $NEW_API_KEY" \\
   -H 'Content-Type: application/json' \\
   -d '{\n    "model": "${model.model}",\n    "prompt": "${prompt}",\n    "n": 1,\n    "response_format": "b64_json",\n    "resolution": "2k",\n    "aspect_ratio": "16:9"${qualityJson}${referenceJson}\n  }'`,
     python: `import os\n\nimport requests\n${pythonReference}\npayload = {\n    "model": "${model.model}",\n    "prompt": "${prompt}",\n    "n": 1,\n    "response_format": "b64_json",\n    "resolution": "2k",\n    "aspect_ratio": "16:9",${qualityPython}${pythonImage}\n}\nresponse = requests.post(\n    "${baseUrl}${requestPath}",\n    headers={"Authorization": f"Bearer {os.environ['NEW_API_KEY']}"},\n    json=payload,\n    timeout=180,\n)\nresponse.raise_for_status()\nprint(response.json())`,
@@ -187,20 +168,10 @@ function buildDouSamples(
     "prompt": "${prompt}",
     "size": "2048x1152"`
 
-  const uploadExample = isEdit
-    ? `
-# Upload a local reference first; the multipart field is image (file is also accepted).
-curl '${baseUrl}/v1/uploads/images' \\
-  -H 'Authorization: Bearer $NEW_API_KEY' \\
-  -H 'X-API-Key: $NEW_API_KEY' \\
-  -F 'image=@reference.png'`
-    : ''
-
   return {
-    curl: `${uploadExample}
-curl '${baseUrl}/v1/images/generations' \\
-  -H 'Authorization: Bearer $NEW_API_KEY' \\
-  -H 'X-API-Key: $NEW_API_KEY' \\
+    curl: `curl '${baseUrl}/v1/images/generations' \\
+  -H "Authorization: Bearer $NEW_API_KEY" \\
+  -H "X-API-Key: $NEW_API_KEY" \\
   -H 'Content-Type: application/json' \\
   -d '{
     ${requestFields}
@@ -208,12 +179,12 @@ curl '${baseUrl}/v1/images/generations' \\
 
 # The API normally returns HTTP 202 with an id. Poll until status is succeeded.
 curl '${baseUrl}/v1/images/generations/{id}' \\
-  -H 'Authorization: Bearer $NEW_API_KEY' \\
-  -H 'X-API-Key: $NEW_API_KEY'
+  -H "Authorization: Bearer $NEW_API_KEY" \\
+  -H "X-API-Key: $NEW_API_KEY"
 
 curl -fL '${baseUrl}/v1/images/generations/{id}/content' \\
-  -H 'Authorization: Bearer $NEW_API_KEY' \\
-  -H 'X-API-Key: $NEW_API_KEY' \\
+  -H "Authorization: Bearer $NEW_API_KEY" \\
+  -H "X-API-Key: $NEW_API_KEY" \\
   -o result.png`,
     python: `import os
 import time
@@ -227,15 +198,7 @@ HEADERS = {"Authorization": f"Bearer {API_KEY}", "X-API-Key": API_KEY}
 
 ${
   isEdit
-    ? `with open("reference.png", "rb") as image:
-    uploaded = requests.post(
-        f"{BASE_URL}/v1/uploads/images",
-        headers=HEADERS,
-        files={"image": ("reference.png", image, "image/png")},
-        timeout=60,
-    )
-uploaded.raise_for_status()
-reference_url = uploaded.json()["url"]
+    ? `reference_url = "https://media.example.com/reference.png"
 payload = {
     "model": "${model.model}",
     "prompt": "${prompt}",
@@ -276,12 +239,7 @@ while True:
 const headers = { Authorization: \`Bearer \${apiKey}\`, 'X-API-Key': apiKey }
 ${
   isEdit
-    ? `const { readFile, writeFile } = await import('node:fs/promises')
-const form = new FormData()
-form.append('image', new Blob([await readFile('reference.png')], { type: 'image/png' }), 'reference.png')
-const upload = await fetch('${baseUrl}/v1/uploads/images', { method: 'POST', headers, body: form })
-if (!upload.ok) throw new Error(await upload.text())
-const referenceURL = (await upload.json()).url
+    ? `const referenceURL = 'https://media.example.com/reference.png'
 const payload = {
   model: '${model.model}',
   prompt: '${prompt}',
@@ -352,13 +310,14 @@ function buildGeminiSamples(
       : 'Cinematic storyboard frame of a detective in a rainy neon alley'
   const prompt = `${basePrompt} [size: 2K, aspect ratio: 16:9]`
 
+  const thinking = model.model === 'nano-banana-2.1'
   return {
     curl: `curl '${url}' \\
-  -H 'Authorization: Bearer $NEW_API_KEY' \\
+  -H "Authorization: Bearer $NEW_API_KEY" \\
   -H 'Content-Type: application/json' \\
-  -d '{\n    "contents": [{\n      "role": "user",\n      "parts": [\n        { "text": "${prompt}" }${referencePart}\n      ]\n    }],\n    "generationConfig": {\n      "topP": 0.95,\n      "responseModalities": ["IMAGE"],\n      "imageConfig": {\n        "aspectRatio": "16:9",\n        "imageSize": "2K"\n      }\n    }\n  }'`,
-    python: `import os\n\nimport requests\n${pythonReference}\npayload = {\n    "contents": [\n        {\n            "role": "user",\n            "parts": [\n                {"text": "${prompt}"}${pythonPart}\n            ],\n        }\n    ],\n    "generationConfig": {\n        "topP": 0.95,\n        "responseModalities": ["IMAGE"],\n        "imageConfig": {"aspectRatio": "16:9", "imageSize": "2K"},\n    },\n}\n\nresponse = requests.post(\n    "${url}",\n    headers={"Authorization": f"Bearer {os.environ['NEW_API_KEY']}"},\n    json=payload,\n    timeout=180,\n)\nresponse.raise_for_status()\nimage_base64 = response.json()["candidates"][0]["content"]["parts"][0]["inlineData"]["data"]`,
-    javascript: `${jsReference}const response = await fetch('${url}', {\n  method: 'POST',\n  headers: {\n    Authorization: \`Bearer \${process.env.NEW_API_KEY}\`,\n    'Content-Type': 'application/json',\n  },\n  body: JSON.stringify({\n    contents: [{\n      role: 'user',\n      parts: [\n        { text: '${prompt}' }${jsPart}\n      ],\n    }],\n    generationConfig: {\n      topP: 0.95,\n      responseModalities: ['IMAGE'],\n      imageConfig: { aspectRatio: '16:9', imageSize: '2K' },\n    },\n  }),\n})\n\nif (!response.ok) throw new Error(await response.text())\nconst result = await response.json()\nconst imageBase64 = result.candidates[0].content.parts[0].inlineData.data`,
+  -d '{\n    "contents": [{\n      "role": "user",\n      "parts": [\n        { "text": "${prompt}" }${referencePart}\n      ]\n    }],\n    "generationConfig": {\n      "topP": 0.95,${thinking ? '\n      "thinkingConfig": {"thinkingLevel": "medium"},' : ''}\n      "responseModalities": ["IMAGE"],\n      "imageConfig": {\n        "aspectRatio": "16:9",\n        "imageSize": "2K"\n      }\n    }\n  }'`,
+    python: `import os\n\nimport requests\n${pythonReference}\npayload = {\n    "contents": [\n        {\n            "role": "user",\n            "parts": [\n                {"text": "${prompt}"}${pythonPart}\n            ],\n        }\n    ],\n    "generationConfig": {\n        "topP": 0.95,${thinking ? '\n      "thinkingConfig": {"thinkingLevel": "medium"},' : ''}\n        "responseModalities": ["IMAGE"],\n        "imageConfig": {"aspectRatio": "16:9", "imageSize": "2K"},\n    },\n}\n\nresponse = requests.post(\n    "${url}",\n    headers={"Authorization": f"Bearer {os.environ['NEW_API_KEY']}"},\n    json=payload,\n    timeout=180,\n)\nresponse.raise_for_status()\nimage_base64 = response.json()["candidates"][0]["content"]["parts"][0]["inlineData"]["data"]`,
+    javascript: `${jsReference}const response = await fetch('${url}', {\n  method: 'POST',\n  headers: {\n    Authorization: \`Bearer \${process.env.NEW_API_KEY}\`,\n    'Content-Type': 'application/json',\n  },\n  body: JSON.stringify({\n    contents: [{\n      role: 'user',\n      parts: [\n        { text: '${prompt}' }${jsPart}\n      ],\n    }],\n    generationConfig: {\n      topP: 0.95,${thinking ? "\n      thinkingConfig: { thinkingLevel: 'medium' }," : ''}\n      responseModalities: ['IMAGE'],\n      imageConfig: { aspectRatio: '16:9', imageSize: '2K' },\n    },\n  }),\n})\n\nif (!response.ok) throw new Error(await response.text())\nconst result = await response.json()\nconst imageBase64 = result.candidates[0].content.parts[0].inlineData.data`,
   }
 }
 
@@ -761,6 +720,9 @@ function ModelSection({
   const { t } = useTranslation()
   const [operation, setOperation] = useState<ModelOperation>('generate')
   const samples = useMemo(() => {
+    if (model.model === 'hy-image-v3.5-preview') {
+      return buildHyImageSamples(baseUrl, operation)
+    }
     if (model.family === 'oopii') {
       return buildDouSamples(model, baseUrl, operation)
     }
@@ -788,7 +750,12 @@ function ModelSection({
     )
   } else if (model.family === 'oopii') {
     resolutionNote = t(
-      'Dou 5.0 Pro expects an exact pixel size such as 2048x1152. Use the upload endpoint for local references, then poll the generation ID returned with HTTP 202.'
+      'Dou 5.0 Pro expects an exact pixel size such as 2048x1152 and public reference URLs. Poll the generation ID returned with HTTP 202.'
+    )
+  }
+  if (model.model === 'hy-image-v3.5-preview') {
+    resolutionNote = t(
+      'Use WIDTHxHEIGHT: each edge must be 256–8192 pixels and total area must not exceed 16777216 pixels. The canvas defaults to 1.5K.'
     )
   }
   if (model.modelIds) {
@@ -996,12 +963,11 @@ function ModelSection({
 
 export function ApiDocs() {
   const { t } = useTranslation()
-  const { status } = useStatus()
   const [mobileNavOpen, setMobileNavOpen] = useState(false)
-  const baseUrl = useMemo(() => resolveBaseUrl(status), [status])
+  const baseUrl = 'https://www.oopii.cc'
   const modelSamples = useMemo<CodeSamples>(
     () => ({
-      curl: `curl '${baseUrl}/v1/models' \\\n  -H 'Authorization: Bearer $NEW_API_KEY'`,
+      curl: `curl '${baseUrl}/v1/models' \\\n  -H "Authorization: Bearer $NEW_API_KEY"`,
       python: `import os\n\nfrom openai import OpenAI\n\nclient = OpenAI(\n    base_url="${baseUrl}/v1",\n    api_key=os.environ["NEW_API_KEY"],\n)\n\nfor model in client.models.list().data:\n    print(model.id)`,
       javascript: `import OpenAI from 'openai'\n\nconst client = new OpenAI({\n  baseURL: '${baseUrl}/v1',\n  apiKey: process.env.NEW_API_KEY,\n})\n\nconst models = await client.models.list()\nconsole.log(models.data.map((model) => model.id))`,
     }),
@@ -1128,7 +1094,8 @@ export function ApiDocs() {
                       </code>
                       <p className='text-muted-foreground mt-3 text-sm leading-6'>
                         {t(
-                          'The API base URL shown in examples is detected from the current new-api deployment.'
+                          'The examples use the OOpii new-api deployment at {{baseUrl}}.',
+                          { baseUrl }
                         )}
                       </p>
                     </div>
@@ -1141,12 +1108,14 @@ export function ApiDocs() {
                   id='oopii-model-catalog'
                   eyebrow='OOpii'
                   title={t('Current OOpii catalog snapshot')}
-                  description={t('apiDocs.image25.catalogNote')}
+                  description={t(
+                    'Catalog checked against enabled relay channels on 2026-10-12. Availability depends on your API key and group; query /v1/models before use.'
+                  )}
                 />
                 <div className='mt-6 grid gap-6'>
                   {(
                     [
-                      ['text', 'Text models'],
+                      ['text', 'Text model families'],
                       ['image', 'Image models'],
                       ['video', 'Video models'],
                       ['midjourney', 'Midjourney models'],
@@ -1167,9 +1136,9 @@ export function ApiDocs() {
                           <thead className='bg-muted/35 text-muted-foreground'>
                             <tr>
                               {[
-                                'Model',
-                                'Owner',
-                                'Supported endpoint types',
+                                group === 'text' ? 'Model family' : 'Model',
+                                'Provider',
+                                'Protocol',
                               ].map((heading) => (
                                 <th
                                   key={heading}
@@ -1184,9 +1153,15 @@ export function ApiDocs() {
                             {oopiiModelGroups[group].map((model) => (
                               <tr key={model.id} className='align-top'>
                                 <td className='px-4 py-3'>
-                                  <code className='text-primary break-all'>
-                                    {model.id}
-                                  </code>
+                                  {group === 'text' ? (
+                                    <span className='font-medium'>
+                                      {model.id}
+                                    </span>
+                                  ) : (
+                                    <code className='text-primary break-all'>
+                                      {model.id}
+                                    </code>
+                                  )}
                                 </td>
                                 <td className='px-4 py-3'>{model.owner}</td>
                                 <td className='px-4 py-3'>
@@ -1209,7 +1184,7 @@ export function ApiDocs() {
                 </div>
                 <div className='border-border/70 bg-muted/20 mt-4 rounded-xl border p-4 text-sm leading-6'>
                   {t(
-                    'OOpii model IDs are exact and case-sensitive where shown. The list includes legacy compatibility entries returned by the upstream catalog; configure only the families enabled in your channel.'
+                    'Text models are grouped by provider and family. Query /v1/models for the exact model IDs available to your API key.'
                   )}
                 </div>
               </section>
@@ -1262,25 +1237,11 @@ export function ApiDocs() {
                     <ScrollBar orientation='horizontal' />
                   </ScrollArea>
                 </div>
-                <div className='mt-4 grid gap-4 sm:grid-cols-2'>
-                  <div className='border-border/70 bg-card rounded-xl border p-4 text-sm leading-6'>
-                    <strong>{t('Default')}:</strong> <code>gpt-5.4</code>{' '}
-                    <span aria-hidden='true'>-&gt;</span>{' '}
-                    <code>openai-responses</code>
-                    <div className='text-muted-foreground mt-2'>
-                      <code>gpt-5.4</code>, <code>gpt-5.5</code>,{' '}
-                      <code>gpt-5.6-sol</code>, <code>gpt-5.6-terra</code>,{' '}
-                      <code>gpt-5.6-luna</code>
-                    </div>
-                  </div>
-                  <div className='border-border/70 bg-card rounded-xl border p-4 text-sm leading-6'>
-                    <strong>{t('Notes')}:</strong> <code>all-5.4</code>{' '}
-                    <span aria-hidden='true'>-&gt;</span> <code>gpt-5.4</code>
-                    <br />
-                    <code>all-5.5</code> <span aria-hidden='true'>-&gt;</span>{' '}
-                    <code>gpt-5.5</code>
-                  </div>
-                </div>
+                <p className='text-muted-foreground mt-4 text-sm leading-6'>
+                  {t(
+                    'Catalog checked against enabled relay channels on 2026-10-12. Availability depends on your API key and group; query /v1/models before use.'
+                  )}
+                </p>
               </section>
 
               <VideoDocs baseUrl={baseUrl} />
@@ -1349,7 +1310,7 @@ export function ApiDocs() {
                 <div className='border-primary/20 bg-primary/5 mt-6 rounded-xl border p-4 text-sm leading-6'>
                   <strong>{t('Storyboard Copilot behavior')}:</strong>{' '}
                   {t(
-                    'The built-in OOpii provider enables async_image_task for all documented image models. Its normal submit path appends async=true; Grok reference-image requests intentionally keep the plain generations URL because OOpii async submission can discard embedded references.'
+                    'Follow the synchronous or asynchronous workflow shown for each model. Only poll when the submission returns a task ID; synchronous responses contain the image result directly.'
                   )}
                 </div>
 

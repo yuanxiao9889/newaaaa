@@ -234,7 +234,9 @@ export function useTaskLogsColumns(
           const log = row.original
           const modelName = log.model_name
           const actualModel =
-            log.upstream_model_name && log.upstream_model_name !== modelName
+            isAdmin &&
+            log.upstream_model_name &&
+            log.upstream_model_name !== modelName
               ? log.upstream_model_name
               : undefined
           if (!modelName) {
@@ -267,7 +269,8 @@ export function useTaskLogsColumns(
                 className='border-border/60 bg-muted/30 !text-foreground max-w-full truncate rounded-md border px-1.5 py-0.5 font-mono'
               />
               <span className='text-muted-foreground/60 truncate text-[11px]'>
-                {t(log.platform)} · {t(taskActionMapper.getLabel(log.action))}
+                {isAdmin && `${t(log.platform)} · `}
+                {t(taskActionMapper.getLabel(log.action))}
               </span>
             </div>
           )

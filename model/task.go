@@ -20,6 +20,42 @@ import (
 
 type TaskStatus string
 
+// UserError derives a public diagnostic without changing the stored failure.
+// Retry details can retain a structured code after FailReason lost its envelope.
+func (t *Task) UserError() common.PublicError {
+	reason, _, _ := strings.Cut(t.FailReason, "\nAsync Channel Retry Path:")
+	publicError := common.ClassifyPublicError("", reason, 0, false)
+	if publicError.Code != "generation_failed" && publicError.Code != "content_safety_unknown" {
+		return publicError
+	}
+	var details []AsyncImageRetryDetail
+	if retry := t.PrivateData.ImageRetry; retry != nil {
+		details = retry.Details
+	} else if retry := t.PrivateData.VideoRetry; retry != nil {
+		details = retry.Details
+	}
+	for i := len(details) - 1; i >= 0; i-- {
+		detail := details[i]
+		if t.ChannelId > 0 && detail.ChannelID != t.ChannelId {
+			continue
+		}
+		if detail.Error == "" && detail.ErrorCode == "" {
+			break
+		}
+		// An earlier attempt's failure is not evidence for a later accepted
+		// job. Only enrich the final diagnostic with its matching retry record.
+		if reason == "" || (detail.Error != "" && (strings.Contains(detail.Error, reason) || strings.Contains(reason, detail.Error))) {
+			diagnostic := common.ClassifyPublicError(detail.ErrorCode, detail.Error, detail.StatusCode, false)
+			if diagnostic.Code != "generation_failed" {
+				return diagnostic
+			}
+			return publicError
+		}
+		break
+	}
+	return publicError
+}
+
 const (
 	TaskStatusNotStart   TaskStatus = "NOT_START"
 	TaskStatusSubmitted             = "SUBMITTED"
@@ -195,14 +231,16 @@ const (
 
 // TaskBillingContext 记录任务提交时的计费参数，以便轮询阶段可以重新计算额度。
 type TaskBillingContext struct {
-	ModelPrice      float64                      `json:"model_price,omitempty"`       // 模型单价
-	GroupRatio      float64                      `json:"group_ratio,omitempty"`       // 分组倍率
-	ModelRatio      float64                      `json:"model_ratio,omitempty"`       // 模型倍率
-	OtherRatios     map[string]float64           `json:"other_ratios,omitempty"`      // 附加倍率（时长、分辨率等）
-	OriginModelName string                       `json:"origin_model_name,omitempty"` // 模型名称，必须为OriginModelName
-	PerCallBilling  bool                         `json:"per_call_billing,omitempty"`  // 按次计费：跳过轮询阶段的差额结算
-	TieredSnapshot  *billingexpr.BillingSnapshot `json:"tiered_snapshot,omitempty"`
-	FixedPriceUnit  string                       `json:"fixed_price_unit,omitempty"`
+	ModelPrice              float64                      `json:"model_price,omitempty"`       // 模型单价
+	GroupRatio              float64                      `json:"group_ratio,omitempty"`       // 分组倍率
+	ModelRatio              float64                      `json:"model_ratio,omitempty"`       // 模型倍率
+	OtherRatios             map[string]float64           `json:"other_ratios,omitempty"`      // 附加倍率（时长、分辨率等）
+	OriginModelName         string                       `json:"origin_model_name,omitempty"` // 模型名称，必须为OriginModelName
+	PerCallBilling          bool                         `json:"per_call_billing,omitempty"`  // 按次计费：跳过轮询阶段的差额结算
+	TieredSnapshot          *billingexpr.BillingSnapshot `json:"tiered_snapshot,omitempty"`
+	FixedPriceUnit          string                       `json:"fixed_price_unit,omitempty"`
+	ImageTokenFallbackQuota *int                         `json:"image_token_fallback_quota,omitempty"`
+	ImageTokenReserveUSD    float64                      `json:"image_token_reserve_usd,omitempty"`
 }
 
 // SyncTaskQueryParams 用于包含所有搜索条件的结构体，可以根据需求添加更多字段

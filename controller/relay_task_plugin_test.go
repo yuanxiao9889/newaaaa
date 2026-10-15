@@ -26,6 +26,7 @@ import (
 	taskjs "github.com/QuantumNous/new-api/relay/channel/task/jsplugin"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	kitdto "github.com/QuantumNous/new-api/relaykit/dto"
+	kittypes "github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/types"
 	"github.com/alicebob/miniredis/v2"
@@ -808,20 +809,35 @@ func TestRespondTaskSubmissionErrorWithoutCause(t *testing.T) {
 }
 
 func TestExecuteTaskSubmissionRefundsWhenFinalReserveFails(t *testing.T) {
-	events := []string{}
-	setupTaskSubmissionDatabase(t, true, &events)
-	billing := &taskSubmissionTestBilling{events: &events, reserveErr: errors.New("insufficient funds")}
-	c := taskSubmissionTestContext()
-	info := taskSubmissionRelayInfo(billing)
-	outcome, taskErr := executeTaskSubmissionWith(c, info, func(*gin.Context, *relaycommon.RelayInfo) (*relay.TaskSubmitResult, *dto.TaskError) {
-		return &relay.TaskSubmitResult{Platform: "plugin", Quota: 600, Immediate: &relaycommon.TaskInfo{Status: "SUCCESS"}}, nil
-	})
-	require.Nil(t, outcome)
-	require.NotNil(t, taskErr)
-	assert.Equal(t, http.StatusForbidden, taskErr.StatusCode)
-	assert.Equal(t, []string{"reserve", "refund"}, events)
-	assert.Equal(t, 1, billing.refunds)
-	assert.False(t, c.Writer.Written())
+	for _, tc := range []struct {
+		name       string
+		reserveErr error
+		status     int
+		code       types.ErrorCode
+	}{
+		{"wallet quota", types.NewErrorWithStatusCode(errors.New("insufficient funds"), kittypes.ErrorCodeInsufficientUserQuota, http.StatusPaymentRequired), http.StatusPaymentRequired, kittypes.ErrorCodeInsufficientUserQuota},
+		{"token quota", types.NewErrorWithStatusCode(errors.New("token quota is not enough"), kittypes.ErrorCodePreConsumeTokenQuotaFailed, http.StatusPaymentRequired), http.StatusPaymentRequired, kittypes.ErrorCodePreConsumeTokenQuotaFailed},
+		{"reservation storage failure", errors.New("reservation storage unavailable"), http.StatusInternalServerError, types.ErrorCodeUpdateDataError},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			events := []string{}
+			setupTaskSubmissionDatabase(t, true, &events)
+			billing := &taskSubmissionTestBilling{events: &events, reserveErr: tc.reserveErr}
+			c := taskSubmissionTestContext()
+			info := taskSubmissionRelayInfo(billing)
+			outcome, taskErr := executeTaskSubmissionWith(c, info, func(*gin.Context, *relaycommon.RelayInfo) (*relay.TaskSubmitResult, *dto.TaskError) {
+				return &relay.TaskSubmitResult{Platform: "plugin", Quota: 600, Immediate: &relaycommon.TaskInfo{Status: "SUCCESS"}}, nil
+			})
+			require.Nil(t, outcome)
+			require.NotNil(t, taskErr)
+			assert.Equal(t, tc.status, taskErr.StatusCode)
+			assert.Equal(t, string(tc.code), taskErr.Code)
+			assert.True(t, taskErr.LocalError)
+			assert.Equal(t, []string{"reserve", "refund"}, events)
+			assert.Equal(t, 1, billing.refunds)
+			assert.False(t, c.Writer.Written())
+		})
+	}
 }
 
 type videoRetryTestFixture struct {

@@ -346,7 +346,7 @@ func refundLegacyMidjourneyTask(ctx context.Context, task *model.Midjourney) {
 		ChannelId: task.ChannelId,
 		ModelName: service.CovertMjpActionToModelName(task.Action),
 		Quota:     task.Quota,
-		Other: other,
+		Other:     other,
 	}); err != nil {
 		logger.LogError(ctx, fmt.Sprintf("record legacy Midjourney refund log failed for task %s: %v", task.MjId, err))
 	}
@@ -391,10 +391,22 @@ func GetUserMidjourney(c *gin.Context) {
 	items := model.GetAllUserTask(userId, pageInfo.GetStartIdx(), pageInfo.GetPageSize(), queryParams)
 	total := model.CountAllUserTask(userId, queryParams)
 
-	if setting.MjForwardUrlEnabled {
-		for i, midjourney := range items {
-			midjourney.ImageUrl = system_setting.ServerAddress + "/mj/image/" + midjourney.MjId
-			items[i] = midjourney
+	for _, task := range items {
+		task.ChannelId = 0
+		task.Properties = ""
+		task.Buttons = ""
+		task.State = ""
+		task.Description = ""
+		task.PromptEn = ""
+		task.VideoUrl = ""
+		task.VideoUrls = ""
+		if task.ImageUrl != "" {
+			task.ImageUrl = system_setting.ServerAddress + "/mj/image/" + task.MjId
+		}
+		if task.Status == "FAILURE" {
+			task.FailReason = common.ClassifyPublicError("", task.FailReason, 0, false).Summary()
+		} else {
+			task.FailReason = ""
 		}
 	}
 	pageInfo.SetTotal(int(total))

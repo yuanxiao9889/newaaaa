@@ -64,7 +64,11 @@ function makeLog(other: LogOtherData): UsageLog {
   }
 }
 
-function renderDetails(other: LogOtherData, promptTokens = 0): QueryClient {
+function renderDetails(
+  other: LogOtherData,
+  promptTokens = 0,
+  isAdmin = false
+): QueryClient {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   })
@@ -80,7 +84,7 @@ function renderDetails(other: LogOtherData, promptTokens = 0): QueryClient {
     <QueryClientProvider client={queryClient}>
       <DetailsDialog
         log={{ ...makeLog(other), prompt_tokens: promptTokens }}
-        isAdmin={false}
+        isAdmin={isAdmin}
         isRoot={false}
         open
         onOpenChange={() => undefined}
@@ -94,18 +98,60 @@ function rowValue(label: string): string | null {
   return screen.getByText(label).nextElementSibling?.textContent ?? null
 }
 
-test('shows the recorded request and response models in log details', () => {
-  const queryClient = renderDetails({
-    response_model: {
-      requested_model: 'requested-model',
-      upstream_model: 'mapped-model',
-      returned_model: 'unexpected-model',
+test('shows the recorded request and response models in admin log details', () => {
+  const queryClient = renderDetails(
+    {
+      response_model: {
+        requested_model: 'requested-model',
+        upstream_model: 'mapped-model',
+        returned_model: 'unexpected-model',
+      },
     },
-  })
+    0,
+    true
+  )
   expect(screen.getByText('Response model: unexpected-model')).toBeVisible()
   expect(rowValue('Request Model')).toBe('requested-model')
   expect(rowValue('Upstream Model')).toBe('mapped-model')
   expect(screen.getByText('unexpected-model')).toBeVisible()
+  queryClient.clear()
+})
+
+test.each([false, true])(
+  'hides upstream model details from users (response observed: %s)',
+  (observed) => {
+    const queryClient = renderDetails({
+      is_model_mapped: true,
+      upstream_model_name: 'private-model',
+      ...(observed
+        ? {
+            response_model: {
+              requested_model: 'wan2.5-i2v-preview',
+              upstream_model: 'private-model',
+              returned_model: 'private-model-version',
+            },
+          }
+        : {}),
+    })
+    expect(screen.getByText('wan2.5-i2v-preview')).toBeVisible()
+    expect(screen.queryByText('Model Mapping')).not.toBeInTheDocument()
+    expect(screen.queryByText('private-model')).not.toBeInTheDocument()
+    expect(screen.queryByText('private-model-version')).not.toBeInTheDocument()
+    queryClient.clear()
+  }
+)
+
+test('keeps model mapping visible in admin log details', () => {
+  const queryClient = renderDetails(
+    {
+      is_model_mapped: true,
+      upstream_model_name: 'private-model',
+    },
+    0,
+    true
+  )
+  expect(screen.getByText('Model Mapping')).toBeVisible()
+  expect(screen.getByText('private-model')).toBeVisible()
   queryClient.clear()
 })
 

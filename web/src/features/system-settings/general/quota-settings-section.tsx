@@ -69,6 +69,9 @@ const quotaSchema = z.object({
     pre_consume_multiplier: z.coerce
       .number({ error: () => i18next.t('Please enter a valid number') })
       .positive({ error: () => i18next.t('Must be greater than 0') }),
+    image_token_pre_consume_usd: z.coerce
+      .number({ error: () => i18next.t('Please enter a valid number') })
+      .positive({ error: () => i18next.t('Must be greater than 0') }),
   }),
 })
 
@@ -217,6 +220,36 @@ export function QuotaSettingsSection({
                   <FormDescription>
                     {t(
                       'Reserve the estimated input cost multiplied by this value, without estimating output tokens. Defaults to 1; positive decimals such as 0.5 and 1.5 are supported. Final charges use actual usage. Per-request and task prices are unaffected.'
+                    )}
+                  </FormDescription>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+
+            <FormField
+              control={form.control}
+              name='quota_setting.image_token_pre_consume_usd'
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>
+                    {t('Minimum reserve per token-billed image (USD)')}
+                  </FormLabel>
+                  <FormControl>
+                    <Input
+                      type='number'
+                      min={0}
+                      step='any'
+                      value={field.value ?? ''}
+                      onChange={field.onChange}
+                      name={field.name}
+                      onBlur={field.onBlur}
+                      ref={field.ref}
+                    />
+                  </FormControl>
+                  <FormDescription>
+                    {t(
+                      'For token-billed Images API requests, reserve the higher of the estimated cost and this amount per image, adjusted by the group ratio. Final charges use actual usage. Fixed prices are unaffected. This reserve reduces overdraft risk but is not a cost limit.'
                     )}
                   </FormDescription>
                   <FormMessage />

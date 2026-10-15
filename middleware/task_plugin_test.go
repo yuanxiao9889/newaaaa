@@ -19,6 +19,7 @@ import (
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/pkg/jsplugin"
 	builtinplugins "github.com/QuantumNous/new-api/plugins"
+	"github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
@@ -809,7 +810,8 @@ func TestPrepareTaskPluginEndpointRejectsModelDriftBeforeDistribution(t *testing
 	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &payload))
 	errObj, _ := payload["error"].(map[string]any)
 	require.NotNil(t, errObj)
-	assert.Contains(t, fmt.Sprint(errObj["message"]), `model "outside-model" is not served by this plugin`)
+	assert.Contains(t, fmt.Sprint(errObj["message"]), "[invalid_parameter]")
+	assert.NotContains(t, fmt.Sprint(errObj["message"]), "outside-model")
 }
 
 func TestPrepareTaskPluginEndpointAcceptsRegisteredVideoMultipartBody(t *testing.T) {
@@ -1263,10 +1265,10 @@ export const native = {error: function(ctx, error) {
 	assert.Equal(t, http.StatusBadGateway, recorder.Code)
 	assert.JSONEq(t, `{
 	  "path": "/vendor/failure",
-	  "code": "server_error",
-	  "message": "Task request failed",
+	  "code": "generation_failed",
+	  "message": "[generation_failed] 生成失败，服务未提供可公开确认的具体原因；请联系管理员并提供请求 ID 或任务 ID，以查询详细错误",
 	  "status": 502,
-	  "retryable": true,
+	  "retryable": false,
 	  "keys": ["code", "httpStatus", "message", "requestId", "retryable"]
 	}`, recorder.Body.String())
 	assert.NotContains(t, recorder.Body.String(), "upstream.invalid")
@@ -1297,10 +1299,97 @@ func TestTaskPluginErrorFallbackIsSanitized(t *testing.T) {
 			abortWithOpenAiMessage(c, http.StatusBadGateway, "https://user:password@upstream.invalid?token=secret")
 
 			assert.Equal(t, http.StatusBadGateway, recorder.Code)
-			assert.JSONEq(t, `{"code":"server_error","message":"Task request failed (request id: fallback-req)","data":null}`, recorder.Body.String())
+			assert.JSONEq(t, `{"code":"generation_failed","message":"[generation_failed] 生成失败，服务未提供可公开确认的具体原因；请联系管理员并提供请求 ID 或任务 ID，以查询详细错误 (request id: fallback-req)","data":null}`, recorder.Body.String())
 			assert.NotContains(t, recorder.Body.String(), "upstream.invalid")
 			assert.NotContains(t, recorder.Body.String(), "renderer secret")
 			assert.NotContains(t, recorder.Body.String(), "password")
+		})
+	}
+}
+
+func TestTaskPluginAndOrdinaryAPIErrorsDistinguishBillingAndHideDetails(t *testing.T) {
+	plugin := compileTaskRoutePlugin(t, genericTaskPluginSource)
+	for _, native := range []bool{false, true} {
+		for _, tc := range []struct {
+			name, code, message, wantCode string
+			status, wantStatus            int
+		}{
+			{name: "unknown credential", status: 401, message: "credential does not exist sk-private-value", wantCode: "invalid_token"},
+			{name: "disabled credential", status: 401, message: "credential is disabled sk-private-value", wantCode: "invalid_token"},
+			{name: "host permission", status: 403, message: "private channel=153 is forbidden", wantCode: "access_denied"},
+			{name: "host missing task", status: 404, message: "private-task-identifier", wantCode: "task_not_found"},
+			{name: "host conflict", status: 409, message: "private-channel-conflict", wantCode: "request_conflict"},
+			{name: "host invalid request", status: 400, message: "private-plugin validation failed", wantCode: "invalid_parameter"},
+			{name: "host token quota", status: 403, code: "pre_consume_token_quota_failed", message: "token quota is not enough, token remain quota: private-quota", wantCode: "insufficient_token_quota", wantStatus: 402},
+			{name: "host billing unavailable", status: 403, code: "pre_consume_token_quota_failed", message: "private-database refused request", wantCode: "billing_failed", wantStatus: 500},
+			{name: "host wallet quota", status: 403, code: "insufficient_user_quota", message: "private-user balance", wantCode: "insufficient_user_quota", wantStatus: 402},
+			{name: "host server failure", status: 500, message: "https://private-host.invalid/internal", wantCode: "generation_failed"},
+		} {
+			t.Run(fmt.Sprintf("native=%t/%s", native, tc.name), func(t *testing.T) {
+				recorder := httptest.NewRecorder()
+				c, _ := gin.CreateTestContext(recorder)
+				c.Request = httptest.NewRequest(http.MethodPost, "/v1/images/generations", nil)
+				c.Set(common.RequestIdKey, "public-request-id")
+				if native {
+					c.Set(jsplugin.ContextKeyPinnedRoute, jsplugin.PinnedRoute{Plugin: plugin})
+					c.Set(jsplugin.ContextKeyRouteRequest, jsplugin.RouteRequestContext{Path: "/vendor/failure", Method: http.MethodPost})
+				}
+				abortWithOpenAiMessage(c, tc.status, tc.message, types.ErrorCode(tc.code))
+				assert.True(t, c.IsAborted())
+				wantStatus := tc.wantStatus
+				if wantStatus == 0 {
+					wantStatus = tc.status
+				}
+				assert.Equal(t, wantStatus, recorder.Code)
+				assert.Equal(t, tc.wantCode, recorder.Header().Get("X-Error-Code"))
+				var payload map[string]any
+				require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &payload))
+				if !native {
+					var ok bool
+					payload, ok = payload["error"].(map[string]any)
+					require.True(t, ok)
+				}
+				assert.Equal(t, tc.wantCode, payload["code"])
+				assert.Contains(t, payload["message"], "["+tc.wantCode+"]")
+				assert.Contains(t, payload["message"], "public-request-id")
+				assert.NotContains(t, recorder.Body.String(), "private-")
+				assert.NotContains(t, recorder.Body.String(), "153")
+			})
+		}
+	}
+}
+
+func TestTaskPluginProviderErrorPreservesCategoryAndNativeEnvelope(t *testing.T) {
+	plugin := compileTaskRoutePlugin(t, genericTaskPluginSource+`
+export const native = {error: function(ctx, error) { return {code: error.httpStatus, message: error.message}; }};
+`)
+	for _, tc := range []struct {
+		code, message, wantCode string
+		status, wantStatus      int
+		local                   bool
+	}{
+		{code: "invalid_image_input", message: "private image detail", status: 400, wantStatus: 400, wantCode: "invalid_image_input"},
+		{code: "invalid_token", message: "private provider key", status: 401, wantStatus: 502, wantCode: "service_auth_error"},
+		{code: "insufficient_token_quota", message: "already projected", status: 403, wantStatus: 402, wantCode: "insufficient_token_quota", local: true},
+		{code: "insufficient_user_quota", status: 403, wantStatus: 402, wantCode: "insufficient_user_quota", local: true},
+		{code: "insufficient_user_quota", message: "private provider balance", status: 402, wantStatus: 503, wantCode: "service_quota_exceeded"},
+		{code: "pre_consume_token_quota_failed", message: "private storage failed", status: 403, wantStatus: 500, wantCode: "billing_failed", local: true},
+		{code: "task_timeout", status: 504, wantStatus: 504, wantCode: "task_timeout", local: true},
+	} {
+		t.Run(tc.wantCode, func(t *testing.T) {
+			recorder := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(recorder)
+			c.Request = httptest.NewRequest(http.MethodPost, "/vendor/failure", nil)
+			c.Set(jsplugin.ContextKeyPinnedRoute, jsplugin.PinnedRoute{Plugin: plugin})
+			c.Set(jsplugin.ContextKeyRouteRequest, jsplugin.RouteRequestContext{Path: "/vendor/failure", Method: http.MethodPost})
+			require.True(t, RespondTaskPluginError(c, &dto.TaskError{Code: tc.code, Message: tc.message, StatusCode: tc.status, LocalError: tc.local}))
+			assert.Equal(t, tc.wantStatus, recorder.Code)
+			assert.Equal(t, tc.wantCode, recorder.Header().Get("X-Error-Code"))
+			var payload map[string]any
+			require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &payload))
+			assert.Equal(t, float64(tc.wantStatus), payload["code"], "native numeric code contract is preserved")
+			assert.Contains(t, payload["message"], "["+tc.wantCode+"]")
+			assert.NotContains(t, recorder.Body.String(), "private")
 		})
 	}
 }
@@ -1384,8 +1473,8 @@ export function parseTaskResult() { return {status: "SUCCESS"}; }
 	assert.Equal(t, http.StatusBadRequest, recorder.Code)
 	var body dto.TaskError
 	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &body))
-	assert.Equal(t, "invalid_request", body.Code)
-	assert.Equal(t, "model is required", body.Message)
+	assert.Equal(t, "missing_model", body.Code)
+	assert.Contains(t, body.Message, "[missing_model] 缺少模型 ID（model）")
 }
 
 func TestPrepareTaskPluginRouteNativeErrorReceivesHookMessage(t *testing.T) {
@@ -1421,7 +1510,7 @@ export function parseTaskResult() { return {status: "SUCCESS"}; }
 	router.ServeHTTP(recorder, request)
 
 	assert.Equal(t, http.StatusBadRequest, recorder.Code)
-	assert.JSONEq(t, `{"code":"invalid_request","message":"model is required","requestId":"native-error-req"}`, recorder.Body.String())
+	assert.JSONEq(t, `{"code":"missing_model","message":"[missing_model] 缺少模型 ID（model）；请填写平台提供的对外模型 ID 后重试","requestId":"native-error-req"}`, recorder.Body.String())
 }
 
 func TestPrepareTaskPluginRouteRejectsNonObjectResultWithFixedMessage(t *testing.T) {
@@ -1451,8 +1540,8 @@ export function parseTaskResult() { return {status: "SUCCESS"}; }
 	assert.Equal(t, http.StatusBadRequest, recorder.Code)
 	var body dto.TaskError
 	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &body))
-	assert.Equal(t, "invalid_request", body.Code)
-	assert.Equal(t, "plugin returned an invalid route result", body.Message)
+	assert.Equal(t, "invalid_parameter", body.Code)
+	assert.Contains(t, body.Message, "[invalid_parameter]")
 }
 
 func TestPrepareTaskPluginRouteSurfacesRequestDecodeDetail(t *testing.T) {
@@ -1482,19 +1571,19 @@ export function parseTaskResult() { return {status: "SUCCESS"}; }
 	assert.Equal(t, http.StatusBadRequest, recorder.Code)
 	var body dto.TaskError
 	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &body))
-	assert.Equal(t, "invalid_request", body.Code)
-	assert.Contains(t, body.Message, "conflicting Content-Type")
+	assert.Equal(t, "invalid_parameter", body.Code)
+	assert.Contains(t, body.Message, "[invalid_parameter]")
 }
 
 func TestSanitizedTaskPluginErrorIgnoresDetailOn5xx(t *testing.T) {
 	got := sanitizedTaskPluginError(http.StatusInternalServerError, "database secret")
-	assert.Equal(t, "server_error", got.Code)
-	assert.Equal(t, "Task request failed", got.Message)
+	assert.Equal(t, "generation_failed", got.Code)
+	assert.Contains(t, got.Message, "[generation_failed]")
 	assert.Equal(t, http.StatusInternalServerError, got.HTTPStatus)
 
 	got = sanitizedTaskPluginError(http.StatusBadGateway, "https://user:password@upstream.invalid")
-	assert.Equal(t, "server_error", got.Code)
-	assert.Equal(t, "Task request failed", got.Message)
+	assert.Equal(t, "generation_failed", got.Code)
+	assert.Contains(t, got.Message, "[generation_failed]")
 }
 
 func TestTaskPluginErrorFallbackMessageIncludesRequestID(t *testing.T) {
@@ -1514,8 +1603,8 @@ func TestTaskPluginErrorFallbackMessageIncludesRequestID(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, recorder.Code)
 	var body dto.TaskError
 	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &body))
-	assert.Equal(t, "invalid_request", body.Code)
-	assert.Equal(t, "model is required (request id: req-fallback-1)", body.Message)
+	assert.Equal(t, "missing_model", body.Code)
+	assert.Contains(t, body.Message, "[missing_model] 缺少模型 ID（model）")
 	assert.True(t, strings.HasSuffix(body.Message, "(request id: req-fallback-1)"))
 }
 
@@ -1542,7 +1631,7 @@ func TestPrepareTaskPluginEndpointSurfacesDecodeHookMessage(t *testing.T) {
 	router.ServeHTTP(recorder, request)
 
 	assert.Equal(t, http.StatusBadRequest, recorder.Code)
-	assert.Contains(t, recorder.Body.String(), "model is required")
+	assert.Contains(t, recorder.Body.String(), "[missing_model] 缺少模型 ID（model）")
 	assert.NotContains(t, recorder.Body.String(), "Invalid task protocol request")
 }
 
@@ -1554,7 +1643,7 @@ func TestPinTaskPluginEndpointRejectsUnsupportedRequestForms(t *testing.T) {
 		supports string
 		hooks    string
 		body     string
-		message  string
+		code     string
 	}{
 		{
 			name:     "stream against sync and background",
@@ -1562,7 +1651,7 @@ func TestPinTaskPluginEndpointRejectsUnsupportedRequestForms(t *testing.T) {
 			supports: `["sync", "background"]`,
 			hooks:    `renderFinal: function() { return {}; }`,
 			body:     `{"model":"form-gate-model","stream":true}`,
-			message:  `Streaming is not supported for this model. Set "stream": false, or use "background": true and retrieve the response later.`,
+			code:     "unsupported_stream_mode",
 		},
 		{
 			name:     "sync against stream only",
@@ -1570,7 +1659,7 @@ func TestPinTaskPluginEndpointRejectsUnsupportedRequestForms(t *testing.T) {
 			supports: `["stream"]`,
 			hooks:    `renderEvents: function() { return {events: [], done: false}; }`,
 			body:     `{"model":"form-gate-model"}`,
-			message:  `Synchronous non-streaming requests are not supported for this model. Set "stream": true.`,
+			code:     "unsupported_sync_mode",
 		},
 		{
 			name:     "background against stream and sync",
@@ -1578,7 +1667,7 @@ func TestPinTaskPluginEndpointRejectsUnsupportedRequestForms(t *testing.T) {
 			supports: `["stream", "sync"]`,
 			hooks:    `renderEvents: function() { return {events: [], done: false}; }, renderFinal: function() { return {}; }`,
 			body:     `{"model":"form-gate-model","background":true}`,
-			message:  `Background mode is not supported for this model. Remove "background": true.`,
+			code:     "unsupported_background_mode",
 		},
 		{
 			name:     "background plus stream reports stream first",
@@ -1586,7 +1675,7 @@ func TestPinTaskPluginEndpointRejectsUnsupportedRequestForms(t *testing.T) {
 			supports: `["sync", "background"]`,
 			hooks:    `renderFinal: function() { return {}; }`,
 			body:     `{"model":"form-gate-model","stream":true,"background":true}`,
-			message:  `Streaming is not supported for this model. Set "stream": false, or use "background": true and retrieve the response later.`,
+			code:     "unsupported_stream_mode",
 		},
 	}
 	for _, testCase := range tests {
@@ -1617,7 +1706,8 @@ func TestPinTaskPluginEndpointRejectsUnsupportedRequestForms(t *testing.T) {
 			errObj, ok := payload["error"].(map[string]any)
 			require.True(t, ok)
 			message, _ := errObj["message"].(string)
-			assert.Contains(t, message, testCase.message)
+			assert.Contains(t, message, "["+testCase.code+"]")
+			assert.Equal(t, testCase.code, errObj["code"])
 			assert.False(t, reachedPrepare)
 			assert.False(t, quotaConsumed)
 			var count int64
@@ -1649,7 +1739,7 @@ func TestPinTaskPluginEndpointMalformedStreamStillFailsInPrepare(t *testing.T) {
 	router.ServeHTTP(recorder, request)
 
 	assert.Equal(t, http.StatusBadRequest, recorder.Code)
-	assert.Contains(t, recorder.Body.String(), "stream must be a boolean")
+	assert.Contains(t, recorder.Body.String(), "[invalid_stream_parameter]")
 	assert.False(t, reachedNext)
 }
 
@@ -1876,7 +1966,10 @@ func TestPrepareTaskPluginEndpointFiltersEachSharedCandidate(t *testing.T) {
 			router.ServeHTTP(recorder, request)
 			if tc.wantError != "" {
 				assert.Equal(t, http.StatusBadRequest, recorder.Code)
-				assert.Contains(t, recorder.Body.String(), tc.wantError)
+				assert.Contains(t, recorder.Body.String(), "[invalid_parameter]")
+				assert.NotContains(t, recorder.Body.String(), tc.wantError)
+				assert.NotContains(t, recorder.Body.String(), "decode-alpha")
+				assert.NotContains(t, recorder.Body.String(), "decode-beta")
 				assert.Empty(t, gotKeys)
 			} else {
 				assert.Equal(t, http.StatusNoContent, recorder.Code, recorder.Body.String())

@@ -24,7 +24,10 @@ import {
 } from '@tanstack/react-table'
 import { render, screen, within, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { expect, it, vi } from 'vitest'
+import { afterEach, expect, it, vi } from 'vitest'
+
+import { ROLE } from '@/lib/roles'
+import { useAuthStore } from '@/stores/auth-store'
 
 import { usageLogSchema, type UsageLog } from '../../data/schema'
 import { useCommonLogsColumns } from '../columns/common-logs-columns'
@@ -32,6 +35,8 @@ import { UsageLogsMobileList } from '../usage-logs-mobile-card'
 import { UsageLogsProvider, useUsageLogsContext } from '../usage-logs-provider'
 
 const longName = 'enterprise-production-failover-2026-without-any-short-alias'
+const originalAuth = useAuthStore.getState().auth
+afterEach(() => useAuthStore.setState({ auth: originalAuth }))
 const log = usageLogSchema.parse({
   id: 1,
   user_id: 2,
@@ -84,6 +89,11 @@ function Fixture(props: {
 }
 
 function renderLogs(props: Parameters<typeof Fixture>[0] = {}) {
+  useAuthStore.getState().auth.setUser({
+    id: 1,
+    username: 'viewer',
+    role: props.admin === false ? ROLE.USER : ROLE.ADMIN,
+  })
   return render(
     <QueryClientProvider
       client={
@@ -96,6 +106,36 @@ function renderLogs(props: Parameters<typeof Fixture>[0] = {}) {
     </QueryClientProvider>
   )
 }
+
+it('only copies the public model for users even when upstream metadata is present', async () => {
+  const user = userEvent.setup()
+  const copy = vi.spyOn(navigator.clipboard, 'writeText').mockResolvedValue()
+  renderLogs({
+    admin: false,
+    logs: [
+      {
+        ...log,
+        other: JSON.stringify({
+          is_model_mapped: true,
+          upstream_model_name: 'private-model',
+          response_model: {
+            requested_model: longName,
+            upstream_model: 'private-model',
+            returned_model: 'private-version',
+          },
+        }),
+      },
+    ],
+  })
+  await user.click(screen.getByRole('button', { name: `Model: ${longName}` }))
+  expect(copy).toHaveBeenCalledWith(longName)
+  expect(
+    screen.queryByRole('dialog', { name: 'Model' })
+  ).not.toBeInTheDocument()
+  expect(
+    screen.queryByText(/private-model|private-version/)
+  ).not.toBeInTheDocument()
+})
 
 it('shows model mismatch evidence when tapping the mobile model badge', async () => {
   const user = userEvent.setup()

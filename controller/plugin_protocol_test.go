@@ -425,8 +425,8 @@ func TestServeTaskPluginProtocolPostDurableObservationFailureUsesCanonicalRespon
 	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &response))
 	assert.Equal(t, "failed", response.Status)
 	require.NotNil(t, response.Error)
-	assert.Equal(t, "server_error", response.Error.Code)
-	assert.Equal(t, "The task could not be observed.", response.Error.Message)
+	assert.Equal(t, "service_unavailable", response.Error.Code)
+	assert.Contains(t, response.Error.Message, "[service_unavailable]")
 	assert.Equal(t, "queued", response.Metadata["task_status"])
 	assert.Equal(t, "/v1/responses/resp_observation_failure", response.Metadata["retrieval_path"])
 	assert.NotContains(t, recorder.Body.String(), "secret")
@@ -810,7 +810,7 @@ func TestServeTaskPluginProtocolArtifactURLFailureOnlyFailsCurrentRendering(t *t
 				require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &response))
 				assert.Equal(t, "failed", response.Status)
 				require.NotNil(t, response.Error)
-				assert.Equal(t, "server_error", response.Error.Code)
+				assert.Equal(t, "service_unavailable", response.Error.Code)
 				assert.Equal(t, "completed", response.Metadata["task_status"])
 			}
 		})
@@ -850,7 +850,7 @@ func TestServeTaskPluginProtocolNonStreamTaskFailureSkipsFinalHook(t *testing.T)
 			Platform:   constant.TaskPlatform(pinned.Plugin.Meta.Key),
 			UserId:     71,
 			Status:     model.TaskStatusFailure,
-			FailReason: "upstream credential at https://secret.invalid/",
+			FailReason: `{"error":{"code":"invalid_image_input","message":"upstream credential at https://secret.invalid/"}}`,
 		}
 		task.SetData(map[string]any{"secret": "database-secret"})
 		return task, true, nil
@@ -863,8 +863,10 @@ func TestServeTaskPluginProtocolNonStreamTaskFailureSkipsFinalHook(t *testing.T)
 	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &response))
 	assert.Equal(t, "failed", response.Status)
 	require.NotNil(t, response.Error)
-	assert.Equal(t, "server_error", response.Error.Code)
-	assert.Equal(t, "The task failed.", response.Error.Message)
+	assert.Equal(t, "invalid_image_input", response.Error.Code)
+	assert.Contains(t, response.Error.Message, "[invalid_image_input]")
+	assert.Equal(t, "resp_failed", response.ID)
+	assert.Equal(t, "task_failed", response.Metadata["task_id"])
 	assert.Empty(t, response.Output)
 	assert.NotContains(t, recorder.Body.String(), "secret")
 	assert.NotContains(t, recorder.Body.String(), "credential")
@@ -898,7 +900,7 @@ func TestServeTaskPluginProtocolStreamTaskFailureSuppressesPluginAndDatabaseDeta
 			Platform:   constant.TaskPlatform(pinned.Plugin.Meta.Key),
 			UserId:     71,
 			Status:     model.TaskStatusFailure,
-			FailReason: "database-secret https://database.invalid/?token=hidden",
+			FailReason: "content_policy_violation: database-secret https://database.invalid/?token=hidden",
 		}
 		task.SetData(map[string]any{"secret": "private-result"})
 		return task, true, nil
@@ -907,8 +909,9 @@ func TestServeTaskPluginProtocolStreamTaskFailureSuppressesPluginAndDatabaseDeta
 	serveTaskPluginProtocol(c, pinned, deps)
 
 	assert.Equal(t, []string{"response.created", "response.failed"}, pluginProtocolTestSSEEventTypes(recorder.Body.String()))
-	assert.Contains(t, recorder.Body.String(), `"code":"server_error"`)
-	assert.Contains(t, recorder.Body.String(), `"message":"The task failed."`)
+	assert.Contains(t, recorder.Body.String(), `"code":"content_policy_violation"`)
+	assert.Contains(t, recorder.Body.String(), "[content_policy_violation]")
+	assert.Contains(t, recorder.Body.String(), `"id":"resp_stream_failed"`)
 	assert.Contains(t, recorder.Body.String(), `"task_status":"failed"`)
 	assert.NotContains(t, recorder.Body.String(), "secret")
 	assert.NotContains(t, recorder.Body.String(), "invalid")
@@ -1018,6 +1021,58 @@ func TestServeTaskPluginProtocolBackgroundNonStreamReturnsPendingWithoutObservat
 	assert.Equal(t, "queued", metadata["task_status"])
 	assert.Equal(t, "/v1/responses/resp_background", metadata["retrieval_path"])
 	assert.NotEqual(t, "text/event-stream", recorder.Header().Get("Content-Type"))
+}
+
+func TestServeTaskPluginProtocolImmediateFailureReturnsClassifiedErrorWithoutObservation(t *testing.T) {
+	pinned := compilePluginProtocolTestEndpoint(t, "immediate-failure", `
+		export const protocols = {openai_responses: {
+			renderEvents: function() { throw new Error("must not render a failed task"); },
+			renderFinal: function() { throw new Error("must not render a failed task"); }
+		}};
+	`)
+	for _, tc := range []struct {
+		name       string
+		stream     bool
+		background bool
+	}{
+		{name: "sync"},
+		{name: "stream", stream: true},
+		{name: "background", background: true},
+		{name: "background stream", stream: true, background: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c, recorder := newPluginProtocolTestContext(tc.stream, tc.stream)
+			setProtocolRequestBackground(c, tc.background)
+			deps := pluginProtocolTestDeps()
+			deps.submit = func(_ *gin.Context, info *relaycommon.RelayInfo) (*taskSubmissionOutcome, *dto.TaskError) {
+				outcome := pluginProtocolTestOutcome(info, pinned.Plugin.Meta.Key, "task_immediate_failure")
+				outcome.Task.Status = model.TaskStatusFailure
+				outcome.Task.FailReason = "content_policy_violation: private-model at upstream.invalid"
+				return outcome, nil
+			}
+			deps.loadTask = func(context.Context, int, constant.TaskPlatform, string) (*model.Task, bool, error) {
+				require.FailNow(t, "a durable terminal failure must not start observation")
+				return nil, false, nil
+			}
+
+			serveTaskPluginProtocol(c, pinned, deps)
+
+			assert.Equal(t, http.StatusOK, recorder.Code)
+			assert.Contains(t, recorder.Body.String(), `"code":"content_policy_violation"`)
+			assert.Contains(t, recorder.Body.String(), "[content_policy_violation]")
+			assert.Contains(t, recorder.Body.String(), `"id":"resp_immediate_failure"`)
+			assert.Contains(t, recorder.Body.String(), `"task_id":"task_immediate_failure"`)
+			assert.NotContains(t, recorder.Body.String(), "private-model")
+			assert.NotContains(t, recorder.Body.String(), "upstream.invalid")
+			if tc.stream {
+				assert.Equal(t, []string{"response.created", "response.failed"}, pluginProtocolTestSSEEventTypes(recorder.Body.String()))
+			} else {
+				var response dto.PluginResponsesResponse
+				require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &response))
+				assert.Equal(t, "failed", response.Status)
+			}
+		})
+	}
 }
 
 func TestServeTaskPluginProtocolBackgroundStreamEntersObservation(t *testing.T) {
@@ -1270,7 +1325,8 @@ func TestRetrieveTaskPluginResponseStreamOnlyPendingAndFailureStayHostEnvelopes(
 		require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &response))
 		assert.Equal(t, "failed", response.Status)
 		require.NotNil(t, response.Error)
-		assert.Equal(t, "The task failed.", response.Error.Message)
+		assert.Equal(t, "generation_failed", response.Error.Code)
+		assert.Contains(t, response.Error.Message, "[generation_failed]")
 	})
 }
 
@@ -1300,8 +1356,8 @@ func TestRetrieveTaskPluginResponseStreamOnlyRenderErrorUsesFailureEnvelope(t *t
 	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &response))
 	assert.Equal(t, "failed", response.Status)
 	require.NotNil(t, response.Error)
-	assert.Equal(t, "server_error", response.Error.Code)
-	assert.Equal(t, "The task could not be observed.", response.Error.Message)
+	assert.Equal(t, "service_unavailable", response.Error.Code)
+	assert.Contains(t, response.Error.Message, "[service_unavailable]")
 }
 
 func TestRetrieveTaskPluginResponseFailureUsesFailedEnvelope(t *testing.T) {
@@ -1321,6 +1377,7 @@ func TestRetrieveTaskPluginResponseFailureUsesFailedEnvelope(t *testing.T) {
 		Platform:   constant.TaskPlatform(pinned.Plugin.Meta.Key),
 		UserId:     71,
 		Status:     model.TaskStatusFailure,
+		FailReason: "status_code=429, private-provider at https://secret.invalid/",
 		Properties: model.Properties{OriginModelName: "video-model"},
 	}, true, nil)
 
@@ -1332,8 +1389,12 @@ func TestRetrieveTaskPluginResponseFailureUsesFailedEnvelope(t *testing.T) {
 	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &response))
 	assert.Equal(t, "failed", response.Status)
 	require.NotNil(t, response.Error)
-	assert.Equal(t, "server_error", response.Error.Code)
-	assert.Equal(t, "The task failed.", response.Error.Message)
+	assert.Equal(t, "rate_limit_exceeded", response.Error.Code)
+	assert.Contains(t, response.Error.Message, "[rate_limit_exceeded]")
+	assert.Equal(t, "resp_retrieve_failure", response.ID)
+	assert.Equal(t, "task_retrieve_failure", response.Metadata["task_id"])
+	assert.NotContains(t, recorder.Body.String(), "private-provider")
+	assert.NotContains(t, recorder.Body.String(), "secret.invalid")
 }
 
 func TestRetrieveTaskPluginResponseNotFound(t *testing.T) {
@@ -1392,7 +1453,7 @@ func TestRetrieveTaskPluginResponseNotFound(t *testing.T) {
 	}
 }
 
-func TestRespondPluginProtocolSubmissionErrorPassesValidationMessage(t *testing.T) {
+func TestRespondPluginProtocolSubmissionErrorClassifiesValidationMessage(t *testing.T) {
 	pinned := compilePluginProtocolTestEndpoint(t, "protocol-validation-detail", `
 		export const protocols = {openai_responses: {
 			renderEvents: function() { return {events: [], done: false}; },
@@ -1404,7 +1465,7 @@ func TestRespondPluginProtocolSubmissionErrorPassesValidationMessage(t *testing.
 	deps.submit = func(*gin.Context, *relaycommon.RelayInfo) (*taskSubmissionOutcome, *dto.TaskError) {
 		return nil, &dto.TaskError{
 			Code:       "invalid_request",
-			Message:    "model is required",
+			Message:    "model private-provider-model is required",
 			StatusCode: http.StatusBadRequest,
 			LocalError: true,
 		}
@@ -1413,12 +1474,13 @@ func TestRespondPluginProtocolSubmissionErrorPassesValidationMessage(t *testing.
 	serveTaskPluginProtocol(c, pinned, deps)
 
 	assert.Equal(t, http.StatusBadRequest, recorder.Code)
-	assert.Contains(t, recorder.Body.String(), `"message":"model is required"`)
-	assert.Contains(t, recorder.Body.String(), `"code":"invalid_request_error"`)
+	assert.Contains(t, recorder.Body.String(), "[invalid_parameter]")
+	assert.Contains(t, recorder.Body.String(), `"code":"invalid_parameter"`)
+	assert.NotContains(t, recorder.Body.String(), "private-provider-model")
 	assert.NotContains(t, recorder.Body.String(), "Invalid task protocol request")
 }
 
-func TestRespondPluginProtocolSubmissionErrorKeepsGenericNonValidation400(t *testing.T) {
+func TestRespondPluginProtocolSubmissionErrorPreservesTaskNotFoundCategory(t *testing.T) {
 	pinned := compilePluginProtocolTestEndpoint(t, "protocol-generic-400", `
 		export const protocols = {openai_responses: {
 			renderEvents: function() { return {events: [], done: false}; },
@@ -1438,8 +1500,8 @@ func TestRespondPluginProtocolSubmissionErrorKeepsGenericNonValidation400(t *tes
 
 	serveTaskPluginProtocol(c, pinned, deps)
 
-	assert.Equal(t, http.StatusBadRequest, recorder.Code)
-	assert.Contains(t, recorder.Body.String(), "Invalid task protocol request")
+	assert.Equal(t, http.StatusNotFound, recorder.Code)
+	assert.Contains(t, recorder.Body.String(), "[task_not_found]")
 	assert.NotContains(t, recorder.Body.String(), "task_origin_not_exist")
 }
 
@@ -1815,15 +1877,17 @@ func TestServeTaskPluginImageProtocolRendersImmediateResultAndInlinesBase64(t *t
 // while the durable task stays with the background poller.
 func TestServeTaskPluginImageProtocolWaitsForAsynchronousTask(t *testing.T) {
 	for _, tc := range []struct {
-		name        string
-		terminal    model.TaskStatus
-		wantStatus  int
-		wantCode    string
-		wantMessage string
+		name       string
+		terminal   model.TaskStatus
+		reason     string
+		wantStatus int
+		wantCode   string
 	}{
-		{"success", model.TaskStatusSuccess, http.StatusOK, "", ""},
-		{"failure", model.TaskStatusFailure, http.StatusBadRequest, "image_generation_failed", "DataInspectionFailed"},
-		{"timeout", "", http.StatusGatewayTimeout, "task_timeout", "still running"},
+		{"success", model.TaskStatusSuccess, "", http.StatusOK, ""},
+		{"unknown failure", model.TaskStatusFailure, "private-provider at upstream.invalid", http.StatusBadRequest, "generation_failed"},
+		{"invalid image", model.TaskStatusFailure, `{"error":{"code":"invalid_image_input","message":"private-provider at upstream.invalid"}}`, http.StatusBadRequest, "invalid_image_input"},
+		{"moderation", model.TaskStatusFailure, `{"code":"DataInspectionFailed","message":"private-provider at upstream.invalid"}`, http.StatusBadRequest, "content_policy_violation"},
+		{"timeout", "", "", http.StatusGatewayTimeout, "task_timeout"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			pinned := imageProtocolTestEndpoint(t)
@@ -1841,7 +1905,7 @@ func TestServeTaskPluginImageProtocolWaitsForAsynchronousTask(t *testing.T) {
 					return nil
 				}
 				task.Status = tc.terminal
-				task.FailReason = "DataInspectionFailed"
+				task.FailReason = tc.reason
 				task.SetData(map[string]any{"images": []string{"https://cdn.example/polled.png"}})
 				return nil
 			}
@@ -1859,13 +1923,14 @@ func TestServeTaskPluginImageProtocolWaitsForAsynchronousTask(t *testing.T) {
 			}
 			errorBody := response["error"].(map[string]any)
 			assert.Equal(t, tc.wantCode, errorBody["code"])
-			assert.Contains(t, errorBody["message"], tc.wantMessage)
+			assert.Contains(t, errorBody["message"], "["+tc.wantCode+"]")
+			assert.NotContains(t, recorder.Body.String(), "private-provider")
+			assert.NotContains(t, recorder.Body.String(), "upstream.invalid")
 		})
 	}
 }
 
-// Submission failures use the OpenAI error envelope and surface a DashScope
-// {code, message} failure body as a readable vendor message.
+// Submission failures keep the OpenAI envelope without exposing vendor bodies.
 func TestServeTaskPluginImageProtocolSubmissionErrorUsesOpenAIEnvelope(t *testing.T) {
 	pinned := imageProtocolTestEndpoint(t)
 	c, recorder := newImageProtocolTestContext("")
@@ -1878,9 +1943,11 @@ func TestServeTaskPluginImageProtocolSubmissionErrorUsesOpenAIEnvelope(t *testin
 	var response map[string]any
 	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &response))
 	errorBody := response["error"].(map[string]any)
-	assert.Equal(t, "InvalidParameter", errorBody["code"])
+	assert.Equal(t, "invalid_parameter", errorBody["code"])
 	assert.Equal(t, "invalid_request_error", errorBody["type"])
-	assert.Contains(t, errorBody["message"], "n must be 1")
+	assert.Contains(t, errorBody["message"], "[invalid_parameter]")
+	assert.NotContains(t, recorder.Body.String(), "InvalidParameter")
+	assert.NotContains(t, recorder.Body.String(), "n must be 1")
 	assert.NotContains(t, errorBody["message"], "request_id")
 }
 

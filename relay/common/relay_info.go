@@ -180,6 +180,9 @@ type RelayInfo struct {
 	// ImageQuotaBeforeGroup is the frozen legacy estimate before request ratios.
 	ImageRequestCount     int
 	ImageQuotaBeforeGroup float64
+	// ImageTokenFallbackQuota excludes the reservation floor from missing-usage billing.
+	ImageTokenFallbackQuota *int
+	ImageTokenReserveUSD    float64
 
 	Request dto.Request
 

@@ -253,7 +253,7 @@ func PrepareTaskPluginRoute() gin.HandlerFunc {
 					pinned.Plugin.Meta.Key,
 					intentErr.Code,
 				)
-				abortTaskPluginRouteErrorDetail(c, intentErr.StatusCode, intentErr.Message)
+				abortTaskPluginRouteErrorDetail(c, intentErr.StatusCode, intentErr.Message, intentErr.Code)
 				return
 			}
 			_, bodyReplaced := resolved["requestBody"]
@@ -326,7 +326,7 @@ func PinTaskPluginEndpoint() gin.HandlerFunc {
 		modelRequest, err := getModelFromRequest(c)
 		if err != nil {
 			if _, _, protocolPath := pluginruntime.LookupHostProtocolOperation(c.Request.Method, c.Request.URL.Path); protocolPath {
-				abortWithOpenAiMessage(c, http.StatusBadRequest, "Invalid task protocol request")
+				abortTaskPluginProtocolError(c, http.StatusBadRequest, "Invalid task protocol request")
 				return
 			}
 			c.Next()
@@ -369,7 +369,7 @@ func PinTaskPluginEndpoint() gin.HandlerFunc {
 		}
 		if rewriteTo != "" {
 			if rewriteErr := rewriteTaskPluginJSONModel(c, rewriteTo); rewriteErr != nil {
-				abortWithOpenAiMessage(c, http.StatusBadRequest, "Invalid task protocol request")
+				abortTaskPluginProtocolError(c, http.StatusBadRequest, "Invalid task protocol request")
 				return
 			}
 		}
@@ -409,7 +409,7 @@ func PinTaskPluginEndpoint() gin.HandlerFunc {
 				}
 			}
 			if len(filtered) == 0 {
-				abortWithOpenAiMessage(c, http.StatusBadRequest, unsupportedProtocolFormMessage(unfiltered, binding.Protocol, stream, background))
+				abortTaskPluginProtocolError(c, http.StatusBadRequest, unsupportedProtocolFormMessage(unfiltered, binding.Protocol, stream, background))
 				return
 			}
 			candidates = filtered
@@ -511,7 +511,7 @@ func PrepareTaskPluginEndpoint() gin.HandlerFunc {
 			return
 		}
 		if !ok || pinned.Generation == nil || pinned.Plugin == nil {
-			abortWithOpenAiMessage(c, http.StatusInternalServerError, "Task protocol request failed")
+			abortTaskPluginProtocolError(c, http.StatusInternalServerError, "Task protocol request failed")
 			return
 		}
 		logger.LogDebug(
@@ -529,7 +529,7 @@ func PrepareTaskPluginEndpoint() gin.HandlerFunc {
 				pinned.Generation.Number,
 				pinned.Plugin.Meta.Key,
 			)
-			abortWithOpenAiMessage(c, http.StatusNotImplemented, "Task protocol bridge is not available")
+			abortTaskPluginProtocolError(c, http.StatusNotImplemented, "Task protocol bridge is not available")
 			return
 		}
 		requestContext, err := buildTaskPluginRouteRequest(c)
@@ -544,7 +544,7 @@ func PrepareTaskPluginEndpoint() gin.HandlerFunc {
 			if errors.Is(err, errTaskPluginUnsupportedMediaType) {
 				status = http.StatusUnsupportedMediaType
 			}
-			abortWithOpenAiMessage(c, status, err.Error())
+			abortTaskPluginProtocolError(c, status, err.Error())
 			return
 		}
 		if body, ok := requestContext.Body.(map[string]any); ok {
@@ -575,7 +575,7 @@ func PrepareTaskPluginEndpoint() gin.HandlerFunc {
 			if len(pinned.Operation.BodyKinds) == 1 && pinned.Operation.BodyKinds[0] == pluginruntime.BodyJSON {
 				detail = "this route requires a JSON body"
 			}
-			abortWithOpenAiMessage(c, http.StatusUnsupportedMediaType, detail)
+			abortTaskPluginProtocolError(c, http.StatusUnsupportedMediaType, detail)
 			return
 		}
 		stream := false
@@ -590,7 +590,7 @@ func PrepareTaskPluginEndpoint() gin.HandlerFunc {
 						pinned.Generation.Number,
 						pinned.Plugin.Meta.Key,
 					)
-					abortWithOpenAiMessage(c, http.StatusBadRequest, "stream must be a boolean")
+					abortTaskPluginProtocolError(c, http.StatusBadRequest, "stream must be a boolean")
 					return
 				}
 			}
@@ -665,7 +665,7 @@ func PrepareTaskPluginEndpoint() gin.HandlerFunc {
 					failures[index] = strings.Join(rejectedPlugins[detail], ", ") + ": " + detail
 				}
 			}
-			abortWithOpenAiMessage(c, http.StatusBadRequest, strings.Join(failures, "; "))
+			abortTaskPluginProtocolError(c, http.StatusBadRequest, strings.Join(failures, "; "))
 			return
 		}
 		pinned.Candidates = accepted
@@ -687,7 +687,7 @@ func PrepareTaskPluginEndpoint() gin.HandlerFunc {
 					pinned.Generation.Number,
 					pinned.Plugin.Meta.Key,
 				)
-				abortWithOpenAiMessage(c, http.StatusBadRequest, taskPluginInvalidRouteResult)
+				abortTaskPluginProtocolError(c, http.StatusBadRequest, taskPluginInvalidRouteResult)
 				return
 			}
 		}
@@ -714,7 +714,7 @@ func PrepareTaskPluginEndpoint() gin.HandlerFunc {
 				pinned.Plugin.Meta.Key,
 				intentErr.Code,
 			)
-			abortWithOpenAiMessage(c, intentErr.StatusCode, intentErr.Message, types.ErrorCode(intentErr.Code))
+			abortTaskPluginProtocolError(c, intentErr.StatusCode, intentErr.Message, intentErr.Code)
 			return
 		}
 		logger.LogDebug(
@@ -1233,7 +1233,20 @@ func RespondTaskPluginError(c *gin.Context, taskErr *dto.TaskError) bool {
 	if !exists || !ok || pinned.Plugin == nil {
 		return false
 	}
-	sanitized := sanitizedTaskPluginError(taskErr.StatusCode, taskErr.Message)
+	publicError := common.ClassifyPublicError(taskErr.Code, taskErr.Message, taskErr.StatusCode, taskErr.LocalError)
+	// Host rejections keep their routing semantics except billing errors:
+	// legacy quota 403s must not look like credential or permission failures.
+	if taskErr.LocalError && taskErr.StatusCode >= 400 && taskErr.StatusCode <= 599 {
+		switch publicError.Code {
+		case "insufficient_user_quota", "insufficient_token_quota", "billing_failed":
+		default:
+			publicError.StatusCode = taskErr.StatusCode
+		}
+	}
+	sanitized := dto.TaskPluginError{Code: publicError.Code, Message: publicError.Summary(), HTTPStatus: publicError.StatusCode, Retryable: publicError.Retryable}
+	// Native renderers own their response shape and may use a numeric code.
+	// Keep the stable classification available without altering that contract.
+	c.Header("X-Error-Code", sanitized.Code)
 	requestID := c.GetString(common.RequestIdKey)
 	hasRenderer, err := pinned.Plugin.Engine.HasCallablePath(c.Request.Context(), "native", "error")
 	requestValue, exists := c.Get(pluginruntime.ContextKeyRouteRequest)
@@ -1288,10 +1301,11 @@ func abortTaskPluginRouteError(c *gin.Context, status int) {
 	abortTaskPluginRouteErrorDetail(c, status, "")
 }
 
-func abortTaskPluginRouteErrorDetail(c *gin.Context, status int, detail string) {
-	taskErr := sanitizedTaskPluginError(status, detail)
+func abortTaskPluginRouteErrorDetail(c *gin.Context, status int, detail string, code ...string) {
+	taskErr := sanitizedTaskPluginError(status, detail, code...)
+	c.Header("X-Error-Code", taskErr.Code)
 	c.Abort()
-	if RespondTaskPluginError(c, &dto.TaskError{Code: taskErr.Code, Message: detail, StatusCode: taskErr.HTTPStatus}) {
+	if RespondTaskPluginError(c, &dto.TaskError{Code: taskErr.Code, Message: taskErr.Message, StatusCode: taskErr.HTTPStatus, LocalError: true}) {
 		return
 	}
 	message := taskErr.Message
@@ -1305,35 +1319,45 @@ func abortTaskPluginRouteErrorDetail(c *gin.Context, status int, detail string) 
 	})
 }
 
-func sanitizedTaskPluginError(status int, detail string) dto.TaskPluginError {
-	var taskErr dto.TaskPluginError
+func sanitizedTaskPluginError(status int, detail string, localCode ...string) dto.TaskPluginError {
+	publicError := common.ClassifyPublicError("", detail, status, false)
+	code := ""
 	switch status {
 	case http.StatusBadRequest:
-		taskErr = dto.TaskPluginError{Code: "invalid_request", Message: "Invalid request", HTTPStatus: status}
+		if publicError.Code == "generation_failed" {
+			code = "invalid_parameter"
+		}
 	case http.StatusUnauthorized:
-		taskErr = dto.TaskPluginError{Code: "authentication_error", Message: "Authentication failed", HTTPStatus: status}
+		code = "invalid_token"
 	case http.StatusForbidden:
-		taskErr = dto.TaskPluginError{Code: "permission_denied", Message: "Access denied", HTTPStatus: status}
+		code = "access_denied"
 	case http.StatusNotFound:
-		taskErr = dto.TaskPluginError{Code: "task_not_found", Message: "Task not found", HTTPStatus: status}
+		code = "task_not_found"
 	case http.StatusConflict:
-		taskErr = dto.TaskPluginError{Code: "request_conflict", Message: "Request conflict", HTTPStatus: status}
-	case http.StatusTooManyRequests:
-		taskErr = dto.TaskPluginError{Code: "rate_limit_exceeded", Message: "Too many requests", HTTPStatus: status, Retryable: true}
-	default:
-		if status < 400 || status > 599 {
-			status = http.StatusInternalServerError
-		}
-		if status < 500 {
-			taskErr = dto.TaskPluginError{Code: "invalid_request", Message: "Invalid request", HTTPStatus: status}
-		} else {
-			taskErr = dto.TaskPluginError{Code: "server_error", Message: "Task request failed", HTTPStatus: status, Retryable: status >= 500}
-		}
+		code = "request_conflict"
+	case http.StatusUnsupportedMediaType:
+		code = "unsupported_parameter"
 	}
-	if detail != "" && taskErr.HTTPStatus < 500 {
-		taskErr.Message = detail
+	if code != "" {
+		publicError = common.ClassifyPublicError(code, "", status, true)
 	}
-	return taskErr
+	if len(localCode) > 0 && localCode[0] != "" {
+		publicError = common.ClassifyPublicError(localCode[0], detail, status, true)
+	}
+	if status < 400 || status > 599 {
+		status = http.StatusInternalServerError
+	}
+	switch publicError.Code {
+	case "insufficient_user_quota", "insufficient_token_quota", "billing_failed":
+		status = publicError.StatusCode
+	}
+	return dto.TaskPluginError{Code: publicError.Code, Message: publicError.Summary(), HTTPStatus: status, Retryable: publicError.Retryable}
+}
+
+func abortTaskPluginProtocolError(c *gin.Context, status int, detail string, code ...string) {
+	publicError := sanitizedTaskPluginError(status, detail, code...)
+	c.Header("X-Error-Code", publicError.Code)
+	abortWithOpenAiMessage(c, publicError.HTTPStatus, publicError.Message, types.ErrorCode(publicError.Code))
 }
 
 func taskPluginHookDetail(err error) string {

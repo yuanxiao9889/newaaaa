@@ -25,12 +25,6 @@ import { getMidjourneyWorkflowSamples } from './midjourney-samples'
 const endpoints = [
   [
     'POST',
-    '/mj/submit/upload-discord-images',
-    'base64Array',
-    'Local temporary image hosting',
-  ],
-  [
-    'POST',
     '/mj/submit/imagine',
     'prompt, botType, base64Array, speedMode',
     'mj_fast_imagine / mj_relax_imagine',
@@ -49,12 +43,6 @@ const endpoints = [
     'mj_fast_modal / mj_relax_modal',
   ],
   ['GET', '/mj/image/{id}', 'id', 'Result image forwarding'],
-  [
-    'GET',
-    '/mj/upload/{filename}',
-    'filename',
-    'Public temporary reference image',
-  ],
 ] as const
 
 const parameters = [
@@ -72,7 +60,7 @@ const parameters = [
   [
     'base64Array',
     'string[]',
-    'Use [] for text-only or URL-reference imagine requests. Use complete data URLs in upload requests.',
+    'Use [] for text-only or public URL reference requests.',
   ],
   [
     '--ar / --v / --niji',
@@ -119,7 +107,7 @@ export function MidjourneyCanvasGuide(props: { baseUrl: string }) {
   return (
     <div
       className='border-border/70 mt-16 border-t pt-12'
-      data-mj-guide-version='2026-09-06-r4'
+      data-mj-guide-version='2026-10-12-r5'
     >
       <Section id='midjourney-overview' title='Midjourney: the canvas workflow'>
         <p>
@@ -140,13 +128,13 @@ export function MidjourneyCanvasGuide(props: { baseUrl: string }) {
           </li>
           <li>
             {t(
-              'Connect image nodes to the Midjourney input. Assign each image as a normal reference or a style reference. The canvas prepares the upload and prompt automatically.'
+              'Connect image nodes as normal or style references. For direct API requests, supply public image URLs in the prompt.'
             )}
           </li>
         </ol>
         <p>
           {t(
-            'For direct API access, use the site root as the base URL, without /v1. Send Authorization: Bearer YOUR_API_KEY on submit, upload and task-query requests. Keep the key in your desktop client or trusted server, not a public web page.'
+            'Use the site root without /v1 as the Midjourney base URL. Send Authorization: Bearer YOUR_API_KEY on submit and task-query requests.'
           )}
         </p>
         <code>{props.baseUrl}</code>
@@ -234,14 +222,10 @@ export function MidjourneyCanvasGuide(props: { baseUrl: string }) {
         </div>
         <p>
           {t(
-            'The upload endpoint authenticates your key and stores temporary images on this gateway. It does not require an upstream mj_upload channel. Generation and follow-up operations use their configured billing rules; polling does not submit a new generation.'
+            'Generation and follow-up actions use the configured billing rules. Polling does not submit a new generation.'
           )}
         </p>
-        <p>
-          {t(
-            '/mj/upload/{filename} is public so Midjourney can fetch references. /mj/image/{id} forwards result images when enabled. Use the image URL actually returned by the API; do not construct filenames or task image URLs yourself.'
-          )}
-        </p>
+        <p>{t('Use the result image URL returned by the API.')}</p>
         <p>
           {t(
             'Other compatibility routes include change, simple-change, blend, describe, shorten, edits, video and task/list-by-condition. Route availability alone does not guarantee upstream support; the workflow below covers the operations used by the canvas.'
@@ -255,51 +239,17 @@ export function MidjourneyCanvasGuide(props: { baseUrl: string }) {
       >
         <p>
           {t(
-            'Recommended order: local image → complete data URL → upload → result[] HTTPS URL → imagine prompt → save task ID → poll. Normal references go at the beginning of prompt; style references follow --sref. Both may be used together.'
-          )}
-        </p>
-        <p>
-          {t(
-            'Upload JPEG, PNG or WebP, 1–4 images per request, up to 8 MiB of decoded bytes per image. Split larger batches. Uploaded URLs are temporary: default retention is 24 hours and can be changed by the operator. Do not use them as permanent asset storage.'
-          )}
-        </p>
-        <p>
-          {t(
-            'The canvas prepares uploads with a maximum edge of 2048 px and compresses oversized sources. For ordinary references it uploads first; inline Base64 is only a small-image fallback when upload fails (at most 1 MiB of combined data-URL characters in the canvas). Large inline imagine requests can time out. External clients should compress and upload first.'
+            'Use a publicly accessible HTTPS URL for the reference image. The URL must remain accessible until the task completes.'
           )}
         </p>
         <h3 className='text-lg font-semibold'>
-          {t('1. Upload and read result[]')}
-        </h3>
-        <code>POST /mj/submit/upload-discord-images</code>
-        <JsonExample
-          value={{
-            base64Array: ['data:image/jpeg;base64,COMPLETE_BASE64_BYTES'],
-          }}
-        />
-        <JsonExample
-          value={{
-            code: 1,
-            description: 'success',
-            result: [props.baseUrl + '/mj/upload/RETURNED_FILENAME.jpg'],
-          }}
-        />
-        <p>
-          {t(
-            'Replace placeholders with complete file bytes and actual returned URLs. A local path, a bare Base64 string, a protected URL or the internal reference_images field is not a substitute for the documented HTTP payload.'
-          )}
-        </p>
-        <h3 className='text-lg font-semibold'>
-          {t('2. Submit the reference and style prompt')}
+          {t('Submit the reference and style prompt')}
         </h3>
         <code>POST /mj/submit/imagine</code>
         <JsonExample
           value={{
             prompt:
-              props.baseUrl +
-              '/mj/upload/REFERENCE.jpg A cinematic portrait --ar 4:5 --v 7 --sref ' +
-              props.baseUrl +
-              '/mj/upload/STYLE.jpg',
+              'https://media.example.com/reference.jpg A cinematic portrait --ar 4:5 --v 7 --sref https://media.example.com/style.jpg',
             botType: 'MID_JOURNEY',
             speedMode: 'fast',
             base64Array: [],
@@ -307,7 +257,7 @@ export function MidjourneyCanvasGuide(props: { baseUrl: string }) {
         />
         <p>
           {t(
-            'For text-only generation, remove both image URLs and --sref. For a normal reference only, remove --sref and its URL. For a style reference only, remove the leading image URL. These examples use placeholders; the complete scripts below upload real local files.'
+            'Replace the example URLs with your public image URLs. Normal references go before the prompt; style references follow --sref. Omit both URLs and --sref for text-only generation.'
           )}
         </p>
         <div className='overflow-x-auto rounded-lg border'>
@@ -332,18 +282,15 @@ export function MidjourneyCanvasGuide(props: { baseUrl: string }) {
         </p>
       </Section>
 
-      <Section
-        id='midjourney-workflow'
-        title='Complete upload, submit and poll examples'
-      >
+      <Section id='midjourney-workflow' title='Submit and poll workflow'>
         <p>
           {t(
-            'The following scripts run outside the browser. Set NEW_API_KEY first. Leave REFERENCE_IMAGE and STYLE_IMAGE unset for text-only generation, or set either or both to local image paths. The scripts print the task ID immediately and poll for up to 20 minutes; a timeout does not cancel the server task.'
+            'Set NEW_API_KEY. Optionally set REFERENCE_IMAGE_URL and STYLE_IMAGE_URL to public HTTPS image URLs. Save the returned task ID; polling stops after 20 minutes without cancelling the task.'
           )}
         </p>
         <p>
           {t(
-            'macOS/Linux: export NEW_API_KEY="your-key". PowerShell: $env:NEW_API_KEY="your-key". Set REFERENCE_IMAGE and STYLE_IMAGE the same way. Use Node.js 20+ for the JavaScript .mjs example, Python 3.9+ with requests for Python, or Bash with curl, jq, file and base64 for cURL. Do not paste Bash commands directly into PowerShell.'
+            'Run these scripts with Node.js 20+, Python 3.9+ with requests, or Bash with curl and jq. Set environment variables in your shell before running.'
           )}
         </p>
         <CodeExample samples={samples} title={t('Complete task workflow')} />

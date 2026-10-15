@@ -919,7 +919,7 @@ func RecalculateTaskQuotaByUsage(ctx context.Context, task *model.Task, usage *d
 // quota before ConfirmTaskBillingSettled writes the final task billing log.
 // It intentionally does not update used-quota stats or create a delta log.
 func AdjustTaskQuotaForFinalSettlement(ctx context.Context, task *model.Task, actualQuota int, reason string) error {
-	if task == nil || actualQuota <= 0 {
+	if task == nil || actualQuota < 0 {
 		return nil
 	}
 	preConsumedQuota := task.Quota

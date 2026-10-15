@@ -80,6 +80,86 @@ func TestBuildImageTaskResponseIncludesSignedURLOnlyForSucceededTasks(t *testing
 	require.Equal(t, dto.ImageAsyncStatusQueued, queuedResp.Status)
 	require.Empty(t, queuedResp.URL)
 	require.Zero(t, queuedResp.URLExpiresAt)
+	failedTask := *successTask
+	failedTask.Status = model.TaskStatusFailure
+	failedTask.FailReason = "provider-private model-private channel=141"
+	failedResp := buildImageTaskResponse(&failedTask)
+	require.Equal(t, "generation_failed", failedResp.ErrorCode)
+	require.Contains(t, failedResp.Error, "[generation_failed]")
+	require.NotContains(t, failedResp.Error, "provider-private")
+	require.Empty(t, failedResp.URL)
+
+	failedTask.PrivateData.ImageRetry = &model.AsyncImageRetryState{Details: []model.AsyncImageRetryDetail{{
+		ChannelID: 141, Error: `{"error":{"code":"InvalidImage","message":"Task failed"}}`,
+	}}}
+	failedTask.FailReason = "Task failed\nAsync Channel Retry Path: 141"
+	require.Equal(t, "invalid_image_input", buildImageTaskResponse(&failedTask).ErrorCode, "host retry annotations must not prevent matching structured diagnostics")
+	failedTask.FailReason = "context deadline exceeded"
+	require.Equal(t, "request_timeout", buildImageTaskResponse(&failedTask).ErrorCode, "the final failure takes precedence over an earlier attempt")
+	failedTask.FailReason = "Task failed"
+	failedTask.ChannelId = 222
+	require.Equal(t, "generation_failed", buildImageTaskResponse(&failedTask).ErrorCode, "an earlier channel cannot explain the current task failure")
+	failedTask.PrivateData.ImageRetry = nil
+	failedTask.FailReason = "The image request is invalid. Check the input and try again."
+	require.Equal(t, "invalid_image_input", buildImageTaskResponse(&failedTask).ErrorCode, "historical tasks may only persist the failure text")
+}
+
+func TestFailedImageTaskReturnsSafeReasonAndCode(t *testing.T) {
+	db := setupImageTaskTestDB(t)
+	for _, tc := range []struct {
+		name, reason, rawCode, wantCode, wantMessage string
+		status                                       int
+	}{
+		{"invalid_image", "The image request is invalid. Check the input and try again.", "invalid_image_input", "invalid_image_input", "输入图片无效", 400},
+		{"moderation", "图片审核失败，请重试", "generation_failed", "content_policy_violation", "安全审核", 502},
+		{"unsafe_prompt", "The provided prompt is considered unsafe and it cannot be used to generate content.", "unknown_error", "content_policy_violation", "安全审核提示", 502},
+		{"unsafe_output", `poll failed: 451 {"error_code":"image_unsafe","message":"The generated images appear to be unsafe."}`, "unknown_error", "content_policy_violation", "安全审核提示", 400},
+		{"uncertain_safety", "safety check failed", "unknown_error", "content_safety_unknown", "尚不能确认内容被拦截", 502},
+		{"structured_safety", "safety check failed", "image_unsafe", "content_policy_violation", "安全审核提示", 502},
+		{"review_passed", "safety check passed; Task failed", "unknown_error", "generation_failed", "未提供可公开确认的具体原因", 502},
+		{"authentication", "provider-private authentication failed", "invalid_api_key", "service_auth_error", "无需更换您的令牌", 401},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			task := &model.Task{
+				TaskID: "public_error_" + tc.name, UserId: 901, Status: model.TaskStatusFailure,
+				Action: constant.TaskActionImageGenerate, FailReason: tc.reason,
+				PrivateData: model.TaskPrivateData{
+					InternalAsync: true,
+					ImageRetry: &model.AsyncImageRetryState{Details: []model.AsyncImageRetryDetail{{
+						ChannelID: 141, ChannelName: "provider-private", ErrorCode: tc.rawCode,
+						StatusCode: tc.status, Error: tc.reason + " model-private https://upstream.invalid sk-secret",
+					}}},
+				},
+			}
+			require.NoError(t, db.Create(task).Error)
+			for _, owner := range []int{901, 902} {
+				recorder := httptest.NewRecorder()
+				c, _ := gin.CreateTestContext(recorder)
+				c.Request = httptest.NewRequest(http.MethodGet, "/v1/images/tasks/"+task.TaskID, nil)
+				c.Set("id", owner)
+				c.Params = gin.Params{{Key: "task_id", Value: task.TaskID}}
+				GetImageTask(c)
+				if owner != task.UserId {
+					require.Equal(t, http.StatusNotFound, recorder.Code)
+					require.Contains(t, recorder.Body.String(), "task_not_found")
+					continue
+				}
+				require.Equal(t, http.StatusOK, recorder.Code)
+				var response dto.ImageAsyncTaskResponse
+				require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &response))
+				require.Equal(t, "failed", response.Status)
+				require.Equal(t, tc.wantCode, response.ErrorCode)
+				require.Contains(t, response.Error, "["+tc.wantCode+"]")
+				require.Contains(t, response.Error, tc.wantMessage)
+				for _, secret := range []string{"provider-private", "model-private", "upstream.invalid", "sk-secret", "141"} {
+					require.NotContains(t, recorder.Body.String(), secret)
+				}
+			}
+			var stored model.Task
+			require.NoError(t, db.First(&stored, task.ID).Error)
+			require.Equal(t, tc.reason, stored.FailReason, "administrator diagnostics must remain intact")
+		})
+	}
 }
 
 func TestGetSignedImageTaskContentServesImageWithoutAuthorization(t *testing.T) {

@@ -55,8 +55,8 @@ describe('Video documentation request recipes', () => {
     const models = videoGroups.flatMap((group) =>
       group.variants.flatMap((variant) => variant.models)
     )
-    expect(models).toHaveLength(17)
-    expect(new Set(models).size).toBe(17)
+    expect(models).toHaveLength(19)
+    expect(new Set(models).size).toBe(19)
     expect(models).toEqual(
       expect.arrayContaining([
         '全能视频2.5-301010-c',
@@ -64,6 +64,10 @@ describe('Video documentation request recipes', () => {
         '全能-mini',
         '全能-fast-10s',
         'Minimax-H3-15s',
+        'muse-video',
+        '万能视频-3.0-720',
+        '全能视频2.5-301010-480',
+        '全能视频2.5-301010-720',
       ])
     )
     expect(models).not.toContain('seedance-2.0-mini-deal')

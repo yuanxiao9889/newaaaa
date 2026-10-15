@@ -27,9 +27,7 @@ export function getMidjourneyWorkflowSamples(baseUrl: string): CodeSamples {
 }
 
 const javascript = String.raw`// Node.js 20+. Save as mj.mjs; run: node mj.mjs
-// Set NEW_API_KEY. Optional: REFERENCE_IMAGE, STYLE_IMAGE (local files).
-import { readFile } from 'node:fs/promises'
-import { extname } from 'node:path'
+// Set NEW_API_KEY. Optional: REFERENCE_IMAGE_URL, STYLE_IMAGE_URL (public HTTPS URLs).
 
 const baseURL = '__BASE_URL__'
 const apiKey = process.env.NEW_API_KEY
@@ -49,23 +47,11 @@ async function request(path, body, timeoutMs = 180000) {
   return data
 }
 
-async function upload(path) {
-  if (!path) return null
-  const mime = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp' }[extname(path).toLowerCase()]
-  if (!mime) throw new Error('Use JPEG, PNG or WebP')
-  const bytes = await readFile(path)
-  if (!bytes.length || bytes.length > 8 * 1024 * 1024) throw new Error('Image must be 1 byte to 8 MiB; compress it first')
-  const data = await request('/mj/submit/upload-discord-images', {
-    base64Array: ['data:' + mime + ';base64,' + bytes.toString('base64')],
-  })
-  if (data.code !== 1 || !Array.isArray(data.result) || data.result.length !== 1 || typeof data.result[0] !== 'string' || !data.result[0].startsWith('https://')) {
-    throw new Error('Upload failed: ' + JSON.stringify(data))
-  }
-  return data.result[0]
+const reference = process.env.REFERENCE_IMAGE_URL
+const style = process.env.STYLE_IMAGE_URL
+for (const url of [reference, style]) {
+  if (url && !/^https:\/\/[^\s]+$/.test(url)) throw new Error('Use a public HTTPS image URL')
 }
-
-const reference = await upload(process.env.REFERENCE_IMAGE)
-const style = await upload(process.env.STYLE_IMAGE)
 const prompt = [reference, 'A cinematic portrait --ar 4:5 --v 7', style ? '--sref ' + style : null].filter(Boolean).join(' ')
 // Never automatically retry a submission: a timeout may still have created a billed task.
 const submitted = await request('/mj/submit/imagine', {
@@ -96,11 +82,9 @@ throw new Error('Polling timed out; resume with task ID: ' + taskId)
 
 const python = String.raw`# Python 3.9+; install dependency: python -m pip install requests
 # Save as mj.py; run: python mj.py
-# Set NEW_API_KEY. Optional: REFERENCE_IMAGE, STYLE_IMAGE (local files).
+# Set NEW_API_KEY. Optional: REFERENCE_IMAGE_URL, STYLE_IMAGE_URL (public HTTPS URLs).
 import os
 import time
-import base64
-from pathlib import Path
 import requests
 
 BASE_URL = '__BASE_URL__'
@@ -115,25 +99,11 @@ def request(path, body=None, timeout=180):
         raise RuntimeError('Invalid JSON response')
     return data
 
-def upload(filename):
-    if not filename:
-        return None
-    path = Path(filename)
-    mime = {'.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp'}.get(path.suffix.lower())
-    if not mime:
-        raise ValueError('Use JPEG, PNG or WebP')
-    content = path.read_bytes()
-    if not 0 < len(content) <= 8 * 1024 * 1024:
-        raise ValueError('Image must be 1 byte to 8 MiB; compress it first')
-    data_url = 'data:' + mime + ';base64,' + base64.b64encode(content).decode('ascii')
-    data = request('/mj/submit/upload-discord-images', {'base64Array': [data_url]})
-    urls = data.get('result')
-    if data.get('code') != 1 or not isinstance(urls, list) or len(urls) != 1 or not isinstance(urls[0], str) or not urls[0].startswith('https://'):
-        raise RuntimeError(data)
-    return urls[0]
-
-reference = upload(os.environ.get('REFERENCE_IMAGE'))
-style = upload(os.environ.get('STYLE_IMAGE'))
+reference = os.environ.get('REFERENCE_IMAGE_URL')
+style = os.environ.get('STYLE_IMAGE_URL')
+for url in (reference, style):
+    if url and (not url.startswith('https://') or any(char.isspace() for char in url)):
+        raise ValueError('Use a public HTTPS image URL')
 prompt = ' '.join(part for part in [reference, 'A cinematic portrait --ar 4:5 --v 7', '--sref ' + style if style else None] if part)
 # Do not automatically retry POST: a timed-out submission may already be accepted.
 submitted = request('/mj/submit/imagine', {
@@ -171,32 +141,17 @@ if not completed:
 `
 
 const curl = String.raw`#!/usr/bin/env bash
-# Bash (WSL/Git Bash on Windows), curl, jq, base64, file.
-# Set NEW_API_KEY. Optional: REFERENCE_IMAGE, STYLE_IMAGE (local files).
+# Bash (WSL/Git Bash on Windows), curl and jq.
+# Set NEW_API_KEY. Optional: REFERENCE_IMAGE_URL, STYLE_IMAGE_URL (public HTTPS URLs).
 set -euo pipefail
 : "${'${'}NEW_API_KEY:?Set NEW_API_KEY first}"
 BASE_URL='__BASE_URL__'
 work=$(mktemp -d)
 trap 'rm -rf -- "$work"' EXIT
 
-upload() {
-  local image="$1" mime size
-  mime=$(file --brief --mime-type "$image")
-  case "$mime" in image/png|image/jpeg|image/webp) ;; *) echo 'Use JPEG, PNG or WebP' >&2; return 1 ;; esac
-  size=$(wc -c < "$image")
-  (( size > 0 && size <= 8388608 )) || { echo 'Image exceeds 8 MiB or is empty' >&2; return 1; }
-  { printf 'data:%s;base64,' "$mime"; base64 < "$image" | tr -d '\r\n'; } > "$work/image.txt"
-  jq -n --rawfile image "$work/image.txt" '{base64Array:[$image]}' > "$work/upload.json"
-  curl --fail-with-body -sS --max-time 180 "$BASE_URL/mj/submit/upload-discord-images" \
-    -H "Authorization: Bearer $NEW_API_KEY" -H 'Content-Type: application/json' \
-    --data-binary @"$work/upload.json" > "$work/upload-response.json"
-  jq -e '.code == 1 and (.result | type == "array" and length == 1) and (.result[0] | type == "string" and startswith("https://"))' "$work/upload-response.json" >/dev/null || { cat "$work/upload-response.json" >&2; return 1; }
-  jq -r '.result[0]' "$work/upload-response.json"
-}
-
 prompt='A cinematic portrait --ar 4:5 --v 7'
-if [[ -n "${'${'}REFERENCE_IMAGE:-}" ]]; then ref=$(upload "$REFERENCE_IMAGE"); prompt="$ref $prompt"; fi
-if [[ -n "${'${'}STYLE_IMAGE:-}" ]]; then style=$(upload "$STYLE_IMAGE"); prompt="$prompt --sref $style"; fi
+if [[ -n "${'${'}REFERENCE_IMAGE_URL:-}" ]]; then [[ "$REFERENCE_IMAGE_URL" == https://* && "$REFERENCE_IMAGE_URL" != *[[:space:]]* ]] || { echo "Use a public HTTPS image URL" >&2; exit 1; }; prompt="$REFERENCE_IMAGE_URL $prompt"; fi
+if [[ -n "${'${'}STYLE_IMAGE_URL:-}" ]]; then [[ "$STYLE_IMAGE_URL" == https://* && "$STYLE_IMAGE_URL" != *[[:space:]]* ]] || { echo "Use a public HTTPS image URL" >&2; exit 1; }; prompt="$prompt --sref $STYLE_IMAGE_URL"; fi
 jq -n --arg prompt "$prompt" '{prompt:$prompt,botType:"MID_JOURNEY",speedMode:"fast",base64Array:[]}' > "$work/submit.json"
 # Do not automatically retry POST: a timed-out submission may already be accepted.
 curl --fail-with-body -sS --max-time 180 "$BASE_URL/mj/submit/imagine" \

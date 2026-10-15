@@ -13,7 +13,10 @@ func TestFormatUserLogsForResponseHidesChannelInfo(t *testing.T) {
 			Id:          99,
 			ChannelId:   12,
 			ChannelName: "upstream-a",
-			Other: common.MapToJsonStr(map[string]interface{}{
+			Other: common.MapToJsonStr(map[string]any{
+				"future_diagnostic":        map[string]any{"model": "private-model"},
+				"model_price":              "private-model",
+				"actual_quota":             123,
 				"admin_info":               map[string]interface{}{"use_channel": []int{12}},
 				"audit_info":               map[string]interface{}{"path": "/api/channel"},
 				"channel_id":               12,
@@ -21,9 +24,9 @@ func TestFormatUserLogsForResponseHidesChannelInfo(t *testing.T) {
 				"channel_type":             1,
 				"request_path":             "/v1/images/edits",
 				"request_conversion":       []string{"openai-image"},
-				"status_code":              502,
+				"status_code":              400,
 				"error_type":               "openai_error",
-				"error_code":               "upstream_error",
+				"error_code":               "invalid_image_input",
 				"async_channel_retry_path": []string{"12", "18"},
 				"async_channel_retry_details": []map[string]interface{}{
 					{
@@ -41,7 +44,14 @@ func TestFormatUserLogsForResponseHidesChannelInfo(t *testing.T) {
 		},
 	}
 
-	FormatUserLogsForResponse(logs, 20)
+	// Exercise the formatter used by both self and token log endpoints.
+	logs[0].Type = LogTypeError
+	logs[0].Content = "provider-private model-private; retry: 12"
+	logs[0].UpstreamRequestId = "upstream-private"
+	formatUserLogs(logs, 20)
+	require.Contains(t, logs[0].Content, "[invalid_image_input]")
+	require.NotContains(t, logs[0].Content, "provider-private")
+	require.Empty(t, logs[0].UpstreamRequestId)
 
 	require.Equal(t, 0, logs[0].ChannelId)
 	require.Empty(t, logs[0].ChannelName)
@@ -58,9 +68,12 @@ func TestFormatUserLogsForResponseHidesChannelInfo(t *testing.T) {
 	require.NotContains(t, other, "async_channel_retry_details")
 	require.NotContains(t, other, "request_path")
 	require.NotContains(t, other, "request_conversion")
-	require.NotContains(t, other, "status_code")
+	require.Equal(t, float64(400), other["status_code"])
 	require.NotContains(t, other, "error_type")
-	require.NotContains(t, other, "error_code")
+	require.Equal(t, "invalid_image_input", other["error_code"])
 	require.NotContains(t, other, "stream_status")
 	require.Equal(t, "task_public", other["task_id"])
+	require.NotContains(t, other, "future_diagnostic")
+	require.NotContains(t, other, "model_price")
+	require.Equal(t, float64(123), other["actual_quota"])
 }

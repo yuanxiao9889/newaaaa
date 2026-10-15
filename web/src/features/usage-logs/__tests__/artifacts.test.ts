@@ -63,6 +63,18 @@ function taskFixture(overrides: Partial<TaskLog> = {}): TaskLog {
 }
 
 describe('task artifact projection', () => {
+  test('uses an audio capability without exposing a platform identity', () => {
+    assert.equal(
+      resolveTaskPreviewMode(
+        taskFixture({
+          platform: '',
+          admin_info: undefined,
+          legacy_audio_available: true,
+        })
+      ),
+      'legacy-suno'
+    )
+  })
   test('enables projection only after a successful artifact viewer opens', () => {
     const successfulPluginTask = taskFixture()
 

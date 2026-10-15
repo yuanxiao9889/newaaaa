@@ -352,7 +352,7 @@ func TestPrepareTaskPluginEndpointRejectsUnknownOriginTask(t *testing.T) {
 	router.ServeHTTP(recorder, request)
 	assert.False(t, reached)
 	assert.Equal(t, http.StatusBadRequest, recorder.Code)
-	assert.Contains(t, recorder.Body.String(), "origin_task_not_found")
+	assert.Contains(t, recorder.Body.String(), "[task_not_found]")
 }
 
 func TestDistributeHonorsOriginTaskChannelPin(t *testing.T) {
@@ -446,5 +446,6 @@ func TestDistributePinViolatingIdentityFilterErrors(t *testing.T) {
 	Distribute()(c)
 	assert.True(t, c.IsAborted())
 	assert.Equal(t, http.StatusBadRequest, recorder.Code)
-	assert.Contains(t, recorder.Body.String(), string(dto.FilterTaskPluginIdentity))
+	assert.Contains(t, recorder.Body.String(), "[model_unavailable]")
+	assert.NotContains(t, recorder.Body.String(), string(dto.FilterTaskPluginIdentity))
 }

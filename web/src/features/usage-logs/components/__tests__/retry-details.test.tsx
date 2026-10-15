@@ -27,12 +27,95 @@ import userEvent from '@testing-library/user-event'
 import { afterEach, expect, test } from 'vitest'
 
 import { usageLogSchema, type UsageLog } from '../../data/schema'
-import type { LogOtherData } from '../../types'
+import type { LogOtherData, TaskLog } from '../../types'
 import { useCommonLogsColumns } from '../columns/common-logs-columns'
+import { useTaskLogsColumns } from '../columns/task-logs-columns'
 import { DetailsDialog } from '../dialogs/details-dialog'
+import { TaskDetailsDialog } from '../dialogs/task-details-dialog'
 import { UsageLogsProvider } from '../usage-logs-provider'
 
 const clients: QueryClient[] = []
+const publicFailure =
+  '[invalid_image_input] 输入图片无效，请重新上传 JPG 或 PNG 图片。'
+const failedTask: TaskLog = {
+  id: 1,
+  user_id: 1,
+  task_id: 'task_public',
+  platform: 'private-platform',
+  model_name: 'public-model',
+  properties: {
+    origin_model_name: 'public-model',
+    upstream_model_name: 'private-model',
+  },
+  channel_id: 141,
+  group: 'default',
+  quota: 100,
+  submit_time: 1,
+  status: 'FAILURE',
+  action: 'generate',
+  fail_reason: publicFailure,
+}
+
+test.each([false, true])(
+  'task detail preserves server-projected failure and protects platform (admin=%s)',
+  (isAdmin) => {
+    render(
+      <TaskDetailsDialog
+        log={{
+          ...failedTask,
+          fail_reason: isAdmin ? 'private-provider-error' : publicFailure,
+        }}
+        isAdmin={isAdmin}
+        isRoot={false}
+        open
+        onOpenChange={() => {}}
+      />
+    )
+    expect(screen.getByText('public-model')).toBeVisible()
+    for (const value of [
+      'private-platform',
+      'private-model',
+      'private-provider-error',
+    ]) {
+      if (isAdmin) expect(screen.getByText(value)).toBeVisible()
+      else expect(screen.queryByText(value)).not.toBeInTheDocument()
+    }
+    if (!isAdmin) expect(screen.getByText(publicFailure)).toBeVisible()
+  }
+)
+
+function TaskFailureCell(props: { log: TaskLog }) {
+  const columns = useTaskLogsColumns(false, false)
+  const table = useReactTable({
+    columns,
+    data: [props.log],
+    getCoreRowModel: getCoreRowModel(),
+  })
+  const cell = table
+    .getRowModel()
+    .rows[0].getAllCells()
+    .find((item) => item.column.id === 'fail_reason')
+  if (!cell) throw new Error('Task details column is missing')
+  return flexRender(cell.column.columnDef.cell, cell.getContext())
+}
+
+test('ordinary users see the server failure code and reason in task rows and details', async () => {
+  const user = userEvent.setup()
+  render(<TaskFailureCell log={failedTask} />)
+  expect(screen.getByText(publicFailure)).toBeVisible()
+
+  await user.click(screen.getByRole('button', { name: 'View details' }))
+  expect(
+    within(screen.getByRole('dialog')).getByText(publicFailure)
+  ).toBeVisible()
+})
+
+test('task rows without a failure reason do not invent one', () => {
+  render(<TaskFailureCell log={{ ...failedTask, fail_reason: '' }} />)
+  expect(screen.getByRole('button', { name: 'View details' })).toBeVisible()
+  expect(screen.queryByText(publicFailure)).not.toBeInTheDocument()
+  expect(screen.queryByText('Task failed')).not.toBeInTheDocument()
+})
 const retryDetails = [
   {
     attempt: 1,
@@ -70,7 +153,7 @@ function renderDetails(other: LogOtherData, isAdmin = true, logType = 5): void {
     user_id: 1,
     created_at: 1,
     type: logType,
-    content: 'Final failure',
+    content: isAdmin ? 'Final failure' : publicFailure,
     username: 'user',
     token_name: '',
     model_name: 'gpt-image-2',
@@ -86,7 +169,7 @@ function renderDetails(other: LogOtherData, isAdmin = true, logType = 5): void {
     ip: '',
     other: JSON.stringify(other),
     request_id: 'task-retry',
-    upstream_request_id: '',
+    upstream_request_id: 'private-upstream-request',
   }
   render(
     <QueryClientProvider client={client}>
@@ -200,6 +283,11 @@ test.each(['admin', 'legacy'] as const)(
     expect(screen.queryByText('Retry Chain')).not.toBeInTheDocument()
     expect(screen.queryByText('Retry Failure Details')).not.toBeInTheDocument()
     expect(screen.queryByText(/Upstream rate limited/)).not.toBeInTheDocument()
+    expect(screen.queryByText('Final failure')).not.toBeInTheDocument()
+    expect(
+      screen.queryByText('private-upstream-request')
+    ).not.toBeInTheDocument()
+    expect(screen.getByText(publicFailure)).toBeVisible()
   }
 )
 

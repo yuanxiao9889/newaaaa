@@ -18,16 +18,15 @@ func abortWithOpenAiMessage(c *gin.Context, statusCode int, message string, code
 	}
 	userId := c.GetInt("id")
 	_, preparedPluginRoute := c.Get(pluginruntime.ContextKeyRouteRequest)
-	if !preparedPluginRoute || !RespondTaskPluginError(c, &dto.TaskError{
-		Code:       codeStr,
-		Message:    message,
-		StatusCode: statusCode,
-	}) {
-		c.JSON(statusCode, gin.H{
+	publicError := sanitizedTaskPluginError(statusCode, message, codeStr)
+	c.Header("X-Error-Code", publicError.Code)
+	nativeError := &dto.TaskError{Code: publicError.Code, Message: publicError.Message, StatusCode: publicError.HTTPStatus, LocalError: true}
+	if !preparedPluginRoute || !RespondTaskPluginError(c, nativeError) {
+		c.JSON(publicError.HTTPStatus, gin.H{
 			"error": gin.H{
-				"message": common.MessageWithRequestId(message, c.GetString(common.RequestIdKey)),
+				"message": common.MessageWithRequestId(publicError.Message, c.GetString(common.RequestIdKey)),
 				"type":    "new_api_error",
-				"code":    codeStr,
+				"code":    publicError.Code,
 			},
 		})
 	}

@@ -31,6 +31,30 @@ func CovertMjpActionToModelName(mjAction string) string {
 	return modelName
 }
 
+// PreConsumeMidjourneyTaskBilling reserves the full fixed price before sending
+// the request upstream. Legacy Midjourney tasks are billed from the wallet.
+func PreConsumeMidjourneyTaskBilling(c *gin.Context, info *relaycommon.RelayInfo, quota int) (*BillingSession, *dto.MidjourneyResponse) {
+	if info == nil || quota < 0 || info.BillingSource == BillingSourceSubscription {
+		return nil, MidjourneyErrorWrapper(4, "invalid_midjourney_billing")
+	}
+	info.ForcePreConsume = true
+	billing := &BillingSession{
+		relayInfo: info,
+		funding:   &WalletFunding{userId: info.UserId, immediate: true},
+	}
+	if err := billing.preConsume(c, quota); err != nil {
+		publicError := common.ClassifyPublicError(string(err.GetErrorCode()), err.Error(), err.StatusCode, true)
+		if publicError.Code == "insufficient_token_quota" || publicError.Code == "insufficient_user_quota" {
+			return nil, &dto.MidjourneyResponse{
+				Code: 4, Description: publicError.Summary(), LocalErrorCode: publicError.Code,
+			}
+		}
+		logger.LogError(c, "Midjourney pre-consume failed: "+err.Error())
+		return nil, MidjourneyErrorWrapper(4, "pre_consume_quota_failed")
+	}
+	return billing, nil
+}
+
 // PrepareMidjourneyTaskBilling sets the durable refund marker before the task is inserted.
 func PrepareMidjourneyTaskBilling(relayInfo *relaycommon.RelayInfo, task *model.Midjourney, quota int, shouldBill bool) (bool, error) {
 	if task == nil {
@@ -53,6 +77,9 @@ func PrepareMidjourneyTaskBilling(relayInfo *relaycommon.RelayInfo, task *model.
 	}
 
 	task.Quota = quota
+	if !relayInfo.IsPlayground {
+		task.TokenId = relayInfo.TokenId
+	}
 	task.BillingChannelId = task.ChannelId
 	if relayInfo.ChannelMeta != nil && relayInfo.ChannelId > 0 {
 		task.BillingChannelId = relayInfo.ChannelId
@@ -60,8 +87,8 @@ func PrepareMidjourneyTaskBilling(relayInfo *relaycommon.RelayInfo, task *model.
 	return true, nil
 }
 
-// SettleMidjourneyTaskBilling charges a persisted legacy task and records the applied stages.
-func SettleMidjourneyTaskBilling(relayInfo *relaycommon.RelayInfo, task *model.Midjourney, prepared bool) (bool, error) {
+// SettleMidjourneyTaskBilling commits the reservation after persisting the task.
+func SettleMidjourneyTaskBilling(relayInfo *relaycommon.RelayInfo, task *model.Midjourney, prepared bool, billing *BillingSession) (bool, error) {
 	if !prepared {
 		return false, nil
 	}
@@ -72,25 +99,16 @@ func SettleMidjourneyTaskBilling(relayInfo *relaycommon.RelayInfo, task *model.M
 		return false, errors.New("Midjourney task must be persisted before billing")
 	}
 
-	result, billingErr := postConsumeQuotaWithResult(relayInfo, task.Quota, 0, true)
-	if !result.FundingApplied {
-		task.Quota = 0
-		task.TokenId = 0
-		task.BillingChannelId = 0
-		if updateErr := task.UpdateBillingState(); updateErr != nil {
-			return false, errors.Join(billingErr, fmt.Errorf("clear Midjourney billing state: %w", updateErr))
-		}
-		return false, billingErr
+	if billing == nil || billing.GetPreConsumedQuota() != task.Quota {
+		return false, errors.New("Midjourney billing reservation does not match task quota")
 	}
-
-	task.TokenId = 0
-	if result.TokenApplied {
-		task.TokenId = relayInfo.TokenId
+	if err := billing.Settle(task.Quota); err != nil {
+		return false, err
 	}
-	if updateErr := task.UpdateBillingState(); updateErr != nil {
-		return true, errors.Join(billingErr, fmt.Errorf("update Midjourney billing state: %w", updateErr))
+	if task.Quota > 0 {
+		checkAndSendQuotaNotify(relayInfo, task.Quota, 0)
 	}
-	return true, billingErr
+	return true, nil
 }
 
 // RefundMidjourneyQuota reverses every accounting element recorded for a billed legacy task.

@@ -3,10 +3,12 @@ package service
 import (
 	"context"
 	"errors"
+	"net/http"
 	"sync"
 
 	"github.com/QuantumNous/new-api/model"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/gin-gonic/gin"
 )
 
@@ -43,6 +45,12 @@ func (s *videoTaskRetryBilling) Reserve(targetQuota int) error {
 		return errors.New("video retry quota cannot be negative")
 	}
 	if err := model.SetVideoTaskRetryQuota(s.ctx, s.task, max(targetQuota, s.task.Quota)); err != nil {
+		switch err.Error() {
+		case "video retry token quota insufficient":
+			return types.NewErrorWithStatusCode(err, types.ErrorCodePreConsumeTokenQuotaFailed, http.StatusPaymentRequired, types.ErrOptionWithSkipRetry())
+		case "video retry wallet quota insufficient", "video retry subscription quota insufficient":
+			return types.NewErrorWithStatusCode(err, types.ErrorCodeInsufficientUserQuota, http.StatusPaymentRequired, types.ErrOptionWithSkipRetry())
+		}
 		return err
 	}
 	s.info.FinalPreConsumedQuota = s.task.Quota

@@ -110,11 +110,8 @@ func serveTaskPluginImageProtocol(c *gin.Context, pinned pluginruntime.PinnedEnd
 		}
 	}
 	if task.Status == model.TaskStatusFailure {
-		reason := strings.TrimSpace(task.FailReason)
-		if reason == "" {
-			reason = "image generation failed"
-		}
-		respondTaskPluginImageError(c, service.TaskErrorWrapperLocal(errors.New(reason), "image_generation_failed", http.StatusBadRequest))
+		publicError := task.UserError()
+		respondTaskPluginImageError(c, service.TaskErrorWrapperLocal(errors.New(publicError.Summary()), publicError.Code, publicError.StatusCode), http.StatusBadRequest)
 		return
 	}
 	view, err := service.BuildTaskPluginView(task)
@@ -233,25 +230,21 @@ func taskPluginImageResponseFormat(request pluginruntime.ProtocolRequestContext)
 
 // respondTaskPluginImageError writes an OpenAI error envelope for the Images
 // API. DashScope failure bodies arrive as JSON {code, message}; their message
-// is surfaced so a client sees the vendor reason instead of raw JSON.
-func respondTaskPluginImageError(c *gin.Context, taskErr *dto.TaskError) {
+// is kept private; clients receive a host-owned error message.
+func respondTaskPluginImageError(c *gin.Context, taskErr *dto.TaskError, protocolStatus ...int) {
 	service.RecordRequestPolicyTermination(c, taskSubmissionAPIError(taskErr))
+	taskErr = publicTaskError(taskErr)
 	status := http.StatusInternalServerError
 	if taskErr.StatusCode >= 400 && taskErr.StatusCode <= 599 {
 		status = taskErr.StatusCode
 	}
+	// The synchronous Images protocol uses 400 for an accepted task's terminal
+	// failure. Its diagnostic code still explains the actual failure category.
+	if len(protocolStatus) > 0 {
+		status = protocolStatus[0]
+	}
 	code := taskErr.Code
 	message := taskErr.Message
-	var upstream struct {
-		Code    string `json:"code"`
-		Message string `json:"message"`
-	}
-	if common.UnmarshalJsonStr(message, &upstream) == nil && strings.TrimSpace(upstream.Message) != "" {
-		message = upstream.Message
-		if strings.TrimSpace(upstream.Code) != "" {
-			code = upstream.Code
-		}
-	}
 	errorType := "new_api_error"
 	if status < http.StatusInternalServerError {
 		errorType = "invalid_request_error"

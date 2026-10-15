@@ -283,6 +283,7 @@ export type BillingSettings = {
   'quota_setting.enable_free_model_pre_consume': boolean
   'quota_setting.trust_quota_usd': number
   'quota_setting.pre_consume_multiplier': number
+  'quota_setting.image_token_pre_consume_usd': number
   QuotaPerUnit: number
   USDExchangeRate: number
   'general_setting.quota_display_type': string

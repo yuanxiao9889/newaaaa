@@ -18,7 +18,8 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { render, screen } from '@testing-library/react'
-import { afterEach, describe, expect, test } from 'vitest'
+import userEvent from '@testing-library/user-event'
+import { afterEach, describe, expect, test, vi } from 'vitest'
 
 import type { UsageLog } from '../../data/schema'
 import type { LogOtherData } from '../../types'
@@ -52,7 +53,10 @@ function makeLog(other: LogOtherData): UsageLog {
   }
 }
 
-function renderDetails(isAdmin: boolean): void {
+function renderDetails(
+  isAdmin: boolean,
+  prompt?: NonNullable<LogOtherData['admin_info']>['moderation_prompt']
+): void {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   })
@@ -66,6 +70,7 @@ function renderDetails(isAdmin: boolean): void {
         log={makeLog({
           admin_info: {
             reject_reason: 'blocked by channel policy',
+            moderation_prompt: prompt,
           },
         })}
         isAdmin={isAdmin}
@@ -97,5 +102,60 @@ describe('usage log reject reason', () => {
 
     expect(screen.queryByText('Reject Reason')).toBeNull()
     expect(screen.queryByText('blocked by channel policy')).toBeNull()
+  })
+
+  test('admins can read and copy retained text without executing markup', async () => {
+    const user = userEvent.setup()
+    const copy = vi.spyOn(navigator.clipboard, 'writeText').mockResolvedValue()
+    const text = '<script>alert(1)</script>\nA flower'
+    renderDetails(true, {
+      text,
+      status: 'captured',
+      truncated: true,
+      redacted: true,
+    })
+    expect(
+      screen.getByText('Safety-rejected prompt (admin only)')
+    ).toBeInTheDocument()
+    expect(screen.getByText(/<script>alert\(1\)<\/script>/)).toBeInTheDocument()
+    expect(document.querySelector('script')).toBeNull()
+    expect(
+      screen.getByText('Prompt truncated at the retention limit')
+    ).toBeInTheDocument()
+    expect(
+      screen.getByText('Detected credentials were redacted')
+    ).toBeInTheDocument()
+    await user.click(
+      screen.getByRole('button', { name: 'Copy retained prompt' })
+    )
+    expect(copy).toHaveBeenCalledWith(text)
+    copy.mockRestore()
+  })
+
+  test('ordinary users cannot see or copy prompts even if supplied in props', () => {
+    renderDetails(false, {
+      text: 'private retained prompt',
+      status: 'captured',
+      truncated: true,
+    })
+    expect(screen.queryByText('private retained prompt')).toBeNull()
+    expect(screen.queryByText('Safety-rejected prompt (admin only)')).toBeNull()
+    expect(
+      screen.queryByRole('button', { name: 'Copy retained prompt' })
+    ).toBeNull()
+    expect(
+      screen.queryByText('Prompt truncated at the retention limit')
+    ).toBeNull()
+  })
+
+  test('admins see why a rejected request has no retained text', () => {
+    renderDetails(true, { status: 'body_too_large' })
+    expect(
+      screen.getByText('Prompt text could not be retained')
+    ).toBeInTheDocument()
+    expect(screen.getByText('body_too_large')).toBeInTheDocument()
+    expect(
+      screen.queryByRole('button', { name: 'Copy retained prompt' })
+    ).toBeNull()
   })
 })

@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/service"
@@ -31,9 +32,22 @@ var imageTaskStatusCache = struct {
 }
 
 func imageTaskError(c *gin.Context, status int, message string) {
+	code := ""
+	switch status {
+	case http.StatusNotFound:
+		code = "task_not_found"
+	case http.StatusGone:
+		code = "task_expired"
+	case http.StatusUnauthorized:
+		code = "invalid_token"
+	case http.StatusBadRequest:
+		code = "task_not_ready"
+	}
+	publicError := common.ClassifyPublicError(code, message, status, true)
 	c.JSON(status, gin.H{
 		"error": gin.H{
-			"message": message,
+			"message": common.MessageWithRequestId(publicError.Summary(), c.GetString(common.RequestIdKey)),
+			"code":    publicError.Code,
 			"type":    "invalid_request_error",
 		},
 	})
@@ -99,7 +113,9 @@ func buildImageTaskResponse(task *model.Task) dto.ImageAsyncTaskResponse {
 		resp.URL, resp.URLExpiresAt = service.BuildSignedAsyncImageContentURL(task)
 	}
 	if resp.Status == dto.ImageAsyncStatusFailed {
-		resp.Error = task.FailReason
+		publicError := task.UserError()
+		resp.Error = publicError.Summary()
+		resp.ErrorCode = publicError.Code
 	}
 	if resp.Status != dto.ImageAsyncStatusSucceeded && resp.Status != dto.ImageAsyncStatusExpired {
 		resp.ExpiresAt = 0
@@ -171,6 +187,12 @@ func GetSignedImageTaskContent(c *gin.Context) {
 func serveImageTaskContent(c *gin.Context, task *model.Task) {
 	status := service.GetAsyncImageTaskStatus(task)
 	switch status {
+	case dto.ImageAsyncStatusFailed:
+		publicError := task.UserError()
+		c.JSON(publicError.StatusCode, gin.H{"error": gin.H{
+			"code": publicError.Code, "message": publicError.Summary(), "type": "task_error",
+		}, "task_id": task.TaskID})
+		return
 	case dto.ImageAsyncStatusExpired:
 		imageTaskError(c, http.StatusGone, "image content has expired")
 		return

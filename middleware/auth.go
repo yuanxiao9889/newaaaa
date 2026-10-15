@@ -573,6 +573,23 @@ func TokenAuth() func(c *gin.Context) {
 			}
 		}
 		if err != nil {
+			// A known, unexpired token with an exhausted budget is still
+			// rejected. Report the billing problem without exposing credentials
+			// or relaxing authentication for disabled, expired, or unknown tokens.
+			if errors.Is(err, model.ErrTokenInvalid) && token != nil &&
+				!token.UnlimitedQuota && token.RemainQuota <= 0 &&
+				(token.Status == common.TokenStatusEnabled || token.Status == common.TokenStatusExhausted) &&
+				(token.ExpiredTime == -1 || token.ExpiredTime >= common.GetTimestamp()) {
+				publicError := common.ClassifyPublicError("insufficient_token_quota", "", http.StatusPaymentRequired, true)
+				c.Header("X-Error-Code", publicError.Code)
+				mjRoute := strings.HasPrefix(c.FullPath(), "/mj/") || strings.HasPrefix(c.FullPath(), "/:mode/mj/")
+				if mjRoute {
+					abortWithMidjourneyMessage(c, http.StatusPaymentRequired, 4, publicError.Summary())
+				} else {
+					abortWithOpenAiMessage(c, http.StatusPaymentRequired, publicError.Summary(), types.ErrorCode(publicError.Code))
+				}
+				return
+			}
 			if errors.Is(err, model.ErrDatabase) {
 				common.SysLog("TokenAuth ValidateUserToken database error: " + err.Error())
 				abortWithOpenAiMessage(c, http.StatusInternalServerError,

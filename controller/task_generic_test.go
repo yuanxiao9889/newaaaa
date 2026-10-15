@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -16,7 +17,9 @@ import (
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/middleware"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/relay"
 	relaychannel "github.com/QuantumNous/new-api/relay/channel"
+	relayconstant "github.com/QuantumNous/new-api/relay/constant"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting/system_setting"
 	"github.com/gin-gonic/gin"
@@ -91,6 +94,61 @@ func TestGetTaskDoesNotProjectArtifacts(t *testing.T) {
 	assert.NotContains(t, recorder.Body.String(), "upstream.invalid")
 }
 
+func TestUserTaskEndpointsEnforceOwnershipAndPrivacy(t *testing.T) {
+	task := setupGenericTaskTest(t)
+	task.Platform = "private-platform"
+	task.Status = model.TaskStatusFailure
+	task.FailReason = "private-platform private-model upstream.invalid retry:141"
+	task.Properties = model.Properties{OriginModelName: "public-model", UpstreamModelName: "private-model", Input: "private-input"}
+	task.Data = []byte(`{"upstream":"upstream.invalid","model":"private-model"}`)
+	task.PrivateData.UpstreamTaskID = "private-upstream-task"
+	require.NoError(t, model.DB.Save(task).Error)
+	fetchVideo := func(c *gin.Context) {
+		if taskErr := relay.RelayTaskFetch(c, relayconstant.RelayModeVideoFetchByID); taskErr != nil {
+			respondTaskError(c, taskErr)
+		}
+	}
+	for _, endpoint := range []struct {
+		name    string
+		path    string
+		param   string
+		handler gin.HandlerFunc
+	}{
+		{"generic", "/v1/tasks/", "key", GetTask},
+		{"detail", "/api/task/self/", "id", GetUserTaskDetail},
+		{"list", "/api/task/self?task_id=", "unused", GetUserTask},
+		{"video", "/v1/video/generations/", "task_id", fetchVideo},
+		{"openai-video", "/v1/videos/", "task_id", fetchVideo},
+	} {
+		for _, userID := range []int{task.UserId, task.UserId + 1} {
+			t.Run(fmt.Sprintf("%s/user-%d", endpoint.name, userID), func(t *testing.T) {
+				recorder := httptest.NewRecorder()
+				c, _ := gin.CreateTestContext(recorder)
+				c.Set("id", userID)
+				c.Set("role", common.RoleCommonUser)
+				c.Params = gin.Params{{Key: endpoint.param, Value: task.TaskID}}
+				c.Request = httptest.NewRequest(http.MethodGet, endpoint.path+task.TaskID, nil)
+				endpoint.handler(c)
+				body := recorder.Body.String()
+				for _, secret := range []string{"private-platform", "private-model", "private-input", "private-upstream-task", "upstream.invalid", "retry:141"} {
+					assert.NotContains(t, body, secret)
+				}
+				if userID == task.UserId {
+					assert.Contains(t, body, task.TaskID)
+					assert.Contains(t, body, "public-model")
+					assert.Contains(t, body, "[generation_failed]")
+					if endpoint.name == "generic" {
+						assert.Contains(t, body, `"error_code":"generation_failed"`)
+					}
+				} else {
+					assert.NotContains(t, body, task.TaskID)
+					assert.NotContains(t, body, "public-model")
+				}
+			})
+		}
+	}
+}
+
 func TestGetTaskArtifactsReturnsEmptyForLegacyTask(t *testing.T) {
 	task := setupGenericTaskTest(t)
 	recorder := httptest.NewRecorder()
@@ -110,6 +168,28 @@ func TestGetTaskArtifactsReturnsEmptyForLegacyTask(t *testing.T) {
 	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &response))
 	assert.Equal(t, task.TaskID, response.TaskID)
 	assert.Empty(t, response.Artifacts)
+}
+
+func TestUserLegacyDrawingLogsHideInternalMetadata(t *testing.T) {
+	task := setupGenericTaskTest(t)
+	require.NoError(t, model.DB.AutoMigrate(&model.Midjourney{}))
+	for _, userID := range []int{task.UserId, task.UserId + 1} {
+		require.NoError(t, model.DB.Create(&model.Midjourney{
+			UserId: userID, MjId: fmt.Sprintf("drawing-%d", userID), ChannelId: 141,
+			Status: "FAILURE", Quota: 123, FailReason: "private-provider-error",
+			Properties: `{"model":"private-model"}`, ImageUrl: "https://upstream.invalid/image.png",
+		}).Error)
+	}
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Set("id", task.UserId)
+	c.Request = httptest.NewRequest(http.MethodGet, "/api/mj/self", nil)
+	GetUserMidjourney(c)
+	for _, secret := range []string{"private-", "upstream.invalid", fmt.Sprintf("drawing-%d", task.UserId+1)} {
+		assert.NotContains(t, recorder.Body.String(), secret)
+	}
+	assert.Contains(t, recorder.Body.String(), "[generation_failed]")
+	assert.Contains(t, recorder.Body.String(), fmt.Sprintf("drawing-%d", task.UserId))
 }
 
 func TestInternalImageTaskArtifacts(t *testing.T) {
@@ -392,7 +472,12 @@ func TestDashboardTaskArtifactsProjectsLegacySunoAudioClips(t *testing.T) {
 	assert.True(t, response.Success)
 	assert.Empty(t, response.Data.Artifacts)
 	require.Len(t, response.Data.LegacyAudioClips, 1)
-	assert.Equal(t, "https://cdn.example/a.mp3", response.Data.LegacyAudioClips[0]["audio_url"])
+	contentURL, err := url.Parse(response.Data.LegacyAudioClips[0]["audio_url"].(string))
+	require.NoError(t, err)
+	assert.Contains(t, contentURL.Path, "/artifacts/audio_url-0/content")
+	assert.True(t, service.VerifyTaskArtifactAccess(contentURL.Query().Get(service.TaskArtifactAccessQueryParameter), task.TaskID, "audio_url-0"))
+	assert.NotContains(t, recorder.Body.String(), "cdn.example")
+	assert.NotContains(t, recorder.Body.String(), "clip-1")
 	assert.Equal(t, "Song", response.Data.LegacyAudioClips[0]["title"])
 	assert.NotContains(t, recorder.Body.String(), "private")
 }
@@ -526,6 +611,23 @@ func TestLegacyVideoArtifactContentUsesGetResultURL(t *testing.T) {
 	assert.Equal(t, http.StatusPartialContent, recorder.Code)
 	assert.Equal(t, "data", recorder.Body.String())
 	assert.Equal(t, "bytes 0-3/4", recorder.Header().Get("Content-Range"))
+
+	// The same gateway media path must also serve historical audio without
+	// giving the browser an upstream URL.
+	task.Platform = constant.TaskPlatformSuno
+	encodedAudio, err := common.Marshal([]map[string]any{{"audio_url": upstream.URL}})
+	require.NoError(t, err)
+	task.Data = encodedAudio
+	require.NoError(t, model.DB.Save(task).Error)
+	audioRecorder := httptest.NewRecorder()
+	audioContext, _ := gin.CreateTestContext(audioRecorder)
+	audioContext.Set("id", task.UserId)
+	audioContext.Params = gin.Params{{Key: "key", Value: task.TaskID}, {Key: "artifact_key", Value: "audio_url-0"}}
+	audioContext.Request = httptest.NewRequest(http.MethodGet, "/v1/tasks/"+task.TaskID+"/artifacts/audio_url-0/content", nil)
+	audioContext.Request.Header.Set("Range", "bytes=0-3")
+	TaskArtifactContent(audioContext)
+	assert.Equal(t, http.StatusPartialContent, audioRecorder.Code)
+	assert.Equal(t, "data", audioRecorder.Body.String())
 }
 
 func TestDisabledArtifactStorePreservesPluginUpstreamContent(t *testing.T) {

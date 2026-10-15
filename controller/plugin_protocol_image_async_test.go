@@ -158,7 +158,16 @@ export function extractUsageOnComplete(){return {tokens:20000};}
 			})
 			engine.ServeHTTP(recorder, request)
 			if scenario == "insufficient_quota" {
-				assert.Equal(t, http.StatusForbidden, recorder.Code, recorder.Body.String())
+				assert.Equal(t, http.StatusPaymentRequired, recorder.Code, recorder.Body.String())
+				var response struct {
+					Error struct {
+						Code    string `json:"code"`
+						Message string `json:"message"`
+					} `json:"error"`
+				}
+				require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &response))
+				assert.Equal(t, "insufficient_user_quota", response.Error.Code)
+				assert.Contains(t, response.Error.Message, "账户余额不足")
 				assert.Zero(t, posts.Load())
 				var tasks int64
 				require.NoError(t, db.Model(&model.Task{}).Count(&tasks).Error)
@@ -176,6 +185,41 @@ export function extractUsageOnComplete(){return {tokens:20000};}
 			assert.Equal(t, relay.PluginAsyncImageFormat, task.PrivateData.RequestRelayFormat)
 			assert.Equal(t, "canvas", task.TokenName)
 			require.NotNil(t, task.PrivateData.BillingContext.TieredSnapshot)
+			// Submission must be visible in the async task APIs before the worker
+			// starts. Usage logs remain empty until settlement or failure.
+			for _, endpoint := range []struct {
+				path    string
+				handler gin.HandlerFunc
+			}{
+				{"/api/task", GetAllTask},
+				{"/api/task/self", GetUserTask},
+			} {
+				listRecorder := httptest.NewRecorder()
+				listContext, _ := gin.CreateTestContext(listRecorder)
+				listContext.Request = httptest.NewRequest(http.MethodGet, endpoint.path+"?model_name="+modelName+"&task_id="+task.TaskID, nil)
+				listContext.Set("id", 61)
+				listContext.Set("role", common.RoleAdminUser)
+				endpoint.handler(listContext)
+				require.Equal(t, http.StatusOK, listRecorder.Code)
+				var listed struct {
+					Success bool `json:"success"`
+					Data    struct {
+						Total int           `json:"total"`
+						Items []dto.TaskDto `json:"items"`
+					} `json:"data"`
+				}
+				require.NoError(t, common.Unmarshal(listRecorder.Body.Bytes(), &listed))
+				require.True(t, listed.Success, endpoint.path)
+				require.Equal(t, 1, listed.Data.Total, endpoint.path)
+				require.Len(t, listed.Data.Items, 1, endpoint.path)
+				assert.Equal(t, task.TaskID, listed.Data.Items[0].TaskID)
+				assert.Equal(t, modelName, listed.Data.Items[0].ModelName)
+				assert.Equal(t, string(model.TaskStatusSubmitted), listed.Data.Items[0].Status)
+				assert.Zero(t, listed.Data.Items[0].FinishTime)
+			}
+			var submissionLogs int64
+			require.NoError(t, model.LOG_DB.Model(&model.Log{}).Count(&submissionLogs).Error)
+			assert.Zero(t, submissionLogs, "submission belongs in tasks, not usage logs")
 			require.True(t, claimInternalAsyncImageTask(&task))
 			if scenario == "mapping_changed" {
 				require.NoError(t, db.Model(&channel).Update("model_mapping", `{"hy-image-v3.5-preview":"different-model"}`).Error)
@@ -205,7 +249,7 @@ export function extractUsageOnComplete(){return {tokens:20000};}
 			assert.GreaterOrEqual(t, task.FinishTime-task.SubmitTime, int64(37))
 			var tasks, consumes int64
 			require.NoError(t, db.Model(&model.Task{}).Count(&tasks).Error)
-			require.NoError(t, db.Model(&model.Log{}).Where("type = ?", model.LogTypeConsume).Count(&consumes).Error)
+			require.NoError(t, model.LOG_DB.Model(&model.Log{}).Where("type = ?", model.LogTypeConsume).Count(&consumes).Error)
 			assert.EqualValues(t, 1, tasks)
 			var user model.User
 			require.NoError(t, db.First(&user, 61).Error)

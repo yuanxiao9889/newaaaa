@@ -118,6 +118,9 @@ function buildDetailSegments(
   language: string,
   usageSchema?: BillingUsageSchema
 ): DetailSegment[] {
+  if (!isAdmin && log.type === LOG_TYPE_ENUM.ERROR) {
+    return [{ text: t('Request failed'), danger: true }]
+  }
   const segments = buildTypeDetailSegments(log, other, t, language, usageSchema)
   const adminSegments: DetailSegment[] = []
   // Quota saturation is a rare, admin-only anomaly marker; surface it first
@@ -718,7 +721,7 @@ export function useCommonLogsColumns(
           const log = row.original
           if (!isDisplayableLogType(log.type)) return null
 
-          const modelInfo = formatModelName(log)
+          const modelInfo = formatModelName(log, isAdmin)
 
           return (
             <div className='flex w-fit flex-col gap-0.5'>

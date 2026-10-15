@@ -29,11 +29,15 @@ import (
 
 type imageReservation struct {
 	held, limit int
+	reserveErr  error
 }
 
 func (s *imageReservation) Reserve(quota int) error {
+	if s.reserveErr != nil {
+		return s.reserveErr
+	}
 	if quota > s.limit {
-		return errors.New("insufficient image quota")
+		return types.NewErrorWithStatusCode(errors.New("insufficient image quota"), types.ErrorCodeInsufficientUserQuota, http.StatusPaymentRequired, types.ErrOptionWithSkipRetry())
 	}
 	s.held = max(s.held, quota)
 	return nil
@@ -50,13 +54,16 @@ func TestImageRequestReservesFinalQuantityBeforeUpstream(t *testing.T) {
 		tiered, passThrough, insufficient, retryReset bool
 		override                                      any
 		count, status                                 int
+		reserveErr                                    error
+		errorCode                                     types.ErrorCode
 	}{
 		{name: "top-level count", body: `{"model":"gpt-image-2","n":2,"parameters":{}}`, count: 2},
 		{name: "legacy channel quantity override", body: `{"model":"gpt-image-2","n":1}`, override: 4, count: 4},
 		{name: "expression channel quantity override", body: `{"model":"gpt-image-2","n":1}`, override: 4, count: 4, tiered: true},
 		{name: "pass-through quantity", body: `{"model":"gpt-image-2","n":2,"parameters":{}}`, count: 2, passThrough: true},
 		{name: "oversized override rejected", body: `{"model":"gpt-image-2","n":1}`, override: 129, status: http.StatusBadRequest},
-		{name: "insufficient reservation blocks upstream", body: `{"model":"gpt-image-2","n":1}`, override: 4, count: 4, insufficient: true, status: http.StatusForbidden},
+		{name: "insufficient reservation blocks upstream", body: `{"model":"gpt-image-2","n":1}`, override: 4, count: 4, insufficient: true, status: http.StatusPaymentRequired, errorCode: types.ErrorCodeInsufficientUserQuota},
+		{name: "reservation storage failure blocks upstream", body: `{"model":"gpt-image-2","n":1}`, override: 4, count: 4, reserveErr: errors.New("reservation storage unavailable"), status: http.StatusInternalServerError, errorCode: types.ErrorCodeUpdateDataError},
 		{name: "retry drops the previous attempt's quantity", body: `{"model":"gpt-image-2","n":1}`, count: 1, retryReset: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -82,7 +89,7 @@ func TestImageRequestReservesFinalQuantityBeforeUpstream(t *testing.T) {
 			}
 			request, err := helper.GetAndValidOpenAIImageRequest(c, relayconstant.RelayModeImagesGenerations)
 			require.NoError(t, err)
-			reservation := &imageReservation{held: 20000, limit: 500000}
+			reservation := &imageReservation{held: 20000, limit: 500000, reserveErr: tc.reserveErr}
 			if tc.insufficient {
 				reservation.limit = reservation.held
 			}
@@ -105,6 +112,10 @@ func TestImageRequestReservesFinalQuantityBeforeUpstream(t *testing.T) {
 			require.NotNil(t, apiErr)
 			if tc.status != 0 {
 				assert.Equal(t, tc.status, apiErr.StatusCode)
+				if tc.errorCode != "" {
+					assert.Equal(t, tc.errorCode, apiErr.GetErrorCode())
+				}
+				assert.Equal(t, 20000, reservation.held)
 				assert.Empty(t, received, "no upstream submission before quantity validation and reservation")
 				return
 			}

@@ -23,9 +23,71 @@ import { describe, expect, it } from 'vitest'
 import en from '../../../i18n/locales/en.json'
 import zh from '../../../i18n/locales/zh.json'
 import { imageModels } from '../data'
+import { buildHyImageSamples } from '../hy-image-samples'
 import { buildOpenAISamples } from '../openai-samples'
 
 const groups = imageModels.filter((model) => model.modelIds)
+
+describe('Hunyuan documentation examples', () => {
+  it.each(['generate', 'edit'] as const)(
+    '%s sends public URLs without unsupported GPT image parameters',
+    async (operation) => {
+      const samples = buildHyImageSamples('https://relay.test/', operation)
+      const curlBody =
+        samples.curl.split("<<'JSON'\n")[1]?.split('\nJSON')[0] ?? ''
+      const payload = JSON.parse(curlBody)
+      let sent: Record<string, unknown> = {}
+      let endpoint = ''
+      await runInNewContext(`(async () => {${samples.javascript}})()`, {
+        fetch: async (url: string, init: RequestInit) => {
+          endpoint = url
+          sent = JSON.parse(String(init.body))
+          expect(init.headers).toEqual({
+            Authorization: 'Bearer fixture-key',
+            'Content-Type': 'application/json',
+          })
+          return {
+            ok: true,
+            json: async () => ({
+              data: [{ url: 'https://media.example.com/result.png' }],
+            }),
+          }
+        },
+        process: { env: { NEW_API_KEY: 'fixture-key' } },
+        AbortSignal,
+        console: { log: () => undefined },
+      })
+      expect(endpoint).toBe(
+        `https://relay.test/v1/images/${operation === 'edit' ? 'edits' : 'generations'}`
+      )
+      expect(sent).toEqual(payload)
+      expect(sent.model).toBe('hy-image-v3.5-preview')
+      expect(sent.size).toBe('1536x1536')
+      expect(sent.n).toBe(1)
+      expect(sent.image).toEqual(
+        operation === 'edit'
+          ? [
+              'https://media.example.com/character.jpg',
+              'https://media.example.com/scene.png',
+            ]
+          : undefined
+      )
+      for (const field of [
+        'images',
+        'quality',
+        'mask',
+        'background',
+        'output_format',
+      ]) {
+        expect(sent).not.toHaveProperty(field)
+      }
+      expect(samples.curl).toContain('-H "Authorization: Bearer $NEW_API_KEY"')
+      const literal =
+        samples.python.match(/payload = json.loads\((.+)\)/)?.[1] ?? ''
+      expect(JSON.parse(JSON.parse(literal))).toEqual(payload)
+    }
+  )
+})
 
 describe('Image 2.5 documentation examples', () => {
   it.each(groups)(

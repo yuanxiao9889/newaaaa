@@ -221,6 +221,9 @@ func TryTieredSettle(relayInfo *relaycommon.RelayInfo, params billingexpr.TokenP
 	tr, err := billingexpr.ComputeTieredQuotaWithRequest(snap, params, requestInput)
 	if err != nil {
 		quota = relayInfo.FinalPreConsumedQuota
+		if relayInfo.ImageTokenFallbackQuota != nil {
+			quota = *relayInfo.ImageTokenFallbackQuota
+		}
 		if quota <= 0 {
 			quota = snap.EstimatedQuotaAfterGroup
 		}

@@ -32,8 +32,6 @@ async function executeExample(
     'https://relay.test'
   ).javascript.replaceAll(/^import .*$/gm, '')
   const context = {
-    readFile: async () => Buffer.from('fixture-image'),
-    extname: () => '.png',
     AbortSignal: { timeout: () => undefined },
     process: {
       env: { NEW_API_KEY: 'fixture-key', ...env },
@@ -99,22 +97,21 @@ describe('published Midjourney JavaScript example', () => {
     expect(result.error).toBe('upstream rejected prompt')
   })
 
-  it('uploads ordinary and style references and places their URLs in the correct prompt positions', async () => {
+  it('places public reference URLs in the correct prompt positions without an upload request', async () => {
     const result = await executeExample(
       [
-        { code: 1, result: ['https://relay.test/mj/upload/ref.png'] },
-        { code: 1, result: ['https://relay.test/mj/upload/style.png'] },
         { code: 1, result: 'task' },
         { status: 'SUCCESS', imageUrl: 'https://images.test/result.png' },
       ],
-      { REFERENCE_IMAGE: 'ref.png', STYLE_IMAGE: 'style.png' }
+      {
+        REFERENCE_IMAGE_URL: 'https://media.example.com/ref.png',
+        STYLE_IMAGE_URL: 'https://media.example.com/style.png',
+      }
     )
-    expect(result.requests[0].url).toBe(
-      'https://relay.test/mj/submit/upload-discord-images'
-    )
-    expect(result.requests[2].body).toEqual({
+    expect(result.requests[0].url).toBe('https://relay.test/mj/submit/imagine')
+    expect(result.requests[0].body).toEqual({
       prompt:
-        'https://relay.test/mj/upload/ref.png A cinematic portrait --ar 4:5 --v 7 --sref https://relay.test/mj/upload/style.png',
+        'https://media.example.com/ref.png A cinematic portrait --ar 4:5 --v 7 --sref https://media.example.com/style.png',
       botType: 'MID_JOURNEY',
       speedMode: 'fast',
       base64Array: [],
@@ -122,11 +119,11 @@ describe('published Midjourney JavaScript example', () => {
     expect(result.error).toBe('EXIT_SUCCESS')
   })
 
-  it('rejects a malformed upload response before submitting generation', async () => {
-    const result = await executeExample([{ code: 1, result: [] }], {
-      REFERENCE_IMAGE: 'ref.png',
+  it('rejects a local reference path before submitting generation', async () => {
+    const result = await executeExample([], {
+      REFERENCE_IMAGE_URL: 'ref.png',
     })
-    expect(result.error).toContain('Upload failed')
-    expect(result.requests).toHaveLength(1)
+    expect(result.error).toContain('Use a public HTTPS image URL')
+    expect(result.requests).toHaveLength(0)
   })
 })

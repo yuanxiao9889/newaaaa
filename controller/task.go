@@ -53,16 +53,14 @@ func GetTask(c *gin.Context) {
 	if createdAt == 0 {
 		createdAt = task.SubmitTime
 	}
-	failReason := task.FailReason
-	if task.Status == model.TaskStatusSuccess && taskFailReasonIsLegacyResultURL(task.FailReason) {
-		failReason = ""
-	}
+	publicTask := relay.UserTaskModel2ListDto(task)
 	c.JSON(http.StatusOK, gin.H{
 		"task_id":     task.TaskID,
-		"platform":    task.Platform,
+		"model":       publicTask.ModelName,
 		"status":      task.Status,
-		"progress":    task.Progress,
-		"fail_reason": failReason,
+		"progress":    publicTask.Progress,
+		"fail_reason": publicTask.FailReason,
+		"error_code":  publicTask.ErrorCode,
 		"created_at":  createdAt,
 		"finished_at": task.FinishTime,
 	})
@@ -117,7 +115,27 @@ func writeTaskArtifacts(c *gin.Context, task *model.Task, dashboard bool) {
 	}
 	response := gin.H{"task_id": task.TaskID, "artifacts": items}
 	if dashboard && task.Status == model.TaskStatusSuccess && task.Platform == constant.TaskPlatformSuno {
-		response["legacy_audio_clips"] = legacySunoAudioClips(task.Data)
+		clips := legacySunoAudioClips(task.Data)
+		for index, clip := range clips {
+			// Keep playback on our artifact endpoint; never send provider URLs,
+			// clip IDs or arbitrary provider metadata to the browser.
+			clip["id"] = fmt.Sprintf("%s_%d", task.TaskID, index)
+			delete(clip, "clip_id")
+			delete(clip, "metadata")
+			for _, field := range []string{"audio_url", "image_url", "image_large_url"} {
+				if source, ok := clip[field].(string); !ok || source == "" {
+					delete(clip, field)
+					continue
+				}
+				contentURL, buildErr := service.BuildTaskArtifactContentURL(task.TaskID, fmt.Sprintf("%s-%d", field, index))
+				if buildErr != nil {
+					writeTaskArtifactError(c, http.StatusInternalServerError, "artifact_url_error", "Failed to build artifact content URL")
+					return
+				}
+				clip[field] = contentURL
+			}
+		}
+		response["legacy_audio_clips"] = clips
 	}
 	if legacyVideoAvailable(task) {
 		legacyContentURL, buildErr := service.BuildTaskArtifactContentURL(task.TaskID, "video")
@@ -356,12 +374,24 @@ func TaskArtifactContent(c *gin.Context) {
 		return
 	}
 	if !taskHasPluginExecution(task) {
-		if artifactKey != "video" || !legacyVideoAvailable(task) {
+		resultURL := ""
+		if artifactKey == "video" && legacyVideoAvailable(task) {
+			resultURL = task.GetResultURL()
+		} else if task.Platform == constant.TaskPlatformSuno {
+			field, indexText, found := strings.Cut(artifactKey, "-")
+			index, parseErr := strconv.Atoi(indexText)
+			clips := legacySunoAudioClips(task.Data)
+			if found && parseErr == nil && index >= 0 && index < len(clips) &&
+				(field == "audio_url" || field == "image_url" || field == "image_large_url") {
+				resultURL, _ = clips[index][field].(string)
+			}
+		}
+		if resultURL == "" {
 			writeTaskArtifactError(c, http.StatusNotFound, "artifact_not_found", "Task or artifact not found")
 			return
 		}
 		descriptor := &relaychannel.TaskContentRequest{
-			URL:            task.GetResultURL(),
+			URL:            resultURL,
 			Method:         c.Request.Method,
 			Credentialless: true,
 		}
@@ -462,6 +492,10 @@ func GetAllTask(c *gin.Context) {
 }
 
 func GetUserTask(c *gin.Context) {
+	if c.Query("platform") != "" || c.Query("channel_id") != "" {
+		common.ApiErrorMsg(c, "Unsupported task filter")
+		return
+	}
 	pageInfo := common.GetPageQuery(c)
 	userID := c.GetInt("id")
 	startTimestamp, _ := strconv.ParseInt(c.Query("start_timestamp"), 10, 64)
@@ -528,6 +562,7 @@ func tasksToDto(tasks []*model.Task, fillUser bool, viewerRole int) []*dto.TaskD
 		}
 		item := relay.TaskModel2DtoWithOptions(task, false, viewerRole >= common.RoleAdminUser)
 		item.LegacyVideoAvailable = legacyVideoAvailable(task)
+		item.LegacyAudioAvailable = task.Platform == constant.TaskPlatformSuno && task.Status == model.TaskStatusSuccess && !taskHasPluginExecution(task)
 		item.ResultDiscarded = task.PrivateData.ResultDiscarded
 		if task.Status == model.TaskStatusSuccess && !task.PrivateData.InternalAsync {
 			item.ResultURL = ""
@@ -594,7 +629,7 @@ func GetUserTaskDetail(c *gin.Context) {
 	userId := c.GetInt("id")
 	task, exists, err := model.GetByTaskId(userId, taskId)
 	if err != nil {
-		common.ApiError(c, err)
+		common.ApiErrorMsg(c, "Failed to query task")
 		return
 	}
 	if !exists {

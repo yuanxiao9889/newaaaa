@@ -39,6 +39,10 @@ func GetAllLogs(c *gin.Context) {
 }
 
 func GetUserLogs(c *gin.Context) {
+	if c.Query("upstream_request_id") != "" || c.Query("channel") != "" {
+		common.ApiErrorMsg(c, "Unsupported log filter")
+		return
+	}
 	pageInfo := common.GetPageQuery(c)
 	userId := c.GetInt("id")
 	logType, _ := strconv.Atoi(c.Query("type"))
@@ -51,7 +55,7 @@ func GetUserLogs(c *gin.Context) {
 	upstreamRequestId := c.Query("upstream_request_id")
 	logs, total, err := model.GetUserLogs(userId, logType, startTimestamp, endTimestamp, modelName, tokenName, pageInfo.GetStartIdx(), pageInfo.GetPageSize(), group, requestId, upstreamRequestId)
 	if err != nil {
-		common.ApiError(c, err)
+		common.ApiErrorMsg(c, "Failed to query logs")
 		return
 	}
 	pageInfo.SetTotal(int(total))
@@ -89,7 +93,7 @@ func GetLogByKey(c *gin.Context) {
 	if err != nil {
 		c.JSON(200, gin.H{
 			"success": false,
-			"message": err.Error(),
+			"message": "Failed to query logs",
 		})
 		return
 	}

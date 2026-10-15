@@ -190,6 +190,7 @@ func TestResponsesWSRequestRunnerRejectsRevokedCredentials(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
 		status int
+		code   string
 		update func(*testing.T, *model.User, *model.Token)
 	}{
 		{name: "disabled token", status: http.StatusUnauthorized, update: func(t *testing.T, _ *model.User, token *model.Token) {
@@ -198,7 +199,7 @@ func TestResponsesWSRequestRunnerRejectsRevokedCredentials(t *testing.T) {
 		{name: "expired token", status: http.StatusUnauthorized, update: func(t *testing.T, _ *model.User, token *model.Token) {
 			require.NoError(t, model.DB.Model(token).Update("expired_time", time.Now().Add(-time.Minute).Unix()).Error)
 		}},
-		{name: "exhausted token", status: http.StatusUnauthorized, update: func(t *testing.T, _ *model.User, token *model.Token) {
+		{name: "exhausted token", status: http.StatusPaymentRequired, code: "insufficient_token_quota", update: func(t *testing.T, _ *model.User, token *model.Token) {
 			require.NoError(t, model.DB.Model(token).Update("remain_quota", 0).Error)
 		}},
 		{name: "disabled user", status: http.StatusForbidden, update: func(t *testing.T, user *model.User, _ *model.Token) {
@@ -223,6 +224,10 @@ func TestResponsesWSRequestRunnerRejectsRevokedCredentials(t *testing.T) {
 			})
 			require.NotNil(t, apiError)
 			assert.Equal(t, tc.status, apiError.StatusCode)
+			if tc.code != "" {
+				assert.Equal(t, tc.code, apiError.ToOpenAIError().Code)
+				assert.Contains(t, apiError.Error(), "["+tc.code+"]")
+			}
 			assert.False(t, called)
 			assert.NotContains(t, apiError.Error(), token.Key)
 		})
@@ -595,12 +600,16 @@ func TestResponsesWebSocketReusesConnectionAndSettlesEachRequest(t *testing.T) {
 	_, data, err := client.ReadMessage()
 	require.NoError(t, err)
 	var rejection struct {
-		Type   string `json:"type"`
-		Status int    `json:"status"`
+		Type   string            `json:"type"`
+		Status int               `json:"status"`
+		Error  types.OpenAIError `json:"error"`
 	}
 	require.NoError(t, common.Unmarshal(data, &rejection))
 	assert.Equal(t, "error", rejection.Type)
-	assert.Equal(t, http.StatusUnauthorized, rejection.Status)
+	assert.Equal(t, http.StatusPaymentRequired, rejection.Status)
+	assert.Equal(t, "insufficient_token_quota", rejection.Error.Code)
+	assert.Contains(t, rejection.Error.Message, "[insufficient_token_quota]")
+	assert.NotContains(t, string(data), token.Key)
 	assert.Equal(t, int32(1), fixture.connections.Load())
 	assert.Empty(t, received, "exhausted token must be rejected before contacting upstream")
 	var logs []model.Log
@@ -999,10 +1008,12 @@ func TestResponsesHTTPHealthCountsFinalResult(t *testing.T) {
 		firstStatus, attempts int
 		success               bool
 		ignored               bool
+		publicStatus          int
+		publicCode            string
 	}{
-		{"business rejection", "context_length_exceeded", 400, 1, false, true},
-		{"credentials rejected as 400", "invalid_api_key", 400, 1, false, false},
-		{"retry succeeds", "server_error", 500, 2, true, false},
+		{"business rejection", "context_length_exceeded", 400, 1, false, true, 413, "input_too_large"},
+		{"credentials rejected as 400", "invalid_api_key", 400, 1, false, false, 502, "service_auth_error"},
+		{"retry succeeds", "server_error", 500, 2, true, false, 200, ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			fixture := newResponsesWSBillingTest(t, `tier("request", fixed(0.002))`, func(*websocket.Conn, *http.Request) {})
@@ -1027,7 +1038,7 @@ func TestResponsesHTTPHealthCountsFinalResult(t *testing.T) {
 			request.Header.Set("Content-Type", "application/json")
 			response, err := http.DefaultClient.Do(request)
 			require.NoError(t, err)
-			_, err = io.Copy(io.Discard, response.Body)
+			body, err := io.ReadAll(response.Body)
 			require.NoError(t, err)
 			require.NoError(t, response.Body.Close())
 			select {
@@ -1038,7 +1049,9 @@ func TestResponsesHTTPHealthCountsFinalResult(t *testing.T) {
 			fixture.closeAndWait(t)
 			assert.Equal(t, int64(tc.attempts), attempts.Load())
 			if !tc.success {
-				assert.Equal(t, tc.firstStatus, response.StatusCode)
+				assert.Equal(t, tc.publicStatus, response.StatusCode)
+				assert.Contains(t, string(body), `"code":"`+tc.publicCode+`"`)
+				assert.Contains(t, string(body), "["+tc.publicCode+"]")
 			} else {
 				assert.Equal(t, http.StatusOK, response.StatusCode)
 			}

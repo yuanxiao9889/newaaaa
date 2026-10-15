@@ -222,10 +222,20 @@ func executeInternalAsyncImageTask(ctx context.Context, task *model.Task) error 
 		if bc := task.PrivateData.BillingContext; bc == nil || !bc.PerCallBilling {
 			actualQuota, clamp := service.CalculateTaskQuotaByUsageChecked(task, usage)
 			quotaClamp = clamp
-			if actualQuota > 0 {
+			if actualQuota <= 0 && bc != nil && bc.ImageTokenFallbackQuota != nil {
+				actualQuota = *bc.ImageTokenFallbackQuota
+			}
+			if actualQuota > 0 || bc != nil && bc.ImageTokenFallbackQuota != nil {
 				if err = service.AdjustTaskQuotaForFinalSettlement(ctx, task, actualQuota, "async image usage settlement"); err != nil {
 					return fmt.Errorf("async image usage settlement failed: %w", err)
 				}
+			}
+		}
+	}
+	if usage == nil && task.PrivateData.RequestRelayFormat != relay.PluginAsyncImageFormat {
+		if bc := task.PrivateData.BillingContext; bc != nil && bc.ImageTokenFallbackQuota != nil {
+			if err = service.AdjustTaskQuotaForFinalSettlement(ctx, task, *bc.ImageTokenFallbackQuota, "image usage missing; exclude reservation floor"); err != nil {
+				return fmt.Errorf("async image fallback settlement failed: %w", err)
 			}
 		}
 	}
@@ -638,8 +648,20 @@ func prepareInternalAsyncRelayInfo(task *model.Task, relayInfo *relaycommon.Rela
 		relayInfo.PriceData.ModelPrice = bc.ModelPrice
 		relayInfo.PriceData.GroupRatioInfo.GroupRatio = bc.GroupRatio
 		relayInfo.PriceData.ModelRatio = bc.ModelRatio
+		relayInfo.PriceData.UsePrice = bc.PerCallBilling
+		relayInfo.TieredBillingSnapshot = bc.TieredSnapshot
+		relayInfo.ImageTokenFallbackQuota = bc.ImageTokenFallbackQuota
+		relayInfo.ImageTokenReserveUSD = bc.ImageTokenReserveUSD
 		relayInfo.PriceData.ReplaceOtherRatios(bc.OtherRatios)
+		if bc.GroupRatio > 0 {
+			estimate := task.Quota
+			if bc.ImageTokenFallbackQuota != nil {
+				estimate = *bc.ImageTokenFallbackQuota
+			}
+			relayInfo.ImageQuotaBeforeGroup = float64(estimate) / bc.GroupRatio
+		}
 	}
+	relayInfo.FinalPreConsumedQuota = task.Quota
 	relayInfo.PriceData.Quota = task.Quota
 	relayInfo.PriceData.QuotaToPreConsume = task.Quota
 }

@@ -358,6 +358,9 @@ func serveTaskPluginProtocol(
 		createdAt,
 		deps.protocolLimits,
 	)
+	if outcome.Task.Status == model.TaskStatusFailure {
+		machine.SetPublicError(outcome.Task.UserError())
+	}
 	background := false
 	if body, ok := protocolRequest.Body.(map[string]any); ok && body["kind"] == string(pluginruntime.BodyJSON) {
 		if requestBody, ok := body["value"].(map[string]any); ok {
@@ -373,6 +376,10 @@ func serveTaskPluginProtocol(
 		}
 		machine.SetBackground(true)
 		if !protocolRequest.Stream {
+			if outcome.Task.Status == model.TaskStatusFailure {
+				writeTaskPluginProtocolFailureResponse(c, machine, string(outcome.Task.Status))
+				return
+			}
 			logger.LogDebug(
 				c,
 				"task_plugin subsystem=protocol event=background_return generation=%d plugin=%q public_task_id=%q status=%q",
@@ -388,11 +395,11 @@ func serveTaskPluginProtocol(
 	}
 	if protocolRequest.Stream {
 		logger.LogDebug(c, "task_plugin subsystem=protocol event=observation_enter generation=%d plugin=%q mode=stream public_task_id=%q", generation, pluginKey, outcome.Task.TaskID)
-		streamTaskPluginProtocol(c, pinned, protocolRequest, outcome.Task.TaskID, machine, deps)
+		streamTaskPluginProtocol(c, pinned, protocolRequest, outcome.Task, machine, deps)
 		return
 	}
 	logger.LogDebug(c, "task_plugin subsystem=protocol event=observation_enter generation=%d plugin=%q mode=nonstream public_task_id=%q", generation, pluginKey, outcome.Task.TaskID)
-	waitTaskPluginProtocol(c, pinned, protocolRequest, outcome.Task.TaskID, machine, deps)
+	waitTaskPluginProtocol(c, pinned, protocolRequest, outcome.Task, machine, deps)
 }
 
 // submittedTaskPluginEndpoint follows a successful cross-provider retry within
@@ -425,10 +432,11 @@ func streamTaskPluginProtocol(
 	c *gin.Context,
 	pinned pluginruntime.PinnedEndpoint,
 	protocolRequest pluginruntime.ProtocolRequestContext,
-	taskID string,
+	initialTask *model.Task,
 	machine *relay.PluginResponsesMachine,
 	deps pluginProtocolBridgeDeps,
 ) {
+	taskID := initialTask.TaskID
 	generation := pinned.Generation.Number
 	pluginKey := pinned.Plugin.Meta.Key
 	logger.LogDebug(
@@ -450,6 +458,10 @@ func streamTaskPluginProtocol(
 	helper.SetEventStreamHeaders(c)
 	if err = writeTaskPluginProtocolEvent(c, created); err != nil {
 		logger.LogDebug(c, "task_plugin subsystem=protocol event=client_write_failed generation=%d plugin=%q mode=stream stage=created_event", generation, pluginKey)
+		return
+	}
+	if initialTask.Status == model.TaskStatusFailure {
+		writeTaskPluginProtocolFailure(c, machine, string(initialTask.Status))
 		return
 	}
 
@@ -534,6 +546,11 @@ func streamTaskPluginProtocol(
 				taskPluginDebugStatus(lastStatus),
 				loadElapsed.Milliseconds(),
 			)
+		}
+		if task.Status == model.TaskStatusFailure {
+			machine.SetPublicError(task.UserError())
+			writeTaskPluginProtocolFailure(c, machine, lastStatus)
+			return
 		}
 		view, viewErr := service.BuildTaskPluginView(task)
 		if viewErr != nil {
@@ -686,10 +703,15 @@ func waitTaskPluginProtocol(
 	c *gin.Context,
 	pinned pluginruntime.PinnedEndpoint,
 	protocolRequest pluginruntime.ProtocolRequestContext,
-	taskID string,
+	initialTask *model.Task,
 	machine *relay.PluginResponsesMachine,
 	deps pluginProtocolBridgeDeps,
 ) {
+	if initialTask.Status == model.TaskStatusFailure {
+		writeTaskPluginProtocolFailureResponse(c, machine, string(initialTask.Status))
+		return
+	}
+	taskID := initialTask.TaskID
 	generation := pinned.Generation.Number
 	pluginKey := pinned.Plugin.Meta.Key
 	logger.LogDebug(
@@ -779,6 +801,7 @@ func waitTaskPluginProtocol(
 		}
 		if !loadOverloaded && (task.Status == model.TaskStatusSuccess || task.Status == model.TaskStatusFailure) {
 			if task.Status == model.TaskStatusFailure {
+				machine.SetPublicError(task.UserError())
 				writeTaskPluginProtocolFailureResponse(c, machine, string(task.Status))
 				return
 			}
@@ -1054,6 +1077,7 @@ func retrieveTaskPluginResponse(c *gin.Context, deps pluginProtocolBridgeDeps) {
 	}
 
 	if task.Status == model.TaskStatusFailure {
+		machine.SetPublicError(task.UserError())
 		logger.LogDebug(c, "task_plugin subsystem=protocol event=retrieve_final generation=%d plugin=%q public_task_id=%q status=%q", generationNumber, plugin.Meta.Key, task.TaskID, taskPluginDebugStatus(string(task.Status)))
 		writeTaskPluginProtocolFailureResponse(c, machine, string(task.Status))
 		return
@@ -1291,26 +1315,11 @@ func writeTaskPluginProtocolEvent(c *gin.Context, event dto.PluginResponsesStrea
 }
 
 func respondPluginProtocolSubmissionError(c *gin.Context, taskErr *dto.TaskError) {
-	status := http.StatusInternalServerError
-	if taskErr != nil && taskErr.StatusCode >= 400 && taskErr.StatusCode <= 599 {
-		status = taskErr.StatusCode
+	if taskErr == nil {
+		taskErr = &dto.TaskError{Code: "service_unavailable", StatusCode: http.StatusServiceUnavailable, LocalError: true}
 	}
-	switch status {
-	case http.StatusBadRequest:
-		message := "Invalid task protocol request"
-		if taskErr != nil && taskErr.Message != "" && (taskErr.Code == "invalid_request" || strings.HasPrefix(taskErr.Code, "invalid_request")) {
-			message = taskErr.Message
-		}
-		respondPluginProtocolError(c, status, "invalid_request_error", message)
-	case http.StatusUnauthorized:
-		respondPluginProtocolError(c, status, "authentication_error", "Authentication failed")
-	case http.StatusForbidden:
-		respondPluginProtocolError(c, status, "permission_denied", "Task protocol request was denied")
-	case http.StatusTooManyRequests:
-		respondPluginProtocolError(c, status, "rate_limit_exceeded", "Too many requests")
-	default:
-		respondPluginProtocolError(c, status, "task_protocol_error", "Task protocol request failed")
-	}
+	publicError := publicTaskError(taskErr)
+	respondPluginProtocolError(c, publicError.StatusCode, publicError.Code, publicError.Message)
 }
 
 func respondPluginProtocolError(c *gin.Context, status int, code, message string) {
