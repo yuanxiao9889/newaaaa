@@ -189,6 +189,51 @@ afterEach(() => {
   clients.length = 0
 })
 
+function UsageFailureCell(props: { type: number; content: string }) {
+  const table = useReactTable({
+    columns: useCommonLogsColumns(false, false),
+    data: [
+      usageLogSchema.parse({
+        id: 1,
+        user_id: 1,
+        created_at: 1,
+        type: props.type,
+        content: props.content,
+        model_name: 'mj_imagine',
+        other: '{}',
+      }),
+    ],
+    getCoreRowModel: getCoreRowModel(),
+  })
+  const cell = table
+    .getRowModel()
+    .rows[0].getAllCells()
+    .find((item) => item.column.id === 'content')
+  if (!cell) throw new Error('Usage details column is missing')
+  return flexRender(cell.column.columnDef.cell, cell.getContext())
+}
+
+test.each([5, 6, 8])(
+  'usage log type %s shows the server failure in the row and full details',
+  async (type) => {
+    const user = userEvent.setup()
+    const reason = '[input_too_large] 提示词过长,目前支持1024以下字符'
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    })
+    client.setQueryData(['status'], {}, { updatedAt: Date.now() + 60_000 })
+    clients.push(client)
+    render(
+      <QueryClientProvider client={client}>
+        <UsageFailureCell type={type} content={reason} />
+      </QueryClientProvider>
+    )
+    expect(screen.getByText(reason)).toBeVisible()
+    await user.click(screen.getByRole('button', { name: /提示词过长/ }))
+    expect(within(screen.getByRole('dialog')).getByText(reason)).toBeVisible()
+  }
+)
+
 function RetryChannelCell(props: { other: LogOtherData }) {
   const columns = useCommonLogsColumns(true, false)
   const table = useReactTable({

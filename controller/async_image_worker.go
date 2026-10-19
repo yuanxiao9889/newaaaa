@@ -165,14 +165,7 @@ func executeInternalAsyncImageTask(ctx context.Context, task *model.Task) error 
 		failInternalAsyncImageTask(ctx, task, "parse image response failed: "+err.Error())
 		return err
 	}
-	assetRef := firstImageAssetRef(imageResp)
-	if assetRef == "" {
-		service.RecordAutoSwitchTaskFailure(ctx, task, 0, "", "image_result_unavailable")
-		err = fmt.Errorf("upstream returned no image result")
-		failInternalAsyncImageTask(ctx, task, err.Error())
-		return err
-	}
-	if err = service.StoreAsyncImageResult(task, proxy, assetRef); err != nil {
+	if err = service.StoreAsyncImageResults(task, proxy, imageResp); err != nil {
 		service.RecordAutoSwitchTaskFailure(ctx, task, 0, "", "image_result_unavailable")
 		failInternalAsyncImageTask(ctx, task, "store async image result failed: "+err.Error())
 		return err
@@ -189,7 +182,7 @@ func executeInternalAsyncImageTask(ctx context.Context, task *model.Task) error 
 		task.StartTime = now
 	}
 	task.FinishTime = now
-	task.Data = service.BuildStoredAsyncImageTaskData(imageResp, task.PrivateData.ResultURL)
+	task.Data = service.BuildStoredAsyncImageResultsData(task, imageResp.Created)
 
 	preSettlementQuota := task.Quota
 	var quotaClamp *common.QuotaClamp
@@ -696,18 +689,6 @@ func geminiImageResponseToOpenAIImageResponse(body []byte) (dto.ImageResponse, e
 		}
 	}
 	return imageResp, fmt.Errorf("gemini response returned no image inlineData")
-}
-
-func firstImageAssetRef(resp dto.ImageResponse) string {
-	for _, item := range resp.Data {
-		if strings.TrimSpace(item.Url) != "" {
-			return strings.TrimSpace(item.Url)
-		}
-		if strings.TrimSpace(item.B64Json) != "" {
-			return strings.TrimSpace(item.B64Json)
-		}
-	}
-	return ""
 }
 
 func failInternalAsyncImageTask(ctx context.Context, task *model.Task, reason string) {

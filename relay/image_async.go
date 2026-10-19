@@ -59,8 +59,8 @@ func validateAsyncImageTaskRequest(info *relaycommon.RelayInfo, request *dto.Ima
 	if request == nil {
 		return types.NewErrorWithStatusCode(fmt.Errorf("image request is required"), types.ErrorCodeInvalidRequest, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
 	}
-	// The queue stores a single image. Provider count overrides must obey the
-	// same limit even before a channel has initialized RelayInfo.ChannelMeta.
+	// Limit each task to one generation; providers may return several images
+	// for n=1. Count overrides obey the same request limit before channel setup.
 	for _, providerParameters := range []bool{false, true} {
 		count, err := request.ImageCount(providerParameters)
 		if err != nil {

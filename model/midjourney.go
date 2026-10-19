@@ -1,5 +1,7 @@
 package model
 
+import "github.com/QuantumNous/new-api/common"
+
 type Midjourney struct {
 	Id          int    `json:"id"`
 	Code        int    `json:"code"`
@@ -26,6 +28,20 @@ type Midjourney struct {
 
 	TokenId          int `json:"-" gorm:"default:0"`
 	BillingChannelId int `json:"-" gorm:"default:0"`
+}
+
+// UserFailReason also covers rejected submissions, which historically have
+// an empty status despite carrying a failure description.
+func (m *Midjourney) UserFailReason() string {
+	reason := m.FailReason
+	failedSubmission := m.Code != 0 && m.Code != 1 && m.Code != 21 && m.Code != 22
+	if reason == "" && failedSubmission {
+		reason = m.Description
+	}
+	if reason == "" && m.Status != "FAILURE" && !failedSubmission {
+		return ""
+	}
+	return common.MidjourneyPublicError("", reason, 0, false).Summary()
 }
 
 // TaskQueryParams 用于包含所有搜索条件的结构体，可以根据需求添加更多字段

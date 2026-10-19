@@ -224,15 +224,16 @@ type ImageAsyncSubmitResponse struct {
 }
 
 type ImageAsyncTaskResponse struct {
-	TaskID       string `json:"task_id"`
-	Status       string `json:"status"`
-	StatusURL    string `json:"status_url"`
-	ContentURL   string `json:"content_url"`
-	URL          string `json:"url,omitempty"`
-	URLExpiresAt int64  `json:"url_expires_at,omitempty"`
-	ExpiresAt    int64  `json:"expires_at"`
-	Error        string `json:"error,omitempty"`
-	ErrorCode    string `json:"error_code,omitempty"`
+	Data         []ImageData `json:"data,omitempty"`
+	TaskID       string      `json:"task_id"`
+	Status       string      `json:"status"`
+	StatusURL    string      `json:"status_url"`
+	ContentURL   string      `json:"content_url"`
+	URL          string      `json:"url,omitempty"`
+	URLExpiresAt int64       `json:"url_expires_at,omitempty"`
+	ExpiresAt    int64       `json:"expires_at"`
+	Error        string      `json:"error,omitempty"`
+	ErrorCode    string      `json:"error_code,omitempty"`
 }
 
 type ImageData struct {

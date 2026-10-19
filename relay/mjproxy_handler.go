@@ -161,9 +161,12 @@ func coverMidjourneyTaskDto(c *gin.Context, originTask *model.Midjourney) (midjo
 		midjourneyTask.VideoUrl = originTask.VideoUrl
 	}
 	midjourneyTask.Status = originTask.Status
-	midjourneyTask.FailReason = originTask.FailReason
+	midjourneyTask.FailReason = originTask.UserFailReason()
 	midjourneyTask.Action = originTask.Action
 	midjourneyTask.Description = originTask.Description
+	if midjourneyTask.FailReason != "" {
+		midjourneyTask.Description = midjourneyTask.FailReason
+	}
 	midjourneyTask.Prompt = originTask.Prompt
 	if originTask.Buttons != "" {
 		var buttons []dto.ActionButton
@@ -244,6 +247,11 @@ func RelaySwapFace(c *gin.Context, info *relaycommon.RelayInfo) *dto.MidjourneyR
 		FailReason:  "",
 		ChannelId:   c.GetInt("channel_id"),
 	}
+	if !accepted {
+		midjourneyTask.FailReason = midjResponse.Description
+		midjourneyTask.Status = "FAILURE"
+		midjourneyTask.Progress = "100%"
+	}
 	billingPrepared, billingErr := service.PrepareMidjourneyTaskBilling(
 		info,
 		midjourneyTask,
@@ -284,6 +292,10 @@ func RelaySwapFace(c *gin.Context, info *relaycommon.RelayInfo) *dto.MidjourneyR
 		model.UpdateChannelUsedQuota(billingChannelID, midjourneyTask.Quota)
 		insertMidjourneyAsyncTask(midjourneyTask, info, priceData)
 	}
+	if !accepted {
+		service.WriteMidjourneyError(c, midjResponse, mjResp.StatusCode, info)
+		return nil
+	}
 	c.Writer.WriteHeader(mjResp.StatusCode)
 	respBody, err := common.Marshal(midjResponse)
 	if err != nil {
@@ -320,6 +332,10 @@ func RelayMidjourneyTaskImageSeed(c *gin.Context) *dto.MidjourneyResponse {
 		return &midjResponseWithStatus.Response
 	}
 	midjResponse := &midjResponseWithStatus.Response
+	if midjResponseWithStatus.StatusCode != http.StatusOK || (midjResponse.Code != 1 && midjResponse.Code != 21 && midjResponse.Code != 22) {
+		service.WriteMidjourneyError(c, midjResponse, midjResponseWithStatus.StatusCode, nil)
+		return nil
+	}
 	c.Writer.WriteHeader(midjResponseWithStatus.StatusCode)
 	respBody, err := common.Marshal(midjResponse)
 	if err != nil {
@@ -578,9 +594,11 @@ func RelayMidjourneySubmit(c *gin.Context, relayInfo *relaycommon.RelayInfo) *dt
 			}
 		}
 	}
-	if midjResponse.Code != 1 && midjResponse.Code != 21 && midjResponse.Code != 22 {
-		//非1-提交成功,21-任务已存在和22-排队中，则记录错误原因
+	if !accepted {
+		// Rejected submissions are terminal; do not poll them as queued jobs.
 		midjourneyTask.FailReason = midjResponse.Description
+		midjourneyTask.Status = "FAILURE"
+		midjourneyTask.Progress = "100%"
 		consumeQuota = false
 	}
 
@@ -607,7 +625,7 @@ func RelayMidjourneySubmit(c *gin.Context, relayInfo *relaycommon.RelayInfo) *dt
 			responseBody = []byte(newBody)
 		}
 	}
-	if midjResponse.Code == 1 && midjRequest.Action == "UPLOAD" {
+	if accepted && midjResponse.Code == 1 && midjRequest.Action == "UPLOAD" {
 		midjourneyTask.Progress = "100%"
 		midjourneyTask.Status = "SUCCESS"
 	}
@@ -657,6 +675,10 @@ func RelayMidjourneySubmit(c *gin.Context, relayInfo *relaycommon.RelayInfo) *dt
 		}
 	}
 
+	if !accepted {
+		service.WriteMidjourneyError(c, midjResponse, midjResponseWithStatus.StatusCode, relayInfo)
+		return nil
+	}
 	if midjResponse.Code == 22 { //22-排队中，说明任务已存在
 		//修改返回值
 		newBody := strings.Replace(string(responseBody), `"code":22`, `"code":1`, -1)

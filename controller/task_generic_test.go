@@ -176,7 +176,7 @@ func TestUserLegacyDrawingLogsHideInternalMetadata(t *testing.T) {
 	for _, userID := range []int{task.UserId, task.UserId + 1} {
 		require.NoError(t, model.DB.Create(&model.Midjourney{
 			UserId: userID, MjId: fmt.Sprintf("drawing-%d", userID), ChannelId: 141,
-			Status: "FAILURE", Quota: 123, FailReason: "private-provider-error",
+			Status: "FAILURE", Quota: 123, FailReason: "prompt too long https://upstream.invalid/error?token=private-token mj-api-secret=private-secret",
 			Properties: `{"model":"private-model"}`, ImageUrl: "https://upstream.invalid/image.png",
 		}).Error)
 	}
@@ -188,7 +188,8 @@ func TestUserLegacyDrawingLogsHideInternalMetadata(t *testing.T) {
 	for _, secret := range []string{"private-", "upstream.invalid", fmt.Sprintf("drawing-%d", task.UserId+1)} {
 		assert.NotContains(t, recorder.Body.String(), secret)
 	}
-	assert.Contains(t, recorder.Body.String(), "[generation_failed]")
+	assert.Contains(t, recorder.Body.String(), "[input_too_large]")
+	assert.Contains(t, recorder.Body.String(), "prompt too long")
 	assert.Contains(t, recorder.Body.String(), fmt.Sprintf("drawing-%d", task.UserId))
 }
 
@@ -315,6 +316,56 @@ func TestInternalImageTaskArtifacts(t *testing.T) {
 			}
 		})
 	}
+
+	t.Run("four retained images have separate artifact links and downloads", func(t *testing.T) {
+		task.PrivateData.ImageAssets = []model.AsyncImageAsset{{LocalPath: imagePath, MimeType: "image/png"}}
+		for i := 1; i < 4; i++ {
+			path := filepath.Join(t.TempDir(), fmt.Sprintf("result-%d.png", i))
+			require.NoError(t, os.WriteFile(path, []byte(fmt.Sprintf("stored-image-%d", i)), 0600))
+			task.PrivateData.ImageAssets = append(task.PrivateData.ImageAssets, model.AsyncImageAsset{LocalPath: path, MimeType: "image/png"})
+		}
+		require.NoError(t, model.DB.Save(task).Error)
+		t.Cleanup(func() {
+			task.PrivateData.ImageAssets = nil
+			require.NoError(t, model.DB.Save(task).Error)
+		})
+		recorder := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(recorder)
+		c.Set("id", task.UserId)
+		c.Params = gin.Params{{Key: "task_id", Value: task.TaskID}}
+		c.Request = httptest.NewRequest(http.MethodGet, "/api/task/"+task.TaskID+"/artifacts", nil)
+		GetDashboardTaskArtifacts(c)
+		require.Equal(t, http.StatusOK, recorder.Code)
+		var response struct {
+			Data struct {
+				Artifacts []taskArtifactResponse `json:"artifacts"`
+			} `json:"data"`
+		}
+		require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &response))
+		require.Len(t, response.Data.Artifacts, 4)
+		for i, artifact := range response.Data.Artifacts {
+			expectedKey := "image"
+			if i > 0 {
+				expectedKey = fmt.Sprintf("image-%d", i+1)
+			}
+			assert.Equal(t, expectedKey, artifact.Key)
+			want := string(imageBytes)
+			if i > 0 {
+				want = fmt.Sprintf("stored-image-%d", i)
+			}
+			// Artifact-key capabilities must ignore the unrelated image API's index query.
+			for _, suffix := range []string{"", "&index=3"} {
+				result := httptest.NewRecorder()
+				router.ServeHTTP(result, httptest.NewRequest(http.MethodGet, artifact.ContentURL+suffix, nil))
+				require.Equal(t, http.StatusOK, result.Code)
+				assert.Equal(t, want, result.Body.String())
+			}
+		}
+		tampered := strings.Replace(response.Data.Artifacts[0].ContentURL, "/image/", "/image-2/", 1)
+		result := httptest.NewRecorder()
+		router.ServeHTTP(result, httptest.NewRequest(http.MethodGet, tampered, nil))
+		assert.Equal(t, http.StatusNotFound, result.Code)
+	})
 
 	for _, tc := range []struct {
 		name      string

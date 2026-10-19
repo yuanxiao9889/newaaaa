@@ -119,7 +119,7 @@ function buildDetailSegments(
   usageSchema?: BillingUsageSchema
 ): DetailSegment[] {
   if (!isAdmin && log.type === LOG_TYPE_ENUM.ERROR) {
-    return [{ text: t('Request failed'), danger: true }]
+    return [{ text: log.content || t('Request failed'), danger: true }]
   }
   const segments = buildTypeDetailSegments(log, other, t, language, usageSchema)
   const adminSegments: DetailSegment[] = []
@@ -147,11 +147,17 @@ function buildTypeDetailSegments(
   }
 
   if (log.type === LOG_TYPE_ENUM.PRE_CONSUME_ROLLBACK) {
-    return [{ text: t('Pre-consume rollback') }]
+    const segments: DetailSegment[] = []
+    if (log.content) segments.push({ text: log.content, danger: true })
+    segments.push({ text: t('Pre-consume rollback') })
+    return segments
   }
 
   if (log.type === LOG_TYPE_ENUM.REFUND) {
-    return [{ text: t('Async task refund') }]
+    const segments: DetailSegment[] = []
+    if (log.content) segments.push({ text: log.content, danger: true })
+    segments.push({ text: t('Async task refund') })
+    return segments
   }
 
   if (log.type !== 2) return []

@@ -136,6 +136,9 @@ func main() {
 	service.StartSubscriptionQuotaResetTask()
 	service.StartAsyncImageCleanupLoop()
 	service.StartMidjourneyUploadCleanupLoop()
+	if err := service.InitReferenceUploads(); err != nil {
+		common.SysError("reference upload acceleration is disabled: invalid configuration or unavailable cache directory")
+	}
 	controller.StartInternalAsyncImageWorkerLoop()
 
 	// Report this process as a system instance so the System Info page can show

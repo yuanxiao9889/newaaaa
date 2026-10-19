@@ -447,29 +447,12 @@ func RelayMidjourney(c *gin.Context) {
 }
 
 func respondMidjourneyError(c *gin.Context, mjErr *taskdto.MidjourneyResponse) int {
-	if mjErr.LocalErrorCode == "insufficient_token_quota" || mjErr.LocalErrorCode == "insufficient_user_quota" {
-		publicError := common.ClassifyPublicError(mjErr.LocalErrorCode, "", 0, true)
-		message := common.MessageWithRequestId(publicError.Summary(), c.GetString(common.RequestIdKey))
-		c.Header("X-Error-Code", publicError.Code)
-		c.JSON(publicError.StatusCode, gin.H{
-			"description": message, "message": message, "type": "new_api_error",
-			"code": mjErr.Code, "error_code": publicError.Code,
-		})
-		return publicError.StatusCode
-	}
 	statusCode := http.StatusBadRequest
 	if mjErr.Code == 30 {
-		mjErr.Result = "当前分组负载已饱和，请稍后再试，或升级账户以提升服务质量。"
 		statusCode = http.StatusTooManyRequests
 	}
-	publicError := common.ClassifyPublicError("", mjErr.Description+" "+mjErr.Result, statusCode, false)
-	message := common.MessageWithRequestId(publicError.Summary(), c.GetString(common.RequestIdKey))
-	c.Header("X-Error-Code", publicError.Code)
-	c.JSON(statusCode, gin.H{
-		"description": message, "message": message, "type": "upstream_error",
-		"code": mjErr.Code, "error_code": publicError.Code,
-	})
-	return statusCode
+	service.WriteMidjourneyError(c, mjErr, statusCode, nil)
+	return c.Writer.Status()
 }
 
 func RelayNotImplemented(c *gin.Context) {

@@ -12,6 +12,7 @@ import (
 	"gorm.io/driver/mysql"
 	"gorm.io/driver/postgres"
 	"image"
+	"image/color"
 	"image/png"
 	"io"
 	"mime/multipart"
@@ -20,6 +21,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -47,6 +49,231 @@ import (
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 )
+
+func TestAsyncImageMultipleResults(t *testing.T) {
+	require.NoError(t, i18n.Init())
+	service.InitHttpClient()
+	oldDownloadLimit := constant.MaxFileDownloadMB
+	constant.MaxFileDownloadMB = 10
+	t.Cleanup(func() { constant.MaxFileDownloadMB = oldDownloadLimit })
+	for _, tc := range []struct {
+		name                          string
+		count                         int
+		mixed, invalid, retryDownload bool
+	}{
+		{name: "four_urls", count: 4, retryDownload: true},
+		{name: "mixed_url_and_base64", count: 4, mixed: true},
+		{name: "partial_failure", count: 4, invalid: true},
+		{name: "single_image", count: 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			db := setupAsyncImageWorkerTestDB(t)
+			require.NoError(t, db.AutoMigrate(&model.Channel{}, &model.Ability{}, &model.QuotaData{}))
+			require.NoError(t, db.Where("channel_id = ?", 703).Delete(&model.Ability{}).Error)
+			var version string
+			versionQuery := "SELECT version()"
+			if common.UsingMainDatabase(common.DatabaseTypeSQLite) {
+				versionQuery = "SELECT sqlite_version()"
+			}
+			require.NoError(t, db.Raw(versionQuery).Scan(&version).Error)
+			t.Logf("database=%s version=%s", common.MainDatabaseType(), version)
+			oldMemory, oldBatch := common.MemoryCacheEnabled, common.BatchUpdateEnabled
+			common.MemoryCacheEnabled, common.BatchUpdateEnabled = false, false
+			oldAddress := system_setting.ServerAddress
+			system_setting.ServerAddress = "https://relay.test"
+			prices := ratio_setting.ModelPrice2JSONString()
+			require.NoError(t, ratio_setting.UpdateModelPriceByJSONString(`{"mj-multi-test":0.3}`))
+			t.Cleanup(func() {
+				common.MemoryCacheEnabled, common.BatchUpdateEnabled = oldMemory, oldBatch
+				system_setting.ServerAddress = oldAddress
+				require.NoError(t, ratio_setting.UpdateModelPriceByJSONString(prices))
+			})
+			t.Setenv("ASYNC_IMAGE_SIGNING_SECRET", "multi-image-test-secret")
+			t.Setenv("ASYNC_IMAGE_REQUEST_STORAGE_PATH", t.TempDir())
+			t.Setenv("ASYNC_IMAGE_STORAGE_PATH", t.TempDir())
+			require.NoError(t, db.Create(&model.User{Id: 61, Username: "native_billing_test", Quota: 850000, Status: common.UserStatusEnabled}).Error)
+			require.NoError(t, db.Create(&model.Token{Id: 62, UserId: 61, Key: "multi-user-token", RemainQuota: 850000, UsedQuota: 150000, Status: common.TokenStatusEnabled}).Error)
+			images := make([][]byte, tc.count)
+			for i := range images {
+				img := image.NewRGBA(image.Rect(0, 0, 2, 2))
+				img.SetRGBA(0, 0, color.RGBA{R: uint8(40 * (i + 1)), A: 255})
+				var encoded bytes.Buffer
+				require.NoError(t, png.Encode(&encoded, img))
+				images[i] = encoded.Bytes()
+			}
+			var posts atomic.Int32
+			var secondDownloads atomic.Int32
+			var upstreamURL string
+			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method == http.MethodPost {
+					posts.Add(1)
+					result := dto.ImageResponse{Created: 123}
+					for i := range images {
+						item := dto.ImageData{Url: upstreamURL + "/image/" + strconv.Itoa(i), RevisedPrompt: fmt.Sprintf("prompt %d", i)}
+						if tc.mixed && i%2 == 1 {
+							item.Url, item.B64Json = "", base64.StdEncoding.EncodeToString(images[i])
+						}
+						result.Data = append(result.Data, item)
+					}
+					body, err := common.Marshal(result)
+					if err != nil {
+						w.WriteHeader(500)
+						return
+					}
+					w.Header().Set("Content-Type", "application/json")
+					_, _ = w.Write(body)
+					return
+				}
+				index, err := strconv.Atoi(strings.TrimPrefix(r.URL.Path, "/image/"))
+				if err != nil || index < 0 || index >= len(images) {
+					w.WriteHeader(404)
+					return
+				}
+				if index == 1 && secondDownloads.Add(1) == 1 && tc.retryDownload {
+					w.WriteHeader(503)
+					return
+				}
+				w.Header().Set("Content-Type", "image/png")
+				if tc.invalid && index == 1 {
+					_, _ = w.Write([]byte("invalid image"))
+					return
+				}
+				_, _ = w.Write(images[index])
+			}))
+			defer upstream.Close()
+			upstreamURL = upstream.URL
+			fetch := system_setting.GetFetchSetting()
+			oldFetch := *fetch
+			parsedUpstream, err := url.Parse(upstreamURL)
+			require.NoError(t, err)
+			fetch.AllowPrivateIp = true
+			fetch.AllowedPorts = []string{parsedUpstream.Port()}
+			t.Cleanup(func() { *fetch = oldFetch })
+			channel := &model.Channel{Id: 703, Name: "multi-image", Type: constant.ChannelTypeOpenAI,
+				Key: "multi-upstream-key", Models: "mj-multi-test", Group: "default", Status: common.ChannelStatusEnabled,
+				BaseURL: &upstreamURL, Weight: common.GetPointer(uint(1))}
+			require.NoError(t, db.Create(channel).Error)
+			require.NoError(t, channel.AddAbilities(db))
+			body := `{"model":"mj-multi-test","prompt":"fixture","n":1}`
+			c, _ := gin.CreateTestContext(httptest.NewRecorder())
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/images/generations?async=true", strings.NewReader(body))
+			c.Request.Header.Set("Content-Type", "application/json")
+			info := &relaycommon.RelayInfo{UserId: 61, TokenId: 62, UsingGroup: "default", OriginModelName: "mj-multi-test", FinalPreConsumedQuota: 150000,
+				ChannelMeta: &relaycommon.ChannelMeta{ChannelId: 703, UpstreamModelName: "mj-multi-test"}}
+			require.Nil(t, relay.SubmitInternalAsyncImageTask(c, info, &dto.ImageRequest{Model: "mj-multi-test"}))
+			common.CleanupBodyStorage(c)
+			var task model.Task
+			require.NoError(t, db.First(&task).Error)
+			require.True(t, claimInternalAsyncImageTask(&task))
+			err = executeInternalAsyncImageTask(context.Background(), &task)
+			assert.EqualValues(t, 1, posts.Load(), "one generation even when a result download needs retry")
+			var restored model.Task
+			require.NoError(t, db.First(&restored, task.ID).Error)
+			if tc.invalid {
+				require.ErrorContains(t, err, "store image 1 failed")
+				assert.Equal(t, model.TaskStatus(model.TaskStatusFailure), restored.Status)
+				assert.Empty(t, restored.PrivateData.ImageAssets)
+				files, err := os.ReadDir(service.GetAsyncImageStoragePath())
+				require.NoError(t, err)
+				assert.Empty(t, files, "partial output must not leak or become a successful task")
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, model.TaskStatus(model.TaskStatusSuccess), restored.Status)
+			require.Len(t, restored.PrivateData.ImageAssets, tc.count)
+			var persisted dto.ImageResponse
+			require.NoError(t, common.Unmarshal(restored.Data, &persisted))
+			require.Len(t, persisted.Data, tc.count)
+			assert.NotContains(t, string(restored.Data), upstreamURL)
+			assert.NotContains(t, string(restored.Data), "b64_json")
+			router := gin.New()
+			router.GET("/v1/images/tasks/:task_id/signed-content", GetSignedImageTaskContent)
+			router.GET("/v1/images/tasks/:task_id/content", func(c *gin.Context) {
+				id, _ := strconv.Atoi(c.GetHeader("X-Test-User"))
+				c.Set("id", id)
+				GetImageTaskContent(c)
+			})
+			router.GET("/v1/images/tasks/:task_id", func(c *gin.Context) {
+				id, _ := strconv.Atoi(c.GetHeader("X-Test-User"))
+				c.Set("id", id)
+				GetImageTask(c)
+			})
+			query := httptest.NewRequest(http.MethodGet, service.BuildAsyncImageStatusURL(restored.TaskID), nil)
+			query.Header.Set("X-Test-User", "61")
+			recorder := httptest.NewRecorder()
+			router.ServeHTTP(recorder, query)
+			require.Equal(t, http.StatusOK, recorder.Code)
+			var response dto.ImageAsyncTaskResponse
+			require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &response))
+			require.Len(t, response.Data, tc.count)
+			assert.Equal(t, response.Data[0].Url, response.URL)
+			seen := map[string]bool{}
+			for i, item := range response.Data {
+				assert.False(t, seen[item.Url])
+				seen[item.Url] = true
+				assert.Equal(t, fmt.Sprintf("prompt %d", i), item.RevisedPrompt)
+				asset := restored.PrivateData.ImageAssets[i]
+				if tc.mixed && i%2 == 1 {
+					assert.Empty(t, asset.SourceURL)
+				} else {
+					assert.Equal(t, upstreamURL+"/image/"+strconv.Itoa(i), asset.SourceURL)
+				}
+				for _, target := range []string{item.Url, persisted.Data[i].Url} {
+					request := httptest.NewRequest(http.MethodGet, target, nil)
+					request.Header.Set("X-Test-User", "61")
+					result := httptest.NewRecorder()
+					router.ServeHTTP(result, request)
+					require.Equal(t, http.StatusOK, result.Code)
+					assert.Equal(t, images[i], result.Body.Bytes())
+				}
+			}
+			for _, target := range []string{response.ContentURL, service.BuildAsyncImageStatusURL(restored.TaskID)} {
+				request := httptest.NewRequest(http.MethodGet, target, nil)
+				request.Header.Set("X-Test-User", "99")
+				result := httptest.NewRecorder()
+				router.ServeHTTP(result, request)
+				assert.Equal(t, http.StatusNotFound, result.Code)
+			}
+			for _, index := range []string{"1", "-1", "999", "../image", ""} {
+				parsed, err := url.Parse(response.URL)
+				require.NoError(t, err)
+				q := parsed.Query()
+				q.Set("index", index)
+				parsed.RawQuery = q.Encode()
+				result := httptest.NewRecorder()
+				router.ServeHTTP(result, httptest.NewRequest(http.MethodGet, parsed.String(), nil))
+				assert.Equal(t, http.StatusUnauthorized, result.Code, "signature cannot be reused for another index")
+			}
+			// Historical single-image private data still resolves to the first image.
+			legacy := restored
+			legacy.PrivateData.ImageAssets = nil
+			legacyResponse := buildImageTaskResponse(&legacy)
+			require.Len(t, legacyResponse.Data, 1)
+			legacyURL, err := url.Parse(legacyResponse.URL)
+			require.NoError(t, err)
+			assert.True(t, service.VerifyAsyncImageToken(legacyURL.Query().Get("token"), &legacy))
+			if tc.retryDownload {
+				assert.EqualValues(t, 2, secondDownloads.Load())
+			}
+			// Compact large historical task payloads without truncating the group.
+			restored.Data = []byte(`{"b64_json":"` + strings.Repeat("A", 3000) + `"}`)
+			restored.PrivateData.ExpiresAt = time.Now().Unix() - 1
+			require.NoError(t, db.Save(&restored).Error)
+			result := httptest.NewRecorder()
+			router.ServeHTTP(result, httptest.NewRequest(http.MethodGet, response.URL, nil))
+			assert.Equal(t, http.StatusUnauthorized, result.Code, "expired content invalidates the token")
+			require.NoError(t, service.CleanupExpiredAsyncImages())
+			for _, asset := range restored.PrivateData.ImageAssets {
+				assert.NoFileExists(t, asset.LocalPath)
+			}
+			var cleaned model.Task
+			require.NoError(t, db.First(&cleaned, task.ID).Error)
+			require.NoError(t, common.Unmarshal(cleaned.Data, &persisted))
+			assert.Len(t, persisted.Data, tc.count)
+			assert.Empty(t, buildImageTaskResponse(&cleaned).Data)
+		})
+	}
+}
 
 func setupAsyncImageWorkerTestDB(t *testing.T) *gorm.DB {
 	t.Helper()

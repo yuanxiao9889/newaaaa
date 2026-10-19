@@ -198,7 +198,7 @@ func TestMidjourneyBillingErrorsRequireLocalProvenance(t *testing.T) {
 			assert.Equal(t, tc.wantCode, payload["error_code"])
 			assert.Equal(t, payload["description"], payload["message"])
 			assert.Contains(t, payload["message"], "["+tc.wantCode+"]")
-			assert.Contains(t, payload["message"], "billing-request-id")
+			assert.Equal(t, "billing-request-id", recorder.Header().Get("X-Request-Id"))
 			assert.NotContains(t, recorder.Body.String(), "private-")
 			assert.NotContains(t, recorder.Body.String(), "internal billing detail")
 			if tc.localCode == "" {

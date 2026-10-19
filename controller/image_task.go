@@ -110,7 +110,13 @@ func buildImageTaskResponse(task *model.Task) dto.ImageAsyncTaskResponse {
 		ExpiresAt:  service.GetAsyncImageExpiresAt(task),
 	}
 	if resp.Status == dto.ImageAsyncStatusSucceeded {
-		resp.URL, resp.URLExpiresAt = service.BuildSignedAsyncImageContentURL(task)
+		for i, asset := range service.GetAsyncImageAssets(task) {
+			imageURL, expiresAt := service.BuildSignedAsyncImageContentURLForIndex(task, i)
+			resp.Data = append(resp.Data, dto.ImageData{Url: imageURL, RevisedPrompt: asset.RevisedPrompt})
+			if i == 0 {
+				resp.URL, resp.URLExpiresAt = imageURL, expiresAt
+			}
+		}
 	}
 	if resp.Status == dto.ImageAsyncStatusFailed {
 		publicError := task.UserError()
@@ -176,7 +182,8 @@ func GetSignedImageTaskContent(c *gin.Context) {
 		imageTaskError(c, http.StatusNotFound, "task not found")
 		return
 	}
-	if !service.VerifyAsyncImageToken(c.Query("token"), task) {
+	index, indexErr := strconv.Atoi(c.DefaultQuery("index", "0"))
+	if indexErr != nil || !service.VerifyAsyncImageTokenForIndex(c.Query("token"), task, index) {
 		imageTaskError(c, http.StatusUnauthorized, "invalid image token")
 		return
 	}
@@ -185,6 +192,15 @@ func GetSignedImageTaskContent(c *gin.Context) {
 }
 
 func serveImageTaskContent(c *gin.Context, task *model.Task) {
+	index, err := strconv.Atoi(c.DefaultQuery("index", "0"))
+	if err != nil {
+		imageTaskError(c, http.StatusNotFound, "image content is unavailable")
+		return
+	}
+	serveImageTaskContentAtIndex(c, task, index)
+}
+
+func serveImageTaskContentAtIndex(c *gin.Context, task *model.Task, index int) {
 	status := service.GetAsyncImageTaskStatus(task)
 	switch status {
 	case dto.ImageAsyncStatusFailed:
@@ -202,12 +218,14 @@ func serveImageTaskContent(c *gin.Context, task *model.Task) {
 		return
 	}
 
-	if task.PrivateData.LocalPath == "" {
-		imageTaskError(c, http.StatusGone, "image content is unavailable")
+	assets := service.GetAsyncImageAssets(task)
+	if index < 0 || index >= len(assets) {
+		imageTaskError(c, http.StatusNotFound, "image content is unavailable")
 		return
 	}
+	asset := assets[index]
 
-	file, err := os.Open(task.PrivateData.LocalPath)
+	file, err := os.Open(asset.LocalPath)
 	if err != nil {
 		if os.IsNotExist(err) {
 			imageTaskError(c, http.StatusGone, "image content has expired")
@@ -224,7 +242,7 @@ func serveImageTaskContent(c *gin.Context, task *model.Task) {
 		return
 	}
 
-	mimeType := task.PrivateData.MimeType
+	mimeType := asset.MimeType
 	if mimeType == "" {
 		mimeType = "application/octet-stream"
 	}
@@ -235,6 +253,6 @@ func serveImageTaskContent(c *gin.Context, task *model.Task) {
 		c.Header("Cache-Control", "private, max-age=3600")
 	}
 	c.Header("X-Content-Type-Options", "nosniff")
-	c.Header("Content-Disposition", fmt.Sprintf("inline; filename=\"%s%s\"", task.TaskID, filepath.Ext(task.PrivateData.LocalPath)))
-	http.ServeContent(c.Writer, c.Request, filepath.Base(task.PrivateData.LocalPath), fileInfo.ModTime(), file)
+	c.Header("Content-Disposition", fmt.Sprintf("inline; filename=\"%s%s\"", task.TaskID, filepath.Ext(asset.LocalPath)))
+	http.ServeContent(c.Writer, c.Request, filepath.Base(asset.LocalPath), fileInfo.ModTime(), file)
 }

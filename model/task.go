@@ -23,6 +23,9 @@ type TaskStatus string
 // UserError derives a public diagnostic without changing the stored failure.
 // Retry details can retain a structured code after FailReason lost its envelope.
 func (t *Task) UserError() common.PublicError {
+	if t.Platform == constant.TaskPlatformMidjourney {
+		return common.MidjourneyPublicError("", t.FailReason, 0, false)
+	}
 	reason, _, _ := strings.Cut(t.FailReason, "\nAsync Channel Retry Path:")
 	publicError := common.ClassifyPublicError("", reason, 0, false)
 	if publicError.Code != "generation_failed" && publicError.Code != "content_safety_unknown" {
@@ -103,6 +106,15 @@ type Properties struct {
 	OriginModelName   string `json:"origin_model_name,omitempty"`
 }
 
+// AsyncImageAsset is one cached result in an async image task, in upstream order.
+type AsyncImageAsset struct {
+	LocalPath     string `json:"local_path"`
+	MimeType      string `json:"mime_type"`
+	FileSize      int64  `json:"file_size"`
+	SourceURL     string `json:"source_url,omitempty"`
+	RevisedPrompt string `json:"revised_prompt,omitempty"`
+}
+
 type TaskPrivateData struct {
 	Key            string `json:"key,omitempty"`
 	UpstreamTaskID string `json:"upstream_task_id,omitempty"` // 上游真实 task ID
@@ -117,13 +129,14 @@ type TaskPrivateData struct {
 	NodeName       string              `json:"node_name,omitempty"`       // 发起任务的节点名，轮询结算阶段据此归属日志而非最后查询节点
 	BillingContext *TaskBillingContext `json:"billing_context,omitempty"` // 计费参数快照（用于轮询阶段重新计算）
 
-	AssetType string `json:"asset_type,omitempty"`
-	LocalPath string `json:"local_path,omitempty"`
-	MimeType  string `json:"mime_type,omitempty"`
-	FileSize  int64  `json:"file_size,omitempty"`
-	StoredAt  int64  `json:"stored_at,omitempty"`
-	ExpiresAt int64  `json:"expires_at,omitempty"`
-	SourceURL string `json:"source_url,omitempty"`
+	AssetType   string            `json:"asset_type,omitempty"`
+	LocalPath   string            `json:"local_path,omitempty"`
+	MimeType    string            `json:"mime_type,omitempty"`
+	FileSize    int64             `json:"file_size,omitempty"`
+	StoredAt    int64             `json:"stored_at,omitempty"`
+	ExpiresAt   int64             `json:"expires_at,omitempty"`
+	SourceURL   string            `json:"source_url,omitempty"`
+	ImageAssets []AsyncImageAsset `json:"image_assets,omitempty"`
 
 	InternalAsync      bool                     `json:"internal_async,omitempty"`
 	RequestBodyPath    string                   `json:"request_body_path,omitempty"`

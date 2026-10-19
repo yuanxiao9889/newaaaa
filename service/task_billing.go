@@ -396,6 +396,9 @@ func RefundTaskQuota(ctx context.Context, task *model.Task, reason string) error
 	other := taskBillingOther(task)
 	other.SetPublic("task_id", task.TaskID)
 	other.SetPublic("reason", reason)
+	if task.Platform == constant.TaskPlatformMidjourney {
+		other.SetAdmin("midjourney_error", task.FailReason)
+	}
 	other.SetPublic("billing_state", TaskBillingStateRefunded)
 	other.SetPublic("pre_consumed_quota", quota)
 	other.SetPublic("actual_quota", 0)

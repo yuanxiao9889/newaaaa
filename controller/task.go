@@ -190,7 +190,16 @@ func projectTaskArtifacts(task *model.Task) ([]relaychannel.TaskArtifact, error)
 		return []relaychannel.TaskArtifact{}, nil
 	}
 	if task.Platform == constant.TaskPlatformInternalImage && task.PrivateData.AssetType == service.AsyncImageAssetType {
-		return []relaychannel.TaskArtifact{{Key: "image", Type: "image", MimeType: task.PrivateData.MimeType}}, nil
+		assets := service.GetAsyncImageAssets(task)
+		artifacts := make([]relaychannel.TaskArtifact, 0, len(assets))
+		for i, asset := range assets {
+			key := "image"
+			if i > 0 {
+				key = fmt.Sprintf("image-%d", i+1)
+			}
+			artifacts = append(artifacts, relaychannel.TaskArtifact{Key: key, Type: "image", MimeType: asset.MimeType})
+		}
+		return artifacts, nil
 	}
 	if !taskHasPluginExecution(task) {
 		return []relaychannel.TaskArtifact{}, nil
@@ -361,7 +370,15 @@ func TaskArtifactContent(c *gin.Context) {
 		return
 	}
 	if task.Platform == constant.TaskPlatformInternalImage && task.PrivateData.AssetType == service.AsyncImageAssetType {
-		if artifactKey != "image" {
+		artifacts, _ := projectTaskArtifacts(task)
+		index := -1
+		for i, artifact := range artifacts {
+			if artifact.Key == artifactKey {
+				index = i
+				break
+			}
+		}
+		if index < 0 {
 			writeTaskArtifactError(c, http.StatusNotFound, "artifact_not_found", "Task or artifact not found")
 			return
 		}
@@ -370,7 +387,9 @@ func TaskArtifactContent(c *gin.Context) {
 			return
 		}
 		c.Header("Cache-Control", "private, no-store")
-		serveImageTaskContent(c, task)
+		// The verified capability authorizes this artifact key only. A caller's
+		// image API query parameters must never select another cached image.
+		serveImageTaskContentAtIndex(c, task, index)
 		return
 	}
 	if !taskHasPluginExecution(task) {

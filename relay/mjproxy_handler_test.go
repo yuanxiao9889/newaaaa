@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/middleware"
 	"github.com/QuantumNous/new-api/model"
@@ -60,12 +61,22 @@ func setupMidjourneyQuotaDB(t *testing.T) *gorm.DB {
 		sqlDB.SetMaxOpenConns(1)
 	}
 	model.DB, model.LOG_DB = db, db
-	t.Setenv("LOG_SQL_DSN", "")
+	logDSN := os.Getenv("MJ_QUOTA_TEST_LOG_DSN")
+	if logDSN != "" {
+		require.Contains(t, logDSN, "mj_quota_test", "only a dedicated log test database is allowed")
+	}
+	t.Setenv("LOG_SQL_DSN", logDSN)
 	originalMaster := common.IsMasterNode
 	common.IsMasterNode = false
 	require.NoError(t, model.InitLogDB())
 	common.IsMasterNode = originalMaster
+	logSQLDB, err := model.LOG_DB.DB()
+	require.NoError(t, err)
 	t.Cleanup(func() {
+		if logSQLDB != sqlDB {
+			require.NoError(t, logSQLDB.Close())
+		}
+		require.NoError(t, os.Setenv("LOG_SQL_DSN", ""))
 		model.DB = originalDB
 		common.SetDatabaseTypes(originalMain, originalLog)
 		common.IsMasterNode = false
@@ -76,10 +87,14 @@ func setupMidjourneyQuotaDB(t *testing.T) *gorm.DB {
 		common.RedisEnabled, common.BatchUpdateEnabled, common.LogConsumeEnabled = originalRedis, originalBatch, originalLogEnabled
 		require.NoError(t, sqlDB.Close())
 	})
-	tables := []any{&model.User{}, &model.Token{}, &model.Channel{}, &model.Midjourney{}, &model.Task{}}
+	tables := []any{&model.User{}, &model.Token{}, &model.Channel{}, &model.Midjourney{}, &model.Task{}, &model.Log{}}
 	require.NoError(t, db.AutoMigrate(tables...))
 	for _, table := range tables {
 		require.NoError(t, db.Session(&gorm.Session{AllowGlobalUpdate: true}).Unscoped().Delete(table).Error)
+	}
+	if model.LOG_DB != db {
+		require.NoError(t, model.LOG_DB.AutoMigrate(&model.Log{}))
+		require.NoError(t, model.LOG_DB.Session(&gorm.Session{AllowGlobalUpdate: true}).Delete(&model.Log{}).Error)
 	}
 	var version string
 	query := "SELECT version()"
@@ -252,6 +267,120 @@ func TestMidjourneyConcurrentTokenQuota(t *testing.T) {
 	require.NoError(t, db.First(&got, token.Id).Error)
 	assert.Zero(t, got.RemainQuota)
 	assert.Equal(t, 200000, got.UsedQuota)
+}
+
+func TestMidjourneyFailureDiagnostics(t *testing.T) {
+	db := setupMidjourneyQuotaDB(t)
+	originalErrorLogs := constant.ErrorLogEnabled
+	constant.ErrorLogEnabled = true
+	t.Cleanup(func() { constant.ErrorLogEnabled = originalErrorLogs })
+	for i, tc := range []struct {
+		name, reason, want string
+		status             int
+		swap, async        bool
+	}{
+		{"prompt limit", "提示词过长,目前支持1024以下字符", "[input_too_large] 提示词过长,目前支持1024以下字符", 200, false, false},
+		{"parameter", "Invalid parameter: --ar must be 16:9 or 1:1", "[invalid_parameter] Invalid parameter: --ar must be 16:9 or 1:1", 400, false, false},
+		{"execution", "执行报错\n图片格式不支持，请使用 PNG", "[invalid_image_input] 执行报错\n图片格式不支持，请使用 PNG", 200, true, false},
+		{"redaction", "图片下载失败 https://private.invalid/image?token=secret mj-api-secret=hidden", "[image_download_failed] 图片下载失败 [URL REDACTED] [REDACTED]", 200, false, false},
+		{"provider quota", "insufficient quota (remaining 0)", "[service_quota_exceeded] 生成服务可用额度不足：insufficient quota (remaining 0)；请联系管理员处理服务额度；无需为此调整您的账户或令牌额度", 200, false, false},
+		{"async failure", "提示词过长,目前支持1024以下字符", "[input_too_large] 提示词过长,目前支持1024以下字符", 200, false, true},
+		{"empty failure", "", "[generation_failed] 生成失败，服务未提供可公开确认的具体原因；请联系管理员并提供请求 ID 或任务 ID，以查询详细错误", 200, false, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			name := fmt.Sprintf("mj-diagnostic-%d", i)
+			user := &model.User{Username: name, AffCode: name, Quota: 1000000, Status: common.UserStatusEnabled}
+			require.NoError(t, db.Create(user).Error)
+			token := &model.Token{UserId: user.Id, Key: name, RemainQuota: 1000000, Status: common.TokenStatusEnabled, ExpiredTime: -1}
+			require.NoError(t, db.Create(token).Error)
+			code, description := 4, tc.reason
+			if tc.async {
+				code, description = 1, "提交成功"
+			}
+			body, err := common.Marshal(dto.MidjourneyResponse{Code: code, Description: description, Result: name})
+			require.NoError(t, err)
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(tc.status)
+				_, _ = w.Write(body)
+			}))
+			defer server.Close()
+			recorder := httptest.NewRecorder()
+			ctx, _ := gin.CreateTestContext(recorder)
+			path, request, modelName := "/mj/submit/imagine", `{"prompt":"cat"}`, "mj_imagine"
+			mode := relayconstant.RelayModeMidjourneyImagine
+			if tc.swap {
+				path, request, modelName = "/mj/insight-face/swap", `{"sourceBase64":"source","targetBase64":"target"}`, "swap_face"
+				mode = relayconstant.RelayModeSwapFace
+			}
+			ctx.Request = httptest.NewRequest(http.MethodPost, path, strings.NewReader(request))
+			ctx.Request.Header.Set("Content-Type", "application/json")
+			ctx.Set("base_url", server.URL)
+			ctx.Set("channel_id", 1)
+			ctx.Set("id", user.Id)
+			ctx.Set("username", name)
+			info := &relaycommon.RelayInfo{UserId: user.Id, UserQuota: user.Quota, TokenId: token.Id, TokenKey: token.Key, OriginModelName: modelName, UsingGroup: "default", RelayMode: mode, StartTime: time.Now()}
+			if tc.swap {
+				require.Nil(t, RelaySwapFace(ctx, info))
+			} else {
+				require.Nil(t, RelayMidjourneySubmit(ctx, info))
+			}
+			assert.Equal(t, tc.status, recorder.Code)
+			if !tc.async {
+				var response map[string]any
+				require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &response))
+				assert.Equal(t, float64(4), response["code"])
+				assert.Equal(t, tc.want, response["description"])
+				assert.Equal(t, tc.want, response["message"])
+			}
+			var mj model.Midjourney
+			require.NoError(t, db.Where("mj_id = ?", name).First(&mj).Error)
+			logType := model.LogTypeError
+			if tc.async {
+				var task model.Task
+				require.NoError(t, db.Where("task_id = ?", name).First(&task).Error)
+				update := dto.MidjourneyDto{Status: "FAILURE", FailReason: tc.reason, Progress: "100%"}
+				require.True(t, service.ApplyMidjourneyUpdateToAsyncTask(&task, update))
+				require.NoError(t, task.Update())
+				assert.Equal(t, tc.want, TaskModel2DtoWithOptions(&task, false, false).FailReason)
+				assert.Equal(t, tc.reason, TaskModel2DtoWithOptions(&task, false, true).FailReason)
+				require.NoError(t, service.RefundTaskQuota(ctx, &task, "构图失败"))
+				mj.Status, mj.FailReason = "FAILURE", tc.reason
+				require.NoError(t, mj.Update())
+				logType = model.LogTypeRefund
+			}
+			assert.Equal(t, tc.reason, mj.FailReason, "administrator diagnostics remain intact")
+			assert.Equal(t, "FAILURE", mj.Status)
+			assert.Equal(t, tc.want, mj.UserFailReason(), "drawing log diagnostic")
+			legacy := mj
+			legacy.Status = ""
+			assert.Equal(t, tc.want, legacy.UserFailReason(), "historical rejected submissions without a status")
+			fetchRecorder := httptest.NewRecorder()
+			fetch, _ := gin.CreateTestContext(fetchRecorder)
+			fetch.Request = httptest.NewRequest(http.MethodGet, "/mj/task/"+name+"/fetch", nil)
+			fetch.Params = gin.Params{{Key: "id", Value: name}}
+			fetch.Set("id", user.Id)
+			require.Nil(t, RelayMidjourneyTask(fetch, relayconstant.RelayModeMidjourneyTaskFetch))
+			var fetched dto.MidjourneyDto
+			require.NoError(t, common.Unmarshal(fetchRecorder.Body.Bytes(), &fetched))
+			assert.Equal(t, tc.want, fetched.FailReason)
+			assert.Equal(t, tc.want, fetched.Description)
+			logs, total, err := model.GetUserLogs(user.Id, logType, 0, 0, "", "", 0, 10, "", "", "")
+			require.NoError(t, err)
+			require.Equal(t, int64(1), total)
+			require.Len(t, logs, 1)
+			assert.Equal(t, tc.want, logs[0].Content)
+			assert.NotContains(t, logs[0].Other, "admin_info")
+			var stored model.Log
+			require.NoError(t, model.LOG_DB.Where("user_id = ? AND type = ?", user.Id, logType).First(&stored).Error)
+			var metadata struct {
+				AdminInfo struct {
+					Reason string `json:"midjourney_error"`
+				} `json:"admin_info"`
+			}
+			require.NoError(t, common.UnmarshalJsonStr(stored.Other, &metadata))
+			assert.Equal(t, tc.reason, metadata.AdminInfo.Reason)
+		})
+	}
 }
 
 func TestMidjourneyExhaustedTokenResponse(t *testing.T) {

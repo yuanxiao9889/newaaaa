@@ -18,10 +18,15 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { render, screen } from '@testing-library/react'
-import { describe, expect, test } from 'vitest'
+import userEvent from '@testing-library/user-event'
+import { afterEach, describe, expect, test, vi } from 'vitest'
 
+import { getTaskArtifacts } from '../../api'
 import type { TaskLog } from '../../types'
 import { TaskArtifactsCell } from '../task-artifacts'
+
+vi.mock('../../api', () => ({ getTaskArtifacts: vi.fn() }))
+afterEach(() => vi.clearAllMocks())
 
 function taskLog(overrides: Partial<TaskLog> = {}): TaskLog {
   return {
@@ -58,6 +63,30 @@ function renderCell(log: TaskLog) {
 }
 
 describe('task artifacts cell', () => {
+  test('opening a four-image task shows four previews and distinct download buttons', async () => {
+    const artifacts = Array.from({ length: 4 }, (_, index) => ({
+      key: index === 0 ? 'image' : `image-${index + 1}`,
+      type: 'image' as const,
+      mime_type: 'image/png',
+      content_url: `https://gateway.example/artifact-${index + 1}`,
+    }))
+    vi.mocked(getTaskArtifacts).mockResolvedValue({ artifacts })
+    renderCell(taskLog({ platform: 'internal_image', admin_info: undefined }))
+
+    expect(getTaskArtifacts).not.toHaveBeenCalled()
+    await userEvent.click(screen.getByRole('button', { name: 'Artifacts' }))
+
+    const downloads = await screen.findAllByRole('button', { name: 'Download' })
+    expect(downloads).toHaveLength(4)
+    for (const [index, artifact] of artifacts.entries()) {
+      expect(downloads[index]).toHaveAttribute('href', artifact.content_url)
+      expect(screen.getByRole('img', { name: artifact.key })).toHaveAttribute(
+        'src',
+        artifact.content_url
+      )
+    }
+  })
+
   test('given a synchronous result the gateway did not retain, a hint replaces the artifacts button', () => {
     renderCell(taskLog({ result_discarded: true }))
 

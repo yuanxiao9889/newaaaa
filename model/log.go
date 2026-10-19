@@ -166,21 +166,40 @@ func formatUserLogs(logs []*Log, startIdx int) {
 		logs[i].UpstreamRequestId = ""
 		logs[i].Group = ""
 		var publicError *common.PublicError
+		var diagnostic struct {
+			Code        string `json:"error_code"`
+			Type        string `json:"error_type"`
+			Status      int    `json:"status_code"`
+			RequestPath string `json:"request_path"`
+			AdminInfo   struct {
+				MidjourneyError *string `json:"midjourney_error"`
+			} `json:"admin_info"`
+		}
+		_ = common.UnmarshalJsonStr(logs[i].Other, &diagnostic)
+		path := strings.TrimPrefix(diagnostic.RequestPath, "/")
+		_, modePath, _ := strings.Cut(path, "/")
+		isMidjourney := diagnostic.AdminInfo.MidjourneyError != nil || strings.HasPrefix(path, "mj/") || strings.HasPrefix(modePath, "mj/")
 		// Free-form relay and settlement text can embed provider identities,
 		// retry paths and upstream payloads, including in historical logs.
 		switch logs[i].Type {
 		case LogTypeError:
-			var diagnostic struct {
-				Code   string `json:"error_code"`
-				Type   string `json:"error_type"`
-				Status int    `json:"status_code"`
-			}
-			_ = common.UnmarshalJsonStr(logs[i].Other, &diagnostic)
 			classified := common.ClassifyPublicError(diagnostic.Code, logs[i].Content, diagnostic.Status, diagnostic.Type == "new_api_error")
+			if isMidjourney {
+				reason := logs[i].Content
+				if diagnostic.AdminInfo.MidjourneyError != nil {
+					reason = *diagnostic.AdminInfo.MidjourneyError
+				}
+				classified = common.MidjourneyPublicError(diagnostic.Code, reason, 0, diagnostic.Type == "new_api_error")
+			}
 			publicError = &classified
 			logs[i].Content = classified.Summary()
 		case LogTypeConsume, LogTypeRefund, LogTypePreConsumeRollback:
 			logs[i].Content = ""
+			if logs[i].Type != LogTypeConsume && diagnostic.AdminInfo.MidjourneyError != nil {
+				classified := common.MidjourneyPublicError("", *diagnostic.AdminInfo.MidjourneyError, 0, false)
+				publicError = &classified
+				logs[i].Content = classified.Summary()
+			}
 		}
 		logs[i].Other = formatLogOtherJSON(logs[i].Other, logOtherVisibilityUser, logs[i].Type)
 		if publicError != nil {

@@ -50,10 +50,43 @@ type storedAsyncImageTaskItem struct {
 }
 
 type asyncImageTokenPayload struct {
-	TaskID    string `json:"task_id"`
-	UserID    int    `json:"user_id"`
-	ExpiresAt int64  `json:"expires_at"`
-	StoredAt  int64  `json:"stored_at"`
+	TaskID     string `json:"task_id"`
+	UserID     int    `json:"user_id"`
+	ExpiresAt  int64  `json:"expires_at"`
+	StoredAt   int64  `json:"stored_at"`
+	ImageIndex int    `json:"image_index,omitempty"`
+}
+
+// GetAsyncImageAssets also reads tasks stored before multi-image support.
+func GetAsyncImageAssets(task *model.Task) []model.AsyncImageAsset {
+	if task == nil {
+		return nil
+	}
+	if len(task.PrivateData.ImageAssets) > 0 {
+		return task.PrivateData.ImageAssets
+	}
+	if task.PrivateData.LocalPath == "" {
+		return nil
+	}
+	return []model.AsyncImageAsset{{
+		LocalPath: task.PrivateData.LocalPath, MimeType: task.PrivateData.MimeType,
+		FileSize: task.PrivateData.FileSize, SourceURL: task.PrivateData.SourceURL,
+	}}
+}
+
+func BuildStoredAsyncImageResultsData(task *model.Task, created int64) []byte {
+	assets := GetAsyncImageAssets(task)
+	data := storedAsyncImageTaskData{Created: created, Data: make([]storedAsyncImageTaskItem, 0, len(assets))}
+	for i, asset := range assets {
+		data.Data = append(data.Data, storedAsyncImageTaskItem{
+			URL: BuildAsyncImageContentURLForIndex(task.TaskID, i), RevisedPrompt: asset.RevisedPrompt,
+		})
+	}
+	body, err := common.Marshal(data)
+	if err != nil {
+		return nil
+	}
+	return body
 }
 
 func IsImageTaskAction(action string) bool {
@@ -122,24 +155,48 @@ func BuildAsyncImageContentURL(taskID string) string {
 	return joinAsyncImageURL(fmt.Sprintf("/v1/images/tasks/%s/content", taskID))
 }
 
+func BuildAsyncImageContentURLForIndex(taskID string, index int) string {
+	contentURL := BuildAsyncImageContentURL(taskID)
+	if index > 0 {
+		contentURL += "?index=" + strconv.Itoa(index)
+	}
+	return contentURL
+}
+
 func BuildAsyncImageSignedContentURL(taskID string) string {
 	return joinAsyncImageURL(fmt.Sprintf("/v1/images/tasks/%s/signed-content", taskID))
 }
 
 func BuildSignedAsyncImageContentURL(task *model.Task) (string, int64) {
+	return BuildSignedAsyncImageContentURLForIndex(task, 0)
+}
+
+func BuildSignedAsyncImageContentURLForIndex(task *model.Task, index int) (string, int64) {
+	if index < 0 || index >= len(GetAsyncImageAssets(task)) {
+		return "", 0
+	}
 	urlExpiresAt := asyncImageSignedURLExpiresAt(task, time.Now())
 	if urlExpiresAt <= 0 {
 		return "", 0
 	}
-	token := signAsyncImageToken(task, urlExpiresAt)
+	token := signAsyncImageToken(task, urlExpiresAt, index)
 	if token == "" {
 		return "", 0
 	}
-	return BuildAsyncImageSignedContentURL(task.TaskID) + "?token=" + url.QueryEscape(token), urlExpiresAt
+	contentURL := BuildAsyncImageSignedContentURL(task.TaskID) + "?token=" + url.QueryEscape(token)
+	if index > 0 {
+		contentURL += "&index=" + strconv.Itoa(index)
+	}
+	return contentURL, urlExpiresAt
 }
 
 func VerifyAsyncImageToken(token string, task *model.Task) bool {
+	return VerifyAsyncImageTokenForIndex(token, task, 0)
+}
+
+func VerifyAsyncImageTokenForIndex(token string, task *model.Task, index int) bool {
 	if task == nil ||
+		index < 0 || index >= len(GetAsyncImageAssets(task)) ||
 		task.PrivateData.AssetType != AsyncImageAssetType ||
 		task.PrivateData.LocalPath == "" ||
 		strings.TrimSpace(token) == "" {
@@ -164,6 +221,7 @@ func VerifyAsyncImageToken(token string, task *model.Task) bool {
 		return false
 	}
 	if payload.TaskID != task.TaskID ||
+		payload.ImageIndex != index ||
 		payload.UserID != task.UserId ||
 		payload.StoredAt != task.PrivateData.StoredAt ||
 		payload.ExpiresAt <= time.Now().Unix() ||
@@ -229,15 +287,16 @@ func asyncImageSignedURLExpiresAt(task *model.Task, now time.Time) int64 {
 	return expiresAt
 }
 
-func signAsyncImageToken(task *model.Task, expiresAt int64) string {
+func signAsyncImageToken(task *model.Task, expiresAt int64, index int) string {
 	if task == nil || expiresAt <= 0 {
 		return ""
 	}
 	payload := asyncImageTokenPayload{
-		TaskID:    task.TaskID,
-		UserID:    task.UserId,
-		ExpiresAt: expiresAt,
-		StoredAt:  task.PrivateData.StoredAt,
+		TaskID:     task.TaskID,
+		UserID:     task.UserId,
+		ExpiresAt:  expiresAt,
+		StoredAt:   task.PrivateData.StoredAt,
+		ImageIndex: index,
 	}
 	payloadJSON, err := common.Marshal(payload)
 	if err != nil {
@@ -294,11 +353,16 @@ func IsAsyncImageExpired(task *model.Task) bool {
 	if time.Now().Unix() >= task.PrivateData.ExpiresAt {
 		return true
 	}
-	if task.PrivateData.LocalPath == "" {
+	assets := GetAsyncImageAssets(task)
+	if len(assets) == 0 {
 		return true
 	}
-	_, err := os.Stat(task.PrivateData.LocalPath)
-	return err != nil
+	for _, asset := range assets {
+		if _, err := os.Stat(asset.LocalPath); err != nil {
+			return true
+		}
+	}
+	return false
 }
 
 func GetAsyncImageStoragePath() string {
@@ -311,6 +375,62 @@ func GetAsyncImageRetention() time.Duration {
 
 func GetAsyncImageCleanupInterval() time.Duration {
 	return time.Duration(common.GetEnvOrDefault("ASYNC_IMAGE_CLEANUP_INTERVAL_MINUTES", 10)) * time.Minute
+}
+
+// StoreAsyncImageResults publishes the complete group only after every image
+// has been downloaded and validated. Download retries never resubmit generation.
+func StoreAsyncImageResults(task *model.Task, proxy string, resp dto.ImageResponse) error {
+	if task == nil {
+		return fmt.Errorf("task is nil")
+	}
+	assets := make([]model.AsyncImageAsset, 0, len(resp.Data))
+	complete := false
+	defer func() {
+		if !complete {
+			for _, asset := range assets {
+				_ = os.Remove(asset.LocalPath)
+			}
+		}
+	}()
+	var first model.TaskPrivateData
+	for _, item := range resp.Data {
+		ref := strings.TrimSpace(item.Url)
+		if ref == "" {
+			ref = strings.TrimSpace(item.B64Json)
+		}
+		if ref == "" {
+			continue
+		}
+		stored := &model.Task{TaskID: task.TaskID}
+		if len(assets) > 0 {
+			stored.TaskID += "-" + strconv.Itoa(len(assets))
+		}
+		if err := StoreAsyncImageResult(stored, proxy, ref); err != nil {
+			return fmt.Errorf("store image %d failed: %w", len(assets), err)
+		}
+		if len(assets) == 0 {
+			first = stored.PrivateData
+		}
+		assets = append(assets, model.AsyncImageAsset{
+			LocalPath: stored.PrivateData.LocalPath, MimeType: stored.PrivateData.MimeType,
+			FileSize: stored.PrivateData.FileSize, SourceURL: stored.PrivateData.SourceURL,
+			RevisedPrompt: item.RevisedPrompt,
+		})
+	}
+	if len(assets) == 0 {
+		return fmt.Errorf("upstream returned no image result")
+	}
+	task.PrivateData.ImageAssets = assets
+	task.PrivateData.AssetType = first.AssetType
+	task.PrivateData.LocalPath = first.LocalPath
+	task.PrivateData.MimeType = first.MimeType
+	task.PrivateData.FileSize = first.FileSize
+	task.PrivateData.StoredAt = first.StoredAt
+	task.PrivateData.ExpiresAt = first.ExpiresAt
+	task.PrivateData.SourceURL = first.SourceURL
+	task.PrivateData.ResultURL = first.ResultURL
+	complete = true
+	return nil
 }
 
 func StoreAsyncImageResult(task *model.Task, proxy string, assetRef string) error {
@@ -407,8 +527,8 @@ func cleanupExpiredSuccessfulAsyncImages(now int64, batchSize int) error {
 			if task.PrivateData.ExpiresAt <= 0 || task.PrivateData.ExpiresAt > now {
 				continue
 			}
-			if task.PrivateData.LocalPath != "" {
-				if err := os.Remove(task.PrivateData.LocalPath); err != nil && !os.IsNotExist(err) {
+			for _, asset := range GetAsyncImageAssets(task) {
+				if err := os.Remove(asset.LocalPath); err != nil && !os.IsNotExist(err) {
 					common.SysError(fmt.Sprintf("remove expired async image %s failed: %s", task.TaskID, err.Error()))
 				}
 			}
@@ -465,7 +585,11 @@ func compactExpiredAsyncImageTaskData(task *model.Task) error {
 	var data []byte
 	switch task.Status {
 	case model.TaskStatusSuccess:
-		data = BuildStoredAsyncImageTaskData(dto.ImageResponse{Created: task.FinishTime}, task.PrivateData.ResultURL)
+		if len(task.PrivateData.ImageAssets) > 0 {
+			data = BuildStoredAsyncImageResultsData(task, task.FinishTime)
+		} else {
+			data = BuildStoredAsyncImageTaskData(dto.ImageResponse{Created: task.FinishTime}, task.PrivateData.ResultURL)
+		}
 	case model.TaskStatusFailure:
 		data = BuildFailedAsyncImageTaskData(task)
 	default:

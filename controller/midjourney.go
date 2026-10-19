@@ -338,6 +338,7 @@ func refundLegacyMidjourneyTask(ctx context.Context, task *model.Midjourney) {
 	other := model.NewLogOther()
 	other.SetPublic("task_id", task.MjId)
 	other.SetPublic("reason", "构图失败")
+	other.SetAdmin("midjourney_error", task.FailReason)
 	other.SetPublic("unattributed_refund", true)
 	if err := model.RecordTaskBillingLog(model.RecordTaskBillingLogParams{
 		UserId:    task.UserId,
@@ -392,6 +393,7 @@ func GetUserMidjourney(c *gin.Context) {
 	total := model.CountAllUserTask(userId, queryParams)
 
 	for _, task := range items {
+		failReason := task.UserFailReason()
 		task.ChannelId = 0
 		task.Properties = ""
 		task.Buttons = ""
@@ -403,11 +405,7 @@ func GetUserMidjourney(c *gin.Context) {
 		if task.ImageUrl != "" {
 			task.ImageUrl = system_setting.ServerAddress + "/mj/image/" + task.MjId
 		}
-		if task.Status == "FAILURE" {
-			task.FailReason = common.ClassifyPublicError("", task.FailReason, 0, false).Summary()
-		} else {
-			task.FailReason = ""
-		}
+		task.FailReason = failReason
 	}
 	pageInfo.SetTotal(int(total))
 	pageInfo.SetItems(items)

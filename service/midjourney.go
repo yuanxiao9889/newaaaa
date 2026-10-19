@@ -31,6 +31,45 @@ func CovertMjpActionToModelName(mjAction string) string {
 	return modelName
 }
 
+// WriteMidjourneyError uses the same diagnostic as task and log views while
+// retaining the original response for administrators. HTTP and MJ business
+// status codes stay separate, including business failures returned with HTTP 200.
+func WriteMidjourneyError(c *gin.Context, response *dto.MidjourneyResponse, status int, info *relaycommon.RelayInfo) {
+	reason := response.Description
+	public := common.MidjourneyPublicError(response.LocalErrorCode, reason, 0, response.LocalErrorCode != "")
+	if response.LocalErrorCode != "" {
+		status = public.StatusCode
+	}
+	errorType := "upstream_error"
+	if response.LocalErrorCode != "" {
+		errorType = "new_api_error"
+	}
+	userID, tokenID := c.GetInt("id"), c.GetInt("token_id")
+	modelName, group := c.GetString("original_model"), c.GetString("group")
+	if info != nil {
+		userID, tokenID = info.UserId, info.TokenId
+		modelName, group = info.OriginModelName, info.UsingGroup
+	}
+	if constant.ErrorLogEnabled && userID > 0 {
+		other := model.NewLogOther()
+		other.SetPublic("error_type", errorType)
+		other.SetPublic("error_code", response.LocalErrorCode)
+		other.SetPublic("status_code", status)
+		other.SetAdmin("midjourney_error", reason)
+		other.SetAdmin("midjourney_response", response)
+		AppendRelayLogAdminInfo(c, info, other)
+		model.RecordErrorLog(c, userID, c.GetInt("channel_id"), modelName, c.GetString("token_name"), reason, tokenID, 0, false, group, other)
+	}
+	c.Header("X-Error-Code", public.Code)
+	if requestID := c.GetString(common.RequestIdKey); requestID != "" {
+		c.Header("X-Request-Id", requestID)
+	}
+	c.JSON(status, gin.H{
+		"code": response.Code, "error_code": public.Code, "type": errorType,
+		"description": public.Summary(), "message": public.Summary(),
+	})
+}
+
 // PreConsumeMidjourneyTaskBilling reserves the full fixed price before sending
 // the request upstream. Legacy Midjourney tasks are billed from the wallet.
 func PreConsumeMidjourneyTaskBilling(c *gin.Context, info *relaycommon.RelayInfo, quota int) (*BillingSession, *dto.MidjourneyResponse) {
@@ -138,6 +177,7 @@ func RefundMidjourneyQuota(ctx context.Context, task *model.Midjourney, reason s
 	other := model.NewLogOther()
 	other.SetPublic("task_id", task.MjId)
 	other.SetPublic("reason", reason)
+	other.SetAdmin("midjourney_error", task.FailReason)
 	model.RecordTaskBillingLog(model.RecordTaskBillingLogParams{
 		UserId:    task.UserId,
 		LogType:   model.LogTypeRefund,

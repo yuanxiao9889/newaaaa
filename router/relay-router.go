@@ -72,6 +72,7 @@ func SetRelayRouter(router *gin.Engine) {
 	relayV1Router.Use(middleware.RouteTag("relay"))
 	relayV1Router.Use(middleware.SystemPerformanceCheck())
 	relayV1Router.Use(middleware.TokenAuth())
+	relayV1Router.Use(middleware.ResolveReferenceAssets())
 	{
 		// Responses WebSocket route. Channel selection happens after the first
 		// response.create event; each event runs the ordinary request limiter.
@@ -91,6 +92,10 @@ func SetRelayRouter(router *gin.Engine) {
 	imageUploadRouter.Use(middleware.SystemPerformanceCheck())
 	imageUploadRouter.Use(middleware.TokenAuth())
 	imageUploadRouter.POST("/images", controller.RelayImageUpload)
+	imageUploadRouter.GET("/references/capabilities", controller.ReferenceUploadCapabilities)
+	imageUploadRouter.POST("/references/prepare", middleware.ReferenceUploadRateLimit(), controller.PrepareReferenceUpload)
+	imageUploadRouter.POST("/references/complete", middleware.ReferenceUploadRateLimit(), controller.CompleteReferenceUpload)
+	router.GET("/v1/uploads/references/content/:user/:asset", controller.GetReferenceContent)
 	{
 		//http router
 		httpRouter := relayV1Router.Group("")
@@ -228,6 +233,7 @@ func SetRelayRouter(router *gin.Engine) {
 	relayGeminiRouter.Use(middleware.SystemPerformanceCheck())
 	relayGeminiRouter.Use(middleware.TokenAuth())
 	relayGeminiRouter.Use(middleware.ModelRequestRateLimit())
+	relayGeminiRouter.Use(middleware.ResolveReferenceAssets())
 	relayGeminiRouter.Use(middleware.Distribute())
 	{
 		// Gemini API 路径格式: /v1beta/models/{model_name}:{action}
@@ -241,7 +247,7 @@ func registerMjRouterGroup(relayMjRouter *gin.RouterGroup) {
 	relayMjRouter.GET("/image/:id", relay.RelayMidjourneyImage)
 	relayMjRouter.GET("/upload/:id", controller.RelayMidjourneyUploadImage)
 	relayMjRouter.POST("/submit/upload-discord-images", middleware.TokenAuth(), controller.RelayMidjourneyUpload)
-	relayMjRouter.Use(middleware.TokenAuth(), middleware.Distribute())
+	relayMjRouter.Use(middleware.TokenAuth(), middleware.ResolveReferenceAssets(), middleware.Distribute())
 	{
 		relayMjRouter.POST("/submit/action", controller.RelayMidjourney)
 		relayMjRouter.POST("/submit/shorten", controller.RelayMidjourney)

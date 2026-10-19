@@ -247,7 +247,7 @@ func TestResponsesWSRequestRunnerUsesExistingMemoryRateLimit(t *testing.T) {
 	apiError := runner(httptest.NewRequest(http.MethodPost, "/v1/responses", nil), "limited", handle)
 	require.NotNil(t, apiError)
 	assert.Equal(t, http.StatusTooManyRequests, apiError.StatusCode)
-	assert.Equal(t, http.StatusText(http.StatusTooManyRequests), apiError.Error())
+	assert.Equal(t, common.MessageWithRequestId("[rate_limit_exceeded] 请求过于频繁或当前并发数已达上限；请降低并发并稍后重试", "limited"), apiError.Error())
 	assert.Equal(t, 1, called)
 }
 
