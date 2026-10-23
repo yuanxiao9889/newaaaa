@@ -33,6 +33,9 @@ func init() {
 }
 
 func captureVideoTaskRetry(c *gin.Context, info *relaycommon.RelayInfo) *model.VideoTaskRetryState {
+	if c.GetString("transfer_execution_id") != "" {
+		return nil
+	}
 	if common.RetryTimes <= 0 || info.TaskRelayInfo == nil || info.LockedChannel != nil || info.OriginTaskID != "" || len(info.OriginTasks) > 0 || service.ShouldSkipRetryAfterChannelAffinityFailure(c) {
 		return nil
 	}
@@ -105,6 +108,9 @@ func buildVideoTaskRetryContext(ctx context.Context, task *model.Task) (*gin.Con
 	}
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
 	c.Request = req
+	if task.PrivateData.TransferExecutionID != "" {
+		c.Set("transfer_execution_id", task.PrivateData.TransferExecutionID)
+	}
 	c.Request.Header.Set("Content-Type", retry.ContentType)
 	c.Request.Header.Set("Accept", retry.Accept)
 	c.Set(common.KeyRequestBody, retry.Body)
@@ -191,7 +197,7 @@ func buildVideoTaskRetryContext(ctx context.Context, task *model.Task) (*gin.Con
 }
 
 func canRetryVideoTask(task *model.Task, failure *relaycommon.TaskInfo, now int64) bool {
-	if task == nil {
+	if task == nil || task.PrivateData.TransferExecutionID != "" {
 		return false
 	}
 	retry := task.PrivateData.VideoRetry

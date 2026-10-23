@@ -1,4 +1,6 @@
 import {
+  pendingVideoModels,
+  pendingVideoNote,
   videoCommonParameters,
   videoGroups,
   videoGuideKeys,
@@ -37,6 +39,9 @@ export function buildVideoMarkdown(
         `- ${translate('apiDocs.video.resolution')}: ${variant.resolution}`,
         `- ${translate('apiDocs.video.ratios')}: ${variant.ratios}`,
         `- ${translate(variant.limits)}`,
+        '```json',
+        JSON.stringify(variant.constraints, null, 2),
+        '```',
         ''
       )
     }
@@ -90,6 +95,10 @@ export function buildVideoMarkdown(
     )
   }
   lines.push(
+    '',
+    `## ${translate('Model mappings to confirm')}`,
+    translate(pendingVideoNote),
+    ...pendingVideoModels.map((model) => `- ${model}`),
     '',
     `## ${translate('apiDocs.video.legacy')}`,
     '',

@@ -626,6 +626,31 @@ func BuildTaskUsageDetails(usage *dto.Usage) *dto.TaskUsageDetails {
 	}
 }
 
+// captureTaskTokenUsage stages delivery before the terminal status CAS. If the
+// process stops before final settlement, successful upstream usage is still
+// recoverable without replaying any funding or quota adjustment.
+func captureTaskTokenUsage(task *model.Task, usage *dto.Usage) {
+	if usage == nil {
+		return
+	}
+	task.PrivateData.PromptTokens = usage.PromptTokens
+	task.PrivateData.CompletionTokens = usage.CompletionTokens
+	task.PrivateData.TotalTokens = usage.TotalTokens
+	task.PrivateData.UsageDetails = BuildTaskUsageDetails(usage)
+	if task.PrivateData.GetUsageAccountingMode() != model.TaskUsageAccountingSubmit || task.PrivateData.TokenUsageLogged || task.PrivateData.PendingUsageLog != nil ||
+		(usage.TotalTokens == 0 && usage.PromptTokens == 0 && usage.CompletionTokens == 0) {
+		return
+	}
+	other := taskBillingOther(task)
+	other.SetPublic("is_task", true)
+	other.SetPublic("task_id", task.TaskID)
+	task.PrivateData.PendingUsageLog = &model.TaskUsageLog{
+		ModelName: taskModelName(task), Other: other.JSONString(),
+		PromptTokens: usage.PromptTokens, CompletionTokens: usage.CompletionTokens,
+		UseTimeSeconds: taskBillingUseTimeSeconds(task), ExportQuotaData: common.DataExportEnabled,
+	}
+}
+
 func ensureTaskBillingSnapshot(task *model.Task) {
 	if task == nil {
 		return
@@ -642,9 +667,7 @@ func persistTaskBillingSnapshot(ctx context.Context, task *model.Task) error {
 	if task == nil || task.ID <= 0 {
 		return nil
 	}
-	err := model.DB.Model(&model.Task{}).
-		Where("id = ?", task.ID).
-		Update("private_data", task.PrivateData).Error
+	err := model.PersistTaskBillingSnapshot(ctx, task)
 	if err != nil {
 		logger.LogWarn(ctx, fmt.Sprintf("更新任务计费快照失败 task %s: %s", task.TaskID, err.Error()))
 	}
@@ -698,6 +721,9 @@ func ConfirmTaskBillingSettled(ctx context.Context, task *model.Task, actualQuot
 		return nil
 	}
 	if task.PrivateData.BillingState == TaskBillingStateSettled {
+		if task.PrivateData.PendingUsageLog != nil {
+			return model.MergeTaskUsageLog(ctx, task)
+		}
 		return nil
 	}
 	if task.PrivateData.BillingState == TaskBillingStateRefunded {
@@ -724,27 +750,18 @@ func ConfirmTaskBillingSettled(ctx context.Context, task *model.Task, actualQuot
 		usedQuotaDelta = 0
 		requestCountDelta = 0
 	}
-	if err := model.ApplyTaskBillingAccounting(task, usedQuotaDelta, requestCountDelta); err != nil {
-		task.PrivateData = previousPrivateData
-		markTaskBillingError(ctx, task, "persist final task accounting failed: "+err.Error())
-		return err
-	}
 	logQuota := actualQuota
 	usageOnly := task.PrivateData.GetUsageAccountingMode() == model.TaskUsageAccountingSubmit
+	recordUsage := true
 	if usageOnly {
 		if task.PrivateData.TokenUsageLogged || (task.PrivateData.TotalTokens == 0 && task.PrivateData.PromptTokens == 0 && task.PrivateData.CompletionTokens == 0) {
-			return nil
+			recordUsage = false
 		}
-		// The submit log already accounted for the charge. Record late usage
-		// without charging or incrementing the request count a second time.
+		// Merge late usage into the charge already recorded at submission.
 		logQuota = 0
-		content = "异步任务用量补录"
 	}
 
 	other := taskBillingOther(task)
-	if usageOnly {
-		other.SetPublic("usage_only", true)
-	}
 	other.SetPublic("is_task", true)
 	other.SetPublic("task_id", task.TaskID)
 	other.SetPublic("billing_state", TaskBillingStateSettled)
@@ -753,8 +770,7 @@ func ConfirmTaskBillingSettled(ctx context.Context, task *model.Task, actualQuot
 	for _, clamp := range clamps {
 		attachQuotaSaturationToOther(other, clamp)
 	}
-	if err := model.RecordTaskBillingLog(model.RecordTaskBillingLogParams{
-		UsageOnly:        usageOnly,
+	logParams := model.RecordTaskBillingLogParams{
 		UserId:           task.UserId,
 		LogType:          model.LogTypeConsume,
 		Content:          content,
@@ -768,7 +784,38 @@ func ConfirmTaskBillingSettled(ctx context.Context, task *model.Task, actualQuot
 		UseTimeSeconds:   taskBillingUseTimeSeconds(task),
 		Other:            other,
 		NodeName:         task.PrivateData.NodeName,
-	}); err != nil {
+	}
+	// Commit a durable delivery checkpoint with settlement. Recovery only
+	// merges logs/statistics; it never re-enters funding reconciliation.
+	if usageOnly && recordUsage && task.PrivateData.PendingUsageLog == nil {
+		task.PrivateData.PendingUsageLog = &model.TaskUsageLog{
+			ModelName: logParams.ModelName, Other: other.JSONString(),
+			PromptTokens: logParams.PromptTokens, CompletionTokens: logParams.CompletionTokens,
+			UseTimeSeconds: logParams.UseTimeSeconds, ExportQuotaData: common.DataExportEnabled,
+		}
+	}
+	var accountingErr error
+	if usageOnly {
+		accountingErr = model.SettleSubmittedTaskUsage(ctx, task)
+	} else {
+		accountingErr = model.ApplyTaskBillingAccounting(task, usedQuotaDelta, requestCountDelta)
+	}
+	if accountingErr != nil {
+		task.PrivateData = previousPrivateData
+		// A failed submit-mode CAS may have observed a concurrently settled
+		// task. Never overwrite that committed checkpoint with this stale copy.
+		if !usageOnly {
+			markTaskBillingError(ctx, task, "persist final task accounting failed: "+accountingErr.Error())
+		}
+		return accountingErr
+	}
+	if usageOnly {
+		if task.PrivateData.PendingUsageLog != nil {
+			return model.MergeTaskUsageLog(ctx, task)
+		}
+		return nil
+	}
+	if err := model.RecordTaskBillingLog(logParams); err != nil {
 		markTaskBillingError(ctx, task, "记录最终结算日志失败: "+err.Error())
 		return err
 	}

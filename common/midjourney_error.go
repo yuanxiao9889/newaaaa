@@ -12,8 +12,8 @@ var midjourneyCredentialPattern = regexp.MustCompile(`(?i)(?:["']?(?:mj-api-secr
 // responses and user log views. Stored diagnostics are never rewritten.
 func MidjourneyPublicError(code, reason string, status int, local bool) PublicError {
 	public := ClassifyPublicError(code, reason, status, local)
-	// Host billing failures already have a precise public diagnosis.
-	if local {
+	// Keep host failures and resource shortages in the shared public wording.
+	if local || public.Code == "model_unavailable" {
 		return public
 	}
 	reason = strings.TrimSpace(reason)

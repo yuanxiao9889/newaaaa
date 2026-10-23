@@ -111,8 +111,18 @@ func PrepareImageAdapterReferences(c *gin.Context, request *dto.ImageRequest, co
 		}
 	}
 	urls := make([]string, len(references))
+	userID := 0
+	if c != nil {
+		userID = c.GetInt("id")
+	}
 	for index, reference := range references {
-		urls[index] = reference.value
+		// Recheck immediately before dispatch as well as during admission: a
+		// synchronous retry may keep its parsed DTO longer than the URL lifetime.
+		address, err := RenewReferenceURL(userID, reference.value)
+		if err != nil {
+			return nil, fmt.Errorf("image reference %d is unavailable; prepare or upload it again: %w", index+1, err)
+		}
+		urls[index] = address
 	}
 	// Reuse the existing storage lifecycle without changing its four-image API.
 	for start := 0; start < len(localIndexes); start += midjourneyUploadMaxImages {

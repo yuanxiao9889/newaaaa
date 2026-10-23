@@ -28,9 +28,6 @@ func (t *Task) UserError() common.PublicError {
 	}
 	reason, _, _ := strings.Cut(t.FailReason, "\nAsync Channel Retry Path:")
 	publicError := common.ClassifyPublicError("", reason, 0, false)
-	if publicError.Code != "generation_failed" && publicError.Code != "content_safety_unknown" {
-		return publicError
-	}
 	var details []AsyncImageRetryDetail
 	if retry := t.PrivateData.ImageRetry; retry != nil {
 		details = retry.Details
@@ -49,6 +46,13 @@ func (t *Task) UserError() common.PublicError {
 		// job. Only enrich the final diagnostic with its matching retry record.
 		if reason == "" || (detail.Error != "" && (strings.Contains(detail.Error, reason) || strings.Contains(reason, detail.Error))) {
 			diagnostic := common.ClassifyPublicError(detail.ErrorCode, detail.Error, detail.StatusCode, false)
+			if !strings.HasPrefix(publicError.Message, "status_code=") && strings.HasPrefix(diagnostic.Message, "status_code=") {
+				status, _, _ := strings.Cut(diagnostic.Message, ", ")
+				publicError.Message = status + ", " + publicError.Message
+			}
+			if publicError.Code != "generation_failed" && publicError.Code != "content_safety_unknown" {
+				return publicError
+			}
 			if diagnostic.Code != "generation_failed" {
 				return diagnostic
 			}
@@ -116,9 +120,13 @@ type AsyncImageAsset struct {
 }
 
 type TaskPrivateData struct {
-	Key            string `json:"key,omitempty"`
-	UpstreamTaskID string `json:"upstream_task_id,omitempty"` // 上游真实 task ID
-	ResultURL      string `json:"result_url,omitempty"`       // 任务成功后的结果 URL（视频地址等）
+	ReferenceAssetIDs []string `json:"reference_asset_ids,omitempty"`
+	Key               string   `json:"key,omitempty"`
+	UpstreamTaskID    string   `json:"upstream_task_id,omitempty"` // 上游真实 task ID
+	ResultURL         string   `json:"result_url,omitempty"`       // 任务成功后的结果 URL（视频地址等）
+	// A guarded generation may dispatch only once, including after worker
+	// reconstruction or restart. Empty preserves the policy for older tasks.
+	TransferExecutionID string `json:"transfer_execution_id,omitempty"`
 	// Execution records safe, immutable request provenance. It lives next to
 	// other private task state so public task DTOs cannot expose it by accident.
 	Execution *TaskExecutionSnapshot `json:"execution,omitempty"`
@@ -164,6 +172,7 @@ type TaskPrivateData struct {
 	CompletionTokens    int                       `json:"completion_tokens,omitempty"`
 	TotalTokens         int                       `json:"total_tokens,omitempty"`
 	TokenUsageLogged    bool                      `json:"token_usage_logged,omitempty"`
+	PendingUsageLog     *TaskUsageLog             `json:"pending_usage_log,omitempty"`
 	UsageDetails        *rootdto.TaskUsageDetails `json:"usage_details,omitempty"`
 	// ResponsesBackground records that the openai_responses create request
 	// asked for background:true. Every task is durable and survives client
@@ -182,6 +191,17 @@ type TaskPrivateData struct {
 	ResultDiscarded bool `json:"result_discarded,omitempty"`
 }
 
+// TaskUsageLog is a durable delivery checkpoint for an already-paid task.
+// Retrying it may update usage logs and statistics, never wallet/token funds.
+type TaskUsageLog struct {
+	ModelName        string `json:"model_name"`
+	Other            string `json:"other"`
+	PromptTokens     int    `json:"prompt_tokens"`
+	CompletionTokens int    `json:"completion_tokens"`
+	UseTimeSeconds   int    `json:"use_time_seconds"`
+	ExportQuotaData  bool   `json:"export_quota_data"`
+}
+
 // AsyncPluginImageState preserves the provider outcome while the host owns
 // queue status, result storage and final settlement.
 type AsyncPluginImageState struct {
@@ -194,6 +214,8 @@ type AsyncPluginImageState struct {
 // current upstream polling snapshot. Submitting is persisted before each POST;
 // an interrupted POST must never be replayed without knowing its outcome.
 type AsyncImageRetryState struct {
+	StartedAtMS int64                      `json:"started_at_ms,omitempty"`
+	CycleStart  int                        `json:"cycle_start,omitempty"`
 	BodyPath    string                     `json:"body_path,omitempty"`
 	BodySize    int64                      `json:"body_size,omitempty"`
 	RelayFormat string                     `json:"relay_format,omitempty"`
@@ -507,7 +529,43 @@ func HasUnfinishedSyncTasks() bool {
 		Where("status != ?", TaskStatusSuccess).
 		Limit(1).
 		Pluck("id", &id).Error
-	return err == nil && id != 0
+	if err != nil || id != 0 {
+		return err == nil
+	}
+	return pendingTaskUsageLogs(DB).Limit(1).Pluck("id", &id).Error == nil && id != 0
+}
+
+func pendingTaskUsageLogs(db *gorm.DB) *gorm.DB {
+	query := db.Model(&Task{}).Where("status = ?", TaskStatusSuccess)
+	if common.UsingMainDatabase(common.DatabaseTypePostgreSQL) {
+		return query.Where("private_data ->> 'pending_usage_log' IS NOT NULL")
+	}
+	return query.Where("JSON_EXTRACT(private_data, '$.pending_usage_log') IS NOT NULL")
+}
+
+func GetPendingTaskUsageLogs(ctx context.Context, limit int) ([]*Task, error) {
+	var tasks []*Task
+	err := pendingTaskUsageLogs(DB.WithContext(ctx)).Order("updated_at ASC").Order("id ASC").Limit(limit).Find(&tasks).Error
+	return tasks, err
+}
+
+// PersistTaskBillingSnapshot preserves delivery receipts committed while a
+// settlement caller was reconciling quota or reporting a billing failure.
+func PersistTaskBillingSnapshot(ctx context.Context, task *Task) error {
+	return DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var current Task
+		if err := lockForUpdate(tx).First(&current, task.ID).Error; err != nil {
+			return err
+		}
+		privateData := task.PrivateData
+		if current.PrivateData.TokenUsageLogged {
+			privateData.TokenUsageLogged = true
+			privateData.PendingUsageLog = nil
+		} else if current.PrivateData.PendingUsageLog != nil {
+			privateData.PendingUsageLog = current.PrivateData.PendingUsageLog
+		}
+		return tx.Model(&Task{}).Where("id = ?", task.ID).Update("private_data", privateData).Error
+	})
 }
 
 func GetByOnlyTaskId(taskId string) (*Task, bool, error) {

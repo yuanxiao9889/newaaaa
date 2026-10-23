@@ -26,12 +26,63 @@ func ReferenceUploadRateLimit() gin.HandlerFunc {
 }
 
 // ResolveReferenceAssets runs after authentication and before model routing,
-// quota reservation or async persistence. Requests without the opt-in header
-// retain their exact existing behavior and body.
+// quota reservation or async persistence. Owned signed reference URLs are also
+// renewed without the opt-in header, including restored retry inputs.
 func ResolveReferenceAssets() gin.HandlerFunc {
 	return func(c *gin.Context) {
+		reuseTaskID := c.GetHeader(service.ImageRetryTaskHeader)
+		if !restoreImageTaskInput(c) {
+			return
+		}
+		if reuseTaskID != "" {
+			defer func() {
+				if c.Writer.Status() >= 200 && c.Writer.Status() < 300 {
+					if err := service.RenewImageTaskInput(c.GetInt("id"), reuseTaskID); err != nil {
+						common.SysError("image input retention renewal failed: " + err.Error())
+					}
+				}
+			}()
+		}
 		version := c.GetHeader(ReferenceAssetsHeader)
 		if version == "" {
+			contentType, _, _ := mime.ParseMediaType(c.GetHeader("Content-Type"))
+			if c.Request.Method == http.MethodPost && (contentType == "application/json" || contentType == "multipart/form-data") {
+				storage, err := common.GetBodyStorage(c)
+				if err != nil {
+					status := http.StatusBadRequest
+					if common.IsRequestBodyTooLargeError(err) {
+						status = http.StatusRequestEntityTooLarge
+					}
+					c.AbortWithStatus(status)
+					return
+				}
+				defer common.CleanupBodyStorage(c)
+				body, err := storage.Bytes()
+				if err != nil {
+					c.AbortWithStatus(http.StatusServiceUnavailable)
+					return
+				}
+				body, renewedType, err := service.RefreshReferenceBody(c.GetInt("id"), body, c.GetHeader("Content-Type"))
+				if err != nil {
+					status, code := http.StatusBadRequest, "reference_invalid"
+					if errors.Is(err, service.ErrReferenceMissing) {
+						status, code = http.StatusGone, "reference_expired"
+						c.Set("reference_recovery_required", true)
+					} else if errors.Is(err, service.ErrReferenceUnavailable) {
+						status, code = http.StatusServiceUnavailable, "reference_unavailable"
+					}
+					c.AbortWithStatusJSON(status, gin.H{"error": gin.H{"code": code, "reference_recovery": c.GetBool("reference_recovery_required"), "message": "reference image is unavailable; prepare or upload it again before generation"}})
+					return
+				}
+				common.CleanupBodyStorage(c)
+				c.Set(common.KeyRequestBody, body)
+				c.Request.Body = io.NopCloser(bytes.NewReader(body))
+				c.Request.ContentLength = int64(len(body))
+				c.Request.TransferEncoding = nil
+				c.Request.Header.Set("Content-Type", renewedType)
+				c.Request.Header.Set("Content-Length", strconv.Itoa(len(body)))
+				c.Request.MultipartForm, c.Request.PostForm, c.Request.Form = nil, nil, nil
+			}
 			c.Next()
 			return
 		}
@@ -108,11 +159,12 @@ func ResolveReferenceAssets() gin.HandlerFunc {
 			status, code := http.StatusBadRequest, "reference_invalid"
 			if errors.Is(err, service.ErrReferenceMissing) {
 				status, code = http.StatusGone, "reference_expired"
+				c.Set("reference_recovery_required", true)
 			}
 			if errors.Is(err, service.ErrReferenceUnavailable) {
 				status, code = http.StatusServiceUnavailable, "reference_unavailable"
 			}
-			c.AbortWithStatusJSON(status, gin.H{"error": gin.H{"code": code, "message": "reference materialization failed before task submission"}})
+			c.AbortWithStatusJSON(status, gin.H{"error": gin.H{"code": code, "reference_recovery": c.GetBool("reference_recovery_required"), "message": "reference materialization failed before task submission"}})
 			return
 		}
 		maxMB := constant.MaxRequestBodyMB

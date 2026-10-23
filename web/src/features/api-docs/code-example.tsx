@@ -16,11 +16,11 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { Check, Clipboard, Terminal } from 'lucide-react'
+import { Terminal } from 'lucide-react'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
-import { Button } from '@/components/ui/button'
+import { CopyButton } from '@/components/copy-button'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 
 type CodeLanguage = 'curl' | 'python' | 'javascript'
@@ -42,13 +42,6 @@ export function CodeExample({
 }) {
   const { t } = useTranslation()
   const [language, setLanguage] = useState<CodeLanguage>('curl')
-  const [copied, setCopied] = useState(false)
-
-  const copyCode = async () => {
-    await navigator.clipboard.writeText(samples[language])
-    setCopied(true)
-    window.setTimeout(() => setCopied(false), 1600)
-  }
 
   return (
     <div className='border-border/70 bg-card overflow-hidden rounded-xl border shadow-sm'>
@@ -74,18 +67,12 @@ export function CodeExample({
             ))}
           </TabsList>
         </Tabs>
-        <Button
-          variant='ghost'
-          size='icon-sm'
-          onClick={copyCode}
+        <CopyButton
+          value={samples[language]}
           aria-label={t('Copy code')}
-        >
-          {copied ? (
-            <Check className='size-3.5' />
-          ) : (
-            <Clipboard className='size-3.5' />
-          )}
-        </Button>
+          className='size-8'
+          iconClassName='size-3.5'
+        />
       </div>
       <pre className='max-h-[34rem] overflow-auto bg-[#0b1020] p-4 text-[12px] leading-6 text-slate-200 dark:bg-black/35'>
         <code>{samples[language]}</code>

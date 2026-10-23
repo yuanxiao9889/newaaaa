@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"strconv"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
@@ -28,7 +29,25 @@ func runRetryableAsyncImageRelay(ctx context.Context, task *model.Task) ([]byte,
 	if retry.Submitting {
 		return nil, task.ChannelId, "", nil, fmt.Errorf("async image submission outcome is unknown; automatic resubmission stopped")
 	}
+	if retry.StartedAtMS == 0 {
+		retry.StartedAtMS = time.Now().UnixMilli()
+		if len(task.PrivateData.ChannelRetryPath) > 0 && task.SubmitTime > 0 {
+			retry.StartedAtMS = task.SubmitTime * 1000
+		}
+	}
+	budget := service.NewRetryBudget(time.UnixMilli(retry.StartedAtMS))
+	cycle := &service.ChannelRetryCycle{Enabled: model.CurrentRequestPolicy().RetryCycleEnabled, Start: retry.CycleStart, Budget: budget}
+	var attemptContext *gin.Context
+	defer func() {
+		if attemptContext != nil {
+			service.ReleaseAutoSwitchAttempt(attemptContext)
+		}
+	}()
 	for {
+		if attemptContext != nil {
+			service.ReleaseAutoSwitchAttempt(attemptContext)
+			attemptContext = nil
+		}
 		if err := ctx.Err(); err != nil {
 			return nil, task.ChannelId, "", nil, err
 		}
@@ -37,6 +56,7 @@ func runRetryableAsyncImageRelay(ctx context.Context, task *model.Task) ([]byte,
 		var apiErr *types.NewAPIError
 		var proxy string
 		var upstreamErrorType string
+		confirmedTaskFailure := false
 		if task.PrivateData.RequestRelayFormat == relay.NativeAsyncImageFormat {
 			body, channelID, usedProxy, err := relay.ResumeNativeAsyncImageTask(ctx, task)
 			if err == nil {
@@ -70,15 +90,17 @@ func runRetryableAsyncImageRelay(ctx context.Context, task *model.Task) ([]byte,
 			if status < 400 || status > 599 {
 				status = http.StatusBadGateway
 			}
-			apiErr = types.NewErrorWithStatusCode(failure, types.ErrorCode(code), status)
-			if !failure.Retryable {
+			if failure.ConfirmedFailure {
+				confirmedTaskFailure = true
+				apiErr = service.NewUpstreamTaskFailure(failure, types.ErrorCode(code), failure.Type, status)
+			} else {
 				apiErr = types.NewErrorWithStatusCode(failure, types.ErrorCode(code), status, types.ErrOptionWithSkipRetry())
 			}
 			// Return to the retained client snapshot only after a terminal failure.
 			task.PrivateData.RequestRelayFormat = retry.RelayFormat
 		} else {
-			if len(task.PrivateData.ChannelRetryPath) > common.RetryTimes {
-				return nil, task.ChannelId, "", nil, fmt.Errorf("async image channel retry limit reached")
+			if len(task.PrivateData.ChannelRetryPath) > 0 && budget.Remaining(common.RetryTimes-len(task.PrivateData.ChannelRetryPath)+1, time.Now()) <= 0 {
+				return nil, task.ChannelId, "", nil, fmt.Errorf("async image retry budget exhausted")
 			}
 			body, err := os.ReadFile(retry.BodyPath)
 			if err != nil {
@@ -86,7 +108,9 @@ func runRetryableAsyncImageRelay(ctx context.Context, task *model.Task) ([]byte,
 			}
 			var recorder *httptest.ResponseRecorder
 			var info *relaycommon.RelayInfo
-			if retry.RelayFormat == string(types.RelayFormatGemini) {
+			if isCompatibleImageFormat(retry.RelayFormat) {
+				c, recorder, info, err = buildInternalAsyncCompatibleImageContext(ctx, task, body)
+			} else if retry.RelayFormat == string(types.RelayFormatGemini) {
 				c, recorder, _, info, err = buildInternalAsyncGeminiImageContext(ctx, task, body)
 			} else {
 				c, recorder, _, info, err = buildInternalAsyncImageContext(ctx, task, body)
@@ -94,12 +118,16 @@ func runRetryableAsyncImageRelay(ctx context.Context, task *model.Task) ([]byte,
 			if err != nil {
 				return nil, task.ChannelId, "", nil, err
 			}
-			defer service.ReleaseAutoSwitchAttempt(c)
+			attemptContext = c
 			constraints := service.GetChannelConstraints(c)
 			constraints.Pins = append(constraints.Pins, retry.Constraints.Pins...)
 			constraints.Filters = append(constraints.Filters, retry.Constraints.Filters...)
 			identity := dto.ChannelFilter{Kind: dto.FilterChannelIdentity}
-			for _, used := range task.PrivateData.ChannelRetryPath {
+			excluded := task.PrivateData.ChannelRetryPath
+			if cycle.Enabled {
+				excluded = nil // The cycle selector owns this round's exclusions.
+			}
+			for _, used := range excluded {
 				id, err := strconv.Atoi(used)
 				if err != nil {
 					common.CleanupBodyStorage(c)
@@ -114,12 +142,18 @@ func runRetryableAsyncImageRelay(ctx context.Context, task *model.Task) ([]byte,
 			constraints.AddFilter(dto.ChannelFilter{Kind: dto.FilterRequestPath, RequestPath: c.Request.URL.Path})
 			// Exclude attempted channels before selecting the highest remaining
 			// priority. Advancing a priority index here would skip valid peers.
-			channel, apiErr = getChannel(c, info, &service.RetryParam{Ctx: c, TokenGroup: task.Group, ModelName: task.Properties.OriginModelName, RequestPath: c.Request.URL.Path})
+			cycle.History = task.PrivateData.ChannelRetryPath
+			channel, apiErr = getChannel(c, info, &service.RetryParam{Cycle: cycle, Ctx: c, TokenGroup: task.Group, ModelName: task.Properties.OriginModelName, RequestPath: c.Request.URL.Path})
 			if apiErr != nil {
 				common.CleanupBodyStorage(c)
 				recordInternalAsyncImageFinalErrorLog(c, task, nil, apiErr, task.PrivateData.ChannelRetryPath, retry.Details)
 				return nil, task.ChannelId, "", nil, apiErr
 			}
+			if len(task.PrivateData.ChannelRetryPath) > 0 && budget.Remaining(1, time.Now()) == 0 {
+				common.CleanupBodyStorage(c)
+				return nil, task.ChannelId, "", nil, fmt.Errorf("async image retry time budget exhausted")
+			}
+			retry.CycleStart = cycle.Start
 			proxy = channel.GetSetting().Proxy
 			task.ChannelId = channel.Id
 			task.PrivateData.ChannelRetryPath = append(task.PrivateData.ChannelRetryPath, strconv.Itoa(channel.Id))
@@ -133,7 +167,9 @@ func runRetryableAsyncImageRelay(ctx context.Context, task *model.Task) ([]byte,
 			info.RetryIndex = len(task.PrivateData.ChannelRetryPath) - 1
 			addUsedChannel(c, channel.Id)
 			c.Request = c.Request.WithContext(service.BeginUpstreamDelivery(c.Request.Context(), channel.Id, len(task.PrivateData.ChannelRetryPath)))
-			if retry.RelayFormat == string(types.RelayFormatGemini) {
+			if isCompatibleImageFormat(retry.RelayFormat) {
+				apiErr = runCompatibleImageHelper(c, info, retry.RelayFormat)
+			} else if retry.RelayFormat == string(types.RelayFormatGemini) {
 				apiErr = geminiRelayHandler(c, info)
 			} else {
 				apiErr = relay.ImageHelper(c, info)
@@ -177,12 +213,12 @@ func runRetryableAsyncImageRelay(ctx context.Context, task *model.Task) ([]byte,
 			processChannelError(c, *types.NewChannelError(channel.Id, channel.Type, channel.Name, channel.ChannelInfo.IsMultiKey, key, channel.GetAutoBan()), apiErr, nil)
 		}
 		common.SetContextKey(c, constant.ContextKeyChannelConstraints, &retry.Constraints)
-		remaining := common.RetryTimes - len(task.PrivateData.ChannelRetryPath) + 1
+		remaining := budget.Remaining(common.RetryTimes-len(task.PrivateData.ChannelRetryPath)+1, time.Now())
 		_, pinned, _ := retry.Constraints.ResolvedPin()
 		canRetry := remaining > 0 && !pinned && shouldRetry(c, apiErr, remaining)
 		// A broken connection after POST may hide an accepted job. A status
 		// code synthesized for a transport error is not an upstream rejection.
-		if apiErr.GetErrorCode() == types.ErrorCodeDoRequestFailed || apiErr.GetErrorCode() == types.ErrorCodeReadResponseBodyFailed || apiErr.GetErrorCode() == types.ErrorCodeBadResponseBody {
+		if !confirmedTaskFailure && (apiErr.GetErrorCode() == types.ErrorCodeDoRequestFailed || apiErr.GetErrorCode() == types.ErrorCodeReadResponseBodyFailed || apiErr.GetErrorCode() == types.ErrorCodeBadResponseBody) {
 			canRetry = false
 		}
 		if !canRetry {

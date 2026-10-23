@@ -420,14 +420,18 @@ export function buildQueryRequest(ctx) { return {url: ctx.baseUrl+"/query"}; }
 export function parseTaskResult() { return {status:"SUCCESS"}; }
 `
 	for _, tc := range []struct {
-		status   int
-		wantCode string
+		status    int
+		wantCode  string
+		truncated bool
 	}{
 		{status: http.StatusOK},
 		{status: http.StatusCreated},
 		{status: http.StatusAccepted},
 		{status: http.StatusBadRequest, wantCode: "fail_to_fetch_task"},
 		{status: http.StatusBadGateway, wantCode: "fail_to_fetch_task"},
+		{status: http.StatusNotFound, wantCode: "fail_to_fetch_task"},
+		{status: http.StatusNotFound, wantCode: "read_response_body_failed", truncated: true},
+		{status: http.StatusServiceUnavailable, wantCode: "read_response_body_failed", truncated: true},
 	} {
 		t.Run(strconv.Itoa(tc.status), func(t *testing.T) {
 			saveBillingConfig(t)
@@ -437,6 +441,9 @@ export function parseTaskResult() { return {status:"SUCCESS"}; }
 			}))
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 				w.Header().Set("Content-Type", "application/json")
+				if tc.truncated {
+					w.Header().Set("Content-Length", "1000")
+				}
 				w.WriteHeader(tc.status)
 				_, _ = w.Write([]byte(`{"id":"job-42","message":"upstream body"}`))
 			}))
@@ -455,8 +462,15 @@ export function parseTaskResult() { return {status:"SUCCESS"}; }
 			if tc.wantCode != "" {
 				require.NotNil(t, taskErr)
 				assert.Equal(t, tc.wantCode, taskErr.Code)
-				assert.Equal(t, tc.status, taskErr.StatusCode)
-				assert.Contains(t, taskErr.Message, "upstream body")
+				if tc.truncated {
+					assert.Equal(t, http.StatusBadGateway, taskErr.StatusCode)
+					assert.True(t, taskErr.NoRetry)
+					assert.False(t, c.GetBool("auto_switch_task_rejected"))
+				} else {
+					assert.Equal(t, tc.status, taskErr.StatusCode)
+					assert.Contains(t, taskErr.Message, "upstream body")
+					assert.True(t, c.GetBool("auto_switch_task_rejected"))
+				}
 				assert.Nil(t, result)
 				return
 			}

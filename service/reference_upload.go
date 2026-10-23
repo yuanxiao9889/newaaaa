@@ -16,19 +16,27 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/setting/system_setting"
 )
 
 const ReferenceMaxBytes = 8 << 20
 
 // Successful preparation or task use renews the cache's idle lifetime.
-const ReferenceRetention = 12 * time.Hour
+func ReferenceRetention() time.Duration {
+	minutes := model.CurrentRequestPolicy().ImageInputRetentionMinutes
+	if minutes != 10 && minutes != 20 && minutes != 30 {
+		minutes = 20
+	}
+	return time.Duration(minutes) * time.Minute
+}
 
 var (
 	ReferenceUploads        *ReferenceUploadStore // Initialized once before HTTP routes start.
@@ -43,34 +51,48 @@ type ReferenceUploadConfig struct {
 	AccessKey, SecretKey, Bucket, UploadURL, DownloadURL, Directory string
 	MaxCacheBytes                                                   int64
 	MaxUserCacheBytes                                               int64
+	DirectEnabled                                                   bool
+	SigningSecret                                                   string
+	MinFreePercent                                                  int
 }
 
 type ReferenceUploadStore struct {
 	config       ReferenceUploadConfig
 	client       *http.Client
+	qiniuFetcher *http.Client
 	mu           sync.Mutex
 	reserved     int64
 	userReserved map[int]int64
 	active       map[string]bool
 	locks        [64]chan struct{}
 	slots        chan struct{}
+	directDir    string
+	storageID    string
 }
 
 type ReferencePrepareRequest struct {
-	SHA256 string `json:"sha256"`
-	Size   int64  `json:"size"`
-	MIME   string `json:"mime_type"`
+	SHA256    string `json:"sha256"`
+	Size      int64  `json:"size"`
+	MIME      string `json:"mime_type"`
+	Mode      string `json:"mode,omitempty"`
+	ETag      string `json:"etag,omitempty"`
+	Transport string `json:"transport,omitempty"`
+	RequestID string `json:"request_id,omitempty"`
 }
 
 type ReferenceUploadResult struct {
-	Status          string `json:"status"`
-	AssetID         string `json:"asset_id"`
-	ExpiresAt       int64  `json:"expires_at"`
-	UploadURL       string `json:"upload_url,omitempty"`
-	UploadToken     string `json:"upload_token,omitempty"`
-	ObjectKey       string `json:"object_key,omitempty"`
-	Ticket          string `json:"ticket,omitempty"`
-	UploadExpiresAt int64  `json:"upload_expires_at,omitempty"`
+	Status          string            `json:"status"`
+	AssetID         string            `json:"asset_id"`
+	ExpiresAt       int64             `json:"expires_at"`
+	UploadURL       string            `json:"upload_url,omitempty"`
+	UploadToken     string            `json:"upload_token,omitempty"`
+	ObjectKey       string            `json:"object_key,omitempty"`
+	Ticket          string            `json:"ticket,omitempty"`
+	UploadExpiresAt int64             `json:"upload_expires_at,omitempty"`
+	DownloadURL     string            `json:"download_url,omitempty"`
+	SessionID       string            `json:"session_id,omitempty"`
+	UploadMethod    string            `json:"upload_method,omitempty"`
+	UploadHeaders   map[string]string `json:"upload_headers,omitempty"`
 }
 
 type referenceTicket struct {
@@ -92,30 +114,52 @@ func InitReferenceUploads() error {
 		Directory:         common.GetEnvOrDefaultString("REFERENCE_CACHE_DIR", "/data/reference-assets"),
 		MaxCacheBytes:     int64(common.GetEnvOrDefault("REFERENCE_CACHE_MAX_MB", 2048)) << 20,
 		MaxUserCacheBytes: int64(common.GetEnvOrDefault("REFERENCE_CACHE_USER_MAX_MB", 256)) << 20,
+		DirectEnabled:     os.Getenv("REFERENCE_DIRECT_UPLOAD_ENABLED") == "true",
+		SigningSecret:     os.Getenv("REFERENCE_SIGNING_SECRET"),
+		MinFreePercent:    common.GetEnvOrDefault("REFERENCE_CACHE_MIN_FREE_PERCENT", 10),
 	})
 	if err != nil {
 		return err
 	}
+	store.Cleanup()
+	if err := store.CleanupDirect(); err != nil {
+		return err
+	}
 	ReferenceUploads = store
 	go func() {
-		ticker := time.NewTicker(time.Hour)
+		ticker := time.NewTicker(time.Minute)
 		defer ticker.Stop()
 		for range ticker.C {
 			store.Cleanup()
+			if err := store.CleanupDirect(); err != nil {
+				common.SysError("reference direct cleanup could not complete")
+			}
 		}
 	}()
-	store.Cleanup()
 	return nil
 }
 
 func NewReferenceUploadStore(config ReferenceUploadConfig) (*ReferenceUploadStore, error) {
+	if config.MinFreePercent == 0 {
+		config.MinFreePercent = 10
+	}
+	if config.MinFreePercent < 1 || config.MinFreePercent > 50 {
+		return nil, ErrReferenceUnavailable
+	}
 	if config.MaxUserCacheBytes == 0 {
 		config.MaxUserCacheBytes = min(256<<20, config.MaxCacheBytes)
 	}
-	if config.AccessKey == "" || config.SecretKey == "" || config.Bucket == "" || strings.ContainsAny(config.Bucket, ":/\\") || config.Directory == "" || config.MaxCacheBytes < ReferenceMaxBytes || config.MaxUserCacheBytes < ReferenceMaxBytes {
+	legacy := config.AccessKey != "" && config.SecretKey != "" && config.Bucket != "" && !strings.ContainsAny(config.Bucket, ":/\\")
+	if !legacy && (config.AccessKey != "" || config.SecretKey != "" || config.Bucket != "") {
+		return nil, ErrReferenceUnavailable
+	}
+	if (!legacy && !config.DirectEnabled) || (config.DirectEnabled && len(config.SigningSecret) < 32) || config.Directory == "" || config.MaxCacheBytes < ReferenceMaxBytes || config.MaxUserCacheBytes < ReferenceMaxBytes {
 		return nil, ErrReferenceUnavailable
 	}
 	for _, address := range []string{config.UploadURL, config.DownloadURL} {
+		if !legacy {
+			break
+		}
 		u, err := url.Parse(address)
 		if err != nil || u.Scheme != "https" || u.Hostname() == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || (u.Path != "" && u.Path != "/") {
 			return nil, ErrReferenceUnavailable
@@ -138,9 +182,14 @@ func NewReferenceUploadStore(config ReferenceUploadConfig) (*ReferenceUploadStor
 	transport.TLSClientConfig.MinVersion = tls.VersionTLS12
 	client := &http.Client{Transport: transport, Timeout: 45 * time.Second,
 		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
-	store := &ReferenceUploadStore{config: config, client: client, slots: make(chan struct{}, 8), active: make(map[string]bool), userReserved: make(map[int]int64)}
+	store := &ReferenceUploadStore{config: config, client: client, qiniuFetcher: newQiniuResultClient(), slots: make(chan struct{}, 8), active: make(map[string]bool), userReserved: make(map[int]int64)}
 	for i := range store.locks {
 		store.locks[i] = make(chan struct{}, 1)
+	}
+	if config.DirectEnabled {
+		if err := store.initDirectReferences(); err != nil {
+			return nil, err
+		}
 	}
 	return store, nil
 }
@@ -157,6 +206,15 @@ func validateReferenceInput(user int, input ReferencePrepareRequest) error {
 	if user <= 0 || !validReferenceID(input.SHA256) || input.Size < 1 || input.Size > ReferenceMaxBytes {
 		return ErrReferenceInvalid
 	}
+	if input.Mode != "" && input.Mode != "url" {
+		return ErrReferenceInvalid
+	}
+	if input.Mode == "url" {
+		digest, err := base64.URLEncoding.DecodeString(input.ETag)
+		if err != nil || len(digest) != 21 || (digest[0] != 0x16 && digest[0] != 0x96) {
+			return ErrReferenceInvalid
+		}
+	}
 	switch input.MIME {
 	case "image/png", "image/jpeg", "image/webp":
 		return nil
@@ -165,7 +223,11 @@ func validateReferenceInput(user int, input ReferencePrepareRequest) error {
 }
 
 func (s *ReferenceUploadStore) sign(value string) string {
-	mac := hmac.New(sha256.New, []byte(s.config.SecretKey))
+	secret := s.config.SecretKey
+	if secret == "" {
+		secret = s.config.SigningSecret
+	}
+	mac := hmac.New(sha256.New, []byte(secret))
 	_, _ = mac.Write([]byte("reference-v1:" + value))
 	return base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
 }
@@ -177,18 +239,31 @@ func (s *ReferenceUploadStore) qiniuSign(value string) string {
 }
 
 func (s *ReferenceUploadStore) Prepare(user int, input ReferencePrepareRequest) (ReferenceUploadResult, error) {
+	if input.Transport == "relay" {
+		return s.PrepareDirect(user, input)
+	}
+	if input.Transport != "" || !s.LegacyEnabled() {
+		return ReferenceUploadResult{}, ErrReferenceUnavailable
+	}
 	if err := validateReferenceInput(user, input); err != nil {
 		return ReferenceUploadResult{}, err
 	}
-	data, mime, err := s.Read(user, input.SHA256, true)
-	if err == nil {
-		if int64(len(data)) != input.Size || mime != input.MIME {
-			return ReferenceUploadResult{}, ErrReferenceInvalid
+	if input.Mode == "url" {
+		if result, ok := s.preparedURL(user, input); ok {
+			return result, nil
 		}
-		return ReferenceUploadResult{Status: "ready", AssetID: input.SHA256, ExpiresAt: time.Now().Add(ReferenceRetention).Unix()}, nil
-	}
-	if !errors.Is(err, ErrReferenceMissing) {
-		return ReferenceUploadResult{}, err
+		// URL-only objects must never masquerade as verified binary cache entries.
+	} else {
+		data, mime, err := s.Read(user, input.SHA256, true)
+		if err == nil {
+			if int64(len(data)) != input.Size || mime != input.MIME {
+				return ReferenceUploadResult{}, ErrReferenceInvalid
+			}
+			return ReferenceUploadResult{Status: "ready", AssetID: input.SHA256, ExpiresAt: time.Now().Add(ReferenceRetention()).Unix()}, nil
+		}
+		if !errors.Is(err, ErrReferenceMissing) {
+			return ReferenceUploadResult{}, err
+		}
 	}
 	var nonce [16]byte
 	if _, err := rand.Read(nonce[:]); err != nil {
@@ -196,6 +271,13 @@ func (s *ReferenceUploadStore) Prepare(user int, input ReferencePrepareRequest) 
 	}
 	now := time.Now()
 	key := fmt.Sprintf("references/%d/%s/%s", user, input.SHA256, hex.EncodeToString(nonce[:]))
+	if input.Mode == "url" {
+		extension := strings.TrimPrefix(input.MIME, "image/")
+		if extension == "jpeg" {
+			extension = "jpg"
+		}
+		key += "." + extension
+	}
 	ticket := referenceTicket{ReferencePrepareRequest: input, UserID: user, Key: key, Expires: now.Add(time.Hour).Unix()}
 	payload, err := common.Marshal(ticket)
 	if err != nil {
@@ -218,6 +300,9 @@ func (s *ReferenceUploadStore) Prepare(user int, input ReferencePrepareRequest) 
 }
 
 func (s *ReferenceUploadStore) Complete(ctx context.Context, user int, token string) (ReferenceUploadResult, error) {
+	if !s.LegacyEnabled() {
+		return ReferenceUploadResult{}, ErrReferenceUnavailable
+	}
 	encoded, signature, ok := strings.Cut(token, ".")
 	if !ok || len(token) > 2048 || !hmac.Equal([]byte(signature), []byte(s.sign("ticket:"+encoded))) {
 		return ReferenceUploadResult{}, ErrReferenceInvalid
@@ -243,8 +328,19 @@ func (s *ReferenceUploadStore) Complete(ctx context.Context, user int, token str
 	case <-ctx.Done():
 		return ReferenceUploadResult{}, ErrReferenceDownload
 	}
+	if ticket.Mode == "url" {
+		return s.completeURL(ctx, ticket)
+	}
+	// Old Qiniu binary imports and native resumable uploads share the quota and
+	// destination files. Serialize publication/reservations across workers so
+	// a rolling deployment cannot overcommit another process's reserved bytes.
+	unlockDisk, err := lockReferenceDirectory(s.config.Directory)
+	if err != nil {
+		return ReferenceUploadResult{}, err
+	}
+	defer unlockDisk()
 	if _, _, err := s.Read(user, ticket.SHA256, true); err == nil {
-		return ReferenceUploadResult{Status: "ready", AssetID: ticket.SHA256, ExpiresAt: time.Now().Add(ReferenceRetention).Unix()}, nil
+		return ReferenceUploadResult{Status: "ready", AssetID: ticket.SHA256, ExpiresAt: time.Now().Add(ReferenceRetention()).Unix()}, nil
 	}
 	name := fmt.Sprintf("%d-%s", user, ticket.SHA256)
 	keyHash := sha256.Sum256([]byte(ticket.Key))
@@ -255,19 +351,8 @@ func (s *ReferenceUploadStore) Complete(ctx context.Context, user int, token str
 	if info, err := os.Stat(part); err == nil {
 		reservation -= min(ticket.Size, info.Size())
 	}
-	entries, scanErr := os.ReadDir(s.config.Directory)
-	var userUsed int64
-	userFiles := 0
-	for _, entry := range entries {
-		if entry.IsDir() || !strings.HasPrefix(entry.Name(), strconv.Itoa(user)+"-") {
-			continue
-		}
-		if info, err := entry.Info(); err == nil {
-			userUsed += info.Size()
-			userFiles++
-		}
-	}
-	if scanErr != nil || used+s.reserved+reservation > s.config.MaxCacheBytes || files >= 10000 || userUsed+s.userReserved[user]+reservation > s.config.MaxUserCacheBytes || userFiles >= 1000 {
+	userUsed, userFiles := s.referenceUserUsageLocked(user)
+	if used+s.reserved+reservation > s.config.MaxCacheBytes || files >= 10000 || userUsed+s.userReserved[user]+reservation > s.config.MaxUserCacheBytes || userFiles >= 1000 {
 		s.mu.Unlock()
 		return ReferenceUploadResult{}, ErrReferenceBusy
 	}
@@ -374,7 +459,7 @@ func (s *ReferenceUploadStore) Complete(ctx context.Context, user int, token str
 	if err != nil {
 		return ReferenceUploadResult{}, ErrReferenceUnavailable
 	}
-	return ReferenceUploadResult{Status: "ready", AssetID: ticket.SHA256, ExpiresAt: time.Now().Add(ReferenceRetention).Unix()}, nil
+	return ReferenceUploadResult{Status: "ready", AssetID: ticket.SHA256, ExpiresAt: time.Now().Add(ReferenceRetention()).Unix()}, nil
 }
 
 // Read returns a private, owned snapshot. Queued requests persist these bytes
@@ -383,12 +468,31 @@ func (s *ReferenceUploadStore) Read(user int, id string, touch bool) ([]byte, st
 	if user <= 0 || !validReferenceID(id) {
 		return nil, "", ErrReferenceInvalid
 	}
+	if s.config.DirectEnabled {
+		data, mime, err := s.ReadDirect(user, id, touch)
+		if !errors.Is(err, ErrReferenceMissing) {
+			return data, mime, err
+		}
+	}
+	return s.readLegacyReference(user, id, touch)
+}
+
+func (s *ReferenceUploadStore) readLegacyReference(user int, id string, touch bool) ([]byte, string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	path := filepath.Join(s.config.Directory, fmt.Sprintf("%d-%s.asset", user, id))
 	info, err := os.Stat(path)
-	if err != nil || !info.Mode().IsRegular() || time.Since(info.ModTime()) >= ReferenceRetention {
+	if err != nil || !info.Mode().IsRegular() {
 		return nil, "", ErrReferenceMissing
+	}
+	if time.Since(info.ModTime()) >= ReferenceRetention() {
+		protected, err := protectedTaskReferences(model.DB, user)
+		if err != nil {
+			return nil, "", ErrReferenceUnavailable
+		}
+		if !protected[fmt.Sprintf("%d-%s", user, id)] {
+			return nil, "", ErrReferenceMissing
+		}
 	}
 	if info.Size() <= 0 || info.Size() > ReferenceMaxBytes {
 		return nil, "", ErrReferenceInvalid
@@ -420,14 +524,32 @@ func (s *ReferenceUploadStore) PublicURL(user int, id string) (string, error) {
 	if _, _, err := s.Read(user, id, true); err != nil {
 		return "", err
 	}
-	expires := strconv.FormatInt(time.Now().Add(ReferenceRetention-time.Minute).Unix(), 10)
+	expires := strconv.FormatInt(time.Now().Add(ReferenceRetention()-time.Minute).Unix(), 10)
 	path := fmt.Sprintf("/v1/uploads/references/content/%d/%s", user, id)
 	return base + path + "?e=" + expires + "&token=" + s.sign("content:"+path+":"+expires), nil
 }
 
 func (s *ReferenceUploadStore) VerifyContent(user int, id, expires, signature string) bool {
+	if taskID, ok := strings.CutPrefix(expires, "task:"); ok {
+		if model.DB == nil {
+			return false
+		}
+		if user <= 0 || !validReferenceID(id) || len(taskID) > 191 || taskID == "" {
+			return false
+		}
+		path := fmt.Sprintf("/v1/uploads/references/content/%d/%s", user, id)
+		if !hmac.Equal([]byte(signature), []byte(s.sign("content:"+path+":"+expires))) {
+			return false
+		}
+		task, exists, err := model.GetByTaskId(user, taskID)
+		if err != nil || !exists || !slices.Contains(task.PrivateData.ReferenceAssetIDs, id) {
+			return false
+		}
+		return task.Status != model.TaskStatusSuccess && task.Status != model.TaskStatusFailure ||
+			task.FinishTime == 0 || task.FinishTime > time.Now().Add(-ReferenceRetention()).Unix()
+	}
 	e, err := strconv.ParseInt(expires, 10, 64)
-	if err != nil || e <= time.Now().Unix() || e > time.Now().Add(ReferenceRetention).Unix() || user <= 0 || !validReferenceID(id) {
+	if err != nil || e <= time.Now().Unix() || e > time.Now().Add(ReferenceRetention()).Unix() || user <= 0 || !validReferenceID(id) {
 		return false
 	}
 	path := fmt.Sprintf("/v1/uploads/references/content/%d/%s", user, id)
@@ -435,8 +557,11 @@ func (s *ReferenceUploadStore) VerifyContent(user int, id, expires, signature st
 }
 
 func (s *ReferenceUploadStore) Cleanup() {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	unlock, err := s.lockResumable()
+	if err != nil {
+		return
+	}
+	defer unlock()
 	s.cleanupLocked()
 }
 
@@ -447,8 +572,9 @@ func (s *ReferenceUploadStore) cleanupLocked() (int64, int) {
 	}
 	var used int64
 	var count int
+	protected, protectionErr := protectedTaskReferences(model.DB, 0)
 	for _, entry := range entries {
-		if entry.IsDir() || (!strings.HasSuffix(entry.Name(), ".asset") && !strings.HasSuffix(entry.Name(), ".part")) {
+		if entry.IsDir() || (!strings.HasSuffix(entry.Name(), ".asset") && !strings.HasSuffix(entry.Name(), ".part") && !strings.HasSuffix(entry.Name(), ".url")) {
 			continue
 		}
 		info, err := entry.Info()
@@ -456,11 +582,12 @@ func (s *ReferenceUploadStore) cleanupLocked() (int64, int) {
 			continue
 		}
 		path := filepath.Join(s.config.Directory, entry.Name())
-		ttl := ReferenceRetention
+		ttl := ReferenceRetention()
 		if strings.HasSuffix(entry.Name(), ".part") {
 			ttl = time.Hour
 		}
-		if !s.active[path] && time.Since(info.ModTime()) >= ttl {
+		identity := strings.TrimSuffix(strings.TrimSuffix(entry.Name(), ".asset"), ".url")
+		if protectionErr == nil && !protected[identity] && !s.active[path] && time.Since(info.ModTime()) >= ttl {
 			if os.Remove(path) == nil {
 				continue
 			}
@@ -468,5 +595,6 @@ func (s *ReferenceUploadStore) cleanupLocked() (int64, int) {
 		used += info.Size()
 		count++
 	}
-	return used, count
+	reservedUploads, uploadCount := s.resumableUsageLocked(0)
+	return used + reservedUploads, count + uploadCount
 }

@@ -22,15 +22,19 @@ import (
 // settings API. It is rebuilt from the option map on every option write, so
 // the runtime globals updated by the same write never disagree with it.
 type RequestPolicySnapshot struct {
-	Affinity        operation_setting.ChannelAffinitySetting
-	RetryTimes      int
-	RetryCodes      []operation_setting.StatusCodeRange
-	DisableCodes    []operation_setting.StatusCodeRange
-	DisableKeywords []string
-	CheckText       bool
-	TextKeywords    []string
-	AutoDisable     bool
-	Options         map[string]string
+	Affinity                   operation_setting.ChannelAffinitySetting
+	RetryTimes                 int
+	RetryCycleEnabled          bool
+	RetryTimeBudgetEnabled     bool
+	RetryTimeBudgetSeconds     int
+	ImageInputRetentionMinutes int
+	RetryCodes                 []operation_setting.StatusCodeRange
+	DisableCodes               []operation_setting.StatusCodeRange
+	DisableKeywords            []string
+	CheckText                  bool
+	TextKeywords               []string
+	AutoDisable                bool
+	Options                    map[string]string
 }
 
 var requestPolicySnapshot atomic.Pointer[RequestPolicySnapshot]
@@ -52,6 +56,10 @@ func requestPolicyDefaultOptions() map[string]string {
 		}
 	}
 	defaults["RetryTimes"] = strconv.Itoa(common.RetryTimes)
+	defaults["RetryCycleEnabled"] = "false"
+	defaults["RetryTimeBudgetEnabled"] = "false"
+	defaults["RetryTimeBudgetSeconds"] = "60"
+	defaults["ImageInputRetentionMinutes"] = "20"
 	defaults["AutomaticRetryStatusCodes"] = operation_setting.AutomaticRetryStatusCodesToString()
 	defaults["AutomaticDisableStatusCodes"] = operation_setting.AutomaticDisableStatusCodesToString()
 	defaults["AutomaticDisableKeywords"] = operation_setting.AutomaticDisableKeywordsToString()
@@ -65,6 +73,9 @@ func requestPolicyDefaultOptions() map[string]string {
 }
 
 func IsRequestPolicyOption(key string) bool {
+	if key == "RetryCycleEnabled" || key == "RetryTimeBudgetEnabled" || key == "RetryTimeBudgetSeconds" || key == "ImageInputRetentionMinutes" {
+		return true
+	}
 	if strings.HasPrefix(key, "channel_affinity_setting.") {
 		return true
 	}
@@ -129,6 +140,22 @@ func BuildRequestPolicy(options map[string]string) (*RequestPolicySnapshot, erro
 	snapshot.RetryTimes, err = strconv.Atoi(raw["RetryTimes"])
 	if err != nil || snapshot.RetryTimes < 0 || snapshot.RetryTimes == math.MaxInt {
 		return nil, fmt.Errorf("retry times must be a non-negative integer with room for the initial attempt")
+	}
+	snapshot.RetryCycleEnabled, err = strconv.ParseBool(raw["RetryCycleEnabled"])
+	if err != nil {
+		return nil, fmt.Errorf("invalid retry cycle switch: %w", err)
+	}
+	snapshot.RetryTimeBudgetEnabled, err = strconv.ParseBool(raw["RetryTimeBudgetEnabled"])
+	if err != nil {
+		return nil, fmt.Errorf("invalid retry time budget switch: %w", err)
+	}
+	snapshot.RetryTimeBudgetSeconds, err = strconv.Atoi(raw["RetryTimeBudgetSeconds"])
+	if err != nil || snapshot.RetryTimeBudgetSeconds < 1 || snapshot.RetryTimeBudgetSeconds > 3600 {
+		return nil, fmt.Errorf("retry time budget must be an integer between 1 and 3600 seconds")
+	}
+	snapshot.ImageInputRetentionMinutes, err = strconv.Atoi(raw["ImageInputRetentionMinutes"])
+	if err != nil || (snapshot.ImageInputRetentionMinutes != 10 && snapshot.ImageInputRetentionMinutes != 20 && snapshot.ImageInputRetentionMinutes != 30) {
+		return nil, fmt.Errorf("image input retention must be 10, 20 or 30 minutes")
 	}
 	snapshot.AutoDisable, err = strconv.ParseBool(raw["AutomaticDisableChannelEnabled"])
 	if err != nil {

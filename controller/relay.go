@@ -168,6 +168,14 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 	}
 
 	priceData := relayInfo.PriceData
+	if relay.IsAsyncCompatibleImageRequest(c, relayFormat) {
+		if !common.GetAsyncImageInternalTaskEnabled() {
+			newAPIError = types.NewErrorWithStatusCode(fmt.Errorf("async image task acceptance is disabled"), types.ErrorCodeInvalidRequest, http.StatusServiceUnavailable, types.ErrOptionWithSkipRetry())
+		} else {
+			newAPIError = relay.SubmitInternalAsyncCompatibleImageTask(c, relayInfo, request, relayFormat)
+		}
+		return
+	}
 	if relayFormat == types.RelayFormatOpenAIImage && relay.IsAsyncImageRequest(c) && common.GetAsyncImageInternalTaskEnabled() {
 		imageReq, ok := request.(*dto.ImageRequest)
 		if !ok {
@@ -217,7 +225,16 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 	relayInfo.RetryIndex = 0
 	relayInfo.LastError = nil
 
-	for ; retryParam.GetRetry() <= common.RetryTimes; retryParam.IncreaseRetry() {
+	budget := service.NewRetryBudget(time.Now())
+	cycle := &service.ChannelRetryCycle{Enabled: model.CurrentRequestPolicy().RetryCycleEnabled, Budget: budget}
+	retryParam.Cycle = cycle
+	for firstAttempt := true; firstAttempt || budget.Remaining(common.RetryTimes-retryParam.GetRetry()+1, time.Now()) > 0; retryParam.IncreaseRetry() {
+		firstAttempt = false
+		cycle.History = c.GetStringSlice("use_channel")
+		if requestErr := c.Request.Context().Err(); requestErr != nil {
+			newAPIError = types.NewErrorWithStatusCode(requestErr, types.ErrorCodeDoRequestFailed, http.StatusRequestTimeout, types.ErrOptionWithSkipRetry())
+			break
+		}
 		relayInfo.StreamStatus = nil
 		relayInfo.PerformanceBusinessRejection = false
 		relayInfo.PerformanceOutputTokens = 0
@@ -226,6 +243,9 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		if channelErr != nil {
 			logger.LogError(c, channelErr.Error())
 			newAPIError = channelErr
+			break
+		}
+		if len(cycle.History) > 0 && budget.Remaining(1, time.Now()) == 0 {
 			break
 		}
 		service.AppendUsedChannel(c, channel.Id)
@@ -266,7 +286,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		newAPIError = service.NormalizeViolationFeeError(newAPIError)
 		relayInfo.LastError = newAPIError
 
-		decision := service.DecideRelayRetry(c, newAPIError, common.RetryTimes-retryParam.GetRetry())
+		decision := service.DecideRelayRetry(c, newAPIError, budget.Remaining(common.RetryTimes-retryParam.GetRetry(), time.Now()))
 		service.RecordPolicyFailure(c, channel.Id, newAPIError, decision)
 		processChannelError(c, *types.NewChannelError(channel.Id, channel.Type, channel.Name, channel.ChannelInfo.IsMultiKey, common.GetContextKeyString(c, constant.ContextKeyChannelKey), channel.GetAutoBan()), newAPIError, relayInfo)
 
@@ -604,7 +624,12 @@ func executeTaskSubmissionWith(
 		Retry:       common.GetPointer(0),
 	}
 
-	for ; retryParam.GetRetry() <= common.RetryTimes; retryParam.IncreaseRetry() {
+	budget := service.NewRetryBudget(time.Now())
+	cycle := &service.ChannelRetryCycle{Enabled: model.CurrentRequestPolicy().RetryCycleEnabled, Budget: budget}
+	retryParam.Cycle = cycle
+	for firstAttempt := true; firstAttempt || budget.Remaining(common.RetryTimes-retryParam.GetRetry()+1, time.Now()) > 0; retryParam.IncreaseRetry() {
+		firstAttempt = false
+		cycle.History = c.GetStringSlice("use_channel")
 		stage = "select_channel"
 		if requestErr := c.Request.Context().Err(); requestErr != nil {
 			diagnostics.cancelled("before_attempt", retryParam.GetRetry()+1)
@@ -634,6 +659,9 @@ func executeTaskSubmissionWith(
 		}
 		diagnostics.attempt(retryParam.GetRetry()+1, channel, relayInfo.LockedChannel != nil)
 
+		if len(cycle.History) > 0 && budget.Remaining(1, time.Now()) == 0 {
+			break
+		}
 		service.AppendUsedChannel(c, channel.Id)
 		bodyStorage, bodyErr := common.GetBodyStorage(c)
 		if bodyErr != nil {
@@ -670,7 +698,7 @@ func executeTaskSubmissionWith(
 
 		taskAPIError := taskSubmissionAPIError(taskErr)
 		relayInfo.LastError = taskAPIError
-		decision := decideTaskRetry(c, taskErr, common.RetryTimes-retryParam.GetRetry())
+		decision := decideTaskRetry(c, taskErr, budget.Remaining(common.RetryTimes-retryParam.GetRetry(), time.Now()))
 		service.RecordAutoSwitchTaskSubmissionFailure(c, taskErr)
 		service.RecordPolicyFailure(c, channel.Id, taskAPIError, decision)
 		if !taskErr.LocalError {
@@ -730,6 +758,7 @@ func executeTaskSubmissionWith(
 
 	stage = "insert"
 	task := model.InitTask(result.Platform, relayInfo)
+	task.PrivateData.TransferExecutionID = c.GetString("transfer_execution_id")
 	// Synchronous plugins finish their upstream work before this durable
 	// barrier. Preserve the actual request start instead of timing the INSERT.
 	if !relayInfo.StartTime.IsZero() && relayInfo.StartTime.Unix() <= task.SubmitTime {
@@ -982,11 +1011,27 @@ func taskSubmissionAPIError(taskErr *taskdto.TaskError) *types.NewAPIError {
 func decideTaskRetry(c *gin.Context, taskErr *taskdto.TaskError, retryTimes int) service.PolicyDecision {
 	stop := service.PolicyDecision{Action: "stop", Source: "system"}
 	retry := service.PolicyDecision{Action: "retry", Reason: "retry_status_matched", Source: "system"}
+	bridgeBlocksRetry := false
+	bridge := c.GetString("transfer_execution_id") != ""
+	if taskErr != nil && bridge {
+		// This host-generated code is emitted only after reading a non-2xx
+		// response completely. Local, transport and parse failures cannot qualify.
+		bridgeBlocksRetry = taskErr.LocalError || taskErr.Code != "fail_to_fetch_task" ||
+			taskErr.StatusCode < 400 || taskErr.StatusCode > 599 ||
+			taskErr.StatusCode == http.StatusForbidden || taskErr.StatusCode == http.StatusRequestTimeout ||
+			operation_setting.IsAlwaysSkipRetryStatusCode(taskErr.StatusCode)
+	}
 	switch {
 	case taskErr == nil:
 		stop.Reason = "request_completed"
+	case bridgeBlocksRetry:
+		stop.Reason = "transfer_dispatch_once"
 	case taskErr.NoRetry:
 		stop.Reason = "task_accepted"
+	case taskErr.LocalError:
+		stop.Reason = "local_rejection"
+	case common.ShouldStopRetryForSafety(taskErr.Code, taskErr.Message):
+		stop.Reason = "safety_related_error"
 	case service.AutoSwitchAttempt(c) != nil && c.GetBool("auto_switch_task_dispatched") && !c.GetBool("auto_switch_task_rejected"):
 		stop.Reason = "submission_unconfirmed"
 	case service.ShouldSkipRetryAfterChannelAffinityFailure(c):
@@ -998,6 +1043,12 @@ func decideTaskRetry(c *gin.Context, taskErr *taskdto.TaskError, retryTimes int)
 		stop.Reason, stop.Source = "attempt_budget_exhausted", "global"
 	case service.GetChannelConstraints(c).SuppressesRetry():
 		stop.Reason, stop.Source = "pinned_channel", "channel_constraint"
+	case bridge:
+		if operation_setting.ShouldRetryByStatusCode(taskErr.StatusCode) {
+			retry.Source = "global"
+			return retry
+		}
+		stop.Reason, stop.Source = "status_not_retryable", "global"
 	case taskErr.StatusCode == http.StatusTooManyRequests, taskErr.StatusCode == 307:
 		return retry
 	case taskErr.StatusCode/100 == 5:
@@ -1010,8 +1061,6 @@ func decideTaskRetry(c *gin.Context, taskErr *taskdto.TaskError, retryTimes int)
 	case taskErr.StatusCode == http.StatusBadRequest, taskErr.StatusCode == 408:
 		// azure处理超时不重试
 		stop.Reason = "status_not_retryable"
-	case taskErr.LocalError:
-		stop.Reason = "local_rejection"
 	case taskErr.StatusCode/100 == 2:
 		stop.Reason = "system_retry_exclusion"
 	default:

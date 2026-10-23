@@ -1266,7 +1266,7 @@ export const native = {error: function(ctx, error) {
 	assert.JSONEq(t, `{
 	  "path": "/vendor/failure",
 	  "code": "generation_failed",
-	  "message": "[generation_failed] 生成失败，服务未提供可公开确认的具体原因；请联系管理员并提供请求 ID 或任务 ID，以查询详细错误",
+	  "message": "[generation_failed] status_code=502, 生成失败，服务未提供可公开确认的具体原因；请联系管理员并提供请求 ID 或任务 ID，以查询详细错误",
 	  "status": 502,
 	  "retryable": false,
 	  "keys": ["code", "httpStatus", "message", "requestId", "retryable"]
@@ -1299,7 +1299,7 @@ func TestTaskPluginErrorFallbackIsSanitized(t *testing.T) {
 			abortWithOpenAiMessage(c, http.StatusBadGateway, "https://user:password@upstream.invalid?token=secret")
 
 			assert.Equal(t, http.StatusBadGateway, recorder.Code)
-			assert.JSONEq(t, `{"code":"generation_failed","message":"[generation_failed] 生成失败，服务未提供可公开确认的具体原因；请联系管理员并提供请求 ID 或任务 ID，以查询详细错误 (request id: fallback-req)","data":null}`, recorder.Body.String())
+			assert.JSONEq(t, `{"code":"generation_failed","message":"[generation_failed] status_code=502, 生成失败，服务未提供可公开确认的具体原因；请联系管理员并提供请求 ID 或任务 ID，以查询详细错误 (request id: fallback-req)","data":null}`, recorder.Body.String())
 			assert.NotContains(t, recorder.Body.String(), "upstream.invalid")
 			assert.NotContains(t, recorder.Body.String(), "renderer secret")
 			assert.NotContains(t, recorder.Body.String(), "password")
@@ -1474,7 +1474,7 @@ export function parseTaskResult() { return {status: "SUCCESS"}; }
 	var body dto.TaskError
 	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &body))
 	assert.Equal(t, "missing_model", body.Code)
-	assert.Contains(t, body.Message, "[missing_model] 缺少模型 ID（model）")
+	assert.Contains(t, body.Message, "[missing_model] status_code=400, 缺少模型 ID（model）")
 }
 
 func TestPrepareTaskPluginRouteNativeErrorReceivesHookMessage(t *testing.T) {
@@ -1510,7 +1510,7 @@ export function parseTaskResult() { return {status: "SUCCESS"}; }
 	router.ServeHTTP(recorder, request)
 
 	assert.Equal(t, http.StatusBadRequest, recorder.Code)
-	assert.JSONEq(t, `{"code":"missing_model","message":"[missing_model] 缺少模型 ID（model）；请填写平台提供的对外模型 ID 后重试","requestId":"native-error-req"}`, recorder.Body.String())
+	assert.JSONEq(t, `{"code":"missing_model","message":"[missing_model] status_code=400, 缺少模型 ID（model）；请填写平台提供的对外模型 ID 后重试","requestId":"native-error-req"}`, recorder.Body.String())
 }
 
 func TestPrepareTaskPluginRouteRejectsNonObjectResultWithFixedMessage(t *testing.T) {
@@ -1604,7 +1604,7 @@ func TestTaskPluginErrorFallbackMessageIncludesRequestID(t *testing.T) {
 	var body dto.TaskError
 	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &body))
 	assert.Equal(t, "missing_model", body.Code)
-	assert.Contains(t, body.Message, "[missing_model] 缺少模型 ID（model）")
+	assert.Contains(t, body.Message, "[missing_model] status_code=400, 缺少模型 ID（model）")
 	assert.True(t, strings.HasSuffix(body.Message, "(request id: req-fallback-1)"))
 }
 
@@ -1631,7 +1631,7 @@ func TestPrepareTaskPluginEndpointSurfacesDecodeHookMessage(t *testing.T) {
 	router.ServeHTTP(recorder, request)
 
 	assert.Equal(t, http.StatusBadRequest, recorder.Code)
-	assert.Contains(t, recorder.Body.String(), "[missing_model] 缺少模型 ID（model）")
+	assert.Contains(t, recorder.Body.String(), "[missing_model] status_code=400, 缺少模型 ID（model）")
 	assert.NotContains(t, recorder.Body.String(), "Invalid task protocol request")
 }
 

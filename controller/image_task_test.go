@@ -18,6 +18,7 @@ import (
 	"github.com/QuantumNous/new-api/service"
 	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 )
@@ -162,6 +163,36 @@ func TestFailedImageTaskReturnsSafeReasonAndCode(t *testing.T) {
 	}
 }
 
+func TestImageTaskPreservesUpstreamFailureStatus(t *testing.T) {
+	const reason = "分组 default 下模型 all-image-2.5-sunburst-1k 的可用渠道不存在（retry）; retry: 124"
+	for _, tc := range []struct {
+		name, reason, wantCode, wantMessage string
+		detail                              *model.AsyncImageRetryDetail
+	}{
+		{"stored status", "status_code=500, " + reason, "model_unavailable", "当前资源紧张，暂时无可用资源", nil},
+		{"unknown upstream failure", "status_code=500, Task failed", "generation_failed", "生成失败", nil},
+		{"retry status", "Task failed", "generation_failed", "生成失败", &model.AsyncImageRetryDetail{ChannelID: 141, StatusCode: 500, Error: "Task failed"}},
+		{"known reason retry status", "context deadline exceeded", "request_timeout", "请求处理超时", &model.AsyncImageRetryDetail{ChannelID: 141, StatusCode: 500, Error: "context deadline exceeded"}},
+		{"retry without status", "status_code=500, Task failed", "generation_failed", "生成失败", &model.AsyncImageRetryDetail{ChannelID: 141, Error: "Task failed"}},
+		{"retry diagnostic", "Task failed", "model_unavailable", "当前资源紧张，暂时无可用资源", &model.AsyncImageRetryDetail{ChannelID: 141, StatusCode: 500, Error: "Task failed: " + reason}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			task := &model.Task{TaskID: "task_status", ChannelId: 141, Status: model.TaskStatusFailure, FailReason: tc.reason}
+			if tc.detail != nil {
+				task.PrivateData.ImageRetry = &model.AsyncImageRetryState{Details: []model.AsyncImageRetryDetail{*tc.detail}}
+			}
+			response := buildImageTaskResponse(task)
+			assert.Equal(t, tc.wantCode, response.ErrorCode)
+			assert.Contains(t, response.Error, "status_code=500")
+			assert.Contains(t, response.Error, tc.wantMessage)
+			assert.Equal(t, tc.reason, task.FailReason)
+			encoded, err := common.Marshal(response)
+			require.NoError(t, err)
+			assert.Contains(t, string(encoded), "status_code=500")
+		})
+	}
+}
+
 func TestGetSignedImageTaskContentServesImageWithoutAuthorization(t *testing.T) {
 	db := setupImageTaskTestDB(t)
 	originalCryptoSecret := common.CryptoSecret
@@ -205,6 +236,26 @@ func TestGetSignedImageTaskContentServesImageWithoutAuthorization(t *testing.T) 
 	require.Equal(t, http.StatusOK, recorder.Code)
 	require.Equal(t, "image/png", recorder.Header().Get("Content-Type"))
 	require.Equal(t, "png-bytes", recorder.Body.String())
+	etag := recorder.Header().Get("ETag")
+	require.Len(t, etag, 66)
+	for _, test := range []struct {
+		ifRange    string
+		wantStatus int
+		wantBody   string
+	}{
+		{etag, 206, "ng-"},
+		{`"different-version"`, 200, "png-bytes"},
+	} {
+		recorder = httptest.NewRecorder()
+		c, _ = gin.CreateTestContext(recorder)
+		c.Request = httptest.NewRequest(http.MethodGet, parsed.RequestURI(), nil)
+		c.Request.Header.Set("Range", "bytes=1-3")
+		c.Request.Header.Set("If-Range", test.ifRange)
+		c.Params = gin.Params{{Key: "task_id", Value: task.TaskID}}
+		GetSignedImageTaskContent(c)
+		assert.Equal(t, test.wantStatus, recorder.Code)
+		assert.Equal(t, test.wantBody, recorder.Body.String())
+	}
 }
 
 func TestGetSignedImageTaskContentRejectsTamperedTokenAndOtherTask(t *testing.T) {

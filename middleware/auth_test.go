@@ -618,6 +618,8 @@ func TestTokenAuthDistinguishesExhaustedQuotaWithoutAuthorizingRejectedTokens(t 
 			router.POST("/v1/responses", handler)
 			router.POST("/mj/submit/imagine", handler)
 			router.POST("/:mode/mj/submit/imagine", handler)
+			router.GET("/v1/tasks/:key/artifacts/:artifact_key/content", handler)
+			router.HEAD("/v1/tasks/:key/artifacts/:artifact_key/content", handler)
 			paths := []string{"/v1/images/generations", "/v1/responses", "/mj/submit/imagine", "/fast/mj/submit/imagine"}
 			for _, path := range paths {
 				request := httptest.NewRequest(http.MethodPost, path, nil)
@@ -662,6 +664,20 @@ func TestTokenAuthDistinguishesExhaustedQuotaWithoutAuthorizingRejectedTokens(t 
 				assert.Equal(t, len(paths), downstreamCalls)
 			} else {
 				assert.Zero(t, downstreamCalls, "every rejected request must stop before relay or billing")
+			}
+			for _, method := range []string{http.MethodGet, http.MethodHead} {
+				request := httptest.NewRequest(method, "/v1/tasks/owned-task/artifacts/image/content", nil)
+				if !tc.noHeader {
+					request.Header.Set("Authorization", "Bearer sk-"+token.Key)
+				}
+				recorder := httptest.NewRecorder()
+				router.ServeHTTP(recorder, request)
+				want := tc.wantStatus
+				if want == http.StatusPaymentRequired {
+					want = http.StatusNoContent // An exhausted budget permits only the owned-result read.
+				}
+				assert.Equal(t, want, recorder.Code, method)
+				assert.NotContains(t, recorder.Body.String(), token.Key)
 			}
 			if !tc.missing && !tc.deleted {
 				var persisted model.Token

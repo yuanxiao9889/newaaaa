@@ -84,14 +84,42 @@ func ClaudeErrorWrapperLocal(err error, code string, statusCode int) *dto.Claude
 	return claudeErr
 }
 
+// upstreamFailure preserves verified upstream provenance independently of
+// channel status mappings and locally synthesized errors.
+type upstreamFailure struct {
+	error
+	statusCode   int
+	terminalTask bool
+}
+
+func (e *upstreamFailure) Unwrap() error { return e.error }
+
+// NewUpstreamTaskFailure is for a task whose upstream status explicitly says
+// failed, never for polling errors, accepted work or local processing failures.
+func NewUpstreamTaskFailure(err error, code types.ErrorCode, providerType string, status int) *types.NewAPIError {
+	if providerType == "" {
+		providerType = string(types.ErrorTypeUpstreamError)
+	}
+	apiErr := types.WithOpenAIError(types.OpenAIError{
+		Message: err.Error(), Type: providerType, Code: string(code),
+	}, status)
+	apiErr.Err = &upstreamFailure{error: err, statusCode: status, terminalTask: true}
+	return apiErr
+}
+
 func RelayErrorHandler(ctx context.Context, resp *http.Response, showBodyWhenFail bool) (newApiErr *types.NewAPIError) {
 	newApiErr = types.InitOpenAIError(types.ErrorCodeBadResponseStatusCode, resp.StatusCode)
+	defer CloseResponseBodyGracefully(resp)
 
 	responseBody, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return
+		return types.NewOpenAIError(err, types.ErrorCodeReadResponseBodyFailed, resp.StatusCode, types.ErrOptionWithSkipRetry())
 	}
-	CloseResponseBodyGracefully(resp)
+	defer func() {
+		if resp.StatusCode >= 400 && resp.StatusCode <= 599 {
+			newApiErr.Err = &upstreamFailure{error: newApiErr.Err, statusCode: resp.StatusCode}
+		}
+	}()
 	var errResponse dto.GeneralErrorResponse
 	responseBodyText := string(responseBody)
 	responseBodyPreview := common.LocalLogPreview(responseBodyText)

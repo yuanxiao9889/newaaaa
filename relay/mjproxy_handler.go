@@ -27,11 +27,18 @@ import (
 )
 
 func RelayMidjourneyImage(c *gin.Context) {
+	c.Header("Cache-Control", "private, no-store")
+	c.Header("Referrer-Policy", "no-referrer")
 	taskId := c.Param("id")
-	midjourneyTask := model.GetByOnlyMJId(taskId)
-	if midjourneyTask == nil {
-		c.JSON(400, gin.H{
-			"error": "midjourney_task_not_found",
+	ownerID := c.GetInt("id")
+	if ownerID == 0 {
+		ownerID, _ = strconv.Atoi(c.Query("uid"))
+	}
+	midjourneyTask := model.GetByMJId(ownerID, taskId)
+	if midjourneyTask == nil ||
+		(c.GetInt("id") == 0 && !service.VerifyMidjourneyImageAccess(midjourneyTask, c.Request.URL.Query(), time.Now())) {
+		c.JSON(http.StatusNotFound, gin.H{
+			"error": "image_not_available",
 		})
 		return
 	}
@@ -66,7 +73,15 @@ func RelayMidjourneyImage(c *gin.Context) {
 		})
 		return
 	}
-	resp, err := httpClient.Get(midjourneyTask.ImageUrl)
+	request, err := http.NewRequestWithContext(c.Request.Context(), c.Request.Method, midjourneyTask.ImageUrl, nil)
+	if err != nil {
+		c.AbortWithStatus(http.StatusBadGateway)
+		return
+	}
+	for _, header := range []string{"Range", "If-Range", "If-None-Match", "If-Modified-Since"} {
+		request.Header.Set(header, c.GetHeader(header))
+	}
+	resp, err := httpClient.Do(request)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"error": "http_get_image_failed",
@@ -74,11 +89,9 @@ func RelayMidjourneyImage(c *gin.Context) {
 		return
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		responseBody, _ := io.ReadAll(resp.Body)
-		c.JSON(resp.StatusCode, gin.H{
-			"error": string(responseBody),
-		})
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusPartialContent &&
+		resp.StatusCode != http.StatusNotModified && resp.StatusCode != http.StatusRequestedRangeNotSatisfiable {
+		c.JSON(http.StatusBadGateway, gin.H{"error": "image_source_unavailable"})
 		return
 	}
 	// 从Content-Type头获取MIME类型
@@ -89,6 +102,15 @@ func RelayMidjourneyImage(c *gin.Context) {
 	}
 	// 设置响应的内容类型
 	c.Writer.Header().Set("Content-Type", contentType)
+	for _, header := range []string{"Content-Length", "Content-Range", "Accept-Ranges", "ETag", "Last-Modified"} {
+		if value := resp.Header.Get(header); value != "" {
+			c.Header(header, value)
+		}
+	}
+	c.Status(resp.StatusCode)
+	if c.Request.Method == http.MethodHead || resp.StatusCode == http.StatusNotModified {
+		return
+	}
 	// 将图片流式传输到响应体
 	_, err = io.Copy(c.Writer, resp.Body)
 	if err != nil {
@@ -150,9 +172,9 @@ func coverMidjourneyTaskDto(c *gin.Context, originTask *model.Midjourney) (midjo
 	midjourneyTask.FinishTime = originTask.FinishTime
 	midjourneyTask.ImageUrl = ""
 	if originTask.ImageUrl != "" && setting.MjForwardUrlEnabled {
-		midjourneyTask.ImageUrl = system_setting.ServerAddress + "/mj/image/" + originTask.MjId
+		midjourneyTask.ImageUrl = service.BuildMidjourneyImageURL(originTask)
 		if originTask.Status != "SUCCESS" {
-			midjourneyTask.ImageUrl += "?rand=" + strconv.FormatInt(time.Now().UnixNano(), 10)
+			midjourneyTask.ImageUrl += "&rand=" + strconv.FormatInt(time.Now().UnixNano(), 10)
 		}
 	} else {
 		midjourneyTask.ImageUrl = originTask.ImageUrl

@@ -701,7 +701,12 @@ export function parseBatchResult(ctx,body){return [{taskId:"vendor-job",status:"
 			task := &model.Task{TaskID: model.GenerateTaskID(), UserId: user.Id, ChannelId: ch.Id, Quota: 1000, Status: model.TaskStatusSuccess, Group: "default", Properties: model.Properties{OriginModelName: "video-test"}, PrivateData: model.TaskPrivateData{UpstreamTaskID: "vendor-job", UsageAccountingMode: model.TaskUsageAccountingFinal, PreConsumedQuota: 1000, BillingContext: &model.TaskBillingContext{PerCallBilling: true}}}
 			if tc.submit {
 				task.PrivateData.UsageAccountingMode = model.TaskUsageAccountingSubmit
-				require.NoError(t, model.RecordTaskBillingLog(model.RecordTaskBillingLogParams{UserId: user.Id, ChannelId: ch.Id, ModelName: "video-test", LogType: model.LogTypeConsume, Quota: 1000, Other: model.NewLogOther()}))
+				other := model.NewLogOther()
+				other.SetPublic("task_id", task.TaskID)
+				other.SetPublic("request_path", "/v1/videos")
+				other.SetAdmin("submit_diagnostic", "preserved")
+				other.SetRoot("submit_node", "preserved")
+				require.NoError(t, model.RecordTaskBillingLog(model.RecordTaskBillingLogParams{UserId: user.Id, ChannelId: ch.Id, ModelName: "video-test", LogType: model.LogTypeConsume, Quota: 1000, Content: "video submitted", Other: other}))
 			}
 			require.NoError(t, db.Create(task).Error)
 			source := genericSource
@@ -759,11 +764,7 @@ export function parseBatchResult(ctx,body){return [{taskId:"vendor-job",status:"
 			assert.Equal(t, 1, user.RequestCount)
 			var logs []model.Log
 			require.NoError(t, model.LOG_DB.Where("user_id = ?", user.Id).Order("id").Find(&logs).Error)
-			wantLogs := 1
-			if tc.submit && tc.total > 0 {
-				wantLogs++
-			}
-			require.Len(t, logs, wantLogs)
+			require.Len(t, logs, 1)
 			last := logs[len(logs)-1]
 			assert.Equal(t, tc.prompt, last.PromptTokens)
 			assert.Equal(t, tc.completion, last.CompletionTokens)
@@ -772,8 +773,13 @@ export function parseBatchResult(ctx,body){return [{taskId:"vendor-job",status:"
 				require.NoError(t, common.UnmarshalJsonStr(last.Other, &other))
 				assert.Equal(t, float64(tc.total), other["total_tokens"])
 				if tc.submit {
-					assert.Zero(t, last.Quota)
-					assert.Equal(t, true, other["usage_only"])
+					assert.Equal(t, 1000, last.Quota)
+					assert.Equal(t, "video submitted", last.Content)
+					assert.NotContains(t, other, "usage_only")
+					assert.Equal(t, "/v1/videos", other["request_path"])
+					assert.Equal(t, "preserved", other["admin_info"].(map[string]any)["submit_diagnostic"])
+					assert.Equal(t, "preserved", other["root_info"].(map[string]any)["submit_node"])
+					assert.True(t, stored.PrivateData.TokenUsageLogged)
 				}
 			}
 			model.SaveQuotaDataCache()
@@ -784,6 +790,231 @@ export function parseBatchResult(ctx,body){return [{taskId:"vendor-job",status:"
 			assert.Equal(t, tc.prompt+tc.completion, totals.TokenUsed)
 		})
 	}
+}
+
+func TestTaskUsageMergeRecovery(t *testing.T) {
+	db := setupAsyncImageWorkerTestDB(t)
+	require.NoError(t, db.AutoMigrate(&model.Channel{}, &model.QuotaData{}))
+	versionQuery := "SELECT version()"
+	if common.UsingMainDatabase(common.DatabaseTypeSQLite) {
+		versionQuery = "SELECT sqlite_version()"
+	}
+	var version string
+	require.NoError(t, db.Raw(versionQuery).Scan(&version).Error)
+	t.Logf("main database: %s %s", common.MainDatabaseType(), version)
+	if dsn := os.Getenv("TASK_USAGE_CLICKHOUSE_DSN"); dsn != "" {
+		logDB, _ := newAuditTestDatabase(t, "clickhouse", dsn)
+		// Exercise the existing consume-log schema without unrelated audit
+		// migrations or JSON feature settings on the validation server.
+		require.NoError(t, logDB.Exec(releasedClickHouseLogSchema).Error)
+		previousLog, previousType := model.LOG_DB, common.LogDatabaseType()
+		model.LOG_DB = logDB
+		common.SetDatabaseTypes(common.MainDatabaseType(), common.DatabaseTypeClickHouse)
+		require.NoError(t, model.LOG_DB.Raw("SELECT version()").Scan(&version).Error)
+		t.Logf("log database: ClickHouse %s", version)
+		t.Cleanup(func() {
+			model.LOG_DB = previousLog
+			common.SetDatabaseTypes(common.MainDatabaseType(), previousType)
+		})
+	}
+	oldConsume, oldExport, oldMemory := common.LogConsumeEnabled, common.DataExportEnabled, common.MemoryCacheEnabled
+	common.LogConsumeEnabled, common.DataExportEnabled = true, true
+	common.MemoryCacheEnabled = false
+	t.Cleanup(func() {
+		common.LogConsumeEnabled, common.DataExportEnabled, common.MemoryCacheEnabled = oldConsume, oldExport, oldMemory
+	})
+	model.CacheQuotaDataLock.Lock()
+	oldCache := model.CacheQuotaData
+	model.CacheQuotaData = make(map[string]*model.QuotaData)
+	model.CacheQuotaDataLock.Unlock()
+	t.Cleanup(func() {
+		model.CacheQuotaDataLock.Lock()
+		model.CacheQuotaData = oldCache
+		model.CacheQuotaDataLock.Unlock()
+	})
+	user := model.User{Id: 61, Username: "usage_merge_owner", Quota: 9000, UsedQuota: 1000, RequestCount: 1}
+	require.NoError(t, db.Create(&user).Error)
+	token := model.Token{Id: 62, UserId: user.Id, Key: "usage-merge-token", RemainQuota: 9000, UsedQuota: 1000}
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { _, _ = w.Write([]byte(`{}`)) }))
+	t.Cleanup(upstream.Close)
+	channel := model.Channel{Id: 63, Name: "usage-merge-provider", BaseURL: &upstream.URL, UsedQuota: 1000}
+	require.NoError(t, db.Create(&token).Error)
+	require.NoError(t, db.Create(&channel).Error)
+	if !common.UsingLogDatabase(common.DatabaseTypeClickHouse) {
+		// The shared fixture clears owner 61; also isolate this test's
+		// second-owner decoy when reusing a dedicated external log database.
+		require.NoError(t, model.LOG_DB.Where("user_id = ? AND model_name = ?", user.Id+1, "video-test").Delete(&model.Log{}).Error)
+	}
+	task := model.Task{TaskID: "task_merge_exact", UserId: user.Id, ChannelId: channel.Id, TokenId: token.Id, Quota: 1000, Status: model.TaskStatusInProgress,
+		Properties: model.Properties{OriginModelName: "video-test"},
+		PrivateData: model.TaskPrivateData{UsageAccountingMode: model.TaskUsageAccountingSubmit, BillingState: service.TaskBillingStatePending,
+			PreConsumedQuota: 1000, ActualQuota: 1000, BillingContext: &model.TaskBillingContext{PerCallBilling: true}}}
+	require.NoError(t, db.Create(&task).Error)
+	plugin, err := pluginruntime.CompilePlugin(`
+export const meta={apiVersion:1,key:"usage-recovery",name:"Usage recovery",version:"1.0.0",author:{name:"Test"},models:["video-test"],fetchMode:"batch"};
+export function buildSubmitRequest(ctx){return {url:ctx.baseUrl+"/submit",body:{}};}
+export function parseSubmitResponse(){return {taskId:"task_merge_exact"};}
+export function parseTaskResult(){return {status:"SUCCESS"};}
+export function buildBatchQueryRequest(ctx){return {url:ctx.baseUrl+"/query"};}
+export function parseBatchResult(){return [{taskId:"task_merge_exact",status:"SUCCESS",tokenUsage:{prompt_tokens:100,completion_tokens:200,total_tokens:300}}];}
+`, pluginruntime.Options{})
+	require.NoError(t, err)
+	// Fail the settlement snapshot, but allow the terminal status CAS. Usage
+	// must already be durable even if the process exits at this boundary.
+	require.NoError(t, db.Callback().Update().Before("gorm:update").Register("test:initial_usage_snapshot_failure", func(tx *gorm.DB) {
+		if _, snapshot := tx.Statement.Dest.(map[string]any); snapshot && tx.Statement.Table == "tasks" {
+			tx.AddError(errors.New("forced initial snapshot failure"))
+		}
+	}))
+	require.NoError(t, service.UpdateBatchTasks(context.Background(), taskjs.New(plugin), map[int][]string{channel.Id: {task.TaskID}}, map[string]*model.Task{task.TaskID: &task}))
+	require.NoError(t, db.Callback().Update().Remove("test:initial_usage_snapshot_failure"))
+	var completed model.Task
+	require.NoError(t, db.First(&completed, task.ID).Error)
+	task = completed
+	require.EqualValues(t, model.TaskStatusSuccess, task.Status)
+	require.Equal(t, service.TaskBillingStatePending, task.PrivateData.BillingState)
+	require.NotNil(t, task.PrivateData.PendingUsageLog)
+	assert.Equal(t, 300, task.PrivateData.TotalTokens)
+	staleTask := task
+	// Neither a similarly named task, another owner nor a difference charge
+	// may substitute for the original submission log.
+	for _, row := range []model.Log{
+		{UserId: user.Id, Other: `{"task_id":"taskXmergeXexact"}`},
+		{UserId: user.Id + 1, Other: `{"task_id":"task_merge_exact"}`},
+		{UserId: user.Id, Other: `{"task_id":"task_merge_exact","actual_quota":1200}`},
+	} {
+		row.Type, row.ModelName, row.Quota, row.CreatedAt, row.RequestId = model.LogTypeConsume, "video-test", 200, 1700000000, common.NewRequestId()
+		require.NoError(t, model.LOG_DB.Create(&row).Error)
+	}
+	err = service.ConfirmTaskBillingSettled(context.Background(), &task, 1000, "finished")
+	require.ErrorIs(t, err, gorm.ErrRecordNotFound)
+	assert.Equal(t, service.TaskBillingStateSettled, task.PrivateData.BillingState)
+	require.NotNil(t, task.PrivateData.PendingUsageLog)
+	assert.True(t, model.HasUnfinishedSyncTasks(), "terminal usage delivery must keep the scheduler active")
+	assert.False(t, task.PrivateData.TokenUsageLogged)
+	var count int64
+	require.NoError(t, model.LOG_DB.Model(&model.Log{}).Count(&count).Error)
+	assert.EqualValues(t, 3, count, "missing original must not create a zero consume log")
+	original := model.Log{UserId: user.Id, Username: user.Username, Type: model.LogTypeConsume, ModelName: "video-test", Quota: 1000, PromptTokens: 25, CompletionTokens: 75,
+		CreatedAt: 1700000010, RequestId: "original-request", UpstreamRequestId: "vendor-request", Ip: "192.0.2.1", Content: "submitted",
+		Other: `{"task_id":"task_merge_exact","request_path":"/v1/videos","admin_info":{"large_id":9007199254740993},"root_info":{"trace":"keep"}}`}
+	require.NoError(t, model.LOG_DB.Create(&original).Error)
+	model.LogQuotaData(model.QuotaDataLogParams{UserID: user.Id, Username: user.Username, ModelName: original.ModelName, Quota: 1000, TokenUsed: 100, CreatedAt: original.CreatedAt})
+	require.NoError(t, db.Callback().Create().Before("gorm:create").Register("test:usage_cache_failure", func(tx *gorm.DB) {
+		if tx.Statement.Table == "quota_data" {
+			tx.AddError(errors.New("forced statistics flush failure"))
+		}
+	}))
+	model.SaveQuotaDataCache()
+	assert.Len(t, model.CacheQuotaData, 1, "failed flush must retain increments")
+	require.NoError(t, db.Callback().Create().Remove("test:usage_cache_failure"))
+	model.SaveQuotaDataCache()
+	assert.Empty(t, model.CacheQuotaData)
+	if !common.UsingLogDatabase(common.DatabaseTypeClickHouse) {
+		require.NoError(t, model.LOG_DB.Callback().Update().Before("gorm:update").Register("test:usage_log_failure", func(tx *gorm.DB) {
+			if tx.Statement.Table == "logs" {
+				tx.AddError(errors.New("forced log merge failure"))
+			}
+		}))
+		err = service.ConfirmTaskBillingSettled(context.Background(), &task, 1000, "finished")
+		require.ErrorContains(t, err, "forced log merge failure")
+		require.NoError(t, model.LOG_DB.Callback().Update().Remove("test:usage_log_failure"))
+		assert.Equal(t, service.TaskBillingStateSettled, task.PrivateData.BillingState)
+		require.NotNil(t, task.PrivateData.PendingUsageLog)
+	}
+	// A main-database failure after the separate log write must be retryable
+	// without adding another log or repeating accounting.
+	failTable := "quota_data"
+	require.NoError(t, db.Callback().Update().Before("gorm:update").Register("test:usage_merge_failure", func(tx *gorm.DB) {
+		if tx.Statement.Table == failTable {
+			tx.AddError(errors.New("forced " + failTable + " failure"))
+		}
+	}))
+	err = service.ConfirmTaskBillingSettled(context.Background(), &task, 1000, "finished")
+	require.ErrorContains(t, err, "forced quota_data failure")
+	failTable = "tasks"
+	err = service.ConfirmTaskBillingSettled(context.Background(), &task, 1000, "finished")
+	require.ErrorContains(t, err, "forced tasks failure")
+	require.NoError(t, db.Callback().Update().Remove("test:usage_merge_failure"))
+	var beforeRetry struct{ Count, Quota, TokenUsed int }
+	require.NoError(t, db.Model(&model.QuotaData{}).Where("user_id = ?", user.Id).Select("SUM(count) AS count, SUM(quota) AS quota, SUM(token_used) AS token_used").Scan(&beforeRetry).Error)
+	assert.Equal(t, 1, beforeRetry.Count)
+	assert.Equal(t, 1000, beforeRetry.Quota)
+	assert.Equal(t, 100, beforeRetry.TokenUsed, "checkpoint failure must roll back the statistics delta")
+	// Simulate a fresh process: no in-memory task or statistics delta survives.
+	model.CacheQuotaDataLock.Lock()
+	model.CacheQuotaData = make(map[string]*model.QuotaData)
+	model.CacheQuotaDataLock.Unlock()
+	previousAdaptor := service.GetTaskAdaptorFunc
+	previousLimit := constant.TaskQueryLimit
+	service.GetTaskAdaptorFunc = nil
+	constant.TaskQueryLimit = 100
+	t.Cleanup(func() {
+		service.GetTaskAdaptorFunc = previousAdaptor
+		constant.TaskQueryLimit = previousLimit
+	})
+	startRecovery := make(chan struct{})
+	recoveryResults := make(chan error, 2)
+	go func() {
+		<-startRecovery
+		service.RunTaskPollingOnce(context.Background(), nil)
+		recoveryResults <- nil
+	}()
+	go func() {
+		<-startRecovery
+		duplicate := task
+		recoveryResults <- model.MergeTaskUsageLog(context.Background(), &duplicate)
+	}()
+	close(startRecovery)
+	for range 2 {
+		err := <-recoveryResults
+		if common.UsingMainDatabase(common.DatabaseTypeSQLite) && err != nil {
+			require.Contains(t, err.Error(), "locked", "SQLite contention must remain retryable")
+		} else {
+			require.NoError(t, err)
+		}
+	}
+	service.RunTaskPollingOnce(context.Background(), nil)
+	var recovered model.Task
+	require.NoError(t, db.First(&recovered, task.ID).Error)
+	task = recovered
+	assert.Nil(t, task.PrivateData.PendingUsageLog)
+	assert.False(t, model.HasUnfinishedSyncTasks())
+	for range 2 {
+		require.NoError(t, service.ConfirmTaskBillingSettled(context.Background(), &task, 1000, "finished"))
+	}
+	require.NoError(t, service.ConfirmTaskBillingSettled(context.Background(), &staleTask, 1000, "stale completion"))
+	var stored model.Log
+	require.NoError(t, model.LOG_DB.Where("request_id = ?", original.RequestId).Take(&stored).Error)
+	assert.Equal(t, original.Quota, stored.Quota)
+	assert.Equal(t, original.CreatedAt, stored.CreatedAt)
+	assert.Equal(t, original.RequestId, stored.RequestId)
+	assert.Equal(t, original.UpstreamRequestId, stored.UpstreamRequestId)
+	assert.Equal(t, original.Ip, stored.Ip)
+	assert.Equal(t, original.Content, stored.Content)
+	assert.Equal(t, 100, stored.PromptTokens)
+	assert.Equal(t, 200, stored.CompletionTokens)
+	assert.Contains(t, stored.Other, "9007199254740993")
+	assert.Contains(t, stored.Other, `"trace":"keep"`)
+	assert.NotContains(t, stored.Other, "usage_only")
+	require.NoError(t, model.LOG_DB.Model(&model.Log{}).Count(&count).Error)
+	assert.EqualValues(t, 4, count)
+	require.NoError(t, db.First(&user, user.Id).Error)
+	assert.Equal(t, 9000, user.Quota)
+	assert.Equal(t, 1000, user.UsedQuota)
+	assert.Equal(t, 1, user.RequestCount)
+	require.NoError(t, db.First(&token, token.Id).Error)
+	assert.Equal(t, 9000, token.RemainQuota)
+	assert.Equal(t, 1000, token.UsedQuota)
+	require.NoError(t, db.First(&channel, channel.Id).Error)
+	assert.EqualValues(t, 1000, channel.UsedQuota)
+	assert.True(t, task.PrivateData.TokenUsageLogged)
+	model.SaveQuotaDataCache()
+	var totals struct{ Count, Quota, TokenUsed int }
+	require.NoError(t, db.Model(&model.QuotaData{}).Where("user_id = ?", user.Id).Select("SUM(count) AS count, SUM(quota) AS quota, SUM(token_used) AS token_used").Scan(&totals).Error)
+	assert.Equal(t, 1, totals.Count)
+	assert.Equal(t, 1000, totals.Quota)
+	assert.Equal(t, 300, totals.TokenUsed, "retry after log success must not duplicate dashboard tokens")
 }
 
 func TestAcceptedSubmitStreamNeverRetries(t *testing.T) {
@@ -946,7 +1177,7 @@ export function buildContentRequest(){return {};}
 	return f
 }
 
-func (f *videoRetryTestFixture) submit(t *testing.T, multipartBody bool) *model.Task {
+func (f *videoRetryTestFixture) submit(t *testing.T, multipartBody bool, executionID ...string) *model.Task {
 	t.Helper()
 	body := []byte(`{"model":"retry-video","prompt":"a lighthouse","seconds":4}`)
 	contentType := "application/json"
@@ -966,6 +1197,9 @@ func (f *videoRetryTestFixture) submit(t *testing.T, multipartBody bool) *model.
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/videos?client=retry-test", bytes.NewReader(body))
 	c.Request.Header.Set("Content-Type", contentType)
+	if len(executionID) > 0 {
+		c.Set("transfer_execution_id", executionID[0])
+	}
 	c.Set("username", f.user.Username)
 	common.SetContextKey(c, constant.ContextKeyUserId, f.user.Id)
 	common.SetContextKey(c, constant.ContextKeyUserGroup, "default")
@@ -991,9 +1225,14 @@ func (f *videoRetryTestFixture) submit(t *testing.T, multipartBody bool) *model.
 	require.NotNil(t, outcome)
 	common.CleanupBodyStorage(c)
 	stored := f.load(t, outcome.Task.TaskID)
-	require.NotNil(t, stored.PrivateData.VideoRetry)
-	assert.Equal(t, body, stored.PrivateData.VideoRetry.Body, "persist the original body before any provider mapping")
-	assert.True(t, stored.PrivateData.VideoRetry.Ready)
+	if c.GetString("transfer_execution_id") == "" {
+		require.NotNil(t, stored.PrivateData.VideoRetry)
+		assert.Equal(t, body, stored.PrivateData.VideoRetry.Body, "persist the original body before any provider mapping")
+		assert.True(t, stored.PrivateData.VideoRetry.Ready)
+	} else {
+		assert.Nil(t, stored.PrivateData.VideoRetry, "guarded tasks never retain a replacement POST")
+		assert.Equal(t, executionID[0], stored.PrivateData.TransferExecutionID)
+	}
 	assert.Equal(t, common.QuotaRound(4*0.01*common.QuotaPerUnit), stored.Quota)
 	return stored
 }

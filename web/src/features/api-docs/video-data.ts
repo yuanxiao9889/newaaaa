@@ -1,16 +1,14 @@
-// Public contracts checked against the canvas and enabled relay channels on 2026-10-12.
-export type VideoParameter = {
-  name: string
-  type: string
-  required: boolean
-  description: string
-}
+// Contracts checked against canvas runtime catalog revision 63 and public models on 2026-10-22.
+import type { ContractParameter } from './contract-parameters'
+
+export type VideoParameter = ContractParameter
 export type VideoVariant = {
   models: string[]
   seconds: string
   resolution: string
   ratios: string
   limits: string
+  constraints: Record<string, unknown>
 }
 export type VideoExample = { title: string; body: Record<string, unknown> }
 export type VideoGroup = {
@@ -21,24 +19,27 @@ export type VideoGroup = {
   notes: string[]
   examples: VideoExample[]
 }
-const key = (value: string) => `apiDocs.video.${value}`
-const parameter = (
-  name: string,
-  type: string,
-  required: boolean,
-  description: string
-): VideoParameter => ({ name, type, required, description: key(description) })
-const image = 'https://media.example.com/reference.jpg'
-const video = 'https://media.example.com/motion.mp4'
-const audio = 'https://media.example.com/sound.mp3'
-const ratios3 = '16:9, 9:16, 1:1'
-const ratios5 = `${ratios3}, 4:3, 3:4`
-const ratios6 = `${ratios5}, 21:9`
-const ratios8 = `${ratios6}, 3:2, 2:3`
 
-export const videoCommonParameters = [
-  parameter('model', 'string', true, 'modelField'),
-  parameter('prompt', 'string', true, 'promptField'),
+export const pendingVideoModels = [
+  '全能视频2.5-301010-c1',
+  '全能视频2.5-30010-T',
+]
+export const pendingVideoNote =
+  'These canvas aliases still need a public API mapping check. Do not infer an available model ID from their names.'
+
+export const videoCommonParameters: VideoParameter[] = [
+  {
+    name: 'model',
+    type: 'string',
+    required: true,
+    description: 'apiDocs.video.modelField',
+  },
+  {
+    name: 'prompt',
+    type: 'string',
+    required: true,
+    description: 'apiDocs.video.promptField',
+  },
 ]
 
 export const videoGroups: VideoGroup[] = [
@@ -52,12 +53,31 @@ export const videoGroups: VideoGroup[] = [
         resolution: '720p',
         ratios: '16:9, 9:16',
         limits:
-          'Up to 10 public image URLs. Video and audio references are not supported. A duration of 10 seconds or less is recommended.',
+          'Apply both per-type and total reference limits. A zero limit means that media type is unsupported.',
+        constraints: {
+          inputModes: ['textToVideo', 'reference'],
+          maxImages: 10,
+          maxVideos: 0,
+          maxAudios: 0,
+          maxTotal: 10,
+          maxPromptCharacters: 100000,
+          audioRequiresVisual: true,
+        },
       },
     ],
     parameters: [
-      parameter('duration', 'integer', true, 'durationField'),
-      parameter('aspect_ratio', 'string', true, 'ratioField'),
+      {
+        name: 'duration',
+        type: 'integer',
+        required: true,
+        description: 'apiDocs.video.durationField',
+      },
+      {
+        name: 'ratio',
+        type: 'string',
+        required: true,
+        description: 'apiDocs.video.ratioField',
+      },
       {
         name: 'images',
         type: 'string[]',
@@ -65,18 +85,25 @@ export const videoGroups: VideoGroup[] = [
         description:
           'Use publicly accessible HTTP(S) media URLs. Local paths, private network URLs and login pages cannot be used.',
       },
+      {
+        name: 'resolution',
+        type: 'string',
+        required: true,
+        description: 'Use a resolution listed for the selected model.',
+      },
     ],
     notes: [
       'Use publicly accessible HTTP(S) media URLs. Local paths, private network URLs and login pages cannot be used.',
     ],
     examples: [
       {
-        title: key('textExample'),
+        title: 'apiDocs.video.textExample',
         body: {
           model: 'muse-video',
           prompt: 'A slow camera push through a sunlit forest.',
           duration: 6,
-          aspect_ratio: '16:9',
+          ratio: '16:9',
+          resolution: '720p',
         },
       },
       {
@@ -85,8 +112,9 @@ export const videoGroups: VideoGroup[] = [
           model: 'muse-video',
           prompt: 'Animate the reference character walking through the scene.',
           duration: 6,
-          aspect_ratio: '16:9',
-          images: [image],
+          images: ['https://your-storage.example.com/reference.jpg'],
+          ratio: '16:9',
+          resolution: '720p',
         },
       },
     ],
@@ -101,13 +129,64 @@ export const videoGroups: VideoGroup[] = [
         resolution: '720p',
         ratios: '16:9, 9:16',
         limits:
-          'Up to 10 images, 5 videos and 5 audio clips; at most 20 references in total. Prompt limit: 20000 characters.',
+          'Apply both per-type and total reference limits. A zero limit means that media type is unsupported.',
+        constraints: {
+          inputModes: ['textToVideo', 'reference'],
+          maxImages: 10,
+          maxVideos: 5,
+          maxAudios: 5,
+          maxTotal: 20,
+          maxPromptCharacters: 20000,
+          audioRequiresVisual: false,
+          maxTotalAudioSeconds: 15,
+        },
+      },
+      {
+        models: ['wan3.0-video'],
+        seconds: '2–30',
+        resolution: '480p / 720p / 1080p',
+        ratios: '16:9, 9:16, 1:1, 4:3, 3:4, 21:9',
+        limits:
+          'Apply both per-type and total reference limits. A zero limit means that media type is unsupported.',
+        constraints: {
+          inputModes: [
+            'textToVideo',
+            'reference',
+            'firstFrame',
+            'firstLastFrame',
+          ],
+          maxImages: 10,
+          maxVideos: 5,
+          maxAudios: 5,
+          maxTotal: 20,
+          maxPromptCharacters: 20000,
+          maxVideoSeconds: 15,
+          audioRequiresVisual: false,
+          maxTotalVideoSeconds: 15,
+          maxVideoAndOutputSeconds: 30,
+          maxTotalAudioSeconds: 15,
+        },
       },
     ],
     parameters: [
-      parameter('duration', 'integer', true, 'durationField'),
-      parameter('ratio', 'string', true, 'ratioField'),
-      parameter('resolution', 'string', true, 'resolution720'),
+      {
+        name: 'duration',
+        type: 'integer',
+        required: true,
+        description: 'apiDocs.video.durationField',
+      },
+      {
+        name: 'ratio',
+        type: 'string',
+        required: true,
+        description: 'apiDocs.video.ratioField',
+      },
+      {
+        name: 'resolution',
+        type: 'string',
+        required: true,
+        description: 'Use a resolution listed for the selected model.',
+      },
       {
         name: 'images / videos / audios',
         type: 'string[]',
@@ -115,13 +194,27 @@ export const videoGroups: VideoGroup[] = [
         description:
           'Use publicly accessible HTTP(S) media URLs. Local paths, private network URLs and login pages cannot be used.',
       },
+      {
+        name: 'start_frame / end_frame',
+        type: 'string[]',
+        required: false,
+        description:
+          'Only wan3.0-video supports these frame arrays: one start frame and optionally one end frame. Do not mix with reference arrays.',
+      },
+      {
+        name: 'watermark',
+        type: 'boolean',
+        required: false,
+        description: 'Send watermark=false only for wan3.0-video.',
+      },
     ],
     notes: [
-      'Use duration as an integer, ratio and resolution=720p. Do not substitute seconds, aspect_ratio or content for this model.',
+      'Use a resolution listed for the selected model.',
+      'Durations in the constraints are in seconds. Check total reference duration and reference-plus-output duration where specified.',
     ],
     examples: [
       {
-        title: key('mixedExample'),
+        title: 'apiDocs.video.mixedExample',
         body: {
           model: '万能视频-3.0-720',
           prompt:
@@ -129,50 +222,174 @@ export const videoGroups: VideoGroup[] = [
           duration: 5,
           ratio: '16:9',
           resolution: '720p',
-          images: [image],
-          videos: [video],
-          audios: [audio],
+          images: ['https://your-storage.example.com/reference.jpg'],
+          videos: ['https://your-storage.example.com/motion.mp4'],
+          audios: ['https://your-storage.example.com/sound.mp3'],
+        },
+      },
+      {
+        title: 'wan3.0-video',
+        body: {
+          model: 'wan3.0-video',
+          prompt: 'A cinematic shot of a mountain ridge at sunrise.',
+          duration: 5,
+          ratio: '16:9',
+          resolution: '720p',
+          watermark: false,
+        },
+      },
+      {
+        title: 'First and last frame example',
+        body: {
+          model: 'wan3.0-video',
+          prompt: 'A smooth transition between the two frames.',
+          duration: 5,
+          ratio: '16:9',
+          resolution: '720p',
+          watermark: false,
+          start_frame: ['https://your-storage.example.com/start.jpg'],
+          end_frame: ['https://your-storage.example.com/end.jpg'],
         },
       },
     ],
   },
-
   {
     id: 'video-arrays',
-    title: key('arraysTitle'),
+    title: 'Omni video: URL arrays',
     variants: [
-      {
-        models: ['全能视频2.5-301010-T', '全能视频2.5-301010-c'],
-        seconds: '4–30',
-        resolution: '720p',
-        ratios: ratios6,
-        limits: key('limits301010'),
-      },
       {
         models: ['全能视频2.0-903-720-c'],
         seconds: '4–15',
         resolution: '720p',
-        ratios: ratios5,
-        limits: key('limits903'),
+        ratios: '16:9, 9:16, 4:3, 1:1, 3:4',
+        limits:
+          'Apply both per-type and total reference limits. A zero limit means that media type is unsupported.',
+        constraints: {
+          maxImages: 9,
+          maxVideos: 0,
+          maxAudios: 3,
+          maxTotal: 12,
+          inputModes: ['textToVideo', 'reference'],
+        },
       },
       {
         models: ['全能视频2.0-933-720-c'],
         seconds: '4–15',
         resolution: '720p',
-        ratios: ratios5,
-        limits: key('limits933'),
+        ratios: '16:9, 9:16, 4:3, 1:1, 3:4',
+        limits:
+          'Apply both per-type and total reference limits. A zero limit means that media type is unsupported.',
+        constraints: {
+          maxImages: 9,
+          maxVideos: 3,
+          maxAudios: 3,
+          maxTotal: 15,
+          inputModes: ['textToVideo', 'reference'],
+        },
+      },
+      {
+        models: ['全能视频2.5-301010-T'],
+        seconds: '4–30',
+        resolution: '720p',
+        ratios: '16:9, 9:16, 1:1, 21:9',
+        limits:
+          'Apply both per-type and total reference limits. A zero limit means that media type is unsupported.',
+        constraints: {
+          inputModes: ['textToVideo', 'reference'],
+          maxImages: 30,
+          maxVideos: 10,
+          maxAudios: 10,
+          maxTotal: 50,
+          maxPromptCharacters: 100000,
+          audioRequiresVisual: false,
+        },
+      },
+      {
+        models: ['全能视频2.5-301010-c'],
+        seconds: '4–30',
+        resolution: '720p',
+        ratios: '16:9, 9:16, 1:1, 21:9',
+        limits:
+          'Apply both per-type and total reference limits. A zero limit means that media type is unsupported.',
+        constraints: {
+          inputModes: ['textToVideo', 'reference'],
+          maxImages: 30,
+          maxVideos: 10,
+          maxAudios: 10,
+          maxTotal: 50,
+          maxPromptCharacters: 100000,
+          audioRequiresVisual: false,
+        },
+      },
+      {
+        models: ['全能视频2.0-903-720-c1'],
+        seconds: '5–15',
+        resolution: '720p',
+        ratios: '16:9, 9:16',
+        limits:
+          'Apply both per-type and total reference limits. A zero limit means that media type is unsupported.',
+        constraints: {
+          inputModes: ['textToVideo', 'reference'],
+          maxImages: 9,
+          maxVideos: 0,
+          maxAudios: 3,
+          maxTotal: 12,
+          maxPromptCharacters: 20000,
+          audioRequiresVisual: false,
+        },
+      },
+      {
+        models: ['全能视频2.0-930-720-c1'],
+        seconds: '5–15',
+        resolution: '720p',
+        ratios: '16:9, 9:16',
+        limits:
+          'Apply both per-type and total reference limits. A zero limit means that media type is unsupported.',
+        constraints: {
+          inputModes: ['textToVideo', 'reference'],
+          maxImages: 9,
+          maxVideos: 3,
+          maxAudios: 0,
+          maxTotal: 12,
+          maxPromptCharacters: 20000,
+          audioRequiresVisual: false,
+          maxVideoSeconds: 15,
+        },
       },
     ],
     parameters: [
-      parameter('duration', 'integer', true, 'durationField'),
-      parameter('ratio', 'string', true, 'ratioField'),
-      parameter('resolution', 'string', true, 'resolution720'),
-      parameter('images / videos / audios', 'string[]', false, 'arrayMedia'),
+      {
+        name: 'duration',
+        type: 'integer',
+        required: true,
+        description: 'apiDocs.video.durationField',
+      },
+      {
+        name: 'ratio',
+        type: 'string',
+        required: true,
+        description: 'apiDocs.video.ratioField',
+      },
+      {
+        name: 'resolution',
+        type: 'string',
+        required: true,
+        description: 'Use a resolution listed for the selected model.',
+      },
+      {
+        name: 'images / videos / audios',
+        type: 'string[]',
+        required: false,
+        description: 'apiDocs.video.arrayMedia',
+      },
     ],
-    notes: [key('arraysNote'), key('xingTags')],
+    notes: [
+      'apiDocs.video.xingTags',
+      'Do not reuse model limits across aliases. The c1 models have different media limits; 301010-T and 301010-c use 16:9, 9:16, 1:1 or 21:9.',
+    ],
     examples: [
       {
-        title: key('mixedExample'),
+        title: 'apiDocs.video.mixedExample',
         body: {
           model: '全能视频2.5-301010-T',
           prompt:
@@ -180,64 +397,249 @@ export const videoGroups: VideoGroup[] = [
           duration: 5,
           ratio: '16:9',
           resolution: '720p',
-          images: [image],
-          videos: [video],
-          audios: [audio],
+          images: ['https://your-storage.example.com/reference.jpg'],
+          videos: ['https://your-storage.example.com/motion.mp4'],
+          audios: ['https://your-storage.example.com/sound.mp3'],
+        },
+      },
+      {
+        title: '全能视频2.0-903-720-c',
+        body: {
+          model: '全能视频2.0-903-720-c',
+          prompt: 'A cinematic shot of a mountain ridge at sunrise.',
+          duration: 5,
+          ratio: '16:9',
+          resolution: '720p',
+        },
+      },
+      {
+        title: '全能视频2.0-933-720-c',
+        body: {
+          model: '全能视频2.0-933-720-c',
+          prompt: 'A cinematic shot of a mountain ridge at sunrise.',
+          duration: 5,
+          ratio: '16:9',
+          resolution: '720p',
+        },
+      },
+      {
+        title: '全能视频2.5-301010-c',
+        body: {
+          model: '全能视频2.5-301010-c',
+          prompt: 'A cinematic shot of a mountain ridge at sunrise.',
+          duration: 5,
+          ratio: '16:9',
+          resolution: '720p',
+        },
+      },
+      {
+        title: '全能视频2.0-903-720-c1',
+        body: {
+          model: '全能视频2.0-903-720-c1',
+          prompt: 'A cinematic shot of a mountain ridge at sunrise.',
+          duration: 5,
+          ratio: '16:9',
+          resolution: '720p',
+        },
+      },
+      {
+        title: '全能视频2.0-930-720-c1',
+        body: {
+          model: '全能视频2.0-930-720-c1',
+          prompt: 'A cinematic shot of a mountain ridge at sunrise.',
+          duration: 5,
+          ratio: '16:9',
+          resolution: '720p',
         },
       },
     ],
   },
   {
     id: 'video-content',
-    title: key('contentTitle'),
+    title: 'Omni video: content format',
     variants: [
       {
-        models: ['全能视频2.5-301010-480', '全能视频2.5-301010-720'],
+        models: ['全能视频2.5-301010-480'],
         seconds: '4–30',
-        resolution: '480p / 720p',
-        ratios: ratios6,
+        resolution: '480p',
+        ratios: '16:9, 9:16, 1:1, 4:3, 3:4, 21:9',
         limits:
-          'Up to 30 images, 10 videos and 10 audio clips; at most 50 references in total. Use fixed ratios; adaptive, first/last frames, editing and extension are not supported.',
+          'Apply both per-type and total reference limits. A zero limit means that media type is unsupported.',
+        constraints: {
+          maxImages: 30,
+          maxVideos: 10,
+          maxAudios: 10,
+          maxTotal: 50,
+          inputModes: ['textToVideo', 'reference'],
+          audioRequiresVisual: false,
+        },
       },
       {
-        models: ['全能视频2.5-无视频参考-480', '全能视频2.5-无视频参考-720'],
+        models: ['全能视频2.5-301010-720'],
         seconds: '4–30',
-        resolution: '480p / 720p',
-        ratios: ratios6,
-        limits: key('limitsNoVideo'),
+        resolution: '720p',
+        ratios: '16:9, 9:16, 1:1, 4:3, 3:4, 21:9',
+        limits:
+          'Apply both per-type and total reference limits. A zero limit means that media type is unsupported.',
+        constraints: {
+          maxImages: 30,
+          maxVideos: 10,
+          maxAudios: 10,
+          maxTotal: 50,
+          inputModes: ['textToVideo', 'reference'],
+          audioRequiresVisual: false,
+        },
       },
       {
-        models: ['全能视频-2.0-933-480', '全能视频-2.0-933-720'],
+        models: ['全能视频2.5-301010-1080'],
+        seconds: '4–30',
+        resolution: '1080p',
+        ratios: '16:9, 9:16, 1:1, 4:3, 3:4, 21:9',
+        limits:
+          'Apply both per-type and total reference limits. A zero limit means that media type is unsupported.',
+        constraints: {
+          maxImages: 30,
+          maxVideos: 10,
+          maxAudios: 10,
+          maxTotal: 50,
+          inputModes: ['textToVideo', 'reference'],
+          audioRequiresVisual: false,
+        },
+      },
+      {
+        models: ['全能视频-2.0-933-480'],
         seconds: '4–15',
-        resolution: '480p / 720p',
-        ratios: `${ratios3}, adaptive`,
-        limits: key('limitsMai20'),
+        resolution: '480p',
+        ratios: '16:9, 9:16, 1:1, 4:3, 3:4, 21:9',
+        limits:
+          'Apply both per-type and total reference limits. A zero limit means that media type is unsupported.',
+        constraints: {
+          maxImages: 9,
+          maxVideos: 3,
+          maxAudios: 3,
+          maxTotal: 15,
+          inputModes: [
+            'textToVideo',
+            'reference',
+            'firstFrame',
+            'firstLastFrame',
+          ],
+          audioRequiresVisual: true,
+        },
+      },
+      {
+        models: ['全能视频-2.0-933-720'],
+        seconds: '4–15',
+        resolution: '720p',
+        ratios: '16:9, 9:16, 1:1, 4:3, 3:4, 21:9',
+        limits:
+          'Apply both per-type and total reference limits. A zero limit means that media type is unsupported.',
+        constraints: {
+          maxImages: 9,
+          maxVideos: 3,
+          maxAudios: 3,
+          maxTotal: 15,
+          inputModes: [
+            'textToVideo',
+            'reference',
+            'firstFrame',
+            'firstLastFrame',
+          ],
+          audioRequiresVisual: true,
+        },
+      },
+      {
+        models: ['全能视频2.0-参考视频-720-token'],
+        seconds: '4–15',
+        resolution: '720p',
+        ratios: '16:9, 9:16, 1:1',
+        limits:
+          'Apply both per-type and total reference limits. A zero limit means that media type is unsupported.',
+        constraints: {
+          maxImages: 9,
+          maxVideos: 3,
+          maxAudios: 3,
+          maxTotal: 15,
+          inputModes: [
+            'textToVideo',
+            'reference',
+            'firstFrame',
+            'firstLastFrame',
+          ],
+          audioRequiresVisual: true,
+        },
+      },
+      {
+        models: ['全能视频2.5-参考视频-720-token'],
+        seconds: '4–30',
+        resolution: '720p',
+        ratios: '16:9, 9:16, 1:1',
+        limits:
+          'Apply both per-type and total reference limits. A zero limit means that media type is unsupported.',
+        constraints: {
+          maxImages: 30,
+          maxVideos: 10,
+          maxAudios: 10,
+          maxTotal: 50,
+          inputModes: ['textToVideo', 'reference'],
+          audioRequiresVisual: false,
+        },
       },
     ],
     parameters: [
-      parameter('seconds', 'integer', true, 'secondsField'),
-      parameter('ratio', 'string', true, 'contentRatio'),
-      parameter('content', 'object[]', false, 'contentField'),
-      parameter('content[].type', 'string', false, 'contentType'),
-      parameter('content[].role', 'string', false, 'contentRole'),
-      parameter(
-        'content[].image_url / video_url / audio_url',
-        '{ url: string }',
-        false,
-        'contentUrl'
-      ),
-      parameter('omni_reference_task_type', 'string', false, 'omniType'),
+      {
+        name: 'seconds',
+        type: 'integer',
+        required: true,
+        description: 'apiDocs.video.secondsField',
+      },
+      {
+        name: 'ratio',
+        type: 'string',
+        required: true,
+        description: 'apiDocs.video.contentRatio',
+      },
+      {
+        name: 'content',
+        type: 'object[]',
+        required: false,
+        description: 'apiDocs.video.contentField',
+      },
+      {
+        name: 'content[].type',
+        type: 'string',
+        required: false,
+        description: 'apiDocs.video.contentType',
+      },
+      {
+        name: 'content[].role',
+        type: 'string',
+        required: false,
+        description: 'apiDocs.video.contentRole',
+      },
+      {
+        name: 'content[].image_url / video_url / audio_url',
+        type: '{ url: string }',
+        required: false,
+        description: 'apiDocs.video.contentUrl',
+      },
+      {
+        name: 'omni_reference_task_type',
+        type: 'string',
+        required: false,
+        description: 'apiDocs.video.omniType',
+      },
     ],
     notes: [
-      key('contentResolution'),
-      key('contentFrame'),
-      key('contentTags'),
-      key('contentDurations'),
-      'For 301010-480/720, use reference_image, reference_video and reference_audio roles only. Do not mix content with images/videos/audios. Video references may change billing; check current pricing.',
+      'apiDocs.video.contentFrame',
+      'apiDocs.video.contentTags',
+      'apiDocs.video.contentDurations',
+      'The model suffix selects resolution: -480, -720 or -1080. Do not send resolution, duration or top-level media arrays.',
+      'For 2.5 content models, use reference roles only and set omni_reference_task_type to reference when attaching media.',
     ],
     examples: [
       {
-        title: key('contentExample'),
+        title: 'apiDocs.video.contentExample',
         body: {
           model: '全能视频2.5-301010-720',
           prompt:
@@ -249,40 +651,22 @@ export const videoGroups: VideoGroup[] = [
             {
               type: 'image_url',
               role: 'reference_image',
-              image_url: { url: image },
+              image_url: {
+                url: 'https://your-storage.example.com/reference.jpg',
+              },
             },
             {
               type: 'video_url',
               role: 'reference_video',
-              video_url: { url: video },
+              video_url: {
+                url: 'https://your-storage.example.com/motion.mp4',
+              },
             },
           ],
         },
       },
       {
-        title: key('noVideoExample'),
-        body: {
-          model: '全能视频2.5-无视频参考-480',
-          prompt: '@image1 walks to the rhythm of @audio1.',
-          seconds: 5,
-          ratio: '4:3',
-          omni_reference_task_type: 'reference',
-          content: [
-            {
-              type: 'image_url',
-              role: 'reference_image',
-              image_url: { url: image },
-            },
-            {
-              type: 'audio_url',
-              role: 'reference_audio',
-              audio_url: { url: audio },
-            },
-          ],
-        },
-      },
-      {
-        title: key('framesExample'),
+        title: 'apiDocs.video.framesExample',
         body: {
           model: '全能视频-2.0-933-720',
           prompt:
@@ -293,154 +677,337 @@ export const videoGroups: VideoGroup[] = [
             {
               type: 'image_url',
               role: 'first_frame',
-              image_url: { url: image },
+              image_url: {
+                url: 'https://your-storage.example.com/reference.jpg',
+              },
             },
             {
               type: 'image_url',
               role: 'last_frame',
-              image_url: { url: 'https://media.example.com/end.jpg' },
+              image_url: {
+                url: 'https://your-storage.example.com/end.jpg',
+              },
             },
           ],
+        },
+      },
+      {
+        title: '全能视频2.5-301010-480',
+        body: {
+          model: '全能视频2.5-301010-480',
+          prompt: 'A cinematic shot of a mountain ridge at sunrise.',
+          seconds: 5,
+          ratio: '16:9',
+        },
+      },
+      {
+        title: '全能视频2.5-301010-1080',
+        body: {
+          model: '全能视频2.5-301010-1080',
+          prompt: 'A cinematic shot of a mountain ridge at sunrise.',
+          seconds: 5,
+          ratio: '16:9',
+        },
+      },
+      {
+        title: '全能视频-2.0-933-480',
+        body: {
+          model: '全能视频-2.0-933-480',
+          prompt: 'A cinematic shot of a mountain ridge at sunrise.',
+          seconds: 5,
+          ratio: '16:9',
+        },
+      },
+      {
+        title: '全能视频2.0-参考视频-720-token',
+        body: {
+          model: '全能视频2.0-参考视频-720-token',
+          prompt: 'A cinematic shot of a mountain ridge at sunrise.',
+          seconds: 5,
+          ratio: '16:9',
+        },
+      },
+      {
+        title: '全能视频2.5-参考视频-720-token',
+        body: {
+          model: '全能视频2.5-参考视频-720-token',
+          prompt: 'A cinematic shot of a mountain ridge at sunrise.',
+          seconds: 5,
+          ratio: '16:9',
         },
       },
     ],
   },
   {
     id: 'video-fixed',
-    title: key('fixedTitle'),
+    title: 'apiDocs.video.fixedTitle',
     variants: [
       {
-        models: ['全能-fast-10s', '全能-fast-15s'],
+        models: ['全能-fast-10s'],
         seconds: '10 / 15',
         resolution: '720p',
-        ratios: ratios8,
-        limits: key('limitsFast'),
+        ratios: '16:9, 9:16, 1:1, 4:3, 3:4, 21:9, 3:2, 2:3',
+        limits:
+          'Apply both per-type and total reference limits. A zero limit means that media type is unsupported.',
+        constraints: {
+          maxImages: 9,
+          maxVideos: 3,
+          maxAudios: 3,
+          maxTotal: 15,
+          inputModes: ['textToVideo', 'reference'],
+          maxVideoSeconds: 15,
+          maxAudioSeconds: 15,
+        },
       },
       {
-        models: ['Minimax-H3-10s', 'Minimax-H3-15s'],
+        models: ['全能-fast-15s'],
+        seconds: '10 / 15',
+        resolution: '720p',
+        ratios: '16:9, 9:16, 1:1, 4:3, 3:4, 21:9, 3:2, 2:3',
+        limits:
+          'Apply both per-type and total reference limits. A zero limit means that media type is unsupported.',
+        constraints: {
+          maxImages: 9,
+          maxVideos: 3,
+          maxAudios: 3,
+          maxTotal: 15,
+          inputModes: ['textToVideo', 'reference'],
+          maxVideoSeconds: 15,
+          maxAudioSeconds: 15,
+        },
+      },
+      {
+        models: ['Minimax-H3-10s'],
         seconds: '10 / 15',
         resolution: '768p',
-        ratios: ratios8,
-        limits: key('limitsH3'),
+        ratios: '16:9, 9:16, 1:1, 4:3, 3:4, 21:9, 3:2, 2:3',
+        limits:
+          'Apply both per-type and total reference limits. A zero limit means that media type is unsupported.',
+        constraints: {
+          maxImages: 9,
+          maxVideos: 3,
+          maxAudios: 3,
+          maxTotal: 12,
+          inputModes: ['textToVideo', 'reference'],
+          maxVideoSeconds: 15,
+          maxAudioSeconds: 15,
+          maxPromptCharacters: 7000,
+        },
+      },
+      {
+        models: ['Minimax-H3-15s'],
+        seconds: '10 / 15',
+        resolution: '768p',
+        ratios: '16:9, 9:16, 1:1, 4:3, 3:4, 21:9, 3:2, 2:3',
+        limits:
+          'Apply both per-type and total reference limits. A zero limit means that media type is unsupported.',
+        constraints: {
+          maxImages: 9,
+          maxVideos: 3,
+          maxAudios: 3,
+          maxTotal: 12,
+          inputModes: ['textToVideo', 'reference'],
+          maxVideoSeconds: 15,
+          maxAudioSeconds: 15,
+          maxPromptCharacters: 7000,
+        },
       },
     ],
     parameters: [
-      parameter('aspect_ratio', 'string', true, 'ratioField'),
-      parameter('images', 'string[]', false, 'fixedImages'),
-      parameter('metadata.video_urls', 'string[]', false, 'fixedVideos'),
-      parameter('metadata.audio_urls', 'string[]', false, 'fixedAudios'),
+      {
+        name: 'aspect_ratio',
+        type: 'string',
+        required: true,
+        description: 'apiDocs.video.ratioField',
+      },
+      {
+        name: 'images',
+        type: 'string[]',
+        required: false,
+        description: 'apiDocs.video.fixedImages',
+      },
+      {
+        name: 'metadata.video_urls',
+        type: 'string[]',
+        required: false,
+        description: 'apiDocs.video.fixedVideos',
+      },
+      {
+        name: 'metadata.audio_urls',
+        type: 'string[]',
+        required: false,
+        description: 'apiDocs.video.fixedAudios',
+      },
     ],
-    notes: [key('fixedNote'), key('h3Note'), key('fixedTags')],
+    notes: [
+      'apiDocs.video.fixedNote',
+      'apiDocs.video.h3Note',
+      'apiDocs.video.fixedTags',
+    ],
     examples: [
       {
-        title: key('fixedExample'),
+        title: 'apiDocs.video.fixedExample',
         body: {
           model: 'Minimax-H3-10s',
           prompt: '@图片1 moves following @视频1, with the rhythm of @音频1.',
           aspect_ratio: '16:9',
-          images: [image],
-          metadata: { video_urls: [video], audio_urls: [audio] },
+          images: ['https://your-storage.example.com/reference.jpg'],
+          metadata: {
+            video_urls: ['https://your-storage.example.com/motion.mp4'],
+            audio_urls: ['https://your-storage.example.com/sound.mp3'],
+          },
         },
       },
-    ],
-  },
-  {
-    id: 'video-mini',
-    title: key('miniTitle'),
-    variants: [
       {
-        models: ['全能-mini'],
-        seconds: '480p: 5–15; 720p: 5–12',
-        resolution: '480p / 720p',
-        ratios: ratios3,
-        limits: key('limitsMini'),
-      },
-    ],
-    parameters: [
-      parameter('seconds', 'integer', true, 'secondsField'),
-      parameter('ratio', 'string', true, 'ratioField'),
-      parameter('resolution', 'string', true, 'miniResolution'),
-      parameter('image_urls', 'string[]', false, 'miniImages'),
-      parameter('audio_urls', 'string[]', false, 'miniAudios'),
-    ],
-    notes: [key('miniNote')],
-    examples: [
-      {
-        title: key('miniExample'),
+        title: '全能-fast-10s',
         body: {
-          model: '全能-mini',
-          prompt: 'The character in the reference image waves at the camera.',
-          seconds: 5,
-          resolution: '480p',
-          ratio: '16:9',
-          image_urls: [image],
-          audio_urls: [audio],
+          model: '全能-fast-10s',
+          prompt: 'A cinematic shot of a mountain ridge at sunrise.',
+          aspect_ratio: '16:9',
+        },
+      },
+      {
+        title: '全能-fast-15s',
+        body: {
+          model: '全能-fast-15s',
+          prompt: 'A cinematic shot of a mountain ridge at sunrise.',
+          aspect_ratio: '16:9',
+        },
+      },
+      {
+        title: 'Minimax-H3-15s',
+        body: {
+          model: 'Minimax-H3-15s',
+          prompt: 'A cinematic shot of a mountain ridge at sunrise.',
+          aspect_ratio: '16:9',
         },
       },
     ],
   },
   {
     id: 'video-grok-preview',
-    title: key('previewTitle'),
+    title: 'apiDocs.video.previewTitle',
     variants: [
       {
         models: ['ok-video-1.5-preview'],
         seconds: '10 / 15',
         resolution: '720p',
         ratios: '16:9, 9:16',
-        limits: key('limitsPreview'),
+        limits:
+          'Apply both per-type and total reference limits. A zero limit means that media type is unsupported.',
+        constraints: {
+          maxImages: 1,
+          maxVideos: 0,
+          maxAudios: 0,
+          maxTotal: 1,
+          inputModes: ['reference'],
+        },
       },
     ],
     parameters: [
-      parameter('seconds', 'string', true, 'previewSeconds'),
-      parameter('size', 'string', true, 'previewSize'),
-      parameter('input_reference / image_url', 'string', true, 'previewImage'),
+      {
+        name: 'seconds',
+        type: 'string',
+        required: true,
+        description: 'apiDocs.video.previewSeconds',
+      },
+      {
+        name: 'size',
+        type: 'string',
+        required: true,
+        description: 'apiDocs.video.previewSize',
+      },
+      {
+        name: 'input_reference / image_url',
+        type: 'string',
+        required: true,
+        description: 'apiDocs.video.previewImage',
+      },
     ],
-    notes: [key('previewNote')],
+    notes: ['apiDocs.video.previewNote'],
     examples: [
       {
-        title: key('previewExample'),
+        title: 'apiDocs.video.previewExample',
         body: {
           model: 'ok-video-1.5-preview',
           prompt: 'Animate this scene with a slow camera push-in.',
           seconds: '10',
           size: '1280x720',
-          input_reference: image,
-          image_url: image,
+          input_reference: 'https://your-storage.example.com/reference.jpg',
+          image_url: 'https://your-storage.example.com/reference.jpg',
         },
       },
     ],
   },
   {
     id: 'video-grok-imagine',
-    title: key('imagineTitle'),
+    title: 'apiDocs.video.imagineTitle',
     variants: [
       {
         models: ['ok-imagine-video'],
         seconds: '10 / 16 / 20',
-        resolution: '480p / 720p / 1080p',
-        ratios: ratios3,
-        limits: key('limitsImagine'),
+        resolution: '480p / 720p',
+        ratios: '16:9, 9:16, 1:1',
+        limits:
+          'Apply both per-type and total reference limits. A zero limit means that media type is unsupported.',
+        constraints: {
+          maxImages: 7,
+          maxVideos: 0,
+          maxAudios: 0,
+          maxTotal: 7,
+          inputModes: ['textToVideo', 'reference', 'firstFrame'],
+        },
       },
     ],
     parameters: [
-      parameter('duration / seconds', 'string', true, 'imagineSeconds'),
-      parameter('aspect_ratio / ratio', 'string', true, 'imagineRatio'),
-      parameter('size', 'string', true, 'imagineSize'),
-      parameter(
-        'resolution_name / resolution',
-        'string',
-        true,
-        'imagineResolution'
-      ),
-      parameter('stream', 'boolean', true, 'streamField'),
-      parameter('image_url', 'string', false, 'imagineImage'),
-      parameter('messages', 'object[]', false, 'imagineMessages'),
+      {
+        name: 'duration / seconds',
+        type: 'string',
+        required: true,
+        description: 'apiDocs.video.imagineSeconds',
+      },
+      {
+        name: 'aspect_ratio / ratio',
+        type: 'string',
+        required: true,
+        description: 'apiDocs.video.imagineRatio',
+      },
+      {
+        name: 'size',
+        type: 'string',
+        required: true,
+        description: 'apiDocs.video.imagineSize',
+      },
+      {
+        name: 'resolution_name / resolution',
+        type: 'string',
+        required: true,
+        description:
+          'Set resolution_name and resolution to the same value: 480p or 720p.',
+      },
+      {
+        name: 'stream',
+        type: 'boolean',
+        required: true,
+        description: 'apiDocs.video.streamField',
+      },
+      {
+        name: 'image_url',
+        type: 'string',
+        required: false,
+        description: 'apiDocs.video.imagineImage',
+      },
+      {
+        name: 'messages',
+        type: 'object[]',
+        required: false,
+        description: 'apiDocs.video.imagineMessages',
+      },
     ],
-    notes: [key('imagineNote')],
+    notes: ['apiDocs.video.imagineNote'],
     examples: [
       {
-        title: key('textExample'),
+        title: 'apiDocs.video.textExample',
         body: {
           model: 'ok-imagine-video',
           prompt: 'A cinematic shot of a mountain ridge at sunrise.',
@@ -455,7 +1022,7 @@ export const videoGroups: VideoGroup[] = [
         },
       },
       {
-        title: key('imagineExample'),
+        title: 'apiDocs.video.imagineExample',
         body: {
           model: 'ok-imagine-video',
           prompt: 'The same character walks through the scene.',
@@ -475,10 +1042,17 @@ export const videoGroups: VideoGroup[] = [
                   type: 'text',
                   text: 'The same character walks through the scene.',
                 },
-                { type: 'image_url', image_url: { url: image } },
                 {
                   type: 'image_url',
-                  image_url: { url: 'https://media.example.com/scene.jpg' },
+                  image_url: {
+                    url: 'https://your-storage.example.com/reference.jpg',
+                  },
+                },
+                {
+                  type: 'image_url',
+                  image_url: {
+                    url: 'https://your-storage.example.com/scene.jpg',
+                  },
                 },
               ],
             },
@@ -487,22 +1061,94 @@ export const videoGroups: VideoGroup[] = [
       },
     ],
   },
+  {
+    id: 'video-kling',
+    title: 'Kling Video v4',
+    variants: [
+      {
+        models: ['灵动视频-video-v4'],
+        seconds: '3–30',
+        resolution: '720p / 1080p',
+        ratios: '16:9, 9:16, 1:1, 21:9',
+        limits:
+          'Apply both per-type and total reference limits. A zero limit means that media type is unsupported.',
+        constraints: {
+          inputModes: ['textToVideo', 'reference'],
+          maxImages: 10,
+          maxVideos: 5,
+          maxAudios: 3,
+          maxTotal: 15,
+          maxPromptCharacters: 8000,
+          maxVideoSeconds: 30,
+          maxTotalVideoSeconds: 30,
+          maxAudioSeconds: 30,
+          audioRequiresVisual: false,
+        },
+      },
+    ],
+    parameters: [
+      {
+        name: 'duration',
+        type: 'integer',
+        required: true,
+        description: 'apiDocs.video.durationField',
+      },
+      {
+        name: 'ratio',
+        type: 'string',
+        required: true,
+        description: 'apiDocs.video.ratioField',
+      },
+      {
+        name: 'resolution',
+        type: 'string',
+        required: true,
+        description: 'Use a resolution listed for the selected model.',
+      },
+      {
+        name: 'images / videos / audios',
+        type: 'string[]',
+        required: false,
+        description: 'apiDocs.video.arrayMedia',
+      },
+    ],
+    notes: [
+      'Durations in the constraints are in seconds. Check total reference duration and reference-plus-output duration where specified.',
+    ],
+    examples: [
+      {
+        title: '灵动视频-video-v4',
+        body: {
+          model: '灵动视频-video-v4',
+          prompt: 'A cinematic shot of a mountain ridge at sunrise.',
+          duration: 10,
+          ratio: '16:9',
+          resolution: '720p',
+        },
+      },
+    ],
+  },
 ]
 
-export const videoGuideKeys = [
-  'scope',
-  'workflow',
-  'authentication',
-  'wireRules',
-  'mediaRules',
-  'modes',
-  'pollRules',
-  'retryRules',
-  'resultRules',
-  'availability',
-].map(key)
+export const videoGuideKeys: string[] = [
+  'apiDocs.video.scope',
+  'apiDocs.video.workflow',
+  'apiDocs.video.authentication',
+  'apiDocs.video.wireRules',
+  'apiDocs.video.mediaRules',
+  'apiDocs.video.modes',
+  'apiDocs.video.pollRules',
+  'apiDocs.video.retryRules',
+  'apiDocs.video.resultRules',
+  'apiDocs.video.availability',
+]
+
 export const videoResponseExamples = {
-  created: { id: 'task_example', object: 'video', status: 'queued' },
+  created: {
+    id: 'task_example',
+    object: 'video',
+    status: 'queued',
+  },
   completed: {
     id: 'task_example',
     object: 'video',
@@ -513,6 +1159,9 @@ export const videoResponseExamples = {
     id: 'task_example',
     object: 'video',
     status: 'failed',
-    error: { code: 'generation_failed', message: 'Generation failed' },
+    error: {
+      code: 'generation_failed',
+      message: 'Generation failed',
+    },
   },
 }

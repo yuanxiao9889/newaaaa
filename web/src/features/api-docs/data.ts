@@ -400,7 +400,7 @@ export type OopiiCatalogModel = {
 }
 
 export const oopiiModelGroups: Record<
-  'text' | 'image' | 'video' | 'midjourney',
+  'text' | 'image' | 'audio' | 'video' | 'midjourney',
   OopiiCatalogModel[]
 > = {
   text: [
@@ -412,7 +412,19 @@ export const oopiiModelGroups: Record<
     { id: 'DeepSeek', owner: 'DeepSeek', endpoints: ['openai'] },
     { id: 'Kimi', owner: 'Moonshot AI', endpoints: ['openai'] },
   ],
+  audio: [
+    {
+      id: 'seed-audio-1.0',
+      owner: 'oopii',
+      endpoints: ['/jieapi/v1/audio/speech'],
+    },
+  ],
   image: [
+    {
+      id: 'Midjourney v8.2',
+      owner: 'midjourney',
+      endpoints: ['/v1/images/generations', '/v1/images/edits'],
+    },
     { id: 'nano-banana-2.1', owner: 'google', endpoints: ['gemini'] },
     { id: 'gpt-image-2-opi', owner: 'openai', endpoints: ['image-generation'] },
     {

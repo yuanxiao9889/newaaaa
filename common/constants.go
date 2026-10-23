@@ -235,7 +235,7 @@ var (
 	SearchRateLimitDuration int64 = 60
 
 	AsyncImageTaskStatusRateLimitEnable         = true
-	AsyncImageTaskStatusRateLimitNum            = 120
+	AsyncImageTaskStatusRateLimitNum            = 300
 	AsyncImageTaskStatusRateLimitDuration int64 = 60
 )
 

@@ -17,6 +17,7 @@ func SetRelayRouter(router *gin.Engine) {
 	router.Use(middleware.DecompressRequestMiddleware())
 	router.Use(middleware.BodyStorageCleanup()) // 清理请求体存储
 	router.Use(middleware.StatsMiddleware())
+	setTransferRouter(router)
 	// https://platform.openai.com/docs/api-reference/introduction
 	modelsRouter := router.Group("/v1/models")
 	modelsRouter.Use(middleware.RouteTag("relay"))
@@ -95,7 +96,14 @@ func SetRelayRouter(router *gin.Engine) {
 	imageUploadRouter.GET("/references/capabilities", controller.ReferenceUploadCapabilities)
 	imageUploadRouter.POST("/references/prepare", middleware.ReferenceUploadRateLimit(), controller.PrepareReferenceUpload)
 	imageUploadRouter.POST("/references/complete", middleware.ReferenceUploadRateLimit(), controller.CompleteReferenceUpload)
+	imageUploadRouter.GET("/references/sessions/:session", middleware.ReferenceUploadRateLimit(), controller.GetDirectReferenceSession)
+	imageUploadRouter.PUT("/references/sessions/:session", middleware.ReferenceUploadRateLimit(), controller.PutDirectReferenceSession)
+	imageUploadRouter.POST("/references/resumable/prepare", middleware.ReferenceUploadRateLimit(), controller.PrepareResumableReference)
+	imageUploadRouter.GET("/references/resumable/:upload", middleware.ReferenceUploadRateLimit(), controller.GetResumableReference)
+	imageUploadRouter.PUT("/references/resumable/:upload/chunks/:index", middleware.ReferenceUploadRateLimit(), controller.PutResumableReferenceChunk)
+	imageUploadRouter.POST("/references/resumable/:upload/complete", middleware.ReferenceUploadRateLimit(), controller.CompleteResumableReference)
 	router.GET("/v1/uploads/references/content/:user/:asset", controller.GetReferenceContent)
+	router.HEAD("/v1/uploads/references/content/:user/:asset", controller.GetReferenceContent)
 	{
 		//http router
 		httpRouter := relayV1Router.Group("")
@@ -189,6 +197,7 @@ func SetRelayRouter(router *gin.Engine) {
 	{
 		imageTaskRouter.GET("/:task_id", middleware.AsyncImageTaskStatusRateLimit(), controller.GetImageTask)
 		imageTaskRouter.GET("/:task_id/content", controller.GetImageTaskContent)
+		imageTaskRouter.GET("/:task_id/retry-input", middleware.AsyncImageTaskStatusRateLimit(), controller.GetImageTaskRetryInput)
 	}
 
 	// Provider-native image tasks (for example Seedream) are registered in
@@ -232,8 +241,8 @@ func SetRelayRouter(router *gin.Engine) {
 	relayGeminiRouter.Use(middleware.RouteTag("relay"))
 	relayGeminiRouter.Use(middleware.SystemPerformanceCheck())
 	relayGeminiRouter.Use(middleware.TokenAuth())
-	relayGeminiRouter.Use(middleware.ModelRequestRateLimit())
 	relayGeminiRouter.Use(middleware.ResolveReferenceAssets())
+	relayGeminiRouter.Use(middleware.ModelRequestRateLimit())
 	relayGeminiRouter.Use(middleware.Distribute())
 	{
 		// Gemini API 路径格式: /v1beta/models/{model_name}:{action}
@@ -244,7 +253,8 @@ func SetRelayRouter(router *gin.Engine) {
 }
 
 func registerMjRouterGroup(relayMjRouter *gin.RouterGroup) {
-	relayMjRouter.GET("/image/:id", relay.RelayMidjourneyImage)
+	relayMjRouter.GET("/image/:id", middleware.MidjourneyImageAuth(), relay.RelayMidjourneyImage)
+	relayMjRouter.HEAD("/image/:id", middleware.MidjourneyImageAuth(), relay.RelayMidjourneyImage)
 	relayMjRouter.GET("/upload/:id", controller.RelayMidjourneyUploadImage)
 	relayMjRouter.POST("/submit/upload-discord-images", middleware.TokenAuth(), controller.RelayMidjourneyUpload)
 	relayMjRouter.Use(middleware.TokenAuth(), middleware.ResolveReferenceAssets(), middleware.Distribute())

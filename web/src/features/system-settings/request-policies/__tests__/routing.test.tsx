@@ -25,7 +25,11 @@ import { SettingsPageProvider } from '../../components/settings-page-context'
 import { RoutingPolicySection } from '../routing-section'
 
 const options = {
+  RetryCycleEnabled: 'false',
+  RetryTimeBudgetEnabled: 'false',
+  RetryTimeBudgetSeconds: '60',
   RetryTimes: '2',
+  ImageInputRetentionMinutes: '20',
   'channel_affinity_setting.enabled': 'true',
   'channel_affinity_setting.session_mode': '',
   'channel_affinity_setting.switch_on_success': 'false',
@@ -178,6 +182,18 @@ it('opens global affinity settings and the complete rules table without switchin
     screen.queryByRole('button', { name: 'Manage all session rules' })
   ).not.toBeInTheDocument()
 })
+it('saves image input retention from the retry policy and restores the selected duration', async () => {
+  show()
+  const retention = await screen.findByRole('combobox', { name: 'Image input retention' })
+  expect(retention).toHaveValue('20')
+  expect(within(retention).getAllByRole('option').map(option => (option as HTMLOptionElement).value)).toEqual(['10', '20', '30'])
+  await userEvent.selectOptions(retention, '10')
+  await userEvent.click(screen.getByRole('button', { name: 'Save Changes' }))
+  await waitFor(() => expect(api.patch).toHaveBeenCalledTimes(1))
+  expect(vi.mocked(api.patch).mock.calls[0][1]).toEqual({ options: { ImageInputRetentionMinutes: '10' } })
+  await waitFor(() => expect(retention).toHaveValue('10'))
+})
+
 it('session rules sit between the session defaults and the retry budget', async () => {
   show()
   const table = await screen.findByRole('table')
@@ -795,3 +811,54 @@ it.each([
     expect(api.patch).not.toHaveBeenCalled()
   }
 )
+
+it('channel cycling and time budget save together and the duration follows its switch', async () => {
+  show()
+  const duration = await screen.findByRole('spinbutton', {
+    name: 'Total retry time budget (seconds)',
+  })
+  expect(duration).toBeDisabled()
+  expect(duration).toHaveValue(60)
+  await userEvent.click(
+    screen.getByRole('switch', {
+      name: 'Cycle through channels after exhaustion',
+    })
+  )
+  await userEvent.click(
+    screen.getByRole('switch', {
+      name: 'Use a time budget instead of the retry count',
+    })
+  )
+  expect(duration).toBeEnabled()
+  fireEvent.change(duration, { target: { value: '90' } })
+  await userEvent.click(screen.getByRole('button', { name: 'Save Changes' }))
+  await waitFor(() => expect(api.patch).toHaveBeenCalledTimes(1))
+  expect(currentOptions).toMatchObject({
+    RetryCycleEnabled: 'true',
+    RetryTimeBudgetEnabled: 'true',
+    RetryTimeBudgetSeconds: '90',
+  })
+})
+it('an invalid retry duration prevents saving', async () => {
+  show()
+  await userEvent.click(
+    await screen.findByRole('switch', {
+      name: 'Use a time budget instead of the retry count',
+    })
+  )
+  fireEvent.change(
+    screen.getByRole('spinbutton', {
+      name: 'Total retry time budget (seconds)',
+    }),
+    { target: { value: '0' } }
+  )
+  await userEvent.click(screen.getByRole('button', { name: 'Save Changes' }))
+  await waitFor(() =>
+    expect(
+      screen.getByRole('spinbutton', {
+        name: 'Total retry time budget (seconds)',
+      })
+    ).toHaveAttribute('aria-invalid', 'true')
+  )
+  expect(api.patch).not.toHaveBeenCalled()
+})

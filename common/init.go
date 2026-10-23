@@ -137,7 +137,7 @@ func InitEnv() {
 	SearchRateLimitDuration = int64(GetEnvOrDefault("SEARCH_RATE_LIMIT_DURATION", 60))
 
 	AsyncImageTaskStatusRateLimitEnable = GetEnvOrDefaultBool("ASYNC_IMAGE_TASK_STATUS_RATE_LIMIT_ENABLE", true)
-	AsyncImageTaskStatusRateLimitNum = GetEnvOrDefault("ASYNC_IMAGE_TASK_STATUS_RATE_LIMIT", 120)
+	AsyncImageTaskStatusRateLimitNum = GetEnvOrDefault("ASYNC_IMAGE_TASK_STATUS_RATE_LIMIT", 300)
 	AsyncImageTaskStatusRateLimitDuration = int64(GetEnvOrDefault("ASYNC_IMAGE_TASK_STATUS_RATE_LIMIT_DURATION", 60))
 	initConstantEnv()
 }

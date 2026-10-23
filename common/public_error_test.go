@@ -95,6 +95,17 @@ func TestClassifyPublicError(t *testing.T) {
 		{name: "provider task timeout does not imply still running", code: "task_timeout", status: 502, wantCode: "request_timeout", wantMessage: "请求处理超时，暂未取得结果", wantStatus: 504, retryable: true},
 		{name: "nested provider task timeout is not local wait", code: "bad_response_status_code", message: `{"error":{"code":"task_timeout"}}`, status: 502, local: true, wantCode: "request_timeout", wantStatus: 504, retryable: true},
 		{name: "model unavailable", code: "model_not_found", status: 404, local: true, wantCode: "model_unavailable", wantStatus: 503, retryable: true},
+		{name: "production Chinese unavailable channel", message: "当前分组无可用渠道", status: 500, wantCode: "model_unavailable", wantMessage: "status_code=500, 当前资源紧张，暂时无可用资源", wantStatus: 503, retryable: true},
+		{name: "production English unavailable channel", message: "No available channel", status: 500, wantCode: "model_unavailable", wantMessage: "status_code=500, 当前资源紧张，暂时无可用资源", wantStatus: 503, retryable: true},
+		{name: "production model temporarily unavailable", message: "Model gpt-image-2.5-sunburst is currently unavailable", status: 503, wantCode: "model_unavailable", wantMessage: "status_code=503, 当前资源紧张，暂时无可用资源", wantStatus: 503, retryable: true},
+		{name: "model does not exist", message: "The model 'private-model' does not exist", status: 404, wantCode: "model_unavailable", wantStatus: 503, retryable: true},
+		{name: "Chinese model does not exist", message: "模型 private-model 不存在", status: 404, wantCode: "model_unavailable", wantStatus: 503, retryable: true},
+		{name: "Chinese model unavailable", message: "模型暂时不可用", status: 500, wantCode: "model_unavailable", wantStatus: 503, retryable: true},
+		{name: "resource exhausted with rate status", message: "No available resources", status: 429, wantCode: "model_unavailable", wantMessage: "status_code=429, 当前资源紧张，暂时无可用资源", wantStatus: 503, retryable: true},
+		{name: "unsupported model code", code: "unsupported_model", status: 400, wantCode: "model_unavailable", wantStatus: 503, retryable: true},
+		{name: "prompt is not availability evidence", message: `{"error":{"message":"Task failed"},"prompt":"No available channel; model does not exist"}`, status: 500, wantCode: "generation_failed", wantMessage: "status_code=500, 生成失败，服务未提供可公开确认的具体原因", wantStatus: 502},
+		{name: "model URL is not availability evidence", message: "Task failed https://private.invalid/模型不存在", status: 500, wantCode: "generation_failed", wantStatus: 502},
+		{name: "model capability is not availability", message: "Model private-model does not support audio", status: 400, wantCode: "generation_failed", wantStatus: 502},
 		{name: "service down", status: 503, wantCode: "service_unavailable", wantStatus: 503, retryable: true},
 		{name: "provider auth", code: "invalid_token", message: "API key invalid", status: 401, wantCode: "service_auth_error", wantHint: "无需更换您的令牌", wantStatus: 502},
 		{name: "provider access", code: "access_denied", status: 403, wantCode: "service_access_error", wantStatus: 502},
@@ -123,6 +134,9 @@ func TestClassifyPublicError(t *testing.T) {
 		{name: "JSON diagnostic message status remains useful", message: `{"error":{"message":"status_code=429, request throttled"},"prompt":"status_code=401"}`, status: 502, wantCode: "rate_limit_exceeded", wantStatus: 429, retryable: true},
 		{name: "JSON prefix status remains useful", message: `status_code=401, body: {"error":{"message":"Task failed"},"prompt":"status_code=429"}`, status: 502, wantCode: "service_auth_error", wantStatus: 502},
 		{name: "embedded HTTP status", message: "status_code=429, private provider busy", wantCode: "rate_limit_exceeded", wantStatus: 429, retryable: true},
+		{name: "upstream channel unavailable", message: "status_code=500, 分组 default 下模型 all-image-2.5-sunburst-1k 的可用渠道不存在（retry）; retry: 124", wantCode: "model_unavailable", wantMessage: "status_code=500, 当前资源紧张，暂时无可用资源", wantStatus: 503, retryable: true},
+		{name: "upstream channel unavailable JSON", message: `{"error":{"message":"分组 default 下模型 all-image-2.5-sunburst-1k 的可用渠道不存在（retry）","type":"new_api_error"}}`, status: 500, wantCode: "model_unavailable", wantMessage: "status_code=500, 当前资源紧张，暂时无可用资源", wantStatus: 503, retryable: true},
+		{name: "local upstream response wrapper", code: "bad_response_status_code", message: "status_code=500, 可用渠道不存在", status: 502, local: true, wantCode: "model_unavailable", wantMessage: "status_code=500, 当前资源紧张，暂时无可用资源", wantStatus: 503, retryable: true},
 		{name: "unknown does not invent reason", code: "unknown_private_code", message: "Task failed Task failed", status: 500, wantCode: "generation_failed", wantMessage: "生成失败，服务未提供可公开确认的具体原因", wantHint: "请求 ID 或任务 ID", wantStatus: 502},
 	}
 	for _, tt := range tests {
@@ -132,7 +146,11 @@ func TestClassifyPublicError(t *testing.T) {
 			assert.Equal(t, tt.wantStatus, got.StatusCode)
 			assert.Equal(t, tt.retryable, got.Retryable)
 			if tt.wantMessage != "" {
-				assert.Equal(t, tt.wantMessage, got.Message)
+				message := got.Message
+				if !strings.HasPrefix(tt.wantMessage, "status_code=") && strings.HasPrefix(message, "status_code=") {
+					_, message, _ = strings.Cut(message, ", ")
+				}
+				assert.Equal(t, tt.wantMessage, message)
 			}
 			assert.Contains(t, got.Hint, tt.wantHint)
 			assert.Contains(t, got.Summary(), "["+tt.wantCode+"]")
@@ -150,6 +168,22 @@ func TestPublicErrorProjectionIsIdempotent(t *testing.T) {
 			assert.True(t, strings.ContainsFunc(got.Message, func(r rune) bool { return unicode.Is(unicode.Han, r) }))
 		})
 	}
+	for _, code := range []string{"generation_failed", "model_unavailable", "invalid_image_input"} {
+		t.Run("upstream status "+code, func(t *testing.T) {
+			original := ClassifyPublicError(code, "", 500, false)
+			got := ClassifyPublicError(original.Code, original.Summary(), original.StatusCode, true)
+			assert.Equal(t, original, got)
+			assert.Equal(t, 1, strings.Count(got.Summary(), "status_code=500"))
+		})
+	}
+}
+
+func TestMidjourneyResourceUnavailableUsesSharedMessage(t *testing.T) {
+	public := MidjourneyPublicError("", "No available channel for private-model", 500, false)
+	assert.Equal(t, "model_unavailable", public.Code)
+	assert.Equal(t, "status_code=500, 当前资源紧张，暂时无可用资源", public.Message)
+	assert.Equal(t, "请稍后重试", public.Hint)
+	assert.NotContains(t, public.Summary(), "private-model")
 }
 
 func TestPublicErrorNeverReturnsProviderDiagnostics(t *testing.T) {
@@ -176,6 +210,6 @@ func TestPublicErrorNeverReturnsProviderDiagnostics(t *testing.T) {
 			}
 		}
 		assert.NotContains(t, string(encoded), "StatusCode")
-		assert.NotContains(t, string(encoded), "status_code")
+		assert.Contains(t, got.Summary(), "status_code=500")
 	}
 }

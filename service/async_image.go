@@ -612,6 +612,16 @@ func asyncImageTaskDataNeedsCompaction(data []byte) bool {
 }
 
 func StartAsyncImageCleanupLoop() {
+	go func() {
+		ticker := time.NewTicker(time.Minute)
+		defer ticker.Stop()
+		for {
+			if err := CleanupImageTaskInputs(); err != nil {
+				common.SysError("cleanup failed image inputs: " + err.Error())
+			}
+			<-ticker.C
+		}
+	}()
 	interval := GetAsyncImageCleanupInterval()
 	go func() {
 		if err := CleanupExpiredAsyncImages(); err != nil {

@@ -17,7 +17,6 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import {
-  ChevronRight,
   Code2,
   Download,
   FileImage,
@@ -28,9 +27,7 @@ import {
   Menu,
   Search,
   ShieldAlert,
-  Sparkles,
   Upload,
-  Workflow,
   X,
 } from 'lucide-react'
 import { useMemo, useState } from 'react'
@@ -50,8 +47,10 @@ import {
   oopiiModelGroups,
   sizeRows,
 } from './data'
+import { DocsNavigation } from './docs-navigation'
+import { generationContracts } from './generation-data'
+import { GenerationDocs, IntegrationExport } from './generation-docs'
 import { buildHyImageSamples } from './hy-image-samples'
-import { midjourneyNavItems } from './midjourney-data'
 import { MidjourneyDocs } from './midjourney-docs'
 import { buildOpenAISamples } from './openai-samples'
 import { videoGroups } from './video-data'
@@ -59,20 +58,25 @@ import { VideoDocs } from './video-docs'
 
 type ModelOperation = 'generate' | 'edit'
 
-const oopiiReferenceItems = [
-  ['oopii-model-catalog', 'Current upstream model list'],
-  ['text-api', 'Text and multimodal API routes'],
-  ['video-api', 'Video task API'],
-] as const
-
-const referenceItems = [
-  ['models-api', 'Query available models'],
-  ['async-images', 'Asynchronous image tasks'],
-  ['image-compression', 'Image compression and upload'],
-  ['size-mapping', 'Size mapping'],
-  ['response-format', 'Response format'],
-  ['errors', 'Errors and status codes'],
-] as const
+const modelSectionIds = new Map<string, string>([
+  ...imageModels.flatMap((model) =>
+    [model.model, ...(model.modelIds ?? [])].map(
+      (id) => [id, `model-${model.id}`] as const
+    )
+  ),
+  ...generationContracts.map(
+    (contract) => [contract.model, contract.id] as const
+  ),
+  ...videoGroups.flatMap((group) =>
+    group.variants.flatMap((variant) =>
+      variant.models.map((id) => [id, group.id] as const)
+    )
+  ),
+  ...oopiiModelGroups.text.map((model) => [model.id, 'text-api'] as const),
+  ...oopiiModelGroups.midjourney.map(
+    (model) => [model.id, 'midjourney-endpoints'] as const
+  ),
+])
 
 const textApiRoutes = [
   {
@@ -618,96 +622,6 @@ function ParameterTable({ model }: { model: ImageModelDoc }) {
   )
 }
 
-function DocsNavigation({ onNavigate }: { onNavigate?: () => void }) {
-  const { t } = useTranslation()
-  const groups = [
-    {
-      label: 'Get started',
-      icon: Sparkles,
-      items: [
-        ['overview', 'Overview'],
-        ['authentication', 'Authentication'],
-      ],
-    },
-    {
-      label: 'OOpii upstream model catalog',
-      icon: FileJson,
-      items: oopiiReferenceItems,
-    },
-    {
-      label: 'apiDocs.video.title',
-      icon: Workflow,
-      items: videoGroups.map((group) => [group.id, group.title]),
-    },
-    {
-      label: 'OpenAI Images models',
-      icon: ImageIcon,
-      items: imageModels
-        .filter((model) => model.family === 'openai')
-        .map((model) => [`model-${model.id}`, model.title ?? model.model]),
-    },
-    {
-      label: 'OOpii image models',
-      icon: Sparkles,
-      items: imageModels
-        .filter((model) => model.family === 'oopii')
-        .map((model) => [`model-${model.id}`, model.title ?? model.model]),
-    },
-    {
-      label: 'Gemini image models',
-      icon: Layers3,
-      items: imageModels
-        .filter((model) => model.family === 'gemini')
-        .map((model) => [`model-${model.id}`, model.title ?? model.model]),
-    },
-    {
-      label: 'Midjourney task API',
-      icon: Workflow,
-      items: midjourneyNavItems,
-    },
-    {
-      label: 'API reference',
-      icon: Code2,
-      items: referenceItems,
-    },
-  ]
-
-  return (
-    <nav
-      className='space-y-6 px-4 py-5'
-      aria-label={t('API documentation navigation')}
-    >
-      {groups.map((group) => {
-        const Icon = group.icon
-        return (
-          <div key={group.label}>
-            <div className='text-muted-foreground mb-2 flex items-center gap-2 px-2 text-[11px] font-semibold tracking-[0.12em] uppercase'>
-              <Icon className='size-3.5' />
-              {t(group.label)}
-            </div>
-            <div className='grid gap-0.5'>
-              {group.items.map(([id, label]) => (
-                <a
-                  key={id}
-                  href={`#${id}`}
-                  onClick={onNavigate}
-                  className={cn(
-                    'text-muted-foreground hover:bg-muted hover:text-foreground flex min-w-0 items-center gap-2 rounded-lg px-2 py-2 text-sm transition-colors',
-                    id.startsWith('model-') && 'font-mono text-xs'
-                  )}
-                >
-                  <ChevronRight className='size-3 shrink-0 opacity-50' />
-                  <span className='truncate'>{t(label)}</span>
-                </a>
-              ))}
-            </div>
-          </div>
-        )
-      })}
-    </nav>
-  )
-}
-
 function ModelSection({
   model,
   baseUrl,
@@ -986,13 +900,15 @@ export function ApiDocs() {
           <div className='flex h-12 items-center justify-between px-4'>
             <div className='flex items-center gap-2 text-sm font-semibold'>
               <Code2 className='text-primary size-4' />
-              {t('Image API documentation')}
+              {t('Model API documentation')}
             </div>
             <Button
               variant='ghost'
               size='icon-sm'
               onClick={() => setMobileNavOpen((open) => !open)}
               aria-label={t('Toggle documentation navigation')}
+              aria-expanded={mobileNavOpen}
+              aria-controls='mobile-docs-navigation'
             >
               {mobileNavOpen ? (
                 <X className='size-4' />
@@ -1002,8 +918,11 @@ export function ApiDocs() {
             </Button>
           </div>
           {mobileNavOpen && (
-            <div className='bg-background border-t shadow-xl'>
-              <ScrollArea className='max-h-[70svh]'>
+            <div
+              id='mobile-docs-navigation'
+              className='bg-background border-t shadow-xl'
+            >
+              <ScrollArea className='h-[min(70svh,36rem)]'>
                 <DocsNavigation onNavigate={() => setMobileNavOpen(false)} />
               </ScrollArea>
             </div>
@@ -1017,9 +936,11 @@ export function ApiDocs() {
                 <Code2 className='size-4' />
               </div>
               <div>
-                <div className='text-sm font-semibold'>{t('Image API')}</div>
+                <div className='text-sm font-semibold'>
+                  {t('Model API documentation')}
+                </div>
                 <div className='text-muted-foreground text-xs'>
-                  OOpii ? new-api
+                  OOpii · new-api
                 </div>
               </div>
             </div>
@@ -1035,14 +956,16 @@ export function ApiDocs() {
                   <Badge variant='secondary'>OOpii</Badge>
                   <Badge variant='outline'>OpenAI Images</Badge>
                   <Badge variant='outline'>Gemini generateContent</Badge>
-                  <Badge variant='outline'>Midjourney</Badge>
+                  <Badge variant='outline'>Midjourney v8.2</Badge>
+                  <Badge variant='outline'>Seed Audio</Badge>
+                  <Badge variant='outline'>{t('Video models')}</Badge>
                 </div>
                 <h1 className='mt-5 max-w-4xl text-3xl font-semibold tracking-tight sm:text-5xl'>
-                  {t('Image generation API reference')}
+                  {t('OOpii developer API reference')}
                 </h1>
                 <p className='text-muted-foreground mt-5 max-w-3xl text-base leading-8'>
                   {t(
-                    'Model-level reference for the OOpii routes used by Storyboard Copilot, including endpoints, parameters, aspect ratios, resolutions, editing workflows, and production-ready examples.'
+                    'Connect image, audio and video models with exact API routes, parameter tables and runnable examples.'
                   )}
                 </p>
                 <div className='mt-8 grid gap-4 sm:grid-cols-3'>
@@ -1052,12 +975,25 @@ export function ApiDocs() {
                         imageModels.reduce(
                           (count, model) =>
                             count + (model.modelIds?.length ?? 1),
+                          2
+                        )
+                      ),
+                      'Image and audio models',
+                    ],
+                    [
+                      String(
+                        videoGroups.reduce(
+                          (count, group) =>
+                            count +
+                            group.variants.reduce(
+                              (sum, variant) => sum + variant.models.length,
+                              0
+                            ),
                           0
                         )
                       ),
-                      'Documented models',
+                      'Video models',
                     ],
-                    ['3', 'Compatible protocols'],
                     ['3', 'Example languages'],
                   ].map(([value, label]) => (
                     <div
@@ -1071,15 +1007,31 @@ export function ApiDocs() {
                     </div>
                   ))}
                 </div>
+                <IntegrationExport baseUrl={baseUrl} />
+                <div className='mt-5 flex flex-wrap gap-3 text-sm'>
+                  {[
+                    ['seed-audio', 'Audio generation'],
+                    ['midjourney-image', 'Midjourney independent image API'],
+                    ['video-api', 'Video task API'],
+                  ].map(([id, label]) => (
+                    <a
+                      key={id}
+                      className='text-primary hover:bg-muted rounded-lg border px-3 py-2'
+                      href={`#${id}`}
+                    >
+                      {t(label)}
+                    </a>
+                  ))}
+                </div>
               </section>
 
               <section className='mt-14'>
                 <SectionHeading
                   id='authentication'
-                  eyebrow='01 ? GET STARTED'
+                  eyebrow={`01 · ${t('Get started')}`}
                   title={t('Authentication')}
                   description={t(
-                    'Send a new-api token in the Authorization header for model discovery and every image request. Keep the token on the server and never expose it in browser code.'
+                    'Send a new-api token in the Authorization header for model discovery and generation requests. Keep the token on the server.'
                   )}
                 />
                 <div className='border-border/70 bg-card mt-6 rounded-xl border p-5'>
@@ -1109,7 +1061,7 @@ export function ApiDocs() {
                   eyebrow='OOpii'
                   title={t('Current OOpii catalog snapshot')}
                   description={t(
-                    'Catalog checked against enabled relay channels on 2026-10-12. Availability depends on your API key and group; query /v1/models before use.'
+                    'Audio, independent Midjourney and video contracts checked on 2026-10-22. Query /v1/models for account-specific availability.'
                   )}
                 />
                 <div className='mt-6 grid gap-6'>
@@ -1117,6 +1069,7 @@ export function ApiDocs() {
                     [
                       ['text', 'Text model families'],
                       ['image', 'Image models'],
+                      ['audio', 'Audio generation'],
                       ['video', 'Video models'],
                       ['midjourney', 'Midjourney models'],
                     ] as const
@@ -1153,15 +1106,20 @@ export function ApiDocs() {
                             {oopiiModelGroups[group].map((model) => (
                               <tr key={model.id} className='align-top'>
                                 <td className='px-4 py-3'>
-                                  {group === 'text' ? (
-                                    <span className='font-medium'>
-                                      {model.id}
-                                    </span>
-                                  ) : (
-                                    <code className='text-primary break-all'>
-                                      {model.id}
-                                    </code>
-                                  )}
+                                  <a
+                                    href={`#${modelSectionIds.get(model.id) ?? 'models-api'}`}
+                                    className='text-primary focus-visible:outline-ring rounded-sm underline-offset-4 hover:underline focus-visible:outline-2 focus-visible:outline-offset-4'
+                                  >
+                                    {group === 'text' ? (
+                                      <span className='font-medium'>
+                                        {model.id}
+                                      </span>
+                                    ) : (
+                                      <code className='text-primary break-all'>
+                                        {model.id}
+                                      </code>
+                                    )}
+                                  </a>
                                 </td>
                                 <td className='px-4 py-3'>{model.owner}</td>
                                 <td className='px-4 py-3'>
@@ -1239,11 +1197,12 @@ export function ApiDocs() {
                 </div>
                 <p className='text-muted-foreground mt-4 text-sm leading-6'>
                   {t(
-                    'Catalog checked against enabled relay channels on 2026-10-12. Availability depends on your API key and group; query /v1/models before use.'
+                    'Audio, independent Midjourney and video contracts checked on 2026-10-22. Query /v1/models for account-specific availability.'
                   )}
                 </p>
               </section>
 
+              <GenerationDocs baseUrl={baseUrl} />
               <VideoDocs baseUrl={baseUrl} />
 
               <div className='mt-16 space-y-16'>

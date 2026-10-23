@@ -137,15 +137,34 @@ func sweepTimedOutTasks(ctx context.Context) {
 // RunTaskPollingOnce performs one async-task (Suno/video) polling pass
 // synchronously. It honors ctx cancellation (the system-task runner cancels it
 // when the lease is lost) and, when report is non-nil, reports progress as
-// (processedPlatforms, totalPlatforms). It returns immediately if the task
-// adaptor factory has not been wired yet, to avoid a nil call during startup.
+// (processedPlatforms, totalPlatforms). Durable usage delivery does not need an
+// adaptor; upstream polling waits until the adaptor factory has been wired.
 func RunTaskPollingOnce(ctx context.Context, report func(processed, total int)) TaskPollSummary {
 	summary := TaskPollSummary{}
-	if GetTaskAdaptorFunc == nil {
-		return summary
-	}
 	if ctx == nil {
 		ctx = context.Background()
+	}
+	// Completed tasks no longer enter upstream polling. Deliver their durable
+	// usage checkpoints separately, without invoking any charging hooks.
+	pendingUsage, err := model.GetPendingTaskUsageLogs(ctx, constant.TaskQueryLimit)
+	if err != nil {
+		logger.LogError(ctx, "load pending task usage failed: "+err.Error())
+	}
+	for _, task := range pendingUsage {
+		if ctx.Err() != nil {
+			return summary
+		}
+		if err := model.MergeTaskUsageLog(ctx, task); err != nil {
+			logger.LogWarn(ctx, fmt.Sprintf("task %s usage delivery failed: %v", task.TaskID, err))
+			// Rotate failed deliveries so one missing original cannot starve
+			// other tasks when the queue exceeds this pass's batch limit.
+			if updateErr := model.DB.WithContext(ctx).Model(&model.Task{}).Where("id = ?", task.ID).Update("updated_at", common.GetTimestamp()).Error; updateErr != nil {
+				logger.LogWarn(ctx, "update usage delivery attempt failed: "+updateErr.Error())
+			}
+		}
+	}
+	if GetTaskAdaptorFunc == nil {
+		return summary
 	}
 
 	common.SysLog("任务进度轮询开始")
@@ -385,6 +404,9 @@ func updateBatchTasks(ctx context.Context, adaptor BatchTaskPollingAdaptor, chan
 
 		isDone := task.Status == model.TaskStatusSuccess || task.Status == model.TaskStatusFailure
 		terminalTransition := isDone && snap.Status != task.Status
+		if task.Status == model.TaskStatusSuccess {
+			captureTaskTokenUsage(task, responseItem.TaskInfo.TokenUsage)
+		}
 		won, updateErr := task.UpdateWithStatus(snap.Status)
 		if updateErr != nil {
 			common.SysLog("UpdateSunoTask task error: " + updateErr.Error())
@@ -651,6 +673,9 @@ func updateVideoSingleTask(ctx context.Context, adaptor TaskPollingAdaptor, ch *
 	}
 
 	isDone := task.Status == model.TaskStatusSuccess || task.Status == model.TaskStatusFailure
+	if task.Status == model.TaskStatusSuccess {
+		captureTaskTokenUsage(task, taskResult.TokenUsage)
+	}
 	if isDone && snap.Status != task.Status {
 		won, err := task.UpdateWithStatus(snap.Status)
 		if err != nil {
@@ -723,16 +748,18 @@ func SettleTaskBillingOnComplete(ctx context.Context, adaptor TaskPollingAdaptor
 		return fmt.Errorf("missing task settlement result")
 	}
 	RecordAutoSwitchTaskResult(ctx, task, taskResult)
-	if task.PrivateData.BillingState == TaskBillingStateSettled || task.PrivateData.BillingState == TaskBillingStateRefunded {
+	if task.PrivateData.BillingState == TaskBillingStateSettled {
+		if task.PrivateData.PendingUsageLog != nil {
+			return model.MergeTaskUsageLog(ctx, task)
+		}
+		return nil
+	}
+	if task.PrivateData.BillingState == TaskBillingStateRefunded {
 		return nil
 	}
 	failed := task.Status == model.TaskStatusFailure || taskResult.Status == string(model.TaskStatusFailure)
 	if !failed && taskResult.TokenUsage != nil {
-		usage := taskResult.TokenUsage
-		task.PrivateData.PromptTokens = usage.PromptTokens
-		task.PrivateData.CompletionTokens = usage.CompletionTokens
-		task.PrivateData.TotalTokens = usage.TotalTokens
-		task.PrivateData.UsageDetails = BuildTaskUsageDetails(usage)
+		captureTaskTokenUsage(task, taskResult.TokenUsage)
 	}
 	bc := task.PrivateData.BillingContext
 	if !failed && task.PrivateData.BillingError != "" && task.PrivateData.ActualQuota >= 0 && task.PrivateData.ActualQuota != task.Quota {

@@ -42,6 +42,7 @@ func AppendTaskPluginIdentityFilter(c *gin.Context, pluginKey string) {
 }
 
 type RetryParam struct {
+	Cycle        *ChannelRetryCycle
 	Ctx          *gin.Context
 	TokenGroup   string
 	ModelName    string
@@ -112,6 +113,13 @@ func (p *RetryParam) ResetRetryNextTry() {
 //	Retry=3: GroupB, priority1 (startRetryIndex=2, priorityRetry=1)
 //	         分组B, 优先级1
 func CacheGetRandomSatisfiedChannel(param *RetryParam) (*model.Channel, string, error) {
+	if param.Cycle != nil && param.Cycle.Enabled {
+		return param.Cycle.Select(param)
+	}
+	return cacheGetRandomSatisfiedChannel(param)
+}
+
+func cacheGetRandomSatisfiedChannel(param *RetryParam) (*model.Channel, string, error) {
 	var channel *model.Channel
 	var err error
 	selectGroup := param.TokenGroup

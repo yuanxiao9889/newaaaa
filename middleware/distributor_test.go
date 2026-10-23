@@ -238,7 +238,7 @@ func TestDistributeHidesTaskPluginDetailsButLogsDiagnostics(t *testing.T) {
 				requestID := recorder.Header().Get(common.RequestIdKey)
 				require.NotEmpty(t, requestID)
 				assert.JSONEq(t, fmt.Sprintf(`{"error":{"message":%q,"type":"new_api_error","code":"model_unavailable"}}`,
-					"[model_unavailable] 所选模型或处理模式暂不可用；请检查对外模型 ID 和处理模式，或联系管理员确认可用配置 (request id: "+requestID+")"), recorder.Body.String())
+					"[model_unavailable] 当前资源紧张，暂时无可用资源；请稍后重试 (request id: "+requestID+")"), recorder.Body.String())
 				assert.NotContains(t, recorder.Body.String(), group)
 				assert.NotContains(t, recorder.Body.String(), "disable or override")
 				for _, key := range keys {

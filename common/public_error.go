@@ -56,7 +56,7 @@ var publicErrorCatalog = map[string]PublicError{
 	"rate_limit_exceeded":           {"rate_limit_exceeded", "请求过于频繁或当前并发数已达上限", "请降低并发并稍后重试", true, http.StatusTooManyRequests},
 	"request_timeout":               {"request_timeout", "请求处理超时，暂未取得结果", "异步任务请先查询原任务状态，避免重复提交；若持续无结果，请联系管理员并提供请求 ID 或任务 ID", true, http.StatusGatewayTimeout},
 	"task_timeout":                  {"task_timeout", "任务仍在处理中，等待结果超时", "请继续查询原任务状态，不要重复提交", true, http.StatusGatewayTimeout},
-	"model_unavailable":             {"model_unavailable", "所选模型或处理模式暂不可用", "请检查对外模型 ID 和处理模式，或联系管理员确认可用配置", true, http.StatusServiceUnavailable},
+	"model_unavailable":             {"model_unavailable", "当前资源紧张，暂时无可用资源", "请稍后重试", true, http.StatusServiceUnavailable},
 	"service_unavailable":           {"service_unavailable", "生成服务暂时不可用", "请稍后重试；若持续失败，请联系管理员并提供请求 ID 或任务 ID", true, http.StatusServiceUnavailable},
 	"service_auth_error":            {"service_auth_error", "生成服务认证失败", "请联系管理员并提供请求 ID 或任务 ID；无需更换您的令牌", false, http.StatusBadGateway},
 	"service_access_error":          {"service_access_error", "生成服务拒绝了此次请求", "请联系管理员并提供请求 ID 或任务 ID，以检查服务访问配置", false, http.StatusBadGateway},
@@ -80,16 +80,35 @@ var publicErrorHTTPStatusPattern = regexp.MustCompile(`(?i)(?:status_code|http_s
 var publicErrorMissingFieldPattern = regexp.MustCompile(`(?:^|[\s:;(])(?:field )?(model|prompt|input|messages|contents|documents|query|instruction)(?: field)? (?:is required|is empty|must not be empty)\b`)
 var publicErrorImageCountPattern = regexp.MustCompile(`(?:^|[\s:;(])(?:parameters\.)?n must be an integer between\b`)
 var publicErrorTokenLimitPattern = regexp.MustCompile(`\b(?:max_tokens|max_output_tokens|maxoutputtokens|min_tokens) is invalid\b`)
+var publicErrorResourceUnavailablePattern = regexp.MustCompile(`(?:没有|暂无|无)可用(?:渠道|模型|资源)|可用渠道不存在|模型\s*(?:["'“]?[-a-z0-9._:/]+["'”]?\s*)?(?:当前|暂时|目前)?(?:不存在|不可用|未找到|已下线)|(?:找不到|不支持)(?:该|此)?模型|\bno (?:available (?:channels?|models?|resources?)|channels? available)\b|\bmodels?(?:\s+["']?[-a-z0-9._:/]+["']?)?\s+(?:(?:is|was)\s+)?(?:(?:currently|temporarily)\s+)?(?:unavailable|not available|not found|does not exist|not supported)\b`)
 var publicErrorSafetyURLPattern = regexp.MustCompile(`https?://[^\s"<>]+`)
+var publicErrorPolicyNegationPattern = regexp.MustCompile(`(?:没有|并未|未|不)(?:违反|违背)(?:了)?(?:(?:我们|平台)的?)?(?:内容|安全)(?:政策|规则)|\b(?:does|do|did) not violate\b[^.!?\n]{0,40}\bcontent policy\b`)
+var publicErrorPolicyRejectionPattern = regexp.MustCompile(`(?:违反|违背)(?:了)?(?:(?:我们|平台)的?)?(?:内容|安全)(?:政策|规则)`)
 var publicErrorSafetyPassedPattern = regexp.MustCompile(`\b(?:no|without)\s+(?:unsafe|nsfw)\s+(?:content|images?|prompts?)\b(?:\s+(?:was\s+)?(?:detected|found))?|\bnot unsafe\b|\b(?:is|was|considered) safe\b|\bno safety violations?\b|\b(?:safety|moderation)(?: check| review)?(?: has| was| is)? (?:passed|approved|successful)\b|(?:已通过|通过了)(?:内容|安全|内容安全)?审核|(?:内容|安全|内容安全)?审核(?:已通过|通过了|通过)`)
 var publicErrorSafetyRejectionPattern = regexp.MustCompile(`\b(?:content[._ ]policy[._ ]violation|(?:unsafe|nsfw)[ _](?:prompts?|images?|content|videos?)|(?:prompts?|images?|content|videos?)[ _](?:unsafe|nsfw))\b|\b(?:prompt|images?|content|videos?|outputs?)\b[^.!?\n]{0,80}\b(?:unsafe|not safe|nsfw)\b|\b(?:blocked|rejected|filtered(?: out)?|flagged|violates?|violated)\b[^.!?\n]{0,120}\b(?:safety|moderation|content policy|prohibited use policy|nsfw)\b|\b(?:safety|moderation|content policy)\b[^.!?\n]{0,60}\b(?:blocked|rejected|violation)\b|(?:未通过|没有通过)(?:内容|安全|内容安全)?审核|(?:内容|安全|内容安全)?审核(?:失败|未通过|不通过)|违规内容|内容违规`)
 var publicErrorSafetyMentionPattern = regexp.MustCompile(`\b(?:safety|moderation|nsfw)\b|(?:^|[\s:])(?:safe|unsafe)(?:$|[.,;](?:\s|$))|安全检查|安全审核|内容审核`)
 
-// ClassifyPublicError projects untrusted diagnostics into fixed public wording.
+// ClassifyPublicError projects untrusted diagnostics into public wording while
+// retaining the upstream HTTP status for clients that display only a message.
 // local grants trust only to the explicit code argument, never to codes or
 // messages extracted from a provider response wrapped by a local error.
-func ClassifyPublicError(code, message string, status int, local bool) PublicError {
+func ClassifyPublicError(code, message string, status int, local bool) (public PublicError) {
 	hostCode := strings.ToLower(strings.TrimSpace(code))
+	codes, text, evidenceStatus := publicErrorEvidence(hostCode, message, status)
+	// A projected error may pass through another local response wrapper. Its
+	// embedded upstream status must survive even when the public HTTP status
+	// differs, without trusting any other part of the original message.
+	projected := strings.HasPrefix(message, "["+hostCode+"] status_code=")
+	if projected {
+		if match := publicErrorHTTPStatusPattern.FindStringSubmatch(message); len(match) == 2 {
+			evidenceStatus, _ = strconv.Atoi(match[1])
+		}
+	}
+	if evidenceStatus != 0 && (!local || hostCode == "bad_response_status_code" || projected) {
+		defer func() {
+			public.Message = "status_code=" + strconv.Itoa(evidenceStatus) + ", " + public.Message
+		}()
+	}
 	if local {
 		// Generic codes may still carry a precise validation or safety reason.
 		if projected, ok := publicErrorCatalog[hostCode]; ok && hostCode != "invalid_parameter" && hostCode != "generation_failed" {
@@ -131,7 +150,7 @@ func ClassifyPublicError(code, message string, status int, local bool) PublicErr
 			}
 		}
 	}
-	codes, text, status := publicErrorEvidence(hostCode, message, status)
+	status = evidenceStatus
 	safetyRejected, safetyMentioned := publicErrorContentSafety(codes, text)
 	missingField := ""
 	if match := publicErrorMissingFieldPattern.FindStringSubmatch(text); len(match) == 2 {
@@ -161,6 +180,8 @@ func ClassifyPublicError(code, message string, status int, local bool) PublicErr
 			return publicErrorCatalog["content_safety_unknown"]
 		}
 		return publicErrorCatalog["service_access_error"]
+	case slices.Contains(codes, "model_not_found"), slices.Contains(codes, "model_unavailable"), slices.Contains(codes, "unsupported_model"), slices.Contains(codes, "get_channel_failed"), slices.Contains(codes, "channel_not_found"), slices.Contains(codes, "model_mapping_failed"), slices.Contains(codes, "model_mapping_changed"), publicErrorResourceUnavailablePattern.MatchString(publicErrorSafetyURLPattern.ReplaceAllString(text, " ")):
+		return publicErrorCatalog["model_unavailable"]
 	case strings.Contains(text, "transparent") && (strings.Contains(text, "not supported") || strings.Contains(text, "unsupported") || strings.Contains(text, "opaque")), strings.Contains(text, "不支持透明背景"):
 		return publicErrorCatalog["unsupported_background"]
 	case slices.Contains(codes, "image_download_failed"), slices.Contains(codes, "invalid_image_url"), strings.Contains(text, "error downloading image"), strings.Contains(text, "failed to download image"), strings.Contains(text, "failed to fetch image"), strings.Contains(text, "image url") && (strings.Contains(text, "unreachable") || strings.Contains(text, "expired")), strings.Contains(text, "图片下载失败"), strings.Contains(text, "图片链接失效"):
@@ -199,8 +220,6 @@ func ClassifyPublicError(code, message string, status int, local bool) PublicErr
 		return publicErrorCatalog["service_connection_failed"]
 	case slices.Contains(codes, "generation_result_empty"), slices.Contains(codes, "empty_response"), strings.Contains(text, "returned no image result"), strings.Contains(text, "no images generated"), strings.Contains(text, "no usable image data"):
 		return publicErrorCatalog["generation_result_empty"]
-	case slices.Contains(codes, "model_not_found"), slices.Contains(codes, "model_unavailable"), slices.Contains(codes, "get_channel_failed"), slices.Contains(codes, "channel_not_found"), slices.Contains(codes, "model_mapping_failed"), slices.Contains(codes, "model_mapping_changed"), strings.Contains(text, "no available channel"), strings.Contains(text, "没有可用渠道"):
-		return publicErrorCatalog["model_unavailable"]
 	case status == http.StatusServiceUnavailable, slices.Contains(codes, "service_unavailable"), slices.Contains(codes, "overloaded_error"):
 		return publicErrorCatalog["service_unavailable"]
 	case slices.Contains(codes, "unsupported_parameter"), slices.Contains(codes, "unsupported_value"), strings.Contains(text, "unsupported parameter"), strings.Contains(text, "不支持的参数"):
@@ -231,15 +250,36 @@ func publicErrorContentSafety(codes []string, text string) (rejected, mentioned 
 	}
 	text = publicErrorSafetyURLPattern.ReplaceAllString(text, " ")
 	text = publicErrorSafetyPassedPattern.ReplaceAllString(text, " ")
+	text = publicErrorPolicyNegationPattern.ReplaceAllString(text, " ")
 	// Some providers explicitly give two possible causes, without confirming
 	// which one occurred. Keep that uncertainty in the public explanation.
 	if strings.Contains(text, "failed or was rejected by content moderation") {
 		return false, true
 	}
-	if publicErrorSafetyRejectionPattern.MatchString(text) {
+	if publicErrorSafetyRejectionPattern.MatchString(text) || publicErrorPolicyRejectionPattern.MatchString(text) {
 		return true, true
 	}
 	return false, mentioned || publicErrorSafetyMentionPattern.MatchString(text)
+}
+
+var retrySafetyKeywordPattern = regexp.MustCompile(`(?:^|[^a-z0-9])(?:safe|unsafe|safety|nsfw|moderation|content[ _.-]+policy|content[ _.-]+filter|sensitive[ _.-]+words?|prohibited[ _.-]+content)(?:$|[^a-z0-9])|安全|审核|违规|内容政策|敏感词`)
+
+// ShouldStopRetryForSafety implements the conservative retry policy: safety
+// diagnostics stop retries even when ambiguous, negated or reporting an outage.
+// This does not establish content rejection for the public error explanation.
+// Echoed prompts, metadata and URLs remain excluded from diagnostic evidence.
+func ShouldStopRetryForSafety(code, message string) bool {
+	codes, text, _ := publicErrorEvidence(strings.ToLower(strings.TrimSpace(code)), message, 0)
+	rejected, _ := publicErrorContentSafety(codes, text)
+	if rejected {
+		return true
+	}
+	for _, diagnosticCode := range codes {
+		if retrySafetyKeywordPattern.MatchString(diagnosticCode) {
+			return true
+		}
+	}
+	return retrySafetyKeywordPattern.MatchString(publicErrorSafetyURLPattern.ReplaceAllString(text, " "))
 }
 
 // publicErrorEvidence understands common error envelopes without trusting their

@@ -126,7 +126,7 @@ func TestModelMemoryRateLimitRejectionsReturnOpenAIError(t *testing.T) {
 			resp := performRateLimitRequest(router, "/", "127.0.0.1:1000")
 			assert.Equal(t, http.StatusTooManyRequests, resp.Code)
 			want, err := common.Marshal(gin.H{"error": gin.H{
-				"message": common.MessageWithRequestId("[rate_limit_exceeded] 请求过于频繁或当前并发数已达上限；请降低并发并稍后重试", "req-limited"),
+				"message": common.MessageWithRequestId("[rate_limit_exceeded] status_code=429, 请求过于频繁或当前并发数已达上限；请降低并发并稍后重试", "req-limited"),
 				"type":    "new_api_error",
 				"code":    "rate_limit_exceeded",
 			}})

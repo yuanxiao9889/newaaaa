@@ -1,7 +1,9 @@
 package service
 
 import (
+	"errors"
 	"fmt"
+	"net/http"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
@@ -22,6 +24,20 @@ func DecideRelayRetry(c *gin.Context, err *types.NewAPIError, retryTimes int) Po
 	if err == nil {
 		return PolicyDecision{Action: "stop", Reason: "request_completed", Source: "system"}
 	}
+	var rejection *upstreamFailure
+	confirmed := errors.As(err, &rejection)
+	if confirmed && rejection.terminalTask && (rejection.statusCode == http.StatusForbidden || err.StatusCode == http.StatusForbidden) {
+		return PolicyDecision{Action: "stop", Reason: "system_retry_exclusion", Source: "system"}
+	}
+	if c.GetString("transfer_execution_id") != "" {
+		// Only a full rejection or confirmed terminal failure permits resubmission.
+		// A local status or provider-like message is not evidence of rejection.
+		if !confirmed || rejection.statusCode == http.StatusForbidden || err.StatusCode == http.StatusForbidden ||
+			(!rejection.terminalTask && (rejection.statusCode == http.StatusRequestTimeout || err.StatusCode == http.StatusRequestTimeout)) ||
+			operation_setting.IsAlwaysSkipRetryStatusCode(rejection.statusCode) {
+			return PolicyDecision{Action: "stop", Reason: "transfer_dispatch_once", Source: "system"}
+		}
+	}
 	if ShouldSkipRetryAfterChannelAffinityFailure(c) {
 		source := RequestPolicy(c).SessionModeSource
 		if source == "" {
@@ -32,11 +48,31 @@ func DecideRelayRetry(c *gin.Context, err *types.NewAPIError, retryTimes int) Po
 	if GetChannelConstraints(c).SuppressesRetry() {
 		return PolicyDecision{Action: "stop", Reason: "pinned_channel", Source: "channel_constraint"}
 	}
-	if types.IsChannelError(err) {
-		return PolicyDecision{Action: "retry", Reason: "channel_error", Source: "system"}
-	}
 	if types.IsSkipRetryError(err) {
 		return PolicyDecision{Action: "stop", Reason: "non_retryable_error", Source: "system"}
+	}
+	if !confirmed {
+		// Local setup/validation/storage failures cannot improve by replaying
+		// generation. Do not let status matching or a time budget override them.
+		if types.IsChannelError(err) {
+			return PolicyDecision{Action: "stop", Reason: "local_rejection", Source: "system"}
+		}
+		switch err.GetErrorCode() {
+		case types.ErrorCodeInvalidRequest, types.ErrorCodeSensitiveWordsDetected,
+			types.ErrorCodeCountTokenFailed, types.ErrorCodeModelPriceError,
+			types.ErrorCodeInvalidApiType, types.ErrorCodeJsonMarshalFailed,
+			types.ErrorCodeClientRequestCanceled, types.ErrorCodeGetChannelFailed, types.ErrorCodeModelNotFound,
+			types.ErrorCodeGenRelayInfoFailed, types.ErrorCodeReadRequestBodyFailed,
+			types.ErrorCodeConvertRequestFailed, types.ErrorCodeAccessDenied,
+			types.ErrorCodeBadRequestBody, types.ErrorCodeQueryDataError,
+			types.ErrorCodeUpdateDataError, types.ErrorCodeInsufficientUserQuota,
+			types.ErrorCodePreConsumeTokenQuotaFailed:
+			return PolicyDecision{Action: "stop", Reason: "local_rejection", Source: "system"}
+		}
+	}
+	if common.ShouldStopRetryForSafety(string(err.GetErrorCode()), err.Error()) ||
+		common.ShouldStopRetryForSafety(err.ToOpenAIError().Type, "") {
+		return PolicyDecision{Action: "stop", Reason: "safety_related_error", Source: "system"}
 	}
 	if retryTimes <= 0 {
 		return PolicyDecision{Action: "stop", Reason: "attempt_budget_exhausted", Source: "global"}
@@ -48,7 +84,7 @@ func DecideRelayRetry(c *gin.Context, err *types.NewAPIError, retryTimes int) Po
 	if code < 100 || code > 599 {
 		return PolicyDecision{Action: "retry", Reason: "unrecognized_status", Source: "system"}
 	}
-	if operation_setting.IsAlwaysSkipRetryCode(err.GetErrorCode()) || operation_setting.IsAlwaysSkipRetryStatusCode(code) {
+	if ((!confirmed || !rejection.terminalTask) && operation_setting.IsAlwaysSkipRetryCode(err.GetErrorCode())) || operation_setting.IsAlwaysSkipRetryStatusCode(code) {
 		return PolicyDecision{Action: "stop", Reason: "system_retry_exclusion", Source: "system"}
 	}
 	if operation_setting.ShouldRetryByStatusCode(code) {

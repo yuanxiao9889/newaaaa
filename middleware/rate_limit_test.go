@@ -93,6 +93,36 @@ func TestRedisUserRateLimiterUsesSharedFixedWindow(t *testing.T) {
 	assert.Equal(t, 23*time.Second, redisServer.TTL(key))
 }
 
+func TestImageTaskQueryAccountLimitAcrossRoutes(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	server, _ := useRateLimitMiniRedis(t)
+	router := gin.New()
+	for _, route := range []struct {
+		path string
+		user int
+	}{{"/bridge", 42}, {"/direct", 42}, {"/other", 43}} {
+		router.GET(route.path, func(c *gin.Context) { c.Set("id", route.user) },
+			AsyncImageTaskStatusRateLimit(), func(c *gin.Context) { c.Status(http.StatusNoContent) })
+	}
+	// This is the public default boundary, not a load test. Different network
+	// routes and source addresses must not create extra account allowances.
+	for i := range 300 {
+		path, address := "/bridge", "192.0.2.20:12345"
+		if i%2 == 1 {
+			path, address = "/direct", "198.51.100.20:12345"
+		}
+		require.Equal(t, http.StatusNoContent, performRateLimitRequest(router, path, address).Code, "query %d", i+1)
+	}
+	for _, path := range []string{"/bridge", "/direct"} {
+		response := performRateLimitRequest(router, path, "203.0.113.10:12345")
+		assert.Equal(t, http.StatusTooManyRequests, response.Code)
+		assert.Equal(t, "60", response.Header().Get("Retry-After"))
+	}
+	assert.Equal(t, http.StatusNoContent, performRateLimitRequest(router, "/other", "192.0.2.20:12345").Code)
+	server.FastForward(60 * time.Second)
+	assert.Equal(t, http.StatusNoContent, performRateLimitRequest(router, "/bridge", "192.0.2.20:12345").Code)
+}
+
 func TestRedisEmailVerificationRateLimiterPreservesResponseAndTTL(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	redisServer, _ := useRateLimitMiniRedis(t)

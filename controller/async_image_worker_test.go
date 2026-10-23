@@ -15,9 +15,11 @@ import (
 	"image/color"
 	"image/png"
 	"io"
+	"maps"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"net/http/httputil"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -165,10 +167,17 @@ func TestAsyncImageMultipleResults(t *testing.T) {
 			var task model.Task
 			require.NoError(t, db.First(&task).Error)
 			require.True(t, claimInternalAsyncImageTask(&task))
+			_, activeInput, inputErr := service.ReadImageTaskInput(61, task.TaskID, true)
+			require.NoError(t, inputErr)
+			assert.Equal(t, body, string(activeInput), "accepted active tasks retain the original request")
 			err = executeInternalAsyncImageTask(context.Background(), &task)
 			assert.EqualValues(t, 1, posts.Load(), "one generation even when a result download needs retry")
 			var restored model.Task
 			require.NoError(t, db.First(&restored, task.ID).Error)
+			retained, retainedBody, inputErr := service.ReadImageTaskInput(61, task.TaskID, true)
+			require.NoError(t, inputErr)
+			assert.Equal(t, body, string(retainedBody), "both success and failure preserve reusable input")
+			assert.Equal(t, restored.FinishTime+1200, retained.ExpiresAt)
 			if tc.invalid {
 				require.ErrorContains(t, err, "store image 1 failed")
 				assert.Equal(t, model.TaskStatus(model.TaskStatusFailure), restored.Status)
@@ -203,6 +212,7 @@ func TestAsyncImageMultipleResults(t *testing.T) {
 			recorder := httptest.NewRecorder()
 			router.ServeHTTP(recorder, query)
 			require.Equal(t, http.StatusOK, recorder.Code)
+			assert.Contains(t, recorder.Body.String(), `"retry_input"`, "successful task status advertises reusable input")
 			var response dto.ImageAsyncTaskResponse
 			require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &response))
 			require.Len(t, response.Data, tc.count)
@@ -662,6 +672,254 @@ func TestFailInternalAsyncImageTaskCompactsStoredData(t *testing.T) {
 	require.Equal(t, constant.TaskActionGeminiImage, payload["action"])
 	require.Equal(t, "gemini-image-test", payload["model"])
 	require.Equal(t, service.BuildAsyncImageContentURL("task_async_compact_failure"), payload["result_url"])
+}
+
+func TestImageTaskInputRetentionAndResubmission(t *testing.T) {
+	for _, outcome := range []string{"failed", "succeeded", "running"} {
+		for _, format := range []string{"json", "multipart", "native", "chat", "responses", "gemini"} {
+			t.Run(format+"_"+outcome, func(t *testing.T) {
+				db := setupAsyncImageWorkerTestDB(t)
+				require.NoError(t, db.AutoMigrate(&model.TransferRequest{}))
+				require.NoError(t, db.Where("user_id IN ?", []int{61, 63}).Delete(&model.TransferRequest{}).Error)
+				require.NoError(t, i18n.Init())
+				oldMemory := common.MemoryCacheEnabled
+				common.MemoryCacheEnabled = false
+				t.Cleanup(func() { common.MemoryCacheEnabled = oldMemory })
+				dir := t.TempDir()
+				t.Setenv("ASYNC_IMAGE_REQUEST_STORAGE_PATH", dir)
+				require.NoError(t, db.Create(&model.User{Id: 61, Username: "retryowner", AffCode: "retryowner", Group: "default", Status: common.UserStatusEnabled, Quota: 1000000}).Error)
+				require.NoError(t, db.Create(&model.User{Id: 63, Username: "retryother", AffCode: "retryother", Group: "default", Status: common.UserStatusEnabled, Quota: 1000000}).Error)
+				tokens := []model.Token{
+					{Id: 62, UserId: 61, Key: "retryOwnerKey", Status: common.TokenStatusEnabled, RemainQuota: 1000000, ExpiredTime: -1},
+					{Id: 64, UserId: 63, Key: "retryOtherKey", Status: common.TokenStatusEnabled, RemainQuota: 1000000, ExpiredTime: -1},
+					{Id: 65, UserId: 61, Key: "retryExhaustedKey", Status: common.TokenStatusExhausted, ExpiredTime: -1},
+					{Id: 66, UserId: 61, Key: "retryDisabledKey", Status: common.TokenStatusDisabled, ExpiredTime: -1},
+					{Id: 67, UserId: 61, Key: "retryExpiredKey", Status: common.TokenStatusEnabled, RemainQuota: 100, ExpiredTime: 1},
+				}
+				require.NoError(t, db.Create(&tokens).Error)
+				imageBytes, err := base64.StdEncoding.DecodeString("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a3WQAAAAASUVORK5CYII=")
+				require.NoError(t, err)
+				contentType := "application/json"
+				body := []byte(`{"model":"retry-image","prompt":"keep me","n":1,"image":"data:image/png;base64,` + base64.StdEncoding.EncodeToString(imageBytes) + `"}`)
+				if format == "multipart" {
+					var encoded bytes.Buffer
+					writer := multipart.NewWriter(&encoded)
+					require.NoError(t, writer.WriteField("model", "retry-image"))
+					require.NoError(t, writer.WriteField("prompt", "keep me"))
+					for range 2 {
+						part, err := writer.CreateFormFile("image[]", "reference.png")
+						require.NoError(t, err)
+						_, err = part.Write(imageBytes)
+						require.NoError(t, err)
+					}
+					require.NoError(t, writer.Close())
+					body, contentType = encoded.Bytes(), writer.FormDataContentType()
+				}
+				requestPath := "/v1/images/edits"
+				switch format {
+				case "chat":
+					requestPath = "/v1/chat/completions"
+				case "responses":
+					requestPath = "/v1/responses"
+				case "gemini":
+					requestPath = "/v1beta/models/image-test:generateContent"
+				}
+				source := filepath.Join(dir, "original.body")
+				require.NoError(t, os.WriteFile(source, body, 0600))
+				task := &model.Task{TaskID: "task_failed_references_" + format, UserId: 61, Action: constant.TaskActionImageEdit,
+					Status: model.TaskStatusInProgress, PrivateData: model.TaskPrivateData{InternalAsync: true,
+						AssetType: service.AsyncImageAssetType, RequestBodyPath: source, RequestContentType: contentType,
+						RequestPath: requestPath, RequestQuery: "original_option=preserved&key=old-secret&api_key=old-secret", RequestRelayFormat: string(kittypes.RelayFormatOpenAIImage),
+						ImageRetry: &model.AsyncImageRetryState{BodyPath: source, BodySize: int64(len(body))}}}
+				if format == "native" {
+					task.PrivateData.RequestBodyPath = filepath.Join(dir, "upstream.native")
+					task.PrivateData.RequestRelayFormat = relay.NativeAsyncImageFormat
+					require.NoError(t, os.WriteFile(task.PrivateData.RequestBodyPath, []byte(`{"id":"provider-private-job"}`), 0600))
+				}
+				require.NoError(t, db.Create(task).Error)
+				if outcome != "running" {
+					failInternalAsyncImageTask(context.Background(), task, "too many reference images")
+					require.NoFileExists(t, source)
+					if outcome == "succeeded" {
+						// The real successful worker retention is covered by
+						// TestAsyncImageMultipleResults; exercise the public reuse contract here.
+						task.Status = model.TaskStatusSuccess
+						require.NoError(t, db.Model(task).Update("status", model.TaskStatusSuccess).Error)
+					}
+				}
+				var failed model.Task
+				require.NoError(t, db.First(&failed, task.ID).Error)
+				if outcome != "running" {
+					assert.Empty(t, failed.PrivateData.RequestBodyPath)
+					assert.Empty(t, failed.PrivateData.ImageRetry.BodyPath)
+				}
+				input, recovered, err := service.ReadImageTaskInput(61, task.TaskID, true)
+				require.NoError(t, err)
+				assert.Equal(t, body, recovered)
+				if outcome != "running" {
+					assert.Equal(t, failed.FinishTime+int64(service.ReferenceRetention().Seconds()), input.ExpiresAt)
+				}
+				assert.Equal(t, "original_option=preserved", input.Query)
+				require.NoError(t, service.CleanupImageTaskInputs())
+				_, recovered, err = service.ReadImageTaskInput(61, task.TaskID, true)
+				require.NoError(t, err)
+				assert.Equal(t, body, recovered)
+
+				var idleExpiry int64
+				if outcome != "running" {
+					files, err := filepath.Glob(filepath.Join(dir, "failed-inputs", "*.retry"))
+					require.NoError(t, err)
+					require.Len(t, files, 1)
+					lastUse := time.Now().Add(-5 * time.Minute)
+					require.NoError(t, os.Chtimes(files[0], lastUse, lastUse))
+					idle, _, err := service.ReadImageTaskInput(61, task.TaskID, false)
+					require.NoError(t, err)
+					idleExpiry = idle.ExpiresAt
+				}
+				engine := gin.New()
+				engine.GET("/v1/images/tasks/:task_id", middleware.TokenAuth(), GetImageTask)
+				engine.GET("/v1/images/tasks/:task_id/retry-input", middleware.TokenAuth(), GetImageTaskRetryInput)
+				admissions := 0
+				engine.POST(requestPath, middleware.TokenAuth(), middleware.ResolveReferenceAssets(), func(c *gin.Context) {
+					admissions++
+					assert.Equal(t, "true", c.Query("async"))
+					assert.Equal(t, "preserved", c.Query("original_option"))
+					assert.Empty(t, c.Query("key"), "never restore original credentials")
+					assert.Empty(t, c.Query("api_key"), "never restore original credentials")
+					if format == "chat" || format == "responses" {
+						assert.Equal(t, "true", c.Query("image_task"))
+					}
+					storage, err := common.GetBodyStorage(c)
+					require.NoError(t, err)
+					got, err := io.ReadAll(storage)
+					require.NoError(t, err)
+					assert.Equal(t, body, got)
+					assert.Equal(t, contentType, c.GetHeader("Content-Type"))
+					info := &relaycommon.RelayInfo{UserId: 61, TokenId: 62, OriginModelName: "retry-image", UsingGroup: "default",
+						ChannelMeta: &relaycommon.ChannelMeta{ChannelId: 703, UpstreamModelName: "retry-image"}}
+					require.Nil(t, relay.SubmitInternalAsyncImageTask(c, info, &dto.ImageRequest{Model: "retry-image"}))
+					common.CleanupBodyStorage(c)
+				})
+				origin := httptest.NewServer(engine)
+				defer origin.Close()
+				originURL, err := url.Parse(origin.URL)
+				require.NoError(t, err)
+				bridge := httptest.NewServer(httputil.NewSingleHostReverseProxy(originURL))
+				defer bridge.Close()
+				request := func(method, path, key, retryID, idempotency string, viaBridge ...bool) *httptest.ResponseRecorder {
+					req := httptest.NewRequest(method, path, strings.NewReader(`{}`))
+					req.Header.Set("Content-Type", "application/json")
+					if key != "" {
+						req.Header.Set("Authorization", "Bearer sk-"+key)
+					}
+					req.Header.Set(service.ImageRetryTaskHeader, retryID)
+					req.Header.Set("Idempotency-Key", idempotency)
+					reply := httptest.NewRecorder()
+					if len(viaBridge) > 0 && viaBridge[0] {
+						req.URL, err = url.Parse(bridge.URL + path)
+						require.NoError(t, err)
+						req.RequestURI = ""
+						response, err := bridge.Client().Do(req)
+						require.NoError(t, err)
+						defer response.Body.Close()
+						reply.WriteHeader(response.StatusCode)
+						_, err = io.Copy(reply, response.Body)
+						require.NoError(t, err)
+						return reply
+					}
+					engine.ServeHTTP(reply, req)
+					return reply
+				}
+				path := "/v1/images/tasks/" + task.TaskID
+				for _, tc := range []struct {
+					key    string
+					status int
+				}{
+					{"retryOwnerKey", 200}, {"retryExhaustedKey", 200}, {"retryOtherKey", 404},
+					{"retryDisabledKey", 401}, {"retryExpiredKey", 401}, {"", 401},
+				} {
+					reply := request(http.MethodGet, path+"/retry-input", tc.key, "", "")
+					require.Equal(t, tc.status, reply.Code, reply.Body.String())
+					if tc.status == 200 {
+						assert.Equal(t, body, reply.Body.Bytes())
+						assert.Equal(t, "no-store", reply.Header().Get("Cache-Control"))
+					}
+				}
+				status := request(http.MethodGet, path, "retryOwnerKey", "", "")
+				require.Equal(t, 200, status.Code, status.Body.String())
+				assert.Contains(t, status.Body.String(), `"retry_input"`)
+				if outcome != "running" {
+					idle, _, err := service.ReadImageTaskInput(61, task.TaskID, false)
+					require.NoError(t, err)
+					assert.Equal(t, idleExpiry, idle.ExpiresAt, "GET must not renew input lifetime")
+				}
+				assert.NotContains(t, status.Body.String(), "keep me")
+				assert.Equal(t, 410, request(http.MethodPost, requestPath+"?async=true", "retryOtherKey", task.TaskID, "").Code)
+				assert.Equal(t, 402, request(http.MethodPost, requestPath+"?async=true", "retryExhaustedKey", task.TaskID, "").Code)
+				const key = "failed-image-retry-request-0001"
+				accepted := request(http.MethodPost, requestPath+"?async=true", "retryOwnerKey", task.TaskID, key, true)
+				require.Equal(t, 200, accepted.Code, accepted.Body.String())
+				var receipt dto.ImageAsyncSubmitResponse
+				require.NoError(t, common.Unmarshal(accepted.Body.Bytes(), &receipt))
+				assert.NotEqual(t, task.TaskID, receipt.TaskID)
+				assert.NotEmpty(t, receipt.TaskID)
+				renewed, _, err := service.ReadImageTaskInput(61, task.TaskID, false)
+				require.NoError(t, err)
+				if outcome != "running" {
+					assert.Greater(t, renewed.ExpiresAt, idleExpiry, "accepted Generate renews the original input")
+					assert.InDelta(t, service.ReferenceRetention().Seconds(), float64(renewed.ExpiresAt-time.Now().Unix()), 2)
+				}
+				replayed := request(http.MethodPost, requestPath+"?async=true", "retryOwnerKey", task.TaskID, key)
+				require.Equal(t, 200, replayed.Code, replayed.Body.String())
+				assert.JSONEq(t, accepted.Body.String(), replayed.Body.String())
+				if outcome != "running" {
+					idle, _, err := service.ReadImageTaskInput(61, task.TaskID, false)
+					require.NoError(t, err)
+					assert.Equal(t, renewed.ExpiresAt, idle.ExpiresAt, "idempotent replay is not another Generate")
+				}
+				assert.Equal(t, 1, admissions)
+				// A deliberate Generate through direct transport creates fresh work;
+				// recovering the bridge attempt above preserved its original identity.
+				next := request(http.MethodPost, requestPath+"?async=true", "retryOwnerKey", task.TaskID, key+"-next")
+				require.Equal(t, 200, next.Code, next.Body.String())
+				var nextReceipt dto.ImageAsyncSubmitResponse
+				require.NoError(t, common.Unmarshal(next.Body.Bytes(), &nextReceipt))
+				assert.NotEmpty(t, nextReceipt.TaskID)
+				assert.NotEqual(t, receipt.TaskID, nextReceipt.TaskID)
+				assert.Equal(t, 2, admissions)
+				assert.Equal(t, 409, request(http.MethodPost, requestPath+"?async=true", "retryOwnerKey", "another-task", key).Code)
+				_, _, err = service.ReadImageTaskInput(61, task.TaskID, true)
+				require.NoError(t, err, "reusing input must not consume or delete it")
+				var original model.Task
+				require.NoError(t, db.First(&original, task.ID).Error)
+				assert.Equal(t, task.Status, original.Status)
+				if outcome == "running" {
+					failInternalAsyncImageTask(context.Background(), task, "finish active fixture")
+				}
+
+				// Simulate a deadline persisted before a restart, with no wall-clock sleeps.
+				files, err := filepath.Glob(filepath.Join(dir, "failed-inputs", "*.retry"))
+				require.NoError(t, err)
+				require.Len(t, files, 1)
+				expired := *input
+				expired.ExpiresAt = time.Now().Unix() - 1
+				header, err := common.Marshal(expired)
+				require.NoError(t, err)
+				require.NoError(t, os.WriteFile(files[0], append(append(header, '\n'), body...), 0600))
+				past := time.Now().Add(-service.ReferenceRetention() - time.Minute)
+				require.NoError(t, os.Chtimes(files[0], past, past))
+				assert.Equal(t, 410, request(http.MethodGet, path+"/retry-input", "retryOwnerKey", "", "").Code)
+				assert.Equal(t, 410, request(http.MethodPost, requestPath+"?async=true", "retryOwnerKey", task.TaskID, "").Code)
+				status = request(http.MethodGet, path, "retryOwnerKey", "", "")
+				assert.NotContains(t, status.Body.String(), `"retry_input"`, "cached task status must not advertise expired inputs")
+				// Recovering a previous acceptance must still work after its source expired.
+				assert.Equal(t, 200, request(http.MethodPost, requestPath+"?async=true", "retryOwnerKey", task.TaskID, key).Code)
+				assert.Equal(t, 2, admissions)
+				require.NoError(t, service.CleanupImageTaskInputs())
+				require.NoFileExists(t, files[0])
+			})
+		}
+	}
 }
 
 func TestImageAdapterChannelUpdateValidatesEffectiveSettings(t *testing.T) {
@@ -1517,20 +1775,39 @@ func TestAsyncImageRetry(t *testing.T) {
 	require.NoError(t, i18n.Init())
 	service.InitHttpClient()
 	for _, tc := range []struct {
-		name, failure                                            string
+		name, failure, retryCodes, terminalStatus                string
 		retries, wantPosts                                       int
 		success, queued, backupFails, pinned, interrupted, cache bool
 		resume, invalidResult, multipart                         bool
 		autoSwitch, missingResult                                bool
+		guarded                                                  bool
 		pollStatus                                               int
 	}{
 		{name: "mapped native failover", failure: `{"code":"server_error","type":"provider_error","message":"temporary failure"}`, retries: 3, wantPosts: 1, success: true},
 		{name: "queued request maps each attempt", failure: `"generation failed: generate error: An error occurred."`, retries: 3, wantPosts: 2, success: true, queued: true, cache: true},
 		{name: "message only rate limit", failure: `"请求过于频繁,请稍后重试"`, retries: 3, wantPosts: 1, success: true},
-		{name: "content rejection is permanent", failure: `{"code":"server_error","message":"生成图片未通过内容审核"}`, retries: 3},
-		{name: "invalid parameter is permanent", failure: `{"status":503,"message":"invalid parameter size"}`, retries: 3},
-		{name: "unknown failure is not guessed", failure: `"unrecognized failure"`, retries: 3},
-		{name: "explicit no retry", failure: `{"code":"server_error","message":"failure","retryable":false}`, retries: 3},
+		{name: "upstream content rejection stops", failure: `{"code":"server_error","message":"生成图片未通过内容审核"}`, retries: 3},
+		{name: "bridge content rejection type stops", failure: `{"code":"400","type":"content_policy_violation","message":"Task failed"}`, retries: 3, guarded: true},
+		{name: "moderation service outage stops by keyword", failure: `{"code":"server_error","message":"审核服务暂不可用"}`, retries: 3},
+		{name: "native bare safe stops", failure: `{"code":"server_error","message":"SAFE"}`, retries: 3},
+		{name: "bridge native unsafe type stops", failure: `{"code":"server_error","type":"unsafe","message":"Task failed"}`, retries: 3, guarded: true},
+		{name: "ordinary service outage retries", failure: `{"code":"server_error","message":"生成服务暂不可用"}`, retries: 3, wantPosts: 1, success: true},
+		{name: "upstream invalid parameter obeys configured status", failure: `{"status":503,"message":"invalid parameter size"}`, retries: 3, wantPosts: 1, success: true},
+		{name: "confirmed failure without status uses 502", failure: `"unrecognized failure"`, retries: 3, wantPosts: 1, success: true},
+		{name: "provider retry hint does not override site policy", failure: `{"code":"server_error","message":"failure","retryable":false}`, retries: 3, wantPosts: 1, success: true},
+		{name: "reported queue failure retries", failure: `{"code":"generation_failed","message":"上游接口繁忙，队列超时请重试"}`, retries: 3, wantPosts: 1, success: true},
+		{name: "reported queue failure bridge retries", failure: `{"code":"generation_failed","message":"上游接口繁忙，队列超时请重试"}`, retries: 3, wantPosts: 1, success: true, guarded: true},
+		{name: "fallback 502 excluded by configuration", failure: `{"code":"generation_failed","message":"busy"}`, retries: 3, retryCodes: "503"},
+		{name: "bridge fallback 502 excluded by configuration", failure: `{"code":"generation_failed","message":"busy"}`, retries: 3, retryCodes: "503", guarded: true},
+		{name: "upstream 403 never retries", failure: `{"status_code":403,"message":"forbidden"}`, retries: 3},
+		{name: "bridge upstream 403 never retries", failure: `{"status_code":403,"message":"forbidden"}`, retries: 3, guarded: true},
+		{name: "numeric forbidden code never retries", failure: `{"code":"403","status_code":502,"message":"forbidden"}`, retries: 3},
+		{name: "upstream 404 retries", failure: `{"status_code":404,"message":"model not found"}`, retries: 3, wantPosts: 1, success: true},
+		{name: "upstream local-looking key code retries", failure: `{"code":"channel:invalid_key","status_code":401,"message":"invalid credential"}`, retries: 3, wantPosts: 1, success: true, guarded: true},
+		{name: "upstream local-looking group code retries", failure: `{"code":"get_channel_failed","status_code":503,"message":"no channel"}`, retries: 3, wantPosts: 1, success: true},
+		{name: "upstream local-looking response code retries", failure: `{"code":"bad_response_body","status_code":502,"message":"upstream job failed"}`, retries: 3, wantPosts: 1, success: true, guarded: true},
+		{name: "expired is not confirmed failed", terminalStatus: "expired", failure: `{"status_code":502,"message":"expired"}`, retries: 3},
+		{name: "cancelled is not confirmed failed", terminalStatus: "cancelled", failure: `{"status_code":502,"message":"cancelled"}`, retries: 3},
 		{name: "retry disabled", failure: `{"code":"rate_limit_exceeded","message":"busy"}`, retries: 0},
 		{name: "retry limit and refund", failure: `{"status_code":503,"message":"busy"}`, retries: 1, wantPosts: 1, backupFails: true},
 		{name: "no channel is attempted twice", failure: `{"code":"server_error","message":"busy"}`, retries: 3, wantPosts: 1, backupFails: true, cache: true},
@@ -1546,9 +1823,20 @@ func TestAsyncImageRetry(t *testing.T) {
 		{name: "automatic health keeps uncertain native attempt pending", retries: 3, pollStatus: 401, autoSwitch: true},
 		{name: "automatic health rejects invalid generated image", retries: 3, invalidResult: true, autoSwitch: true},
 		{name: "automatic health releases completed job with missing artifact", retries: 3, missingResult: true, autoSwitch: true},
+		{name: "guarded queued task retries confirmed failure", failure: `{"code":"server_error","message":"temporary failure"}`, retries: 3, wantPosts: 2, queued: true, guarded: true, success: true},
+		{name: "guarded accepted task retries confirmed failure", failure: `{"code":"server_error","message":"temporary failure"}`, retries: 3, guarded: true, wantPosts: 1, success: true},
+		{name: "guarded interrupted submission stays unknown", retries: 3, queued: true, interrupted: true, guarded: true},
+		{name: "guarded accepted task resumes polling", retries: 1, resume: true, success: true, guarded: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			db := setupAsyncImageWorkerTestDB(t)
+			previousCodes := operation_setting.AutomaticRetryStatusCodesToString()
+			t.Cleanup(func() { require.NoError(t, operation_setting.AutomaticRetryStatusCodesFromString(previousCodes)) })
+			codes := tc.retryCodes
+			if codes == "" {
+				codes = "400-599"
+			}
+			require.NoError(t, operation_setting.AutomaticRetryStatusCodesFromString(codes))
 			if tc.name == "mapped native failover" {
 				query := "SELECT version()"
 				if common.UsingMainDatabase(common.DatabaseTypeSQLite) {
@@ -1618,7 +1906,11 @@ func TestAsyncImageRetry(t *testing.T) {
 					return
 				}
 				if strings.HasSuffix(r.URL.Path, "/first") || tc.backupFails {
-					fmt.Fprintf(w, `{"status":"failed","error":%s}`, tc.failure)
+					status := tc.terminalStatus
+					if status == "" {
+						status = "failed"
+					}
+					fmt.Fprintf(w, `{"status":%q,"error":%s}`, status, tc.failure)
 					return
 				}
 				fmt.Fprintf(w, `{"status":"completed","data":[{"b64_json":%q}]}`, base64.StdEncoding.EncodeToString(imageBytes.Bytes()))
@@ -1627,7 +1919,7 @@ func TestAsyncImageRetry(t *testing.T) {
 			config := &kitdto.ImageAdapterConfig{Enabled: true,
 				Request:    kitdto.ImageAdapterRequestConfig{GenerationsPath: "/v1/images/generations", EditsPath: "/v1/images/generations", FieldMap: map[string]string{"quality": "detail_level"}},
 				References: &kitdto.ImageAdapterReferenceConfig{Field: "references", Encoding: "url_array", MaxImages: 4, UploadLocal: true},
-				Task:       &kitdto.ImageAdapterTaskConfig{IDPaths: []string{"id"}, StatusPath: "status", ErrorPath: "error", ResultB64Path: "data.0.b64_json", PollURLTemplate: "/jobs/{task_id}", PendingStates: []string{"queued"}, SuccessStates: []string{"completed"}, FailureStates: []string{"failed"}},
+				Task:       &kitdto.ImageAdapterTaskConfig{IDPaths: []string{"id"}, StatusPath: "status", ErrorPath: "error", ResultB64Path: "data.0.b64_json", PollURLTemplate: "/jobs/{task_id}", PendingStates: []string{"queued"}, SuccessStates: []string{"completed"}, FailureStates: []string{"failed", "expired", "cancelled"}},
 			}
 			require.NoError(t, config.Validate())
 			setting, err := common.Marshal(kitdto.ChannelSettings{ImageAdapter: config})
@@ -1674,6 +1966,9 @@ func TestAsyncImageRetry(t *testing.T) {
 			if tc.pinned {
 				service.GetChannelConstraints(c).AddPin(dto.ChannelPin{ChannelId: 701, Source: dto.PinSourceToken, Rank: dto.PinRankToken, RetryMode: dto.PinRetrySingleAttempt})
 			}
+			if tc.guarded {
+				c.Set("transfer_execution_id", "persisted-transfer-execution")
+			}
 			var initialTicket *model.ChannelAutoSwitchTicket
 			if tc.autoSwitch {
 				selected, _, err := service.CacheGetRandomSatisfiedChannel(&service.RetryParam{Ctx: c, TokenGroup: "default", ModelName: "custom-image-alias", RequestPath: c.Request.URL.Path})
@@ -1696,6 +1991,8 @@ func TestAsyncImageRetry(t *testing.T) {
 			var task model.Task
 			require.NoError(t, db.First(&task).Error)
 			require.NotNil(t, task.PrivateData.ImageRetry)
+			assert.Equal(t, c.GetString("transfer_execution_id"), task.PrivateData.TransferExecutionID,
+				"queue admission must persist the guard before the worker can dispatch")
 			if tc.autoSwitch {
 				assert.Nil(t, service.AutoSwitchAttempt(c), "HTTP completion must not record queue or native acceptance as success")
 				var attempt model.ChannelAutoSwitchAttempt
@@ -1761,9 +2058,10 @@ func TestAsyncImageRetry(t *testing.T) {
 				assert.True(t, ok, "retry must reconstruct original parameters")
 			}
 			if tc.wantPosts > 0 {
-				assert.Equal(t, "upstream-backup", postedModels[len(postedModels)-1])
+				expected := "upstream-backup"
+				assert.Equal(t, expected, postedModels[len(postedModels)-1])
 			}
-			if tc.queued {
+			if tc.queued && !tc.interrupted {
 				assert.Equal(t, []string{"upstream-first", "upstream-backup"}, postedModels)
 			}
 			assert.Equal(t, "custom-image-alias", stored.Properties.OriginModelName)
@@ -1899,4 +2197,225 @@ func TestAsyncImageRetryWorkerOwnership(t *testing.T) {
 	assert.False(t, won, "a stale worker cannot refund a newer attempt")
 	require.NoError(t, db.First(&current, task.ID).Error)
 	assert.Equal(t, model.TaskStatus(model.TaskStatusInProgress), current.Status)
+}
+
+func TestAsyncImageRetryCycleBudget(t *testing.T) {
+	require.NoError(t, i18n.Init())
+	service.InitHttpClient()
+	for _, tc := range []struct {
+		name                                 string
+		cycle, timed, expired, pinned, cache bool
+		resumeCycle, submission              bool
+		localConfig, localSubmit             bool
+		unavailableGroup                     bool
+		contentRejected, direct              bool
+		safetyKeyword                        bool
+		status, retries, wantPosts           int
+		success                              bool
+	}{
+		{name: "task submission cycles within time budget", cycle: true, timed: true, submission: true, status: 503, wantPosts: 4, success: true},
+		{name: "bridge content rejection overrides cycle budget", cycle: true, timed: true, contentRejected: true, status: 400, retries: 9, wantPosts: 1},
+		{name: "direct content rejection overrides cycle budget", cycle: true, timed: true, contentRejected: true, direct: true, status: 502, retries: 9, wantPosts: 1},
+		{name: "bridge safe keyword overrides cycle budget", cycle: true, timed: true, safetyKeyword: true, status: 502, retries: 9, wantPosts: 1},
+		{name: "direct safe keyword overrides cycle budget", cycle: true, timed: true, safetyKeyword: true, direct: true, status: 500, retries: 9, wantPosts: 1},
+		{name: "other upstream 400 still cycles", cycle: true, timed: true, status: 400, wantPosts: 4, success: true},
+		{name: "task local 500 stops despite time budget", cycle: true, timed: true, submission: true, localSubmit: true, status: 500},
+		{name: "local model mapping failure never cycles", cycle: true, timed: true, localConfig: true, retries: 9},
+		{name: "local unavailable group never cycles", cycle: true, timed: true, unavailableGroup: true, retries: 9},
+		{name: "resumed cycle keeps original round", cycle: true, timed: true, resumeCycle: true, status: 503, wantPosts: 1, success: true},
+		{name: "disabled stops after all channels", status: 503, retries: 5, wantPosts: 2},
+		{name: "cycle remains count limited", cycle: true, status: 503, retries: 2, wantPosts: 3},
+		{name: "cycle succeeds next round", cycle: true, status: 503, retries: 3, wantPosts: 4, success: true},
+		{name: "time overrides zero count for 500", cycle: true, timed: true, status: 500, wantPosts: 4, success: true},
+		{name: "time overrides zero count for upstream 404", cycle: true, timed: true, status: 404, wantPosts: 4, success: true},
+		{name: "time overrides count for 502", cycle: true, timed: true, status: 502, retries: 1, wantPosts: 4, success: true},
+		{name: "time overrides count for 429", cycle: true, timed: true, status: 429, retries: 1, wantPosts: 4, success: true},
+		{name: "time overrides count with cache", cycle: true, timed: true, cache: true, status: 503, retries: 1, wantPosts: 4, success: true},
+		{name: "expired resumed budget stops", cycle: true, timed: true, expired: true, status: 503, retries: 9},
+		{name: "bridge 403 remains blocked", cycle: true, timed: true, status: 403, retries: 9, wantPosts: 1},
+		{name: "pinned channel never cycles", cycle: true, timed: true, pinned: true, status: 503, retries: 9, wantPosts: 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			db := setupAsyncImageWorkerTestDB(t)
+			require.NoError(t, db.AutoMigrate(&model.Channel{}, &model.Ability{}, &model.QuotaData{}, &model.Option{}))
+			require.NoError(t, db.Where("channel_id IN ?", []int{701, 809, 810}).Delete(&model.Ability{}).Error)
+			common.OptionMapRWMutex.Lock()
+			oldOptions := common.OptionMap
+			common.OptionMap = maps.Clone(model.CurrentRequestPolicy().Options)
+			common.OptionMapRWMutex.Unlock()
+			t.Cleanup(func() {
+				common.OptionMapRWMutex.Lock()
+				common.OptionMap = oldOptions
+				common.OptionMapRWMutex.Unlock()
+			})
+			previous := model.CurrentRequestPolicy().Options
+			previousRetry := common.RetryTimes
+			require.NoError(t, model.UpdateRequestPolicyOptions(map[string]string{"RetryCycleEnabled": strconv.FormatBool(tc.cycle), "RetryTimeBudgetEnabled": strconv.FormatBool(tc.timed), "RetryTimeBudgetSeconds": "60", "AutomaticRetryStatusCodes": "400,403-404,429,500-503"}))
+			t.Cleanup(func() {
+				require.NoError(t, model.UpdateRequestPolicyOptions(previous))
+				common.RetryTimes = previousRetry
+			})
+			oldRetry, oldMemory, oldBatch, oldLog := common.RetryTimes, common.MemoryCacheEnabled, common.BatchUpdateEnabled, common.LogConsumeEnabled
+			common.RetryTimes, common.MemoryCacheEnabled, common.BatchUpdateEnabled, common.LogConsumeEnabled = tc.retries, tc.cache, false, true
+			t.Cleanup(func() {
+				common.RetryTimes, common.MemoryCacheEnabled, common.BatchUpdateEnabled, common.LogConsumeEnabled = oldRetry, oldMemory, oldBatch, oldLog
+			})
+			t.Setenv("ASYNC_IMAGE_REQUEST_STORAGE_PATH", t.TempDir())
+			t.Setenv("ASYNC_IMAGE_STORAGE_PATH", t.TempDir())
+			t.Setenv("ASYNC_IMAGE_SIGNING_SECRET", "cycle-budget-fixture")
+			require.NoError(t, db.Create(&model.User{Id: 61, Username: "native_billing_test", Quota: 850000, Status: common.UserStatusEnabled}).Error)
+			require.NoError(t, db.Create(&model.Token{Id: 62, UserId: 61, Key: "retry-user-token", RemainQuota: 850000, UsedQuota: 150000, Status: common.TokenStatusEnabled}).Error)
+			var imageBytes bytes.Buffer
+			require.NoError(t, png.Encode(&imageBytes, image.NewRGBA(image.Rect(0, 0, 4, 4))))
+			var posts atomic.Int32
+			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				if posts.Add(1) < 4 && !tc.resumeCycle {
+					w.WriteHeader(tc.status)
+					if tc.safetyKeyword {
+						_, _ = io.WriteString(w, `{"error":{"code":"server_error","message":"SAFE"}}`)
+						return
+					}
+					if tc.contentRejected {
+						_, _ = io.WriteString(w, `{"error":{"code":"400","message":"非常抱歉，该提示可能违反了我们的内容政策。如果你认为此判断有误，请重试或修改提示语。"}}`)
+						return
+					}
+					_, _ = io.WriteString(w, `{"error":{"code":"upstream_unavailable","message":"busy"}}`)
+					return
+				}
+				fmt.Fprintf(w, `{"data":[{"b64_json":%q}]}`, base64.StdEncoding.EncodeToString(imageBytes.Bytes()))
+			}))
+			defer upstream.Close()
+			for i, id := range []int{701, 809, 810} {
+				channel := &model.Channel{Id: id, Name: "retry-cycle", Type: constant.ChannelTypeOpenAI, Key: "fixture", Models: "gpt-image-1", Group: "default", Status: common.ChannelStatusEnabled, Priority: common.GetPointer(int64(5 - i)), Weight: common.GetPointer(uint(1)), BaseURL: common.GetPointer(upstream.URL)}
+				if id == 810 {
+					channel.Status = common.ChannelStatusManuallyDisabled
+				}
+				if tc.localConfig && id == 701 {
+					channel.ModelMapping = common.GetPointer(`{"gpt-image-1":"alias","alias":"gpt-image-1"}`)
+				}
+				if tc.unavailableGroup {
+					channel.Group = "unrelated-group"
+				}
+				require.NoError(t, db.Create(channel).Error)
+				require.NoError(t, channel.AddAbilities(db))
+			}
+			if tc.cache {
+				model.InitChannelCache()
+			}
+			body := `{"model":"gpt-image-1","prompt":"fixture","size":"1024x1024","n":1}`
+			c, _ := gin.CreateTestContext(httptest.NewRecorder())
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/images/generations?async=true", strings.NewReader(body))
+			c.Request.Header.Set("Content-Type", "application/json")
+			if !tc.direct {
+				c.Set("transfer_execution_id", "cycle-test-bridge")
+			}
+			if tc.pinned {
+				service.GetChannelConstraints(c).AddPin(dto.ChannelPin{ChannelId: 701, Source: dto.PinSourceToken, Rank: dto.PinRankToken, RetryMode: dto.PinRetrySingleAttempt})
+			}
+			info := &relaycommon.RelayInfo{UserId: 61, TokenId: 62, UsingGroup: "default", OriginModelName: "gpt-image-1", FinalPreConsumedQuota: 150000, ChannelMeta: &relaycommon.ChannelMeta{ChannelId: 701, UpstreamModelName: "gpt-image-1"}}
+			if tc.submission {
+				events := []string{}
+				billing := &taskSubmissionTestBilling{events: &events}
+				info.Billing = billing
+				info.TokenGroup = "default"
+				info.TaskRelayInfo = &relaycommon.TaskRelayInfo{PublicTaskID: "task_cycle_fixture"}
+				info.ChannelMeta = &relaycommon.ChannelMeta{}
+				submissions := 0
+				outcome, taskErr := executeTaskSubmissionWith(c, info, func(c *gin.Context, _ *relaycommon.RelayInfo) (*relay.TaskSubmitResult, *dto.TaskError) {
+					submissions++
+					if tc.localSubmit {
+						return nil, service.TaskErrorWrapperLocal(fmt.Errorf("local request setup failed"), "build_request_failed", tc.status)
+					}
+					response, err := http.Post(upstream.URL, "application/json", c.Request.Body)
+					require.NoError(t, err)
+					_, err = io.Copy(io.Discard, response.Body)
+					require.NoError(t, err)
+					require.NoError(t, response.Body.Close())
+					if response.StatusCode != 200 {
+						return nil, &dto.TaskError{Code: "fail_to_fetch_task", Message: "busy", StatusCode: response.StatusCode}
+					}
+					return &relay.TaskSubmitResult{UpstreamTaskID: "accepted-cycle-task", Platform: "cycle-fixture"}, nil
+				})
+				common.CleanupBodyStorage(c)
+				if tc.localSubmit {
+					require.NotNil(t, taskErr)
+					assert.True(t, taskErr.LocalError)
+					assert.Nil(t, outcome)
+					assert.Equal(t, 1, submissions)
+					assert.Zero(t, posts.Load())
+					assert.Equal(t, []string{"701"}, c.GetStringSlice("use_channel"))
+					return
+				}
+				require.Nil(t, taskErr)
+				require.NotNil(t, outcome)
+				assert.EqualValues(t, 4, posts.Load())
+				assert.Equal(t, []string{"701", "809", "701", "809"}, c.GetStringSlice("use_channel"))
+				assert.Equal(t, []string{"reserve", "settle"}, events)
+				assert.Zero(t, billing.refunds)
+				var taskCount int64
+				require.NoError(t, db.Model(&model.Task{}).Count(&taskCount).Error)
+				assert.EqualValues(t, 1, taskCount)
+				return
+			}
+			require.Nil(t, relay.SubmitInternalAsyncImageTask(c, info, &dto.ImageRequest{Model: "gpt-image-1"}))
+			common.CleanupBodyStorage(c)
+			var task model.Task
+			require.NoError(t, db.First(&task).Error)
+			if tc.resumeCycle {
+				task.PrivateData.ImageRetry.StartedAtMS = time.Now().UnixMilli()
+				task.PrivateData.ImageRetry.CycleStart = 2
+				task.PrivateData.ChannelRetryPath = []string{"701", "809", "701"}
+				require.NoError(t, db.Save(&task).Error)
+			}
+			if tc.expired {
+				task.PrivateData.ImageRetry.StartedAtMS = time.Now().Add(-time.Minute).UnixMilli()
+				task.PrivateData.ChannelRetryPath = []string{"701"}
+				require.NoError(t, db.Save(&task).Error)
+			}
+			require.True(t, claimInternalAsyncImageTask(&task))
+			require.NoError(t, db.First(&task, task.ID).Error)
+			err := executeInternalAsyncImageTask(context.Background(), &task)
+			if tc.success {
+				require.NoError(t, err)
+			} else {
+				require.Error(t, err)
+			}
+			assert.EqualValues(t, tc.wantPosts, posts.Load())
+			var stored model.Task
+			require.NoError(t, db.First(&stored, task.ID).Error)
+			assert.NotContains(t, stored.PrivateData.ChannelRetryPath, "810", "disabled channel must stay excluded in every round")
+			if tc.localConfig {
+				assert.Equal(t, []string{"701"}, stored.PrivateData.ChannelRetryPath, "local setup failure must stop before selecting the next channel")
+			}
+			if tc.unavailableGroup {
+				assert.Empty(t, stored.PrivateData.ChannelRetryPath, "group rejection must stop before dispatch")
+			}
+			if tc.wantPosts >= 3 {
+				assert.Equal(t, []string{"701", "809", "701"}, stored.PrivateData.ChannelRetryPath[:3])
+			}
+			var taskCount, consumes int64
+			require.NoError(t, db.Model(&model.Task{}).Count(&taskCount).Error)
+			require.NoError(t, model.LOG_DB.Model(&model.Log{}).Where("type = ?", model.LogTypeConsume).Count(&consumes).Error)
+			assert.EqualValues(t, 1, taskCount)
+			if tc.success {
+				assert.Equal(t, model.TaskStatus(model.TaskStatusSuccess), stored.Status)
+				assert.EqualValues(t, 1, consumes)
+				assert.Equal(t, []string{"701", "809", "701", "809"}, stored.PrivateData.ChannelRetryPath)
+				assert.Equal(t, 2, stored.PrivateData.ImageRetry.CycleStart)
+			} else {
+				assert.Equal(t, model.TaskStatus(model.TaskStatusFailure), stored.Status)
+			}
+		})
+	}
+}
+
+func TestRetryBudgetDeadline(t *testing.T) {
+	start := time.Unix(1000, 0)
+	budget := service.RetryBudget{Deadline: start.Add(time.Minute)}
+	assert.Equal(t, 1, budget.Remaining(-10, start.Add(59*time.Second)))
+	assert.Zero(t, budget.Remaining(99, start.Add(time.Minute)))
+	assert.Zero(t, budget.Remaining(99, start.Add(61*time.Second)))
+	assert.Equal(t, -1, (service.RetryBudget{}).Remaining(-1, start))
+	assert.Equal(t, 3, (service.RetryBudget{}).Remaining(3, start))
 }

@@ -92,7 +92,27 @@ func TestRequestPolicyDatabaseMatrix(t *testing.T) {
 			loadOptionsFromDatabase()
 			assert.Equal(t, "strict", CurrentRequestPolicy().Affinity.SessionMode)
 			assert.Equal(t, rules, CurrentRequestPolicy().Options["channel_affinity_setting.rules"], "a global mode never rewrites rule fields")
+			require.NoError(t, UpdateRequestPolicyOptions(map[string]string{"RetryCycleEnabled": "true", "RetryTimeBudgetEnabled": "true", "RetryTimeBudgetSeconds": "60"}))
+			loadOptionsFromDatabase()
+			loadOptionsFromDatabase()
+			assert.True(t, CurrentRequestPolicy().RetryCycleEnabled)
+			assert.True(t, CurrentRequestPolicy().RetryTimeBudgetEnabled)
+			assert.Equal(t, 60, CurrentRequestPolicy().RetryTimeBudgetSeconds)
+			for _, minutes := range []int{10, 20, 30} {
+				require.NoError(t, UpdateRequestPolicyOptions(map[string]string{"ImageInputRetentionMinutes": strconv.Itoa(minutes)}))
+				loadOptionsFromDatabase()
+				assert.Equal(t, minutes, CurrentRequestPolicy().ImageInputRetentionMinutes)
+			}
 			snapshot := CurrentRequestPolicy()
+			for _, value := range []string{"0", "15", "60", "12h", "1.5", ""} {
+				assert.Error(t, UpdateRequestPolicyOptions(map[string]string{"ImageInputRetentionMinutes": value}))
+				assert.Same(t, snapshot, CurrentRequestPolicy())
+			}
+			for _, value := range []string{"0", "-1", "3601", "1.5", "bad"} {
+				assert.Error(t, UpdateRequestPolicyOptions(map[string]string{"RetryTimeBudgetSeconds": value}))
+				assert.Same(t, snapshot, CurrentRequestPolicy())
+			}
+			assert.Error(t, UpdateRequestPolicyOptions(map[string]string{"RetryCycleEnabled": "invalid"}))
 			assert.Error(t, UpdateRequestPolicyOptions(map[string]string{"channel_affinity_setting.session_mode": "unknown"}))
 			assert.Same(t, snapshot, CurrentRequestPolicy())
 			for _, value := range []string{"-1", "1.5", "bad", strconv.Itoa(math.MaxInt)} {

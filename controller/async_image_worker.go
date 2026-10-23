@@ -234,6 +234,7 @@ func executeInternalAsyncImageTask(ctx context.Context, task *model.Task) error 
 	}
 
 	task.Status = model.TaskStatusSuccess
+	retainedInput := service.CaptureImageTaskInput(task)
 	snapshotPath := clearInternalAsyncImageRequestSnapshotFields(task)
 	won, updateErr := task.UpdateInternalAsyncImageTask(model.TaskStatusInProgress, task.PrivateData.WorkerAttempts)
 	if updateErr != nil || !won {
@@ -247,6 +248,9 @@ func executeInternalAsyncImageTask(ctx context.Context, task *model.Task) error 
 		}
 		logger.LogWarn(ctx, fmt.Sprintf("internal async image task %s already transitioned, skip settle", task.TaskID))
 		return nil
+	}
+	if err := service.RetainImageTaskInput(retainedInput); err != nil {
+		logger.LogError(ctx, fmt.Sprintf("retain image task input for %s: %s", task.TaskID, err))
 	}
 	removeInternalAsyncImageRequestSnapshot(snapshotPath...)
 	if err = service.ConfirmTaskBillingSettled(ctx, task, task.Quota, "async image stored", quotaClamp); err != nil {
@@ -368,6 +372,9 @@ func runInternalAsyncImageRelay(ctx context.Context, task *model.Task) ([]byte, 
 }
 
 func runInternalAsyncImageRelayOnce(ctx context.Context, task *model.Task, body []byte, retryParam *service.RetryParam) (*gin.Context, *httptest.ResponseRecorder, *model.Channel, *types.NewAPIError, error) {
+	if isCompatibleImageFormat(task.PrivateData.RequestRelayFormat) {
+		return runInternalAsyncCompatibleImageRelayOnce(ctx, task, body, retryParam)
+	}
 	if task.PrivateData.RequestRelayFormat == string(types.RelayFormatGemini) || task.Action == constant.TaskActionGeminiImage {
 		return runInternalAsyncGeminiImageRelayOnce(ctx, task, body, retryParam)
 	}
@@ -472,6 +479,12 @@ func buildInternalAsyncGeminiImageContext(ctx context.Context, task *model.Task,
 }
 
 func buildInternalAsyncBaseContext(ctx context.Context, task *model.Task, body []byte) (*gin.Context, *httptest.ResponseRecorder, error) {
+	// Queue time and prior attempts may outlive the signed URL in the saved
+	// request. Refresh from this task owner's retained bytes on every attempt.
+	body, contentType, err := service.RefreshTaskReferenceBody(task, body)
+	if err != nil {
+		return nil, nil, fmt.Errorf("refresh image references before submission: %w", err)
+	}
 	recorder := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(recorder)
 	method := task.PrivateData.RequestMethod
@@ -494,12 +507,15 @@ func buildInternalAsyncBaseContext(ctx context.Context, task *model.Task, body [
 	if err != nil {
 		return nil, nil, err
 	}
-	if task.PrivateData.RequestContentType != "" {
-		req.Header.Set("Content-Type", task.PrivateData.RequestContentType)
+	if contentType != "" {
+		req.Header.Set("Content-Type", contentType)
 	}
 	req.ContentLength = int64(len(body))
 	c.Request = req
 	c.Set(common.KeyRequestBody, body)
+	if task.PrivateData.TransferExecutionID != "" {
+		c.Set("transfer_execution_id", task.PrivateData.TransferExecutionID)
+	}
 	c.Set("async_image_worker", true)
 	c.Set(asyncImageWorkerContextKey, true)
 	c.Set(suppressRelayErrorLogContextKey, true)
@@ -660,6 +676,9 @@ func prepareInternalAsyncRelayInfo(task *model.Task, relayInfo *relaycommon.Rela
 }
 
 func parseInternalAsyncImageResponse(task *model.Task, body []byte) (dto.ImageResponse, error) {
+	if task != nil && isCompatibleImageFormat(task.PrivateData.RequestRelayFormat) {
+		return compatibleImageResponse(body)
+	}
 	if task != nil && (task.PrivateData.RequestRelayFormat == string(types.RelayFormatGemini) || task.Action == constant.TaskActionGeminiImage) {
 		return geminiImageResponseToOpenAIImageResponse(body)
 	}
@@ -701,6 +720,7 @@ func failInternalAsyncImageTask(ctx context.Context, task *model.Task, reason st
 	}
 	task.FinishTime = now
 	task.Data = service.BuildFailedAsyncImageTaskData(task)
+	retainedInput := service.CaptureImageTaskInput(task)
 	snapshotPath := clearInternalAsyncImageRequestSnapshotFields(task)
 	won, err := task.UpdateInternalAsyncImageTask(model.TaskStatusInProgress, task.PrivateData.WorkerAttempts)
 	if err != nil {
@@ -710,6 +730,9 @@ func failInternalAsyncImageTask(ctx context.Context, task *model.Task, reason st
 	if !won {
 		logger.LogWarn(ctx, fmt.Sprintf("internal async image task %s already transitioned, skip refund", task.TaskID))
 		return
+	}
+	if err := service.RetainImageTaskInput(retainedInput); err != nil {
+		logger.LogError(ctx, fmt.Sprintf("retain image task input for %s: %s", task.TaskID, err))
 	}
 	removeInternalAsyncImageRequestSnapshot(snapshotPath...)
 	if err := service.RefundTaskQuota(ctx, task, reason); err != nil {

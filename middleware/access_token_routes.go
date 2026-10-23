@@ -41,6 +41,10 @@ func accessTokenScopeRule(scope string) accessTokenRouteRule {
 // Casbin-guarded routes declare themselves through
 // DeclareAccessTokenPermissionRoute when they are registered.
 var accessTokenRouteRules = map[string]accessTokenRouteRule{
+	"GET /api/bridge-management":          accessTokenScopeRule("ops:read"),
+	"PUT /api/bridge-management":          accessTokenScopeRule("ops:write"),
+	"POST /api/bridge-management/check":   accessTokenScopeRule("ops:read"),
+	"POST /api/bridge-management/runtime": accessTokenScopeRule("ops:write"),
 	// router/api-router.go: top level
 	"GET /api/models":                     accessTokenScopeRule("profile:read"),
 	"GET /api/status/test":                accessTokenScopeRule("log:read"),

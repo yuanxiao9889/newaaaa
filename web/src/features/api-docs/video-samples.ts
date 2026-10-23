@@ -1,16 +1,11 @@
 import type { CodeSamples } from './code-example'
+import { buildJsonRequestSamples } from './request-samples'
 
 export function buildVideoSubmitSamples(
   baseUrl: string,
   body: Record<string, unknown>
 ): CodeSamples {
-  const url = `${baseUrl.replace(/\/+$/, '')}/v1/videos`
-  const json = JSON.stringify(body, null, 2)
-  return {
-    curl: `curl --fail-with-body ${JSON.stringify(url)} \\\n  -H "Authorization: Bearer $NEW_API_KEY" \\\n  -H 'Content-Type: application/json' \\\n  --data-binary @- <<'JSON'\n${json}\nJSON`,
-    python: `import json\nimport os\nimport requests\n\npayload = json.loads(${JSON.stringify(json)})\nresponse = requests.post(\n    ${JSON.stringify(url)},\n    headers={"Authorization": f"Bearer {os.environ['NEW_API_KEY']}"},\n    json=payload, timeout=180,\n)\nresponse.raise_for_status()\nprint(response.json())`,
-    javascript: `const response = await fetch(${JSON.stringify(url)}, {\n  method: 'POST',\n  headers: { Authorization: \`Bearer \${process.env.NEW_API_KEY}\`, 'Content-Type': 'application/json' },\n  body: JSON.stringify(${json}),\n  signal: AbortSignal.timeout(180000),\n})\nif (!response.ok) throw new Error(await response.text())\nconsole.log(await response.json())`,
-  }
+  return buildJsonRequestSamples(baseUrl, body, '/v1/videos')
 }
 
 export function buildVideoLifecycleSamples(baseUrl: string): CodeSamples {

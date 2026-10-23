@@ -522,6 +522,17 @@ func TokenAuthReadOnly() func(c *gin.Context) {
 }
 
 func TokenAuth() func(c *gin.Context) {
+	return tokenAuth(false)
+}
+
+// TransferControlAuth permits only a quota-only rejection to recover an
+// already authorized operation. All credential, account and IP checks remain.
+// The exact route gate also prevents an accidental use on a generation route.
+func TransferControlAuth() func(c *gin.Context) {
+	return tokenAuth(true)
+}
+
+func tokenAuth(allowTransferRecovery bool) func(c *gin.Context) {
 	return func(c *gin.Context) {
 		// 先检测是否为ws
 		applyWebSocketSubprotocolAuthorization(c.Request.Header)
@@ -537,7 +548,9 @@ func TokenAuth() func(c *gin.Context) {
 			strings.HasPrefix(c.Request.URL.Path, "/v1beta/models") ||
 			strings.HasPrefix(c.Request.URL.Path, "/v1beta/openai/models") ||
 			strings.HasPrefix(c.Request.URL.Path, "/v1/models/") {
-			skKey := c.Query("key")
+			// Read credentials without freezing Gin's query cache before the
+			// authenticated image-input resolver restores the original query.
+			skKey := c.Request.URL.Query().Get("key")
 			if skKey != "" {
 				c.Request.Header.Set("Authorization", "Bearer "+skKey)
 			}
@@ -566,6 +579,28 @@ func TokenAuth() func(c *gin.Context) {
 			key = parts[0]
 		}
 		token, err := model.ValidateUserToken(key)
+		quotaOnly := errors.Is(err, model.ErrTokenInvalid) && token != nil &&
+			!token.UnlimitedQuota && token.RemainQuota <= 0 &&
+			(token.Status == common.TokenStatusEnabled || token.Status == common.TokenStatusExhausted) &&
+			(token.ExpiredTime == -1 || token.ExpiredTime >= common.GetTimestamp())
+		if quotaOnly {
+			switch c.Request.Method + " " + c.FullPath() {
+			case "GET /v1/images/tasks/:task_id", "GET /v1/images/tasks/:task_id/content",
+				"GET /v1/tasks/:key/artifacts/:artifact_key/content", "HEAD /v1/tasks/:key/artifacts/:artifact_key/content",
+				"GET /v1/images/tasks/:task_id/retry-input",
+				"GET /v1/images/generations/:task_id", "GET /v1/images/generations/:task_id/content",
+				"GET /mj/image/:id", "HEAD /mj/image/:id", "GET /:mode/mj/image/:id", "HEAD /:mode/mj/image/:id":
+				// Reading an owned, already-paid image must remain possible when
+				// its generation consumed the last token quota. Controllers still
+				// enforce ownership; all credential restrictions below still apply.
+				err = nil
+			case "GET /v1/transfer/capabilities", "GET /v1/transfer/requests/:key",
+				"POST /v1/transfer/download-tickets", "POST /v1/transfer/download-observations":
+				if allowTransferRecovery {
+					err = nil
+				}
+			}
+		}
 		if token != nil {
 			id := c.GetInt("id")
 			if id == 0 {
@@ -576,10 +611,7 @@ func TokenAuth() func(c *gin.Context) {
 			// A known, unexpired token with an exhausted budget is still
 			// rejected. Report the billing problem without exposing credentials
 			// or relaxing authentication for disabled, expired, or unknown tokens.
-			if errors.Is(err, model.ErrTokenInvalid) && token != nil &&
-				!token.UnlimitedQuota && token.RemainQuota <= 0 &&
-				(token.Status == common.TokenStatusEnabled || token.Status == common.TokenStatusExhausted) &&
-				(token.ExpiredTime == -1 || token.ExpiredTime >= common.GetTimestamp()) {
+			if quotaOnly {
 				publicError := common.ClassifyPublicError("insufficient_token_quota", "", http.StatusPaymentRequired, true)
 				c.Header("X-Error-Code", publicError.Code)
 				mjRoute := strings.HasPrefix(c.FullPath(), "/mj/") || strings.HasPrefix(c.FullPath(), "/:mode/mj/")
@@ -655,7 +687,7 @@ func TokenAuth() func(c *gin.Context) {
 		if err != nil {
 			return
 		}
-		c.Next()
+		TransferRequestGuard(c)
 	}
 }
 

@@ -1,6 +1,7 @@
 package model
 
 import (
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -121,42 +122,55 @@ func LogQuotaDataDelta(params QuotaDataLogParams, count int) {
 func SaveQuotaDataCache() {
 	CacheQuotaDataLock.Lock()
 	defer CacheQuotaDataLock.Unlock()
-	size := len(CacheQuotaData)
-	// 如果缓存中有数据，就保存到数据库中
-	// 1. 先查询数据库中是否有数据
-	// 2. 如果有数据，就更新数据
-	// 3. 如果没有数据，就插入数据
-	for _, quotaData := range CacheQuotaData {
-		quotaDataDB := &QuotaData{}
-		DB.Table("quota_data").
-			Where("user_id = ? and username = ? and model_name = ? and created_at = ? and use_group = ? and token_id = ? and channel_id = ? and node_name = ?",
-				quotaData.UserID, quotaData.Username, quotaData.ModelName, quotaData.CreatedAt, quotaData.UseGroup, quotaData.TokenID, quotaData.ChannelID, quotaData.NodeName).
-			First(quotaDataDB)
-		if quotaDataDB.Id > 0 {
-			//quotaDataDB.Count += quotaData.Count
-			//quotaDataDB.Quota += quotaData.Quota
-			//DB.Table("quota_data").Save(quotaDataDB)
-			increaseQuotaData(quotaData)
-		} else {
-			DB.Table("quota_data").Create(quotaData)
+	saved := 0
+	for key, quotaData := range CacheQuotaData {
+		err := DB.Transaction(func(tx *gorm.DB) error { return applyQuotaDataDelta(tx, quotaData) })
+		if err != nil {
+			common.SysError("save quota data failed: " + err.Error())
+			continue // Retain failed increments for the next flush.
 		}
+		delete(CacheQuotaData, key)
+		saved++
 	}
-	CacheQuotaData = make(map[string]*QuotaData)
-	common.SysLog(fmt.Sprintf("保存数据看板数据成功，共保存%d条数据", size))
+	common.SysLog(fmt.Sprintf("保存数据看板数据成功，共保存%d条数据", saved))
 }
 
-func increaseQuotaData(quotaData *QuotaData) {
-	err := DB.Table("quota_data").
+// applyQuotaDataDelta shares the user's row lock between cached submission
+// statistics and durable task usage delivery. This also serializes creation
+// of an hourly bucket without requiring a new uniqueness constraint.
+func applyQuotaDataDelta(tx *gorm.DB, quotaData *QuotaData) error {
+	if quotaData.Count == 0 && quotaData.Quota == 0 && quotaData.TokenUsed == 0 {
+		return nil
+	}
+	var user User
+	if err := lockForUpdate(tx.Unscoped()).Select("id").Where("id = ?", quotaData.UserID).Find(&user).Error; err != nil {
+		return err
+	}
+	var existing QuotaData
+	err := tx.
 		Where("user_id = ? and username = ? and model_name = ? and created_at = ? and use_group = ? and token_id = ? and channel_id = ? and node_name = ?",
 			quotaData.UserID, quotaData.Username, quotaData.ModelName, quotaData.CreatedAt, quotaData.UseGroup, quotaData.TokenID, quotaData.ChannelID, quotaData.NodeName).
-		Updates(map[string]any{
-			"count":      gorm.Expr("count + ?", quotaData.Count),
-			"quota":      gorm.Expr("quota + ?", quotaData.Quota),
-			"token_used": gorm.Expr("token_used + ?", quotaData.TokenUsed),
-		}).Error
-	if err != nil {
-		common.SysLog(fmt.Sprintf("increaseQuotaData error: %s", err))
+		Order("id").Take(&existing).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		row := *quotaData
+		row.Id = 0
+		return tx.Create(&row).Error
 	}
+	if err != nil {
+		return err
+	}
+	result := tx.Model(&QuotaData{}).Where("id = ?", existing.Id).Updates(map[string]any{
+		"count":      gorm.Expr("count + ?", quotaData.Count),
+		"quota":      gorm.Expr("quota + ?", quotaData.Quota),
+		"token_used": gorm.Expr("token_used + ?", quotaData.TokenUsed),
+	})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected != 1 {
+		return fmt.Errorf("quota data bucket %d changed before increment; retry required", existing.Id)
+	}
+	return nil
 }
 
 func GetQuotaDataByUsername(username string, startTime int64, endTime int64) (quotaData []*QuotaData, err error) {

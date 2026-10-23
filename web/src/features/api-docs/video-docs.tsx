@@ -4,59 +4,19 @@ import { useTranslation } from 'react-i18next'
 import { ScrollArea, ScrollBar } from '@/components/ui/scroll-area'
 
 import { CodeExample } from './code-example'
+import { ContractParameters } from './contract-parameters'
 import {
+  pendingVideoModels,
+  pendingVideoNote,
   videoCommonParameters,
   videoGroups,
   videoResponseExamples,
-  type VideoParameter,
 } from './video-data'
 import { buildVideoMarkdown } from './video-guide'
 import {
   buildVideoLifecycleSamples,
   buildVideoSubmitSamples,
 } from './video-samples'
-
-function VideoParameters({ fields }: { fields: VideoParameter[] }) {
-  const { t } = useTranslation()
-  return (
-    <ScrollArea className='border-border/70 w-full rounded-xl border'>
-      <table className='w-full min-w-[640px] text-left text-sm'>
-        <thead className='bg-muted/45 text-muted-foreground'>
-          <tr>
-            {['field', 'type', 'requirement', 'description'].map((key) => (
-              <th key={key} className='px-4 py-3 font-medium'>
-                {t(`apiDocs.video.${key}`)}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody className='divide-border divide-y'>
-          {fields.map((field) => (
-            <tr key={field.name} className='align-top'>
-              <td className='px-4 py-3'>
-                <code>{field.name}</code>
-              </td>
-              <td className='px-4 py-3'>
-                <code>{field.type}</code>
-              </td>
-              <td className='px-4 py-3'>
-                {t(
-                  field.required
-                    ? 'apiDocs.video.required'
-                    : 'apiDocs.video.optional'
-                )}
-              </td>
-              <td className='text-muted-foreground px-4 py-3 leading-6'>
-                {t(field.description)}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-      <ScrollBar orientation='horizontal' />
-    </ScrollArea>
-  )
-}
 
 export function VideoDocs({ baseUrl }: { baseUrl: string }) {
   const { t } = useTranslation()
@@ -85,9 +45,11 @@ export function VideoDocs({ baseUrl }: { baseUrl: string }) {
           <li>{t('apiDocs.video.quickConnection')}</li>
           <li>{t('apiDocs.video.quickFlow')}</li>
           <li>{t('apiDocs.video.quickModels')}</li>
-          <li>{t('apiDocs.video.quickMedia')}</li>
+          <li className='text-foreground font-medium'>
+            {t('apiDocs.video.quickMedia')}
+          </li>
         </ul>
-        <VideoParameters fields={videoCommonParameters} />
+        <ContractParameters fields={videoCommonParameters} />
         <nav
           aria-label={t('apiDocs.video.title')}
           className='flex flex-wrap gap-3 text-sm'
@@ -148,7 +110,28 @@ export function VideoDocs({ baseUrl }: { baseUrl: string }) {
                     <td className='px-4 py-3'>{variant.resolution}</td>
                     <td className='px-4 py-3'>{variant.ratios}</td>
                     <td className='text-muted-foreground px-4 py-3 leading-6'>
-                      {t(variant.limits)}
+                      <div>
+                        {t(
+                          'Reference limits: {{images}} images, {{videos}} videos, {{audios}} audio clips; {{total}} total.',
+                          {
+                            images: variant.constraints.maxImages,
+                            videos: variant.constraints.maxVideos,
+                            audios: variant.constraints.maxAudios,
+                            total: variant.constraints.maxTotal,
+                          }
+                        )}
+                      </div>
+                      <details className='mt-2'>
+                        <summary className='text-primary cursor-pointer'>
+                          {t('All constraints (JSON)')}
+                        </summary>
+                        <p className='mt-2'>{t(variant.limits)}</p>
+                        <pre className='mt-2 max-w-80 overflow-x-auto text-xs'>
+                          <code>
+                            {JSON.stringify(variant.constraints, null, 2)}
+                          </code>
+                        </pre>
+                      </details>
                     </td>
                   </tr>
                 ))}
@@ -159,7 +142,7 @@ export function VideoDocs({ baseUrl }: { baseUrl: string }) {
           <h4 className='text-sm font-semibold'>
             {t('apiDocs.video.parameters')}
           </h4>
-          <VideoParameters fields={group.parameters} />
+          <ContractParameters fields={group.parameters} />
           <ul className='text-muted-foreground list-disc space-y-2 pl-5 text-sm leading-7'>
             {group.notes.map((note) => (
               <li key={note}>{t(note)}</li>
@@ -201,6 +184,15 @@ export function VideoDocs({ baseUrl }: { baseUrl: string }) {
         </ul>
         <CodeExample title={t('apiDocs.video.lifecycle')} samples={lifecycle} />
       </section>
+      <aside className='bg-muted/30 space-y-2 rounded-xl border p-5 text-sm leading-7'>
+        <h3 className='font-semibold'>{t('Model mappings to confirm')}</h3>
+        <p className='text-muted-foreground'>{t(pendingVideoNote)}</p>
+        {pendingVideoModels.map((model) => (
+          <code key={model} className='block'>
+            {model}
+          </code>
+        ))}
+      </aside>
       <aside className='bg-muted/30 space-y-2 rounded-xl border p-5 text-sm leading-7'>
         <h3 className='font-semibold'>{t('apiDocs.video.legacy')}</h3>
         <p className='text-muted-foreground'>{t('apiDocs.video.legacyNote')}</p>

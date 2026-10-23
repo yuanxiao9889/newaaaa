@@ -24,14 +24,14 @@ import (
 	"gorm.io/gorm"
 )
 
-func TestShouldRetryRelayErrorHonorsChannelPinOnChannelError(t *testing.T) {
+func TestLocalChannelErrorNeverRetries(t *testing.T) {
 	err := types.NewError(errors.New("channel failed"), types.ErrorCodeChannelNoAvailableKey)
 	for _, test := range []struct {
 		name      string
 		pin       *dto.ChannelPin
 		wantRetry bool
 	}{
-		{name: "unrestricted channel error", wantRetry: true},
+		{name: "unrestricted local channel error", wantRetry: false},
 		{
 			name: "single attempt pin suppresses channel error retry",
 			pin: &dto.ChannelPin{
@@ -40,11 +40,11 @@ func TestShouldRetryRelayErrorHonorsChannelPinOnChannelError(t *testing.T) {
 			wantRetry: false,
 		},
 		{
-			name: "origin task pin permits retry on the same channel",
+			name: "origin task pin cannot override a local error",
 			pin: &dto.ChannelPin{
 				ChannelId: 1, Source: dto.PinSourceOriginTask, Rank: dto.PinRankOriginTask, RetryMode: dto.PinRetrySameChannel,
 			},
-			wantRetry: true,
+			wantRetry: false,
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -142,7 +142,7 @@ func TestDecideRelayRetryReasons(t *testing.T) {
 		{name: "always skipped status", err: upstream(http.StatusGatewayTimeout), retries: 1, want: PolicyDecision{Action: "stop", Reason: "system_retry_exclusion", Source: "system"}},
 		{name: "success status never retries", err: upstream(http.StatusOK), retries: 1, want: PolicyDecision{Action: "stop", Reason: "system_retry_exclusion", Source: "system"}},
 		{name: "skip retry error", err: types.NewErrorWithStatusCode(errors.New("local"), types.ErrorCodeInvalidRequest, http.StatusBadRequest, types.ErrOptionWithSkipRetry()), retries: 1, want: PolicyDecision{Action: "stop", Reason: "non_retryable_error", Source: "system"}},
-		{name: "channel error retries without budget", err: types.NewError(errors.New("no key"), types.ErrorCodeChannelNoAvailableKey), retries: 0, want: PolicyDecision{Action: "retry", Reason: "channel_error", Source: "system"}},
+		{name: "local channel error stops", err: types.NewError(errors.New("no key"), types.ErrorCodeChannelNoAvailableKey), retries: 0, want: PolicyDecision{Action: "stop", Reason: "local_rejection", Source: "system"}},
 		{name: "single attempt pin", err: upstream(http.StatusTooManyRequests), retries: 1, setup: func(c *gin.Context) {
 			GetChannelConstraints(c).AddPin(dto.ChannelPin{ChannelId: 1, Source: dto.PinSourceToken, Rank: dto.PinRankToken, RetryMode: dto.PinRetrySingleAttempt})
 		}, want: PolicyDecision{Action: "stop", Reason: "pinned_channel", Source: "channel_constraint"}},

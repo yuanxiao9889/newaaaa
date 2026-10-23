@@ -403,7 +403,7 @@ func (p *PreparedTaskSubmission) submit(c *gin.Context, info *relaycommon.RelayI
 	// 8. 构建请求体
 	requestBody, err := adaptor.BuildRequestBody(c, info)
 	if err != nil {
-		return nil, service.TaskErrorWrapper(err, "build_request_failed", http.StatusInternalServerError)
+		return nil, service.TaskErrorWrapperLocal(err, "build_request_failed", http.StatusInternalServerError)
 	}
 
 	// 9. 发送请求
@@ -419,8 +419,13 @@ func (p *PreparedTaskSubmission) submit(c *gin.Context, info *relaycommon.RelayI
 	// Any 2xx is a successful submission: task APIs commonly answer 201 Created
 	// or 202 Accepted, and parseSubmitResponse receives the exact status code.
 	if resp.StatusCode/100 != 2 {
+		responseBody, readErr := io.ReadAll(resp.Body)
+		if readErr != nil {
+			taskErr := service.TaskErrorWrapper(readErr, "read_response_body_failed", http.StatusBadGateway)
+			taskErr.NoRetry = true
+			return nil, taskErr
+		}
 		c.Set("auto_switch_task_rejected", true)
-		responseBody, _ := io.ReadAll(resp.Body)
 		return nil, service.TaskErrorWrapper(fmt.Errorf("%s", string(responseBody)), "fail_to_fetch_task", resp.StatusCode)
 	}
 

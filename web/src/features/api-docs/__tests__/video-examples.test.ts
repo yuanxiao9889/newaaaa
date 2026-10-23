@@ -3,21 +3,26 @@ import { runInNewContext } from 'node:vm'
 
 import { describe, expect, it, vi } from 'vitest'
 
+import { generationContracts } from '../generation-data'
+import { buildJsonRequestSamples } from '../request-samples'
 import { videoGroups } from '../video-data'
-import {
-  buildVideoLifecycleSamples,
-  buildVideoSubmitSamples,
-} from '../video-samples'
+import { buildVideoLifecycleSamples } from '../video-samples'
 
-const examples = videoGroups.flatMap((group) => group.examples)
+const examples = [
+  ...videoGroups.flatMap((group) =>
+    group.examples.map((example) => ({ ...example, path: '/v1/videos' }))
+  ),
+  ...generationContracts.flatMap((contract) => contract.examples),
+]
 
 describe('Video documentation request recipes', () => {
   it.each(examples)(
     '$title sends the documented JSON with real bearer interpolation',
     async (example) => {
-      const samples = buildVideoSubmitSamples(
+      const samples = buildJsonRequestSamples(
         'https://relay.test/',
-        example.body
+        example.body,
+        example.path
       )
       const fetch = vi.fn(async () => ({
         ok: true,
@@ -30,7 +35,7 @@ describe('Video documentation request recipes', () => {
         AbortSignal,
       })
       expect(fetch).toHaveBeenCalledWith(
-        'https://relay.test/v1/videos',
+        `https://relay.test${example.path}`,
         expect.objectContaining({
           method: 'POST',
           headers: {
@@ -55,13 +60,17 @@ describe('Video documentation request recipes', () => {
     const models = videoGroups.flatMap((group) =>
       group.variants.flatMap((variant) => variant.models)
     )
-    expect(models).toHaveLength(19)
-    expect(new Set(models).size).toBe(19)
+    expect(models).toHaveLength(23)
+    expect(new Set(models).size).toBe(23)
     expect(models).toEqual(
       expect.arrayContaining([
         '全能视频2.5-301010-c',
         '全能视频2.5-301010-T',
-        '全能-mini',
+        'wan3.0-video',
+        '灵动视频-video-v4',
+        '全能视频2.0-903-720-c1',
+        '全能视频2.0-930-720-c1',
+        '全能视频2.5-301010-1080',
         '全能-fast-10s',
         'Minimax-H3-15s',
         'muse-video',
@@ -72,6 +81,41 @@ describe('Video documentation request recipes', () => {
     )
     expect(models).not.toContain('seedance-2.0-mini-deal')
     expect(models).not.toContain('MiniMax-H3')
+  })
+
+  it('keeps different duration and reference contracts separate', () => {
+    const muse = videoGroups.find((group) => group.id === 'video-muse')
+    if (!muse) throw new Error('Missing Muse documentation')
+    expect(muse.examples[0].body).toMatchObject({
+      duration: 6,
+      ratio: '16:9',
+      resolution: '720p',
+    })
+    expect(muse.examples[0].body).not.toHaveProperty('aspect_ratio')
+    const variants = videoGroups.flatMap((group) => group.variants)
+    expect(
+      variants.find((variant) => variant.models.includes('wan3.0-video'))
+        ?.constraints
+    ).toMatchObject({ maxTotalVideoSeconds: 15, maxVideoAndOutputSeconds: 30 })
+    expect(
+      variants.find((variant) =>
+        variant.models.includes('全能视频2.0-930-720-c1')
+      )?.constraints
+    ).toMatchObject({ maxImages: 9, maxVideos: 3, maxAudios: 0 })
+    expect(
+      variants.find((variant) => variant.models.includes('ok-imagine-video'))
+    ).toMatchObject({
+      resolution: '480p / 720p',
+      constraints: { maxImages: 7 },
+    })
+    for (const group of videoGroups.filter(
+      (group) => group.id === 'video-fixed'
+    )) {
+      for (const example of group.examples) {
+        expect(example.body).not.toHaveProperty('duration')
+        expect(example.body).not.toHaveProperty('seconds')
+      }
+    }
   })
 })
 

@@ -18,6 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import {
   Activity,
+  ArrowLeftRight,
   Box,
   ClipboardList,
   CreditCard,
@@ -178,6 +179,12 @@ export function useSidebarData(): SidebarData {
             url: '/task-plugins',
             icon: PlugZap,
             requiredRole: ROLE.SUPER_ADMIN,
+          },
+          {
+            title: t('Bridge Management'),
+            url: '/bridge-management',
+            icon: ArrowLeftRight,
+            requiredRole: ROLE.ADMIN,
           },
           {
             title: t('System Settings'),

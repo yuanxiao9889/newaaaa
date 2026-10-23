@@ -21,6 +21,11 @@ func SetApiRouter(router *gin.Engine) {
 	apiRouter.Use(middleware.BodyStorageCleanup()) // 清理请求体存储
 	apiRouter.Use(middleware.GlobalAPIRateLimit())
 	anonymousRequestBodyLimit := middleware.AnonymousRequestBodyLimit()
+	bridgeManagement := apiRouter.Group("/bridge-management")
+	bridgeManagement.GET("", middleware.AdminAuth(), controller.GetBridgeManagement)
+	bridgeManagement.PUT("", middleware.RootAuth(), controller.UpdateBridgeManagement)
+	bridgeManagement.POST("/check", middleware.AdminAuth(), controller.CheckBridgeConnection)
+	bridgeManagement.POST("/runtime", middleware.RootAuth(), controller.UpdateBridgeRuntime)
 	{
 		apiRouter.GET("/setup", controller.GetSetup)
 		apiRouter.POST("/setup", anonymousRequestBodyLimit, controller.PostSetup)

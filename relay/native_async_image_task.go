@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -33,11 +34,11 @@ var ErrNativeImageResultUnavailable = errors.New("completed native image result 
 // NativeImageTaskError is a confirmed upstream terminal failure, distinct from
 // polling transport errors and failures downloading an already generated image.
 type NativeImageTaskError struct {
-	Message    string
-	Code       string
-	Type       string
-	StatusCode int
-	Retryable  bool
+	Message          string
+	Code             string
+	Type             string
+	StatusCode       int
+	ConfirmedFailure bool
 }
 
 func (e *NativeImageTaskError) Error() string { return e.Message }
@@ -66,39 +67,36 @@ func nativeImageTaskFailure(status string, body []byte, apiKey string) *NativeIm
 	if status != "failed" && status != "failure" && status != "error" {
 		return failure
 	}
-	// Permanent errors take precedence over broad upstream server-error codes.
-	description := strings.ToLower(failure.Code + " " + failure.Type + " " + failure.Message)
-	for _, permanent := range []string{"content_filter", "content_policy", "moderation", "safety", "unsafe", "policy", "sensitive", "nsfw", "审核", "违规", "敏感", "invalid", "bad_request", "parameter", "参数", "suspended", "violat"} {
-		if strings.Contains(description, permanent) {
-			return failure
-		}
-	}
-	if value.Get("retryable").Type == gjson.False {
-		return failure
-	}
+	// A fully read failed status establishes the outcome. Retry eligibility is
+	// the administrator's status policy, not a provider code/message allowlist
+	// or its retryable hint. Expired/cancelled/unknown outcomes never enter here.
+	failure.ConfirmedFailure = true
 	classification := failure.Code
 	if classification == "" {
 		classification = failure.Type
 	}
-	switch strings.ToLower(classification) {
-	case "rate_limit_exceeded", "rate_limit_error", "too_many_requests", "429":
-		failure.Retryable, failure.StatusCode = true, http.StatusTooManyRequests
-	case "server_error", "internal_error", "internal_server_error", "service_unavailable", "overloaded_error", "500", "502", "503":
-		failure.Retryable = true
+	classification = strings.ToLower(strings.TrimSpace(classification))
+	if classification == "403" || classification == "forbidden" {
+		failure.StatusCode = http.StatusForbidden
 	}
-	if failure.StatusCode == 429 || failure.StatusCode == 500 || failure.StatusCode == 502 || failure.StatusCode == 503 {
-		failure.Retryable = true
+	if failure.StatusCode < 400 || failure.StatusCode > 599 {
+		failure.StatusCode = 0
+		if code, err := strconv.Atoi(classification); err == nil && code >= 400 && code <= 599 {
+			failure.StatusCode = code
+		} else if classification == "rate_limit_exceeded" || classification == "rate_limit_error" || classification == "too_many_requests" {
+			failure.StatusCode = http.StatusTooManyRequests
+		}
 	}
 	// Compatibility for providers returning a message without an error code.
 	if failure.Code == "" && failure.StatusCode == 0 {
 		switch strings.ToLower(strings.TrimSpace(failure.Message)) {
 		case "请求过于频繁,请稍后重试", "请求过于频繁，请稍后重试", "too many requests", "rate limit exceeded":
-			failure.Code, failure.StatusCode, failure.Retryable = "rate_limit_exceeded", http.StatusTooManyRequests, true
+			failure.Code, failure.StatusCode = "rate_limit_exceeded", http.StatusTooManyRequests
 		case "generation failed: generate error: an error occurred.", "service unavailable", "internal server error":
-			failure.Code, failure.Retryable = "upstream_generation_failed", true
+			failure.Code = "upstream_generation_failed"
 		}
 	}
-	if failure.Retryable && failure.StatusCode == 0 {
+	if failure.StatusCode == 0 {
 		failure.StatusCode = http.StatusBadGateway
 	}
 	return failure

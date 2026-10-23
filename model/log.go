@@ -2,6 +2,7 @@ package model
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"github.com/QuantumNous/new-api/common"
@@ -9,6 +10,7 @@ import (
 	"github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
+	"maps"
 	"strings"
 	"time"
 )
@@ -66,7 +68,6 @@ type RecordConsumeLogParams struct {
 }
 
 type RecordTaskBillingLogParams struct {
-	UsageOnly        bool // Late usage for a task already counted at submission.
 	UserId           int
 	LogType          int
 	Content          string
@@ -546,17 +547,227 @@ func RecordTaskBillingLog(params RecordTaskBillingLogParams) error {
 		switch params.LogType {
 		case LogTypeConsume:
 			quotaData.Quota = params.Quota
-			if params.UsageOnly {
-				LogQuotaDataDelta(quotaData, 0)
-			} else {
-				LogQuotaData(quotaData)
-			}
+			LogQuotaData(quotaData)
 		case LogTypeRefund:
 			quotaData.Quota = -params.Quota
 			LogQuotaDataDelta(quotaData, 0)
 		}
 	}
 	return nil
+}
+
+// SettleSubmittedTaskUsage records completion without touching paid quota.
+// A stale caller cannot recreate a checkpoint already delivered by another
+// process; the persisted billing state, not its in-memory copy, is authoritative.
+func SettleSubmittedTaskUsage(ctx context.Context, task *Task) error {
+	var settled Task
+	err := DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := lockForUpdate(tx).First(&settled, task.ID).Error; err != nil {
+			return err
+		}
+		if settled.PrivateData.BillingState == "settled" {
+			return nil
+		}
+		if settled.PrivateData.BillingState == "refunded" || settled.Quota != task.Quota || settled.PrivateData.GetUsageAccountingMode() != TaskUsageAccountingSubmit {
+			return fmt.Errorf("task %s billing changed before usage settlement", task.TaskID)
+		}
+		// Delivery can finish after the terminal CAS but before settlement.
+		// Preserve its receipt when this caller still holds an older snapshot.
+		if settled.PrivateData.TokenUsageLogged {
+			task.PrivateData.TokenUsageLogged = true
+			task.PrivateData.PendingUsageLog = nil
+		} else if settled.PrivateData.PendingUsageLog != nil {
+			task.PrivateData.PendingUsageLog = settled.PrivateData.PendingUsageLog
+		}
+		settled.PrivateData = task.PrivateData
+		return tx.Model(&Task{}).Where("id = ?", settled.ID).Update("private_data", settled.PrivateData).Error
+	})
+	if err == nil {
+		*task = settled
+	}
+	return err
+}
+
+// MergeTaskUsageLog delivers an already-paid task's durable usage checkpoint.
+// Log storage and the primary database may be independent. Log writes are
+// idempotent; the statistics delta and checkpoint acknowledgment commit together.
+func MergeTaskUsageLog(ctx context.Context, task *Task) error {
+	var fresh Task
+	if err := DB.WithContext(ctx).First(&fresh, task.ID).Error; err != nil {
+		return err
+	}
+	pending := fresh.PrivateData.PendingUsageLog
+	if pending == nil {
+		*task = fresh
+		return nil
+	}
+	if fresh.Status != TaskStatusSuccess || fresh.PrivateData.BillingState == "refunded" {
+		return fmt.Errorf("task %s usage delivery requires a successful task", fresh.TaskID)
+	}
+	if !common.LogConsumeEnabled {
+		return fmt.Errorf("task usage delivery is paused while consume logging is disabled")
+	}
+	delta, err := mergeTaskUsageLog(ctx, &fresh, pending)
+	if err != nil {
+		return err
+	}
+	err = DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var current Task
+		if err := lockForUpdate(tx).First(&current, fresh.ID).Error; err != nil {
+			return err
+		}
+		if current.PrivateData.PendingUsageLog == nil {
+			fresh = current
+			return nil
+		}
+		if *current.PrivateData.PendingUsageLog != *pending {
+			return fmt.Errorf("task %s usage checkpoint changed; retry required", fresh.TaskID)
+		}
+		if pending.ExportQuotaData && delta.TokenUsed != 0 {
+			if err := applyQuotaDataDelta(tx, delta); err != nil {
+				return err
+			}
+		}
+		current.PrivateData.PendingUsageLog = nil
+		current.PrivateData.TokenUsageLogged = true
+		if err := tx.Model(&Task{}).Where("id = ?", current.ID).Update("private_data", current.PrivateData).Error; err != nil {
+			return err
+		}
+		fresh = current
+		return nil
+	})
+	if err == nil {
+		*task = fresh
+	}
+	return err
+}
+
+// mergeTaskUsageLog changes only usage fields, preserving the original charge
+// and request identity. The persisted delta lets primary-database delivery
+// resume after a process restart without counting the same tokens twice.
+func mergeTaskUsageLog(ctx context.Context, task *Task, pending *TaskUsageLog) (*QuotaData, error) {
+	if task.TaskID == "" {
+		return nil, fmt.Errorf("task usage merge requires a task ID")
+	}
+	encodedID, err := common.Marshal(task.TaskID)
+	if err != nil {
+		return nil, err
+	}
+	var candidates []Log
+	// LIKE is only a portable prefilter; exact decoded IDs are checked below.
+	query := LOG_DB.WithContext(ctx).Where("user_id = ? AND model_name = ? AND type = ? AND other LIKE ?",
+		task.UserId, pending.ModelName, LogTypeConsume, "%"+string(encodedID)+"%")
+	if err := query.Order("created_at ASC").Order("id ASC").Find(&candidates).Error; err != nil {
+		return nil, err
+	}
+	for _, original := range candidates {
+		var identity struct {
+			TaskID          string `json:"task_id"`
+			UsageOnly       bool   `json:"usage_only"`
+			UsageMerged     bool   `json:"usage_merged"`
+			UsageTokenDelta *int   `json:"usage_token_delta"`
+			ActualQuota     *int   `json:"actual_quota"`
+			RootInfo        struct {
+				NodeName string `json:"node_name"`
+			} `json:"root_info"`
+		}
+		if common.UnmarshalJsonStr(original.Other, &identity) != nil || identity.TaskID != task.TaskID || identity.UsageOnly {
+			continue
+		}
+		// Difference settlements are independent accounting events.
+		if identity.ActualQuota != nil && !identity.UsageMerged {
+			continue
+		}
+		nodeName := identity.RootInfo.NodeName
+		if nodeName == "" {
+			nodeName = task.PrivateData.NodeName
+		}
+		if nodeName == "" {
+			nodeName = common.NodeName
+		}
+		delta := &QuotaData{
+			UserID: original.UserId, Username: original.Username, ModelName: original.ModelName,
+			CreatedAt: original.CreatedAt - original.CreatedAt%3600,
+			TokenUsed: pending.PromptTokens + pending.CompletionTokens - original.PromptTokens - original.CompletionTokens,
+			UseGroup:  original.Group, TokenID: original.TokenId, ChannelID: original.ChannelId, NodeName: nodeName,
+		}
+		if identity.UsageMerged {
+			if identity.UsageTokenDelta == nil || original.PromptTokens != pending.PromptTokens || original.CompletionTokens != pending.CompletionTokens {
+				return nil, fmt.Errorf("task %s merged usage differs from its checkpoint", task.TaskID)
+			}
+			delta.TokenUsed = *identity.UsageTokenDelta
+			return delta, nil
+		}
+		var merged, supplement map[string]json.RawMessage
+		if err := common.UnmarshalJsonStr(original.Other, &merged); err != nil {
+			return nil, err
+		}
+		if err := common.UnmarshalJsonStr(pending.Other, &supplement); err != nil {
+			return nil, err
+		}
+		for _, scope := range []string{logOtherAdminInfoKey, logOtherRootInfoKey, logOtherAuditInfoKey} {
+			if supplement[scope] == nil {
+				continue
+			}
+			values := make(map[string]json.RawMessage)
+			if raw := merged[scope]; raw != nil {
+				if err := common.Unmarshal(raw, &values); err != nil {
+					return nil, err
+				}
+			}
+			var additions map[string]json.RawMessage
+			if err := common.Unmarshal(supplement[scope], &additions); err != nil {
+				return nil, err
+			}
+			if values == nil {
+				values = make(map[string]json.RawMessage)
+			}
+			maps.Copy(values, additions)
+			supplement[scope], err = common.Marshal(values)
+			if err != nil {
+				return nil, err
+			}
+		}
+		maps.Copy(merged, supplement)
+		delete(merged, "usage_only")
+		merged["usage_merged"] = json.RawMessage("true")
+		merged["usage_token_delta"], err = common.Marshal(delta.TokenUsed)
+		if err != nil {
+			return nil, err
+		}
+		encoded, err := common.Marshal(merged)
+		if err != nil {
+			return nil, err
+		}
+		if common.UsingLogDatabase(common.DatabaseTypeClickHouse) {
+			// ClickHouse mutations do not report matched rows. Wait for the
+			// mutation and verify the exact event before acknowledging delivery.
+			err = LOG_DB.WithContext(ctx).Exec("ALTER TABLE logs UPDATE prompt_tokens = ?, completion_tokens = ?, use_time = ?, other = ? WHERE user_id = ? AND created_at = ? AND request_id = ? AND other = ? SETTINGS mutations_sync = 1",
+				pending.PromptTokens, pending.CompletionTokens, pending.UseTimeSeconds, string(encoded), original.UserId, original.CreatedAt, original.RequestId, original.Other).Error
+			if err != nil {
+				return nil, err
+			}
+			var verified Log
+			err = LOG_DB.WithContext(ctx).Where("user_id = ? AND created_at = ? AND request_id = ?", original.UserId, original.CreatedAt, original.RequestId).Take(&verified).Error
+			if err != nil {
+				return nil, err
+			}
+			if verified.Other != string(encoded) || verified.PromptTokens != pending.PromptTokens || verified.CompletionTokens != pending.CompletionTokens {
+				return nil, fmt.Errorf("task %s usage mutation was not applied; retry required", task.TaskID)
+			}
+		} else {
+			result := LOG_DB.WithContext(ctx).Model(&Log{}).Where("id = ? AND user_id = ? AND other = ?", original.Id, original.UserId, original.Other).
+				Updates(map[string]any{"prompt_tokens": pending.PromptTokens, "completion_tokens": pending.CompletionTokens, "use_time": pending.UseTimeSeconds, "other": string(encoded)})
+			if result.Error != nil {
+				return nil, result.Error
+			}
+			if result.RowsAffected != 1 {
+				return nil, fmt.Errorf("task %s consume log changed during usage merge; retry required", task.TaskID)
+			}
+		}
+		return delta, nil
+	}
+	return nil, fmt.Errorf("original consume log for task %s: %w", task.TaskID, gorm.ErrRecordNotFound)
 }
 
 func GetAllLogs(logType int, startTimestamp int64, endTimestamp int64, modelName string, username string, tokenName string, startIdx int, num int, channel int, group string, requestId string, upstreamRequestId string) (logs []*Log, total int64, err error) {

@@ -125,6 +125,7 @@ func SubmitInternalAsyncImageTask(c *gin.Context, info *relaycommon.RelayInfo, r
 		info.TaskRelayInfo.PublicTaskID = model.GenerateTaskID()
 	}
 	task := model.InitTask(constant.TaskPlatformInternalImage, info)
+	task.PrivateData.TransferExecutionID = c.GetString("transfer_execution_id")
 	task.PrivateData.AutoSwitch = autoSwitch
 	task.Action = asyncImageTaskAction(info.RelayMode)
 	task.Status = model.TaskStatusSubmitted
@@ -184,6 +185,11 @@ func SubmitInternalAsyncImageTask(c *gin.Context, info *relaycommon.RelayInfo, r
 	}
 	if len(native) > 0 && native[0] != nil {
 		if task.PrivateData.ImageRetry != nil {
+			started := common.GetContextKeyTime(c, constant.ContextKeyRequestStartTime)
+			if started.IsZero() {
+				started = time.Now()
+			}
+			task.PrivateData.ImageRetry.StartedAtMS = started.UnixMilli()
 			task.PrivateData.ChannelRetryPath = append([]string(nil), c.GetStringSlice("use_channel")...)
 			if len(task.PrivateData.ChannelRetryPath) == 0 {
 				task.PrivateData.ChannelRetryPath = []string{strconv.Itoa(native[0].ChannelID)}
@@ -198,7 +204,7 @@ func SubmitInternalAsyncImageTask(c *gin.Context, info *relaycommon.RelayInfo, r
 		return types.NewErrorWithStatusCode(err, types.ErrorCodeReadRequestBodyFailed, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
 	}
 
-	if err = task.Insert(); err != nil {
+	if err = service.InsertImageTaskWithReferences(task); err != nil {
 		_ = os.Remove(task.PrivateData.RequestBodyPath)
 		if replay := task.PrivateData.ImageRetry; replay != nil {
 			_ = os.Remove(replay.BodyPath)
@@ -217,10 +223,15 @@ func SubmitInternalAsyncImageTask(c *gin.Context, info *relaycommon.RelayInfo, r
 }
 
 func SubmitInternalAsyncGeminiImageTask(c *gin.Context, info *relaycommon.RelayInfo, request *dto.GeminiChatRequest) (ret *types.NewAPIError) {
-	service.ReleaseAutoSwitchAttempt(c)
 	if err := validateAsyncGeminiImageTaskRequest(request); err != nil {
+		service.ReleaseAutoSwitchAttempt(c)
 		return err
 	}
+	return submitInternalAsyncProtocolImageTask(c, info, string(types.RelayFormatGemini), constant.TaskActionGeminiImage)
+}
+
+func submitInternalAsyncProtocolImageTask(c *gin.Context, info *relaycommon.RelayInfo, format, action string) (ret *types.NewAPIError) {
+	service.ReleaseAutoSwitchAttempt(c)
 	maxTasks := common.GetAsyncImageMaxUnfinishedTasks()
 	if model.CountUnfinishedInternalAsyncImageTasks(maxTasks+1) >= maxTasks {
 		return types.NewErrorWithStatusCode(fmt.Errorf("async image task queue is full"), types.ErrorCodeInvalidRequest, http.StatusTooManyRequests, types.ErrOptionWithSkipRetry())
@@ -239,7 +250,8 @@ func SubmitInternalAsyncGeminiImageTask(c *gin.Context, info *relaycommon.RelayI
 	}
 	info.TaskRelayInfo.PublicTaskID = model.GenerateTaskID()
 	task := model.InitTask(constant.TaskPlatformInternalImage, info)
-	task.Action = constant.TaskActionGeminiImage
+	task.PrivateData.TransferExecutionID = c.GetString("transfer_execution_id")
+	task.Action = action
 	task.Status = model.TaskStatusSubmitted
 	task.Progress = taskcommon.ProgressSubmitted
 	preConsumedQuota := info.FinalPreConsumedQuota
@@ -257,7 +269,7 @@ func SubmitInternalAsyncGeminiImageTask(c *gin.Context, info *relaycommon.RelayI
 	task.PrivateData.RequestPath = c.Request.URL.Path
 	task.PrivateData.RequestQuery = stripAsyncQuery(c.Request.URL.RawQuery)
 	task.PrivateData.RequestContentType = c.Request.Header.Get("Content-Type")
-	task.PrivateData.RequestRelayFormat = string(types.RelayFormatGemini)
+	task.PrivateData.RequestRelayFormat = format
 	task.PrivateData.BillingSource = info.BillingSource
 	task.PrivateData.SubscriptionId = info.SubscriptionId
 	task.PrivateData.TokenId = info.TokenId
@@ -283,7 +295,7 @@ func SubmitInternalAsyncGeminiImageTask(c *gin.Context, info *relaycommon.RelayI
 	if err != nil {
 		return types.NewErrorWithStatusCode(err, types.ErrorCodeReadRequestBodyFailed, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
 	}
-	if err = task.Insert(); err != nil {
+	if err = service.InsertImageTaskWithReferences(task); err != nil {
 		_ = os.Remove(task.PrivateData.RequestBodyPath)
 		return types.NewErrorWithStatusCode(err, types.ErrorCodeUpdateDataError, http.StatusInternalServerError)
 	}
