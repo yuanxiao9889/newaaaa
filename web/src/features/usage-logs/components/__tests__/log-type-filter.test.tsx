@@ -67,6 +67,21 @@ async function renderFilter(
 ) {
   vi.spyOn(api, 'get').mockImplementation(async (url) => {
     if (url === '/api/group/') return { data: { success: true, data: [] } }
+    if (url === '/api/status') {
+      const currency = useSystemConfigStore.getState().config.currency
+      return {
+        data: {
+          success: true,
+          data: {
+            quota_display_type: currency.quotaDisplayType,
+            quota_per_unit: currency.quotaPerUnit,
+            usd_exchange_rate: currency.usdExchangeRate,
+            custom_currency_symbol: currency.customCurrencySymbol,
+            custom_currency_exchange_rate: currency.customCurrencyExchangeRate,
+          },
+        },
+      }
+    }
     return {
       data: {
         success: true,

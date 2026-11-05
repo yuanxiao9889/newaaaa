@@ -108,7 +108,7 @@ func ConsumeResponsesQuota(c *gin.Context, info *relaycommon.RelayInfo, usage *d
 		return
 	}
 	if strings.HasPrefix(info.OriginModelName, "gpt-4o-audio") {
-		service.PostAudioConsumeQuota(c, info, usage, "")
+		service.PostAudioConsumeQuota(c, info, usage, nil)
 		return
 	}
 	service.PostTextConsumeQuota(c, info, usage, nil)

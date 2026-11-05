@@ -15,6 +15,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
+	"github.com/QuantumNous/new-api/i18n"
 	"github.com/QuantumNous/new-api/middleware"
 	"github.com/QuantumNous/new-api/model"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
@@ -32,6 +33,7 @@ import (
 
 func setupMidjourneyQuotaDB(t *testing.T) *gorm.DB {
 	t.Helper()
+	require.NoError(t, i18n.Init())
 	originalDB, originalLogDB := model.DB, model.LOG_DB
 	originalMain, originalLog := common.MainDatabaseType(), common.LogDatabaseType()
 	originalRedis, originalBatch, originalLogEnabled := common.RedisEnabled, common.BatchUpdateEnabled, common.LogConsumeEnabled
@@ -364,7 +366,7 @@ func TestMidjourneyFailureDiagnostics(t *testing.T) {
 			require.NoError(t, common.Unmarshal(fetchRecorder.Body.Bytes(), &fetched))
 			assert.Equal(t, tc.want, fetched.FailReason)
 			assert.Equal(t, tc.want, fetched.Description)
-			logs, total, err := model.GetUserLogs(user.Id, logType, 0, 0, "", "", 0, 10, "", "", "")
+			logs, total, err := model.GetUserLogs(user.Id, model.LogFilter{Type: logType}, 0, 10)
 			require.NoError(t, err)
 			require.Equal(t, int64(1), total)
 			require.Len(t, logs, 1)

@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -76,4 +77,28 @@ func TestFormatUserLogsForResponseHidesChannelInfo(t *testing.T) {
 	require.NotContains(t, other, "future_diagnostic")
 	require.NotContains(t, other, "model_price")
 	require.Equal(t, float64(123), other["actual_quota"])
+}
+
+func TestUserLogTranslationsPreserveAccountHistoryPrivacy(t *testing.T) {
+	for _, logType := range []int{LogTypeTopup, LogTypeConsume, LogTypeError} {
+		other := NewLogOther()
+		content := other.setContent(common.NewMessage("Credited {{amount}}", map[string]any{"amount": "10"}))
+		other.SetPublic("fixed_price_unit", "second")
+		other.SetPublic("cache_creation_tokens_12h", 42)
+		other.SetAdmin("channel_name", "private-upstream")
+		logs := []*Log{{Type: logType, Content: content, Other: other.JSONString()}}
+		formatUserLogs(logs, 0)
+		var public map[string]any
+		require.NoError(t, common.UnmarshalJsonStr(logs[0].Other, &public))
+		assert.NotContains(t, public, "admin_info")
+		assert.Equal(t, "second", public["fixed_price_unit"])
+		assert.Equal(t, float64(42), public["cache_creation_tokens_12h"])
+		if logType == LogTypeTopup {
+			assert.Contains(t, public, "content_parts")
+			assert.Equal(t, "Credited 10", logs[0].Content)
+		} else {
+			assert.NotContains(t, public, "content_parts")
+			assert.NotContains(t, logs[0].Content, "Credited")
+		}
+	}
 }

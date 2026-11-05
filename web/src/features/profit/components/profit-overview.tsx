@@ -112,34 +112,30 @@ export const ProfitOverview = memo(function ProfitOverview(props: {
           ['cost', t('Cost')],
           ['profit', t('Profit')],
         ] as const
-      ).map(
-        ([key, title]): ColumnDef<ProfitBreakdownItem> => ({
-          accessorKey: key,
-          enableHiding: false,
-          header: ({ column }) => (
-            <DataTableColumnHeader
-              column={column}
-              title={title}
-              className='justify-end'
-            />
-          ),
-          cell: ({ row }) => (
-            <span
-              className={cn(
-                'block text-right tabular-nums',
-                key === 'profit' && 'font-semibold',
-                key === 'profit' &&
-                  row.original.profit < 0 &&
-                  'text-destructive'
-              )}
-            >
-              {key === 'request_count'
-                ? row.original[key].toLocaleString()
-                : formatMoney(row.original[key])}
-            </span>
-          ),
-        })
-      ),
+      ).map(([key, title]): ColumnDef<ProfitBreakdownItem> => ({
+        accessorKey: key,
+        enableHiding: false,
+        header: ({ column }) => (
+          <DataTableColumnHeader
+            column={column}
+            title={title}
+            className='justify-end'
+          />
+        ),
+        cell: ({ row }) => (
+          <span
+            className={cn(
+              'block text-right tabular-nums',
+              key === 'profit' && 'font-semibold',
+              key === 'profit' && row.original.profit < 0 && 'text-destructive'
+            )}
+          >
+            {key === 'request_count'
+              ? row.original[key].toLocaleString()
+              : formatMoney(row.original[key])}
+          </span>
+        ),
+      })),
       {
         accessorKey: 'coverage_rate',
         enableHiding: false,

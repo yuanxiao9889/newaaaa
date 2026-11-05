@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/MoeForge/moego/ojson"
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/pkg/billingexpr"
@@ -24,7 +25,6 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/tidwall/gjson"
 )
 
 type imageReservation struct {
@@ -46,6 +46,8 @@ func (s *imageReservation) GetPreConsumedQuota() int { return s.held }
 func (*imageReservation) Settle(int) error           { return nil }
 func (*imageReservation) Refund(*gin.Context)        {}
 func (*imageReservation) NeedsRefund() bool          { return false }
+
+func (s *imageReservation) ReserveBeforeSubmit(quota int) error { return s.Reserve(quota) }
 
 func TestImageRequestReservesFinalQuantityBeforeUpstream(t *testing.T) {
 	service.InitHttpClient()
@@ -122,7 +124,7 @@ func TestImageRequestReservesFinalQuantityBeforeUpstream(t *testing.T) {
 			assert.Equal(t, http.StatusBadGateway, apiErr.StatusCode)
 			require.Len(t, received, 1)
 			body := <-received
-			assert.Equal(t, int64(tc.count), gjson.GetBytes(body, "n").Int())
+			assert.Equal(t, int64(tc.count), ojson.GetBytes(body, "n").Int())
 			assert.Equal(t, tc.count*20000, info.PriceData.QuotaToPreConsume)
 			assert.GreaterOrEqual(t, reservation.held, info.PriceData.QuotaToPreConsume)
 			assert.Nil(t, info.BillingImageCount)

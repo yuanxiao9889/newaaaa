@@ -60,6 +60,11 @@ func (s *videoTaskRetryBilling) Reserve(targetQuota int) error {
 	return nil
 }
 
+// ReserveBeforeSubmit keeps retries covered by the existing durable reservation.
+func (s *videoTaskRetryBilling) ReserveBeforeSubmit(targetQuota int) error {
+	return s.Reserve(targetQuota)
+}
+
 func (s *videoTaskRetryBilling) Settle(actualQuota int) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()

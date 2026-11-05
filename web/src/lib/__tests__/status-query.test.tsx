@@ -46,9 +46,15 @@ const apiClient = api as unknown as MockableApi
 const originalGet = apiClient.get
 
 test('keeps footer links and formatting while removing active HTML content', async () => {
-  apiClient.get = async () => ({ data: { success: true, data: {
-    footer_html: '<p><a href="https://example.com">Help</a><strong>new-api</strong><img src="/logo.png" onerror="alert(1)"><script>alert(2)</script></p>',
-  } } })
+  apiClient.get = async () => ({
+    data: {
+      success: true,
+      data: {
+        footer_html:
+          '<p><a href="https://example.com">Help</a><strong>new-api</strong><img src="/logo.png" onerror="alert(1)"><script>alert(2)</script></p>',
+      },
+    },
+  })
   await ensureStatus(createQueryClient())
   const footer = useSystemConfigStore.getState().config.footerHtml
   expect(footer).toContain('<a href="https://example.com">Help</a>')

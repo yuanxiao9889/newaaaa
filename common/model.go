@@ -80,13 +80,3 @@ func IsImageGenerationModel(modelName string) bool {
 	}
 	return false
 }
-
-func IsOpenAITextModel(modelName string) bool {
-	modelName = strings.ToLower(modelName)
-	for _, m := range OpenAITextModels {
-		if strings.Contains(modelName, m) {
-			return true
-		}
-	}
-	return false
-}

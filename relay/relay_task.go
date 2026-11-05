@@ -2,8 +2,14 @@ package relay
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
+	"io"
+	"net/http"
+	"strconv"
+	"strings"
+
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
@@ -20,10 +26,6 @@ import (
 	"github.com/QuantumNous/new-api/setting/billing_setting"
 	"github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
-	"io"
-	"net/http"
-	"strconv"
-	"strings"
 )
 
 type TaskSubmitResult struct {
@@ -69,7 +71,7 @@ func ResolveOriginTask(c *gin.Context, info *relaycommon.RelayInfo) *dto.TaskErr
 	// 查找原始任务
 	originTask, exist, err := model.GetByTaskId(info.UserId, info.OriginTaskID)
 	if err != nil {
-		return service.TaskErrorWrapper(err, "get_origin_task_failed", http.StatusInternalServerError)
+		return service.TaskErrorWrapper(err, "get_origin_task_failed", http.StatusInternalServerError, common.UpstreamAddresses(c)...)
 	}
 	if !exist {
 		return service.TaskErrorWrapperLocal(errors.New("task_origin_not_exist"), "task_not_exist", http.StatusBadRequest)
@@ -103,7 +105,7 @@ func ResolveOriginTask(c *gin.Context, info *relaycommon.RelayInfo) *dto.TaskErr
 	if originTask.ChannelId != info.ChannelId {
 		key, _, newAPIError := ch.GetNextEnabledKey()
 		if newAPIError != nil {
-			return service.TaskErrorWrapper(newAPIError, "channel_no_available_key", newAPIError.StatusCode)
+			return service.TaskErrorWrapper(newAPIError, "channel_no_available_key", newAPIError.StatusCode, common.UpstreamAddresses(c)...)
 		}
 		common.SetContextKey(c, constant.ContextKeyChannelKey, key)
 		common.SetContextKey(c, constant.ContextKeyChannelType, ch.Type)
@@ -256,13 +258,15 @@ func prepareTaskSubmission(c *gin.Context, info *relaycommon.RelayInfo, reserve 
 		}
 	}
 
-	// 4. 价格计算：基础模型价格
+	// 4. 价格计算：基础模型价格。重试可能换了插件或渠道，每次尝试都重新定价，
+	//    不沿用上一次尝试的表达式快照。
 	info.OriginModelName = modelName
 	// Queue workers reuse their admission-time price and reservation.
 	if !reserve {
 		return &PreparedTaskSubmission{platform: platform, adaptor: adaptor}, nil
 	}
 	preservedRatios := info.PriceData.OtherRatios()
+	info.TieredBillingSnapshot = nil
 	var priceData types.PriceData
 	var err error
 	pluginKey := c.GetString("task_plugin_key")
@@ -276,16 +280,16 @@ func prepareTaskSubmission(c *gin.Context, info *relaycommon.RelayInfo, reserve 
 	if useTiered {
 		provider, supported := adaptor.(channel.TaskUsageFactsProvider)
 		if billingexpr.UsesFixedPricing(exprStr) {
-			return nil, service.TaskErrorWrapper(fmt.Errorf("fixed pricing is not supported for task usage expressions"), "model_price_error", http.StatusBadRequest)
+			return nil, service.TaskErrorWrapper(fmt.Errorf("fixed pricing is not supported for task usage expressions"), "model_price_error", http.StatusBadRequest, common.UpstreamAddresses(c)...)
 		}
 		if !exists || !supported {
-			return nil, service.TaskErrorWrapper(fmt.Errorf("task model %s has no usage expression or meter", modelName), "model_price_error", http.StatusBadRequest)
+			return nil, service.TaskErrorWrapper(fmt.Errorf("task model %s has no usage expression or meter", modelName), "model_price_error", http.StatusBadRequest, common.UpstreamAddresses(c)...)
 		}
 		sharedModel := pinnedPlugin.Generation.SharedModel(modelName) || pinnedPlugin.Generation.SharedModel(info.UpstreamModelName)
 		if sharedModel && pinnedPlugin.Plugin != nil {
 			schema, _ := pinnedPlugin.Plugin.Meta.UsageForModels(info.UpstreamModelName, modelName)
 			if !billing_setting.TaskExprCompatible(exprStr, schema) {
-				return nil, service.TaskErrorWrapper(fmt.Errorf("task model %s pricing is not configured for plugin %s", modelName, pluginKey), "model_price_error", http.StatusBadRequest)
+				return nil, service.TaskErrorWrapper(fmt.Errorf("task model %s pricing is not configured for plugin %s", modelName, pluginKey), "model_price_error", http.StatusBadRequest, common.UpstreamAddresses(c)...)
 			}
 		}
 		var facts map[string]any
@@ -302,7 +306,7 @@ func prepareTaskSubmission(c *gin.Context, info *relaycommon.RelayInfo, reserve 
 			if runErr == nil {
 				runErr = fmt.Errorf("negative task expression result")
 			}
-			return nil, service.TaskErrorWrapper(runErr, "model_price_error", http.StatusBadRequest)
+			return nil, service.TaskErrorWrapper(runErr, "model_price_error", http.StatusBadRequest, common.UpstreamAddresses(c)...)
 		}
 		groupRatioInfo := helper.HandleGroupRatio(c, info)
 		quota, clamp := common.QuotaRoundChecked(cost * common.QuotaPerUnit * groupRatioInfo.GroupRatio)
@@ -312,7 +316,7 @@ func prepareTaskSubmission(c *gin.Context, info *relaycommon.RelayInfo, reserve 
 	} else {
 		priceData, err = helper.ModelPriceHelperPerCall(c, info)
 		if err != nil {
-			return nil, service.TaskErrorWrapper(err, "model_price_error", http.StatusBadRequest)
+			return nil, service.TaskErrorWrapper(err, "model_price_error", http.StatusBadRequest, common.UpstreamAddresses(c)...)
 		}
 	}
 	info.PriceData = priceData
@@ -354,7 +358,7 @@ func prepareTaskSubmission(c *gin.Context, info *relaycommon.RelayInfo, reserve 
 	if info.QuotaClamp != nil {
 		return nil, service.TaskErrorWrapperLocal(info.QuotaClamp, string(types.ErrorCodeModelPriceError), http.StatusBadRequest)
 	}
-	if info.Billing == nil && !info.PriceData.FreeModel {
+	if info.Billing != nil || !info.PriceData.FreeModel {
 		info.ForcePreConsume = true
 		if apiErr := service.PreConsumeBilling(c, info.PriceData.Quota, info); apiErr != nil {
 			return nil, service.TaskErrorFromAPIError(apiErr)
@@ -410,7 +414,7 @@ func (p *PreparedTaskSubmission) submit(c *gin.Context, info *relaycommon.RelayI
 	c.Set("auto_switch_task_dispatched", true)
 	resp, err := adaptor.DoRequest(c, info, requestBody)
 	if err != nil {
-		return nil, service.TaskErrorWrapper(err, "do_request_failed", http.StatusInternalServerError)
+		return nil, service.TaskErrorWrapper(err, "do_request_failed", http.StatusInternalServerError, common.UpstreamAddresses(c)...)
 	}
 	if resp == nil {
 		return nil, service.TaskErrorWrapperLocal(errors.New("upstream returned an empty response"), "fail_to_fetch_task", http.StatusBadGateway)
@@ -426,7 +430,7 @@ func (p *PreparedTaskSubmission) submit(c *gin.Context, info *relaycommon.RelayI
 			return nil, taskErr
 		}
 		c.Set("auto_switch_task_rejected", true)
-		return nil, service.TaskErrorWrapper(fmt.Errorf("%s", string(responseBody)), "fail_to_fetch_task", resp.StatusCode)
+		return nil, service.TaskErrorWrapper(fmt.Errorf("%s", string(responseBody)), "fail_to_fetch_task", resp.StatusCode, common.UpstreamAddresses(c)...)
 	}
 
 	// 10. Parse only. The controller presents the response after the durable
@@ -447,7 +451,7 @@ func (p *PreparedTaskSubmission) submit(c *gin.Context, info *relaycommon.RelayI
 		if parsed.Immediate != nil && parsed.Immediate.Status == model.TaskStatusSuccess && len(parsed.Immediate.UsageFacts) > 0 {
 			settlement, facts, err := service.EvaluateTaskCompletionUsage(snap, parsed.Immediate.UsageFacts)
 			if err != nil {
-				logger.LogWarn(c, fmt.Sprintf("task immediate usage settlement failed; retaining reserved quota: %v", err))
+				logger.LogWarn(c, common.LogText("task immediate usage settlement failed; retaining reserved quota: %v", err))
 			} else {
 				finalQuota = settlement.ActualQuotaAfterGroup
 				snap.UsageFacts = facts
@@ -610,6 +614,14 @@ func tryRealtimeFetch(task *model.Task, isOpenAIVideoAPI bool) []byte {
 	if adaptor == nil {
 		return nil
 	}
+	adaptor.Init(&relaycommon.RelayInfo{ChannelMeta: &relaycommon.ChannelMeta{
+		ChannelType:     channelModel.Type,
+		ChannelId:       channelModel.Id,
+		ChannelBaseUrl:  baseURL,
+		ApiKey:          channelModel.Key,
+		ChannelSetting:  channelModel.GetSetting(),
+		HeadersOverride: channelModel.GetHeaderOverride(),
+	}})
 
 	resp, err := adaptor.FetchTask(baseURL, channelModel.Key, task, proxy)
 	if err != nil || resp == nil {
@@ -627,25 +639,34 @@ func tryRealtimeFetch(task *model.Task, isOpenAIVideoAPI bool) []byte {
 	}
 
 	snap := task.Snapshot()
+	status := model.TaskStatus(ti.Status)
+	finished := status == model.TaskStatusSuccess || status == model.TaskStatusFailure
+	if finished && snap.Status != model.TaskStatusSuccess && snap.Status != model.TaskStatusFailure {
+		// Finishing a task settles or refunds it. Let the poller record the
+		// final status, as it does for every other task, so that happens once.
+		upstreamID := task.GetUpstreamTaskID()
+		_ = service.UpdateVideoTasks(context.Background(), task.Platform,
+			map[int][]string{task.ChannelId: {upstreamID}}, map[string]*model.Task{upstreamID: task})
+	} else {
+		// 将上游最新状态更新到 task
+		if ti.Status != "" {
+			task.Status = status
+		}
+		if ti.Progress != "" {
+			task.Progress = ti.Progress
+		}
+		if strings.HasPrefix(ti.Url, "data:") {
+			// data: URI — kept in Data, not ResultURL
+		} else if ti.Url != "" {
+			task.PrivateData.ResultURL = ti.Url
+		} else if task.Status == model.TaskStatusSuccess {
+			// No URL from adaptor — construct proxy URL using public task ID
+			task.PrivateData.ResultURL = taskcommon.BuildProxyURL(task.TaskID)
+		}
 
-	// 将上游最新状态更新到 task
-	if ti.Status != "" {
-		task.Status = model.TaskStatus(ti.Status)
-	}
-	if ti.Progress != "" {
-		task.Progress = ti.Progress
-	}
-	if strings.HasPrefix(ti.Url, "data:") {
-		// data: URI — kept in Data, not ResultURL
-	} else if ti.Url != "" {
-		task.PrivateData.ResultURL = ti.Url
-	} else if task.Status == model.TaskStatusSuccess {
-		// No URL from adaptor — construct proxy URL using public task ID
-		task.PrivateData.ResultURL = taskcommon.BuildProxyURL(task.TaskID)
-	}
-
-	if !snap.Equal(task.Snapshot()) {
-		_, _ = task.UpdateWithStatus(snap.Status)
+		if !snap.Equal(task.Snapshot()) {
+			_, _ = task.UpdateWithStatus(snap.Status)
+		}
 	}
 
 	// OpenAI Video API 由调用者的 ConvertToOpenAIVideo 分支处理

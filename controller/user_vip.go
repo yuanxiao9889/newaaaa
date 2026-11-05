@@ -6,7 +6,6 @@ import (
 	"strconv"
 
 	"github.com/QuantumNous/new-api/common"
-	"github.com/QuantumNous/new-api/i18n"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
@@ -22,16 +21,16 @@ func UpdateUserVIP(c *gin.Context) {
 		IsVIP *bool `json:"is_vip"`
 	}
 	if err != nil || userID <= 0 || common.DecodeJson(c.Request.Body, &req) != nil || req.IsVIP == nil {
-		common.ApiErrorI18n(c, i18n.MsgInvalidParams)
+		common.ApiErrorT(c, "Invalid parameters")
 		return
 	}
 	previous, err := model.SetUserVIP(userID, c.GetInt("role"), *req.IsVIP)
 	if errors.Is(err, model.ErrUserVIPPermission) {
-		common.ApiErrorI18n(c, i18n.MsgUserNoPermissionHigherLevel)
+		common.ApiErrorT(c, "No permission to update users of same or higher permission level")
 		return
 	}
 	if errors.Is(err, gorm.ErrRecordNotFound) {
-		common.ApiErrorI18n(c, i18n.MsgUserNotExists)
+		common.ApiErrorT(c, "User does not exist")
 		return
 	}
 	if err != nil {

@@ -5,6 +5,11 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"maps"
+	"math"
+	"strings"
+	"time"
+
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
@@ -19,10 +24,6 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/shopspring/decimal"
 	"gorm.io/gorm"
-	"maps"
-	"math"
-	"strings"
-	"time"
 )
 
 const (
@@ -39,10 +40,10 @@ const (
 // 实际扣费已由 BillingSession（PreConsumeBilling + SettleBilling）完成。
 func LogTaskConsumption(c *gin.Context, info *relaycommon.RelayInfo, task *model.Task) error {
 	tokenName := c.GetString("token_name")
-	logContent := fmt.Sprintf("操作 %s", info.Action)
+	logContent := []*common.Message{common.NewMessage("Action {{action}}", map[string]any{"action": info.Action})}
 	// 支持任务仅按次计费
 	if common.StringsContains(constant.TaskPricePatches, info.OriginModelName) && !info.PriceData.UsePrice {
-		logContent = fmt.Sprintf("%s，按次计费", logContent)
+		logContent = append(logContent, common.NewMessage("Billed per request"))
 	} else {
 		var contents []string
 		if otherRatios := info.PriceData.OtherRatios(); len(otherRatios) > 0 {
@@ -58,7 +59,7 @@ func LogTaskConsumption(c *gin.Context, info *relaycommon.RelayInfo, task *model
 			}
 		}
 		if len(contents) > 0 {
-			logContent = fmt.Sprintf("%s, 计算参数：%s", logContent, strings.Join(contents, ", "))
+			logContent = append(logContent, common.NewMessage("Billing parameters: {{params}}", map[string]any{"params": strings.Join(contents, ", ")}))
 		}
 	}
 	other := model.NewLogOther()
@@ -145,7 +146,7 @@ func resolveTokenKey(ctx context.Context, tokenId int, taskID string) string {
 	}
 	token, err := model.GetTokenById(tokenId)
 	if err != nil {
-		logger.LogWarn(ctx, fmt.Sprintf("get token key failed (tokenId=%d, task=%s): %s", tokenId, taskID, err.Error()))
+		logger.LogWarn(ctx, common.LogText("failed to get token key (tokenId=%d, task=%s): %s", tokenId, taskID, err.Error()))
 		return ""
 	}
 	return token.Key
@@ -199,6 +200,8 @@ func taskBillingOther(task *model.Task) *model.LogOther {
 	if delivery := AsyncImageDeliverySnapshot(task.TaskID, task.PrivateData.WorkerAttempts); len(delivery) > 0 {
 		other.SetAdmin("upstream_delivery", delivery)
 	}
+	// 前端列表按 is_task 选择任务档位渲染分支,缺失会把差额/退款日志误判成普通 relay 动态计费
+	other.SetPublic("is_task", true)
 	if bc := task.PrivateData.BillingContext; bc != nil {
 		other.SetPublic("model_price", bc.ModelPrice)
 		if bc.FixedPriceUnit != "" {
@@ -211,7 +214,7 @@ func taskBillingOther(task *model.Task) *model.LogOther {
 		if priceData := taskBillingContextPriceData(bc); priceData != nil {
 			for k, v := range priceData.OtherRatios() {
 				if !other.SetPublic(k, v) {
-					common.SysError("task billing other ratio key rejected: " + k)
+					common.SysError(common.LogText("task billing other ratio key rejected: %s", k))
 				}
 			}
 		}
@@ -448,9 +451,9 @@ func RefundTaskQuota(ctx context.Context, task *model.Task, reason string) error
 
 // RecalculateTaskQuota 通用的异步差额结算。
 // actualQuota 是任务完成后的实际应扣额度，与预扣额度 (task.Quota) 做差额结算。
-// reason 用于日志记录（例如 "token重算" 或 "adaptor调整"）。
+// reason 写入日志内容（例如按 token 重算或 adaptor 调整）。
 // clamps 可选：若计算 actualQuota 时发生额度饱和，将其记入日志 admin_info（仅管理员可见）。
-func RecalculateTaskQuota(ctx context.Context, task *model.Task, actualQuota int, reason string, clamps ...*common.QuotaClamp) error {
+func RecalculateTaskQuota(ctx context.Context, task *model.Task, actualQuota int, reason any, clamps ...*common.QuotaClamp) error {
 	if task == nil || actualQuota < 0 {
 		return nil
 	}
@@ -463,7 +466,7 @@ func RecalculateTaskQuota(ctx context.Context, task *model.Task, actualQuota int
 		return nil
 	}
 
-	logger.LogInfo(ctx, fmt.Sprintf("任务 %s 差额结算：delta=%s（实际：%s，预扣：%s，%s）",
+	logger.LogInfo(ctx, common.LogText("task %s settles the difference: delta=%s (actual %s, pre-consumed %s, %s)",
 		task.TaskID,
 		logger.LogQuota(quotaDelta),
 		logger.LogQuota(actualQuota),

@@ -11,6 +11,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
+	"github.com/QuantumNous/new-api/i18n"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/setting"
 	"github.com/gin-gonic/gin"
@@ -45,6 +46,7 @@ func TestModelRedisRateLimitUsesUTCRegardlessOfLocalTimezone(t *testing.T) {
 var modelRateLimitTestUsers atomic.Int64
 
 func TestModelRateLimitStreamFailuresDoNotConsumeSuccessLimit(t *testing.T) {
+	require.NoError(t, i18n.Init())
 	for _, backend := range []string{"memory", "redis"} {
 		for _, totalLimit := range []int{0, 2} {
 			t.Run(fmt.Sprintf("%s/total=%d", backend, totalLimit), func(t *testing.T) {
@@ -78,6 +80,7 @@ func TestModelRateLimitStreamFailuresDoNotConsumeSuccessLimit(t *testing.T) {
 }
 
 func TestModelMemoryRateLimitReservesConcurrentSuccessAdmission(t *testing.T) {
+	require.NoError(t, i18n.Init())
 	subject := strconv.Itoa(7200000 + int(modelRateLimitTestUsers.Add(1)))
 	entered, release, finished := make(chan struct{}), make(chan struct{}), make(chan struct{})
 	router := gin.New()

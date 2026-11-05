@@ -111,11 +111,7 @@ export function UpstreamDeliveryDetails(props: {
               />
             )}
             {attempt.error_kind && (
-              <DetailRow
-                label={t('Type')}
-                value={attempt.error_kind}
-                mono
-              />
+              <DetailRow label={t('Type')} value={attempt.error_kind} mono />
             )}
           </li>
         ))}

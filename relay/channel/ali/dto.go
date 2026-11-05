@@ -72,7 +72,10 @@ type AliUsage struct {
 	InputTokens  int `json:"input_tokens"`
 	OutputTokens int `json:"output_tokens"`
 	TotalTokens  int `json:"total_tokens"`
-	ImageCount   int `json:"image_count,omitempty"`
+	ImageTokens  int `json:"image_tokens,omitempty"`
+	// InputTokensDetails splits input_tokens on tongyi-embedding-vision.
+	InputTokensDetails *dto.InputTokenDetails `json:"input_tokens_details,omitempty"`
+	ImageCount         int                    `json:"image_count,omitempty"`
 }
 
 type TaskResult struct {

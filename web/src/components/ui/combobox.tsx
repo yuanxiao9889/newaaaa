@@ -87,8 +87,8 @@ function OptionCombobox(props: LegacyComboboxProps) {
   const selected = props.options.find((option) => option.value === props.value)
   const displayedValue =
     open && props.allowCustomValue
-      ? props.value ?? ''
-      : selected?.label ?? props.value ?? ''
+      ? (props.value ?? '')
+      : (selected?.label ?? props.value ?? '')
   return (
     <ComboboxPrimitive.Root
       items={props.options}

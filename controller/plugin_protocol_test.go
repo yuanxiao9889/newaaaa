@@ -1892,6 +1892,7 @@ func TestServeTaskPluginImageProtocolWaitsForAsynchronousTask(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			pinned := imageProtocolTestEndpoint(t)
 			c, recorder := newImageProtocolTestContext("")
+			common.SetContextKey(c, constant.ContextKeyChannelBaseUrl, "https://private.example.com")
 			deps := pluginProtocolTestDeps()
 			deps.imagePollInterval = time.Millisecond
 			deps.submissionTimeout = 50 * time.Millisecond

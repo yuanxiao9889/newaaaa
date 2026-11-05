@@ -49,9 +49,26 @@ export function GeneralError({
   const { history } = useRouter()
   const status = getHttpStatus(error)
   const isRateLimited = status === 429
-
   useEffect(() => {
-    if (isRateLimited || !markFrontendRecoveryAttempt()) return
+    if (isRateLimited) return
+    const chunkFailure =
+      error instanceof Error &&
+      (error.name === 'ChunkLoadError' ||
+        /^Loading (CSS )?chunk .+ failed\./.test(error.message))
+
+    // Recover only when the failed route is displayed, never on intent preload.
+    // Keep the marker across reloads so a persistent failure shows this page.
+    try {
+      if (chunkFailure) {
+        const key = `tanstack_router_reload:${error.message}`
+        if (sessionStorage.getItem(key)) return
+        sessionStorage.setItem(key, '1')
+      }
+    } catch {
+      // Without a persistent marker, reloading could loop indefinitely.
+      return
+    }
+    if (!markFrontendRecoveryAttempt()) return
     window.location.reload()
   }, [error, isRateLimited])
   const title = isRateLimited
@@ -64,10 +81,8 @@ export function GeneralError({
   return (
     <div className={cn('h-svh w-full', className)}>
       <div className='m-auto flex h-full w-full flex-col items-center justify-center gap-2'>
-        {!minimal && (
-          <h1 className='text-[7rem] leading-tight font-bold'>
-            {status ?? 500}
-          </h1>
+        {!minimal && status !== undefined && (
+          <h1 className='text-[7rem] leading-tight font-bold'>{status}</h1>
         )}
         <span className='font-medium'>{title}</span>
         <p className='text-muted-foreground text-center'>

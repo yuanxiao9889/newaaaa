@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -190,4 +191,19 @@ func TestLogQuotaDataSplitsRowsByUseGroupTokenChannelAndNode(t *testing.T) {
 	require.Equal(t, 60, rows[0].TokenUsed)
 	require.Equal(t, "default", rows[1].UseGroup)
 	require.Equal(t, 25, rows[1].Quota)
+
+	// A late cache-usage report must update the same durable bucket without
+	// adding another request or losing the existing accounting dimensions.
+	LogQuotaDataDelta(QuotaDataLogParams{
+		UserID: 1, Username: "alice", ModelName: "gpt-a", CreatedAt: 3700,
+		UseGroup: "vip", TokenID: 11, ChannelID: 1, NodeName: "node-a",
+		CacheReadTokens: 12, CacheCreationTokens: 7,
+	}, 0)
+	SaveQuotaDataCache()
+	var updated QuotaData
+	require.NoError(t, DB.First(&updated, rows[0].Id).Error)
+	assert.Equal(t, 2, updated.Count)
+	assert.Equal(t, 150, updated.Quota)
+	assert.Equal(t, int64(12), updated.CacheReadTokens)
+	assert.Equal(t, int64(7), updated.CacheCreationTokens)
 }

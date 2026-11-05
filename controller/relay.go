@@ -3,9 +3,16 @@ package controller
 import (
 	"errors"
 	"fmt"
+	"io"
+	"log"
+	"net/http"
+	"strings"
+	"time"
+
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	taskdto "github.com/QuantumNous/new-api/dto"
+	"github.com/QuantumNous/new-api/i18n"
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/middleware"
 	"github.com/QuantumNous/new-api/model"
@@ -23,11 +30,6 @@ import (
 	"github.com/bytedance/gopkg/util/gopool"
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
-	"io"
-	"log"
-	"net/http"
-	"strings"
-	"time"
 )
 
 var upgrader = websocket.Upgrader{
@@ -64,6 +66,8 @@ func relayHandler(c *gin.Context, info *relaycommon.RelayInfo) *types.NewAPIErro
 		err = relay.ResponsesHelper(c, info)
 	case relayconstant.RelayModeAlphaSearch:
 		err = relay.AlphaSearchHelper(c, info)
+	case relayconstant.RelayModeToolsSearch, relayconstant.RelayModeToolsFetch:
+		err = relay.DeepSeekToolsHelper(c, info)
 	default:
 		err = relay.TextHelper(c, info)
 	}
@@ -104,7 +108,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 	defer func() {
 		if newAPIError != nil {
 			service.RecordRequestPolicyTermination(c, newAPIError)
-			logger.LogError(c, fmt.Sprintf("relay error: %s", common.LocalLogPreview(newAPIError.Error())))
+			logger.LogError(c, common.LogText("relay error: %s", common.LocalLogPreview(newAPIError.Error())))
 			if c.GetInt("role") < common.RoleAdminUser {
 				publicError := common.ClassifyPublicError(string(newAPIError.GetErrorCode()), newAPIError.Error(), newAPIError.StatusCode,
 					newAPIError.GetErrorType() == types.ErrorTypeNewAPIError)
@@ -115,9 +119,18 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 			} else {
 				newAPIError.SetMessage(common.MessageWithRequestId(newAPIError.Error(), requestId))
 			}
+			upstreamURLs := common.UpstreamAddresses(c)
+			if relayFormat != types.RelayFormatOpenAIRealtime && c.Writer.Written() &&
+				strings.HasPrefix(c.Writer.Header().Get("Content-Type"), "text/event-stream") {
+				writeRelayStreamError(c, relayFormat, newAPIError)
+				return
+			}
+			if relayFormat != types.RelayFormatOpenAIRealtime {
+				c.Header("Content-Type", "application/json; charset=utf-8")
+			}
 			switch relayFormat {
 			case types.RelayFormatOpenAIRealtime:
-				helper.WssError(c, ws, newAPIError.ToOpenAIError())
+				helper.WssError(c, ws, newAPIError.ToOpenAIError(upstreamURLs...))
 			case types.RelayFormatClaude:
 				claudeError := newAPIError.ToClaudeError()
 				c.JSON(newAPIError.StatusCode, gin.H{
@@ -126,7 +139,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 				})
 			default:
 				c.JSON(newAPIError.StatusCode, gin.H{
-					"error": newAPIError.ToOpenAIError(),
+					"error": newAPIError.ToOpenAIError(upstreamURLs...),
 				})
 			}
 		}
@@ -162,6 +175,12 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 			panic(recovered)
 		}
 	}()
+
+	generalSettings := operation_setting.GetGeneralSetting()
+	if relayFormat == types.RelayFormatClaude && relayInfo.IsStream && generalSettings.PingIntervalEnabled {
+		stopKeepAlive := helper.StartStreamKeepAlive(c, time.Duration(generalSettings.PingIntervalSeconds)*time.Second)
+		defer stopKeepAlive()
+	}
 
 	if newAPIError = relay.EstimateRequestBilling(c, relayInfo); newAPIError != nil {
 		return
@@ -297,9 +316,26 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 
 	useChannel := c.GetStringSlice("use_channel")
 	if len(useChannel) > 1 {
-		retryLogStr := fmt.Sprintf("重试：%s", strings.Trim(strings.Join(strings.Fields(fmt.Sprint(useChannel)), "->"), "[]"))
+		retryLogStr := common.LogText("retry: %s", strings.Trim(strings.Join(strings.Fields(fmt.Sprint(useChannel)), "->"), "[]"))
 		logger.LogInfo(c, retryLogStr)
 	}
+}
+
+func writeRelayStreamError(c *gin.Context, format types.RelayFormat, apiError *types.NewAPIError) {
+	// 心跳提交响应头后，最终错误继续通过同一个流返回。
+	status, _ := common.GetContextKeyType[*relaycommon.StreamStatus](c, constant.ContextKeyResponseStreamStatus)
+	if status == nil {
+		status = relaycommon.NewStreamStatus()
+		common.SetContextKey(c, constant.ContextKeyResponseStreamStatus, status)
+	}
+	status.MarkFailed(string(apiError.GetErrorCode()), string(apiError.GetErrorType()), apiError.StatusCode)
+	upstreamURLs := common.UpstreamAddresses(c)
+	if format == types.RelayFormatClaude {
+		_ = helper.ClaudeData(c, dto.ClaudeResponse{Type: "error", Error: apiError.ToClaudeError(upstreamURLs...)})
+		return
+	}
+	_ = helper.ObjectData(c, gin.H{"error": apiError.ToOpenAIError(upstreamURLs...)})
+	helper.Done(c)
 }
 
 // CountClaudeTokens implements Anthropic's token-counting utility endpoint.
@@ -358,10 +394,10 @@ func getChannel(c *gin.Context, info *relaycommon.RelayInfo, retryParam *service
 	}
 	channel, selectGroup, err := service.CacheGetRandomSatisfiedChannel(retryParam)
 	if err != nil {
-		return nil, types.NewError(fmt.Errorf("获取分组 %s 下模型 %s 的可用渠道失败（retry）: %s", selectGroup, info.OriginModelName, err.Error()), types.ErrorCodeGetChannelFailed, types.ErrOptionWithSkipRetry())
+		return nil, types.NewError(errors.New(i18n.T(c, i18n.MsgRelayRetryGetChannelFailed, map[string]any{"Group": selectGroup, "Model": info.OriginModelName, "Error": err.Error()})), types.ErrorCodeGetChannelFailed, types.ErrOptionWithSkipRetry())
 	}
 	if channel == nil {
-		return nil, types.NewError(fmt.Errorf("分组 %s 下模型 %s 的可用渠道不存在（retry）", selectGroup, info.OriginModelName), types.ErrorCodeGetChannelFailed, types.ErrOptionWithSkipRetry())
+		return nil, types.NewError(errors.New(i18n.T(c, i18n.MsgRelayRetryNoAvailableChannel, map[string]any{"Group": selectGroup, "Model": info.OriginModelName})), types.ErrorCodeGetChannelFailed, types.ErrOptionWithSkipRetry())
 	}
 
 	info.PriceData.GroupRatioInfo = helper.HandleGroupRatio(c, info)
@@ -462,7 +498,7 @@ func RelayMidjourney(c *gin.Context) {
 		policy.Successful = false
 		statusCode := respondMidjourneyError(c, mjErr)
 		channelId := c.GetInt("channel_id")
-		logger.LogError(c, fmt.Sprintf("relay error (channel #%d, status code %d): %s", channelId, statusCode, fmt.Sprintf("%s %s", mjErr.Description, mjErr.Result)))
+		logger.LogError(c, common.LogText("relay error (channel #%d, status code %d): %s", channelId, statusCode, fmt.Sprintf("%s %s", mjErr.Description, mjErr.Result)))
 	}
 }
 
@@ -691,7 +727,9 @@ func executeTaskSubmissionWith(
 	durable := false
 	stage := "start"
 	defer func() {
-		if !durable && relayInfo.Billing != nil {
+		// The client of a relayed event stream already holds the vendor's
+		// work, so the submission is billed instead of refunded.
+		if !durable && relayInfo.Billing != nil && !c.Writer.Written() {
 			diagnostics.refund(stage)
 			relayInfo.Billing.Refund(c)
 		}
@@ -804,7 +842,7 @@ func executeTaskSubmissionWith(
 
 	useChannel := c.GetStringSlice("use_channel")
 	if len(useChannel) > 1 {
-		retryLogStr := fmt.Sprintf("重试：%s", strings.Trim(strings.Join(strings.Fields(fmt.Sprint(useChannel)), "->"), "[]"))
+		retryLogStr := common.LogText("retry: %s", strings.Trim(strings.Join(strings.Fields(fmt.Sprint(useChannel)), "->"), "[]"))
 		logger.LogInfo(c, retryLogStr)
 	}
 
@@ -825,17 +863,22 @@ func executeTaskSubmissionWith(
 
 	// Reserve any submit-time upward billing adjustment before persistence.
 	// This keeps insertion failures fully refundable while ensuring settlement
-	// after the barrier normally has a zero positive delta.
+	// after the barrier normally has a zero positive delta. A relayed event
+	// stream is billed even when this reserve fails: settlement then charges
+	// past the available quota, as it does for any usage above its reservation.
 	if relayInfo.Billing != nil {
 		stage = "reserve"
 		diagnostics.reserve("reserve_start", result.Quota)
 		if reserveErr := relayInfo.Billing.Reserve(result.Quota); reserveErr != nil {
 			common.SysError("reserve adjusted task billing error: " + reserveErr.Error())
-			taskErr = service.TaskErrorFromAPIError(types.NewError(reserveErr, types.ErrorCodeUpdateDataError, types.ErrOptionWithSkipRetry()))
-			diagnostics.failed("reserve", "insufficient_quota", taskErr, false)
-			return nil, taskErr
+			if !c.Writer.Written() {
+				taskErr = service.TaskErrorFromAPIError(types.NewError(reserveErr, types.ErrorCodeUpdateDataError, types.ErrOptionWithSkipRetry()))
+				diagnostics.failed("reserve", "insufficient_quota", taskErr, false)
+				return nil, taskErr
+			}
+		} else {
+			diagnostics.reserve("reserve_complete", result.Quota)
 		}
-		diagnostics.reserve("reserve_complete", result.Quota)
 	}
 	if requestErr := c.Request.Context().Err(); requestErr != nil {
 		diagnostics.cancelled("before_insert", retryParam.GetRetry()+1)
@@ -933,7 +976,7 @@ func executeTaskSubmissionWith(
 				task.PrivateData.ResultDiscarded = true
 				insertOmits = append(insertOmits, "data")
 			} else {
-				logger.LogWarn(c, fmt.Sprintf("task plugin route %s %s declares retainResult: false but returned an asynchronous result; retaining task %s", pinned.Route.Method, pinned.Route.Path, task.TaskID))
+				logger.LogWarn(c, common.LogText("task plugin route %s %s declares retainResult: false but returned an asynchronous result; retaining task %s", pinned.Route.Method, pinned.Route.Path, task.TaskID))
 			}
 		}
 	}
@@ -945,9 +988,18 @@ func executeTaskSubmissionWith(
 	}
 	diagnostics.insertStart(task)
 	if insertErr := task.InsertWithContext(c.Request.Context(), insertOmits...); insertErr != nil {
-		common.SysError("insert task error: " + insertErr.Error())
+		common.SysError(common.LogText("insert task error: %s", insertErr.Error()))
 		taskErr = service.TaskErrorWrapperLocal(errors.New("failed to persist task"), "task_insert_failed", http.StatusInternalServerError)
 		diagnostics.failed("insert", "database_error", taskErr, false)
+		// The client of a relayed event stream already holds the vendor's
+		// work, so it is settled and logged without a task row.
+		if c.Writer.Written() {
+			if settleErr := service.SettleBilling(c, relayInfo, result.Quota); settleErr != nil {
+				common.SysError(common.LogText("settle task billing error: %s", settleErr.Error()))
+				return nil, taskErr
+			}
+			service.LogTaskConsumption(c, relayInfo, task)
+		}
 		return nil, taskErr
 	}
 	durable = true
@@ -956,7 +1008,7 @@ func executeTaskSubmissionWith(
 	diagnostics.settleStart(task, result.Quota)
 
 	if settleErr := service.SettleBilling(c, relayInfo, result.Quota); settleErr != nil {
-		common.SysError("settle task billing error: " + settleErr.Error())
+		common.SysError(common.LogText("settle task billing error: %s", settleErr.Error()))
 		if relayInfo.Billing != nil {
 			task.Quota = relayInfo.Billing.GetPreConsumedQuota()
 			task.PrivateData.PreConsumedQuota = task.Quota
@@ -969,6 +1021,7 @@ func executeTaskSubmissionWith(
 		diagnostics.failed("settle", "billing_error", taskErr, true)
 		return nil, taskErr
 	}
+	perfmetrics.RecordImmediateTaskResult(relayInfo, result.Immediate)
 	if task.Status != model.TaskStatusFailure {
 		service.MarkRequestPolicySuccess(c, nil)
 	} else {
@@ -1004,6 +1057,11 @@ func executeTaskSubmissionWith(
 
 func presentTaskSubmission(c *gin.Context, outcome *taskSubmissionOutcome) {
 	diagnostics := newTaskPluginSubmitDiagnostics(c)
+	// A native route that relayed the vendor's event stream has answered.
+	if c.Writer.Written() {
+		diagnostics.present(outcome.Task, "native_stream")
+		return
+	}
 	if c.GetBool("native_task_adaptor") && outcome.Result.ClientResponse != nil {
 		c.JSON(http.StatusOK, outcome.Result.ClientResponse)
 		return
@@ -1024,17 +1082,20 @@ func presentTaskSubmission(c *gin.Context, outcome *taskSubmissionOutcome) {
 				viewValue, valueErr := taskPluginProtocolJSONValue(view)
 				if valueErr == nil {
 					if body, callErr := pinned.Plugin.Engine.CallPath(c.Request.Context(), "native", []string{pinned.Route.Render}, requestContext.JSValue(), viewValue); callErr == nil {
-						diagnostics.present(outcome.Task, "native_presenter")
-						c.JSON(http.StatusOK, body)
-						return
+						if replyErr := middleware.WriteNativeReply(c, http.StatusOK, body); replyErr == nil {
+							diagnostics.present(outcome.Task, "native_presenter")
+							return
+						} else {
+							logger.LogError(c, common.LogText("task plugin native submit presenter failed: %s", replyErr.Error()))
+						}
 					} else {
-						logger.LogError(c, "task plugin native submit presenter failed: "+callErr.Error())
+						logger.LogError(c, common.LogText("task plugin native submit presenter failed: %s", callErr.Error()))
 					}
 				} else {
-					logger.LogError(c, "encode task plugin native submit view failed: "+valueErr.Error())
+					logger.LogError(c, common.LogText("encode task plugin native submit view failed: %s", valueErr.Error()))
 				}
 			} else {
-				logger.LogError(c, "build task plugin native submit view failed: "+err.Error())
+				logger.LogError(c, common.LogText("build task plugin native submit view failed: %s", err.Error()))
 			}
 		}
 	}
@@ -1062,6 +1123,11 @@ func presentTaskSubmission(c *gin.Context, outcome *taskSubmissionOutcome) {
 func respondTaskSubmissionError(c *gin.Context, taskErr *taskdto.TaskError) {
 	service.RecordRequestPolicyTermination(c, taskSubmissionAPIError(taskErr))
 	newTaskPluginSubmitDiagnostics(c).presentError(taskErr)
+	// The client of a relayed event stream already has the vendor's events,
+	// including any error event; nothing can follow them.
+	if c.Writer.Written() {
+		return
+	}
 	if middleware.RespondTaskPluginError(c, publicTaskError(taskErr)) {
 		return
 	}

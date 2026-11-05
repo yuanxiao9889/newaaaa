@@ -23,9 +23,7 @@ import { cn } from '@/lib/utils'
 
 import { getBillingModeLabelKey } from '../lib/billing-mode'
 import { isDynamicPricingModel } from '../lib/dynamic-price'
-import {
-  isSecondBasedFixedPriceModel,
-} from '../lib/model-helpers'
+import { isSecondBasedFixedPriceModel } from '../lib/model-helpers'
 import type { PricingModel } from '../types'
 
 interface ModelBillingModeBadgeProps {

@@ -72,7 +72,8 @@ beforeEach(() => {
   vi.spyOn(api, 'get').mockImplementation(async (url, config) => {
     let data: unknown
     if (url === '/api/channel') {
-      const secondPage = config?.params?.p === 2
+      const secondPage =
+        (config?.params as Record<string, unknown> | undefined)?.p === 2
       data = {
         total: 101,
         page_size: 100,
@@ -87,7 +88,9 @@ beforeEach(() => {
             ],
       }
     } else if (url === '/api/profit/summary') {
-      summaryRequests.push(config?.params ?? {})
+      summaryRequests.push(
+        (config?.params as Record<string, unknown> | undefined) ?? {}
+      )
       if (reportFails) {
         return { data: { success: false, message: 'Report unavailable' } }
       }

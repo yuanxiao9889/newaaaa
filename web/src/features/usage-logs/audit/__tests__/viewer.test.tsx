@@ -904,7 +904,11 @@ it('keeps unseen and background alerts unread and counts new alerts after leavin
     data: {
       success: true,
       data: {
-        items: config?.params.page_size === 100 ? recent : [channelAlert],
+        items:
+          (config?.params as Record<string, unknown> | undefined)?.page_size ===
+          100
+            ? recent
+            : [channelAlert],
         total: 2,
       },
     },

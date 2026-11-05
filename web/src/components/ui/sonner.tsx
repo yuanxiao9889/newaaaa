@@ -31,12 +31,7 @@ import { Toaster as Sonner, type ToasterProps } from 'sonner'
 import { useTheme } from '@/context/theme-provider'
 import { cn } from '@/lib/utils'
 
-function Toaster({
-  className,
-  style,
-  toastOptions,
-  ...props
-}: ToasterProps) {
+function Toaster({ className, style, toastOptions, ...props }: ToasterProps) {
   const { resolvedTheme } = useTheme()
 
   return (

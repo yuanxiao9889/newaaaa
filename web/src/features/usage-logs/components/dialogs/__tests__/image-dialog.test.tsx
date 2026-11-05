@@ -34,10 +34,9 @@ describe('image preview dialog', () => {
       />
     )
 
-    expect(screen.getByRole('img', { name: 'Generated image' })).toHaveAttribute(
-      'src',
-      imageUrl
-    )
+    expect(
+      screen.getByRole('img', { name: 'Generated image' })
+    ).toHaveAttribute('src', imageUrl)
     expect(document.body).not.toHaveTextContent(imageUrl)
   })
 })

@@ -286,6 +286,7 @@ func TestAsyncImageMultipleResults(t *testing.T) {
 }
 
 func setupAsyncImageWorkerTestDB(t *testing.T) *gorm.DB {
+	require.NoError(t, i18n.Init())
 	t.Helper()
 
 	originalDB := model.DB

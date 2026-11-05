@@ -18,6 +18,12 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { assert, describe, expect, test } from 'vitest'
 
+import {
+  applyPriceSyncSelections,
+  applyPricingDraft,
+  pricingOptions,
+} from '@/features/model-pricing/pricing'
+
 import { applyFixedPriceUnitForModel } from '../model-pricing-core'
 import {
   buildModelSnapshots,
@@ -26,7 +32,6 @@ import {
   getPriceSummary,
   type ModelPricingSnapshotInput,
 } from '../model-pricing-snapshots'
-import { applyPriceSyncSelections, applyPricingDraft, pricingOptions } from '@/features/model-pricing/pricing'
 
 const emptySnapshotInput: ModelPricingSnapshotInput = {
   modelPrice: '{}',
@@ -93,10 +98,18 @@ describe('model pricing fixed price units', () => {
   })
 
   test('upstream price sync preserves the unit and changing mode clears it', () => {
-    const selected = applyPriceSyncSelections(pricingOptions({}), { video: { model_price: 0.45, fixed_price_unit: 'second' } })
+    const selected = applyPriceSyncSelections(pricingOptions({}), {
+      video: { model_price: 0.45, fixed_price_unit: 'second' },
+    })
     expect(JSON.parse(selected.ModelPrice)).toEqual({ video: 0.45 })
-    expect(JSON.parse(selected['billing_setting.fixed_price_unit'])).toEqual({ video: 'second' })
-    const changed = applyPricingDraft(selected, { name: 'video', billingMode: 'per-token', ratio: '2' })
+    expect(JSON.parse(selected['billing_setting.fixed_price_unit'])).toEqual({
+      video: 'second',
+    })
+    const changed = applyPricingDraft(selected, {
+      name: 'video',
+      billingMode: 'per-token',
+      ratio: '2',
+    })
     expect(JSON.parse(changed.ModelPrice)).toEqual({})
     expect(JSON.parse(changed['billing_setting.fixed_price_unit'])).toEqual({})
   })

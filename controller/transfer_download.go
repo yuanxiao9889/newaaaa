@@ -203,7 +203,7 @@ func resolveTransferDownload(c *gin.Context, request transferDownloadRequest) (*
 			if !ok {
 				return result, nil
 			}
-			descriptor, err := provider.BuildContentRequest(task, key, relaychannel.TaskArtifactClientRequest{Method: "GET"})
+			descriptor, err := provider.BuildContentRequest(c.Request.Context(), task, key, relaychannel.TaskArtifactClientRequest{Method: "GET"})
 			if err != nil {
 				return nil, err
 			}

@@ -2,6 +2,13 @@ package model
 
 import (
 	"fmt"
+	"log"
+	"net/url"
+	"os"
+	"strings"
+	"sync"
+	"time"
+
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/glebarez/sqlite"
@@ -9,12 +16,6 @@ import (
 	"gorm.io/driver/mysql"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
-	"log"
-	"net/url"
-	"os"
-	"strings"
-	"sync"
-	"time"
 )
 
 var commonGroupCol string
@@ -81,7 +82,7 @@ func createRootAccountIfNeed() error {
 	var user User
 	//if user.Status != common.UserStatusEnabled {
 	if err := DB.First(&user).Error; err != nil {
-		common.SysLog("no user exists, create a root user for you: username is root, password is 123456")
+		common.SysLog(common.LogText("no user exists, create a root user for you: username is root, password is 123456"))
 		hashedPassword, err := common.Password2Hash("123456")
 		if err != nil {
 			return err
@@ -105,7 +106,7 @@ func CheckSetup() {
 	if setup == nil {
 		// No setup record exists, check if we have a root user
 		if RootUserExists() {
-			common.SysLog("system is not initialized, but root user exists")
+			common.SysLog(common.LogText("system is not initialized, but root user exists"))
 			// Create setup record
 			newSetup := Setup{
 				Version:       common.Version,
@@ -113,16 +114,16 @@ func CheckSetup() {
 			}
 			err := DB.Create(&newSetup).Error
 			if err != nil {
-				common.SysLog("failed to create setup record: " + err.Error())
+				common.SysLog(common.LogText("failed to create setup record: %s", err.Error()))
 			}
 			constant.Setup = true
 		} else {
-			common.SysLog("system is not initialized and no root user exists")
+			common.SysLog(common.LogText("system is not initialized and no root user exists"))
 			constant.Setup = false
 		}
 	} else {
 		// Setup record exists, system is initialized
-		common.SysLog("system is already initialized at: " + time.Unix(setup.InitializedAt, 0).String())
+		common.SysLog(common.LogText("system is already initialized at: %s", time.Unix(setup.InitializedAt, 0).String()))
 		constant.Setup = true
 	}
 }
@@ -154,13 +155,13 @@ func chooseDB(envName string, isLog bool) (*gorm.DB, common.DatabaseType, error)
 			if !isLog {
 				return nil, "", fmt.Errorf("%s does not support ClickHouse; use SQLite, MySQL, or PostgreSQL for the primary database and LOG_SQL_DSN for ClickHouse logs", envName)
 			}
-			common.SysLog("using ClickHouse as log database")
+			common.SysLog(common.LogText("using ClickHouse as log database"))
 			db, err := gorm.Open(clickhouse.Open(normalizeClickHouseDSN(dsn)), newGormConfig(false))
 			return db, common.DatabaseTypeClickHouse, err
 		}
 		if strings.HasPrefix(dsn, "postgres://") || strings.HasPrefix(dsn, "postgresql://") {
 			// Use PostgreSQL
-			common.SysLog("using PostgreSQL as database")
+			common.SysLog(common.LogText("using PostgreSQL as database"))
 			// 同时关闭 pgx 隐式与 GORM 显式预处理语句:命名 prepared statement 与
 			// 事务池代理(PgBouncer/Neon/Supabase)不兼容,会触发 FATAL 08P01/42P05。
 			db, err := gorm.Open(postgresMigrationDialector{postgres.Dialector{Config: &postgres.Config{
@@ -170,12 +171,12 @@ func chooseDB(envName string, isLog bool) (*gorm.DB, common.DatabaseType, error)
 			return db, common.DatabaseTypePostgreSQL, err
 		}
 		if strings.HasPrefix(dsn, "local") {
-			common.SysLog("SQL_DSN not set, using SQLite as database")
+			common.SysLog(common.LogText("SQL_DSN not set, using SQLite as database"))
 			db, err := gorm.Open(sqlite.Open(common.SQLitePath), newGormConfig(true))
 			return db, common.DatabaseTypeSQLite, err
 		}
 		// Use MySQL
-		common.SysLog("using MySQL as database")
+		common.SysLog(common.LogText("using MySQL as database"))
 		// check parseTime
 		if !strings.Contains(dsn, "parseTime") {
 			if strings.Contains(dsn, "?") {
@@ -188,7 +189,7 @@ func chooseDB(envName string, isLog bool) (*gorm.DB, common.DatabaseType, error)
 		return db, common.DatabaseTypeMySQL, err
 	}
 	// Use SQLite
-	common.SysLog("SQL_DSN not set, using SQLite as database")
+	common.SysLog(common.LogText("SQL_DSN not set, using SQLite as database"))
 	db, err := gorm.Open(sqlite.Open(common.SQLitePath), newGormConfig(true))
 	return db, common.DatabaseTypeSQLite, err
 }
@@ -226,14 +227,14 @@ func InitDB() (err error) {
 			// Only the master node migrates. A node that cannot read the deadline
 			// keeps rejecting legacy access tokens instead of refusing to start.
 			if err := EnsureLegacyAccessTokenRetireAt(common.GetTimestamp()); err != nil {
-				common.SysError("initialize legacy access token deadline: " + err.Error())
+				common.SysError(common.LogText("initialize legacy access token deadline: %s", err.Error()))
 			}
 			return nil
 		}
 		if common.UsingMainDatabase(common.DatabaseTypeMySQL) {
 			//_, _ = sqlDB.Exec("ALTER TABLE channels MODIFY model_mapping TEXT;") // TODO: delete this line when most users have upgraded
 		}
-		common.SysLog("database migration started")
+		common.SysLog(common.LogText("database migration started"))
 		err = migrateDB()
 		return err
 	} else {
@@ -277,7 +278,7 @@ func InitLogDB() (err error) {
 		if !common.IsMasterNode {
 			return nil
 		}
-		common.SysLog("database migration started")
+		common.SysLog(common.LogText("database migration started"))
 		err = migrateLOGDB()
 		return err
 	} else {
@@ -291,7 +292,7 @@ func InitLogDB() (err error) {
 // an existing wallet; operators must migrate it explicitly before starting.
 func ensureUserQuotaColumns(db *gorm.DB, dbType common.DatabaseType) error {
 	if common.GetEnvOrDefaultBool("SKIP_64BIT_QUOTA_SCHEMA_CHECK", false) {
-		common.SysLog("SKIP_64BIT_QUOTA_SCHEMA_CHECK=true; skipping user quota schema check")
+		common.SysLog(common.LogText("SKIP_64BIT_QUOTA_SCHEMA_CHECK=true; skipping user quota schema check"))
 		return nil
 	}
 	if db == nil || dbType == common.DatabaseTypeSQLite {
@@ -344,7 +345,7 @@ func migrateDB() error {
 		return err
 	}
 	if err := migrateOptionPrimaryKey(DB); err != nil {
-		common.SysError("failed to migrate options primary key: " + err.Error())
+		common.SysError(common.LogText("failed to migrate options primary key: %s", err.Error()))
 	}
 
 	models := []any{
@@ -635,7 +636,7 @@ func migrateTokenModelLimitsToText() error {
 		if err := DB.Raw(`SELECT data_type FROM information_schema.columns
 			WHERE table_schema = current_schema() AND table_name = ? AND column_name = ?`,
 			tableName, columnName).Scan(&dataType).Error; err != nil {
-			common.SysLog(fmt.Sprintf("Warning: failed to query metadata for %s.%s: %v", tableName, columnName, err))
+			common.SysLog(common.LogText("Warning: failed to query metadata for %s.%s: %v", tableName, columnName, err))
 		} else if dataType == "text" {
 			return nil
 		}
@@ -645,7 +646,7 @@ func migrateTokenModelLimitsToText() error {
 		if err := DB.Raw(`SELECT COLUMN_TYPE FROM information_schema.columns
 				WHERE table_schema = DATABASE() AND table_name = ? AND column_name = ?`,
 			tableName, columnName).Scan(&columnType).Error; err != nil {
-			common.SysLog(fmt.Sprintf("Warning: failed to query metadata for %s.%s: %v", tableName, columnName, err))
+			common.SysLog(common.LogText("Warning: failed to query metadata for %s.%s: %v", tableName, columnName, err))
 		} else if strings.ToLower(columnType) == "text" {
 			return nil
 		}
@@ -658,7 +659,7 @@ func migrateTokenModelLimitsToText() error {
 		if err := DB.Exec(alterSQL).Error; err != nil {
 			return fmt.Errorf("failed to migrate %s.%s to text: %w", tableName, columnName, err)
 		}
-		common.SysLog(fmt.Sprintf("Successfully migrated %s.%s to text", tableName, columnName))
+		common.SysLog(common.LogText("Successfully migrated %s.%s to text", tableName, columnName))
 	}
 	return nil
 }
@@ -692,7 +693,7 @@ func migrateSubscriptionPlanPriceAmount() {
 		if err := DB.Raw(`SELECT data_type FROM information_schema.columns
 			WHERE table_schema = current_schema() AND table_name = ? AND column_name = ?`,
 			tableName, columnName).Scan(&dataType).Error; err != nil {
-			common.SysLog(fmt.Sprintf("Warning: failed to query metadata for %s.%s: %v", tableName, columnName, err))
+			common.SysLog(common.LogText("Warning: failed to query metadata for %s.%s: %v", tableName, columnName, err))
 		} else if dataType == "numeric" {
 			return // Already decimal/numeric
 		}
@@ -704,7 +705,7 @@ func migrateSubscriptionPlanPriceAmount() {
 		if err := DB.Raw(`SELECT COLUMN_TYPE FROM information_schema.columns
 				WHERE table_schema = DATABASE() AND table_name = ? AND column_name = ?`,
 			tableName, columnName).Scan(&columnType).Error; err != nil {
-			common.SysLog(fmt.Sprintf("Warning: failed to query metadata for %s.%s: %v", tableName, columnName, err))
+			common.SysLog(common.LogText("Warning: failed to query metadata for %s.%s: %v", tableName, columnName, err))
 		} else if strings.HasPrefix(strings.ToLower(columnType), "decimal") {
 			return // Already decimal
 		}
@@ -716,9 +717,9 @@ func migrateSubscriptionPlanPriceAmount() {
 
 	if alterSQL != "" {
 		if err := DB.Exec(alterSQL).Error; err != nil {
-			common.SysLog(fmt.Sprintf("Warning: failed to migrate %s.%s to decimal: %v", tableName, columnName, err))
+			common.SysLog(common.LogText("Warning: failed to migrate %s.%s to decimal: %v", tableName, columnName, err))
 		} else {
-			common.SysLog(fmt.Sprintf("Successfully migrated %s.%s to decimal(10,6)", tableName, columnName))
+			common.SysLog(common.LogText("Successfully migrated %s.%s to decimal(10,6)", tableName, columnName))
 		}
 	}
 }
@@ -752,7 +753,7 @@ func checkMySQLChineseSupport(db *gorm.DB) error {
 	var schemaCharset, schemaCollation string
 	err := db.Raw("SELECT DEFAULT_CHARACTER_SET_NAME, DEFAULT_COLLATION_NAME FROM information_schema.SCHEMATA WHERE SCHEMA_NAME = DATABASE()").Row().Scan(&schemaCharset, &schemaCollation)
 	if err != nil {
-		return fmt.Errorf("读取当前库默认字符集/排序规则失败 / Failed to read schema default charset/collation: %v", err)
+		return fmt.Errorf("Failed to read schema default charset/collation: %v", err)
 	}
 
 	toLower := func(s string) string { return strings.ToLower(s) }
@@ -784,8 +785,8 @@ func checkMySQLChineseSupport(db *gorm.DB) error {
 
 	// 1) 当前库默认值必须支持中文
 	if !isChineseCapable(schemaCharset, schemaCollation) {
-		return fmt.Errorf("当前库默认字符集/排序规则不支持中文：schema(%s/%s)。请将库设置为 utf8mb4/utf8/gbk/big5/gb18030 / Schema default charset/collation is not Chinese-capable: schema(%s/%s). Please set to utf8mb4/utf8/gbk/big5/gb18030",
-			schemaCharset, schemaCollation, schemaCharset, schemaCollation)
+		return fmt.Errorf("Schema default charset/collation is not Chinese-capable: schema(%s/%s). Please set to utf8mb4/utf8/gbk/big5/gb18030",
+			schemaCharset, schemaCollation)
 	}
 
 	// 2) 所有物理表的排序规则（隐含字符集）必须支持中文
@@ -795,7 +796,7 @@ func checkMySQLChineseSupport(db *gorm.DB) error {
 	}
 	var tables []tableInfo
 	if err := db.Raw("SELECT TABLE_NAME, TABLE_COLLATION FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_TYPE = 'BASE TABLE'").Scan(&tables).Error; err != nil {
-		return fmt.Errorf("读取表排序规则失败 / Failed to read table collations: %v", err)
+		return fmt.Errorf("Failed to read table collations: %v", err)
 	}
 
 	var badTables []string
@@ -827,8 +828,8 @@ func checkMySQLChineseSupport(db *gorm.DB) error {
 			shown = shown[:maxShow]
 		}
 		return fmt.Errorf(
-			"存在不支持中文的表，请修复其排序规则/字符集。示例（最多展示 %d 项）：%v / Found tables not Chinese-capable. Please fix their collation/charset. Examples (showing up to %d): %v",
-			maxShow, shown, maxShow, shown,
+			"Found tables not Chinese-capable. Please fix their collation/charset. Examples (showing up to %d): %v",
+			maxShow, shown,
 		)
 	}
 	return nil
@@ -844,18 +845,18 @@ func PingDB() error {
 
 	sqlDB, err := DB.DB()
 	if err != nil {
-		log.Printf("Error getting sql.DB from GORM: %v", err)
+		log.Print(common.LogText("Error getting sql.DB from GORM: %v", err))
 		return err
 	}
 
 	err = sqlDB.Ping()
 	if err != nil {
-		log.Printf("Error pinging DB: %v", err)
+		log.Print(common.LogText("Error pinging DB: %v", err))
 		return err
 	}
 
 	lastPingTime = time.Now()
-	common.SysLog("Database pinged successfully")
+	common.SysLog(common.LogText("Database pinged successfully"))
 	return nil
 }
 

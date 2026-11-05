@@ -33,13 +33,13 @@ import { GeneralError } from '@/features/errors/general-error'
 import { NotFoundError } from '@/features/errors/not-found-error'
 import { getSetupStatus } from '@/features/setup/api'
 import { useSystemConfig } from '@/hooks/use-system-config'
-import { clearFrontendRecoveryAttempt } from '@/lib/frontend-recovery'
 import {
   bootstrapAuthentication,
   clearAuthenticatedClientState,
   clearAuthentication,
 } from '@/lib/auth-session'
 import { subscribeAuthSessionEvents } from '@/lib/auth-session-sync'
+import { clearFrontendRecoveryAttempt } from '@/lib/frontend-recovery'
 import { resolveLegacyRoute } from '@/lib/legacy-route'
 import { useAuthStore } from '@/stores/auth-store'
 

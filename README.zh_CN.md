@@ -398,6 +398,7 @@ docker run --name new-api -d --restart always \
 3. 一键安装
 
 📖 [图文教程](./docs/installation/BT.md)
+贡献前请阅读 [AGENTS.md](./AGENTS.md)。按改动范围执行检查：Go 模块使用 `make test`；前端在 `web/` 下运行 `bun check -b`、`bun run lint`、`bun run test` 和 `bun run build`。修改 RelayKit 后还必须在 `relaykit/` 下执行 `GOWORK=off go build ./...`。
 
 </details>
 

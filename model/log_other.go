@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"maps"
 	"slices"
+	"strings"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/dto"
@@ -12,9 +13,10 @@ import (
 )
 
 const (
-	logOtherAdminInfoKey = "admin_info"
-	logOtherRootInfoKey  = "root_info"
-	logOtherAuditInfoKey = "audit_info"
+	logOtherAdminInfoKey    = "admin_info"
+	logOtherRootInfoKey     = "root_info"
+	logOtherAuditInfoKey    = "audit_info"
+	logOtherContentPartsKey = "content_parts"
 )
 
 // legacySensitiveLogOtherKeys are historical top-level fields that must never
@@ -94,6 +96,37 @@ func (o *LogOther) MergePublic(values map[string]any) {
 	for key, value := range values {
 		o.SetPublic(key, value)
 	}
+}
+
+// setContent stores structured content under content_parts, which the web
+// console renders in the viewer's language, and returns the English text kept
+// in the content column for exports and API callers.
+func (o *LogOther) setContent(content any) string {
+	var parts []*common.Message
+	switch value := content.(type) {
+	case nil:
+		return ""
+	case string:
+		return value
+	case *common.Message:
+		if value == nil {
+			return ""
+		}
+		parts = []*common.Message{value}
+	case []*common.Message:
+		parts = value
+	default:
+		return ""
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	o.SetPublic(logOtherContentPartsKey, parts)
+	texts := make([]string, 0, len(parts))
+	for _, part := range parts {
+		texts = append(texts, part.Error())
+	}
+	return strings.Join(texts, ", ")
 }
 
 func (o *LogOther) SetAdmin(key string, value any) bool {
@@ -181,7 +214,7 @@ func (o *LogOther) jsonString() string {
 	}
 	data, err := common.Marshal(o.toMap())
 	if err != nil {
-		common.SysError("failed to marshal log other: " + err.Error())
+		common.SysError(common.LogText("failed to marshal log other: %s", err.Error()))
 		return ""
 	}
 	return string(data)
@@ -255,15 +288,15 @@ func formatLogOtherJSON(value string, visibility logOtherVisibility, logType int
 		for key, raw := range values {
 			allowed := false
 			switch key {
-			case "op", "login_method", "user_agent":
+			case "op", "login_method", "user_agent", logOtherContentPartsKey:
 				// Account history has its own host-authored public descriptors.
 				// Never accept these as an escape hatch on relay/task logs.
 				allowed = logType == LogTypeTopup || logType == LogTypeManage || logType == LogTypeLogin
 			case "audio_input", "audio_output", "text_input", "text_output",
 				"cache_tokens", "image_cache_tokens", "cache_creation_tokens",
-				"cache_creation_tokens_5m", "cache_creation_tokens_1h",
+				"cache_creation_tokens_5m", "cache_creation_tokens_1h", "cache_creation_tokens_12h",
 				"model_ratio", "completion_ratio", "model_price", "group_ratio", "user_group_ratio",
-				"cache_ratio", "cache_creation_ratio", "cache_creation_ratio_5m", "cache_creation_ratio_1h",
+				"cache_ratio", "cache_creation_ratio", "cache_creation_ratio_5m", "cache_creation_ratio_1h", "cache_creation_ratio_12h",
 				"audio_ratio", "audio_completion_ratio", "frt", "fixed_price", "image_count",
 				"image_ratio", "image_input", "image_output", "web_search_call_count", "web_search_price",
 				"file_search_call_count", "file_search_price", "audio_input_token_count", "audio_input_price",
@@ -278,6 +311,9 @@ func formatLogOtherJSON(value string, visibility logOtherVisibility, logType int
 			case "task_id":
 				var id string
 				allowed = common.Unmarshal(raw, &id) == nil
+			case "fixed_price_unit":
+				var unit string
+				allowed = common.Unmarshal(raw, &unit) == nil && slices.Contains([]string{"request", "second"}, unit)
 			case "billing_state", "billing_mode", "billing_unit", "billing_source":
 				var state string
 				allowed = common.Unmarshal(raw, &state) == nil && slices.Contains([]string{

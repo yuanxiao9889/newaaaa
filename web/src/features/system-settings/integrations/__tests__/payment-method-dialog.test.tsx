@@ -31,9 +31,7 @@ it('selects a payment type and saves a custom type without submitting on Enter',
   await user.click(type)
   await user.click(screen.getByRole('option', { name: 'Stripe (stripe)' }))
   expect(type).toHaveValue('Stripe (stripe)')
-  expect(
-    screen.getByRole('textbox', { name: 'Name' })
-  ).toHaveValue('Stripe')
+  expect(screen.getByRole('textbox', { name: 'Name' })).toHaveValue('Stripe')
   await user.clear(type)
   await user.type(type, 'custom-payment')
   await user.keyboard('{Enter}')
