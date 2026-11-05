@@ -190,6 +190,11 @@ func SetRelayRouter(router *gin.Engine) {
 		httpRouter.DELETE("/models/:model", controller.RelayNotImplemented)
 	}
 
+	audioTaskRouter := router.Group("/v1/audio/tasks")
+	audioTaskRouter.Use(middleware.RouteTag("relay"), middleware.SystemPerformanceCheck(), middleware.TokenOrUserAuth())
+	audioTaskRouter.GET("/:task_id", middleware.AsyncImageTaskStatusRateLimit(), controller.GetAudioTask)
+	audioTaskRouter.GET("/:task_id/content", controller.GetAudioTaskContent)
+
 	imageTaskRouter := router.Group("/v1/images/tasks")
 	imageTaskRouter.Use(middleware.RouteTag("relay"))
 	imageTaskRouter.Use(middleware.SystemPerformanceCheck())
@@ -256,7 +261,8 @@ func registerMjRouterGroup(relayMjRouter *gin.RouterGroup) {
 	relayMjRouter.GET("/image/:id", middleware.MidjourneyImageAuth(), relay.RelayMidjourneyImage)
 	relayMjRouter.HEAD("/image/:id", middleware.MidjourneyImageAuth(), relay.RelayMidjourneyImage)
 	relayMjRouter.GET("/upload/:id", controller.RelayMidjourneyUploadImage)
-	relayMjRouter.POST("/submit/upload-discord-images", middleware.TokenAuth(), controller.RelayMidjourneyUpload)
+	relayMjRouter.HEAD("/upload/:id", controller.RelayMidjourneyUploadImage)
+	relayMjRouter.POST("/submit/upload-discord-images", middleware.TokenAuth(), middleware.ResolveReferenceAssets(), controller.RelayMidjourneyUpload)
 	relayMjRouter.Use(middleware.TokenAuth(), middleware.ResolveReferenceAssets(), middleware.Distribute())
 	{
 		relayMjRouter.POST("/submit/action", controller.RelayMidjourney)

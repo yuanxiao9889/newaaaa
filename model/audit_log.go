@@ -19,6 +19,7 @@ const (
 	AuditCategorySecurity    = "security"
 	AuditCategoryOperation   = "operation"
 	AuditCategoryAccessToken = "access_token"
+	AuditCategorySystem      = "system"
 )
 
 // AuditLog is retained independently of usage logs and their cleanup/TTL policy.
@@ -138,6 +139,11 @@ func RecordAuditLog(c *gin.Context, entry AuditLog) {
 
 func GetAuditLogs(filter AuditLogFilter, start, limit, viewerRole int) ([]*AuditLog, int64, error) {
 	query := LOG_DB.Model(&AuditLog{})
+	// System alerts must never appear in personal audit views, even if a
+	// malformed event was associated with an ordinary user's ID.
+	if filter.SelfView || viewerRole < common.RoleAdminUser {
+		query = query.Where("(category IS NULL OR category <> ?)", AuditCategorySystem)
+	}
 	if common.UsingLogDatabase(common.DatabaseTypeClickHouse) {
 		// Decode native JSON through database/sql as text for AuditOther.Scan.
 		// Preserve numeric metadata instead of returning quoted Int64 values.
@@ -263,7 +269,7 @@ func MigrateAuditLogs() error {
 }
 
 func ValidAuditCategory(category string) bool {
-	return category == "" || category == AuditCategoryLogin || category == AuditCategorySecurity || category == AuditCategoryOperation || category == AuditCategoryAccessToken
+	return category == "" || category == AuditCategoryLogin || category == AuditCategorySecurity || category == AuditCategoryOperation || category == AuditCategoryAccessToken || category == AuditCategorySystem
 }
 
 func ValidTokenFingerprint(value string) bool {

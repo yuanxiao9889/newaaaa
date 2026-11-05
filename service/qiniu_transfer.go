@@ -234,11 +234,20 @@ func (s *ReferenceUploadStore) PutQiniuResult(ctx context.Context, identity, sou
 	if resp.ContentLength > 0 {
 		reservation = resp.ContentLength
 	}
+	unlockDisk, err := lockReferenceDirectory(s.config.Directory)
+	if err != nil {
+		return "", err
+	}
+	defer unlockDisk()
 	s.mu.Lock()
-	used, files := s.cleanupLocked()
-	if used+s.reserved+reservation > s.config.MaxCacheBytes || files >= 10000 {
+	_, files := s.cleanupLocked()
+	if files >= 10000 {
 		s.mu.Unlock()
 		return "", ErrReferenceBusy
+	}
+	if err := s.reclaimReferenceSpaceLocked(reservation); err != nil {
+		s.mu.Unlock()
+		return "", err
 	}
 	s.reserved += reservation
 	s.mu.Unlock()

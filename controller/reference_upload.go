@@ -130,21 +130,33 @@ func GetReferenceContent(c *gin.Context) {
 
 func referenceUploadError(c *gin.Context, err error) {
 	status, code := http.StatusServiceUnavailable, "reference_unavailable"
+	message := "Reference upload service is unavailable; retry later"
 	switch {
 	case errors.Is(err, service.ErrReferenceInvalid):
 		status, code = http.StatusBadRequest, "reference_invalid"
+		message = "Invalid reference upload request"
 	case errors.Is(err, service.ErrReferenceConflict):
 		status, code = http.StatusConflict, "reference_upload_conflict"
+		message = "Reference upload content conflicts with the prepared image"
 	case errors.Is(err, service.ErrReferenceMissing):
 		status, code = http.StatusGone, "reference_expired"
+		message = "Reference image expired; prepare or upload it again"
 	case errors.Is(err, service.ErrReferenceUnavailable):
 		status, code = http.StatusServiceUnavailable, "reference_unavailable"
 	case errors.Is(err, service.ErrReferenceBusy):
 		status, code = http.StatusTooManyRequests, "reference_busy"
+		message = "Reference upload cache capacity or concurrency limit reached; retry later"
 		c.Header("Retry-After", "2")
+	case errors.Is(err, service.ErrReferenceDiskSpace):
+		code = "reference_disk_space_low"
+		message = "Reference upload paused to preserve free disk space; retry later"
+		c.Header("Retry-After", "60")
 	case errors.Is(err, service.ErrReferenceDownload):
 		status, code = http.StatusBadGateway, "reference_download_failed"
+		message = "Reference image download failed; retry completion"
 	}
+	c.Set("reference_upload_error_code", code)
+	c.Set("reference_upload_error_message", message)
 	c.Header("Cache-Control", "no-store")
-	c.JSON(status, gin.H{"error": gin.H{"code": code, "message": code, "type": "invalid_request_error", "scope": "origin"}})
+	c.JSON(status, gin.H{"error": gin.H{"code": code, "message": message, "type": "reference_upload_error", "scope": "origin"}})
 }

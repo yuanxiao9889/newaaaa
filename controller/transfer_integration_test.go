@@ -367,8 +367,7 @@ func testDirectReferenceContract(t *testing.T, db *gorm.DB) {
 	_, err = migrating.Prepare(105, input)
 	require.NoError(t, err)
 	assert.EqualValues(t, 1, migrations.Load(), "verified local migration is reused")
-	// Capacity is reserved for the entire body at prepare, even with no bytes
-	// received yet. A second account cannot exceed the storage-wide budget.
+	// Old byte quotas no longer block valid uploads. Per-file bounds still apply.
 	limitedConfig := config
 	limitedConfig.MaxCacheBytes, limitedConfig.MaxUserCacheBytes = 8<<20, 8<<20
 	limited, err := service.NewReferenceUploadStore(limitedConfig)
@@ -377,7 +376,7 @@ func testDirectReferenceContract(t *testing.T, db *gorm.DB) {
 	oversized.SHA256 = strings.Repeat("a", 64)
 	oversized.Size = 8 << 20
 	_, err = limited.Prepare(104, oversized)
-	require.ErrorIs(t, err, service.ErrReferenceBusy)
+	require.NoError(t, err)
 	oversized.Size++
 	_, err = limited.Prepare(104, oversized)
 	require.ErrorIs(t, err, service.ErrReferenceInvalid)

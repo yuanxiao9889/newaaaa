@@ -15,7 +15,8 @@ import (
 // RetryBudget limits new submissions, not the lifetime of accepted upstream
 // work. In-flight requests keep their existing timeout and cancellation rules.
 type RetryBudget struct {
-	Deadline time.Time
+	Deadline   time.Time
+	MaxRetries int
 }
 
 func NewRetryBudget(start time.Time) RetryBudget {
@@ -23,17 +24,21 @@ func NewRetryBudget(start time.Time) RetryBudget {
 	if !policy.RetryTimeBudgetEnabled {
 		return RetryBudget{}
 	}
-	return RetryBudget{Deadline: start.Add(time.Duration(policy.RetryTimeBudgetSeconds) * time.Second)}
+	return RetryBudget{Deadline: start.Add(time.Duration(policy.RetryTimeBudgetSeconds) * time.Second), MaxRetries: policy.RetryTimeBudgetMaxRetries}
 }
 
-func (b RetryBudget) Remaining(countRemaining int, now time.Time) int {
+// Remaining uses the complete attempt history, including the initial submission,
+// so changing channels, starting another round or resuming a task cannot reset
+// the configured retry limit in time-budget mode.
+func (b RetryBudget) Remaining(countRemaining, attemptsMade int, now time.Time) int {
 	if b.Deadline.IsZero() {
 		return countRemaining
 	}
-	if !now.Before(b.Deadline) {
+	maxTimedRetries := b.MaxRetries
+	if !now.Before(b.Deadline) || attemptsMade >= maxTimedRetries+1 {
 		return 0
 	}
-	return max(1, countRemaining)
+	return min(max(1, countRemaining), maxTimedRetries+1-max(0, attemptsMade))
 }
 
 // ChannelRetryCycle excludes only this round's attempts. Static constraints
@@ -93,7 +98,7 @@ func (cycle *ChannelRetryCycle) Select(param *RetryParam) (*model.Channel, strin
 		return nil, group, c.Request.Context().Err()
 	case <-timer.C:
 	}
-	if cycle.Budget.Remaining(1, time.Now()) == 0 {
+	if cycle.Budget.Remaining(1, len(cycle.History), time.Now()) == 0 {
 		return nil, group, context.DeadlineExceeded
 	}
 	cycle.Start = len(cycle.History)

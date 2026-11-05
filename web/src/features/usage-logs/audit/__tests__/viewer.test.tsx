@@ -18,6 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -40,6 +41,7 @@ import zhTW from '@/i18n/locales/zh-TW.json'
 import zh from '@/i18n/locales/zh.json'
 import { api } from '@/lib/api'
 import { useAuthStore } from '@/stores/auth-store'
+import { useNotificationStore } from '@/stores/notification-store'
 
 import { AuditLogs } from '..'
 import { AuditLogViewer } from '../components/audit-log-viewer'
@@ -395,6 +397,7 @@ it.each([
 )
 
 beforeEach(() => {
+  useNotificationStore.setState({ adminReadIds: {} })
   vi.stubGlobal('localStorage', {
     getItem: () => null,
     setItem: () => undefined,
@@ -809,4 +812,184 @@ it('mobile access history keeps pagination visible and puts result filters in a 
       Reflect.deleteProperty(HTMLElement.prototype, 'setPointerCapture')
     }
   }
+})
+
+const channelAlert = {
+  event_id: 'disable-event',
+  user_id: 0,
+  username: 'system',
+  actor_role: 10,
+  created_at: 1700000000,
+  category: 'system',
+  action: 'channel.auto_disable',
+  token_ref: '',
+  ip: '',
+  user_agent: '',
+  method: '',
+  route: '',
+  status: 0,
+  success: true,
+  request_id: 'alert-request',
+  content: '',
+  other: {
+    op: {
+      action: 'channel.auto_disable',
+      params: {
+        id: 7,
+        name: 'MJ primary',
+        reason: 'upstream quota exhausted',
+      },
+    },
+  },
+}
+
+it('viewing administrator alerts clears the unread count automatically for this account', async () => {
+  useAuthStore.getState().auth.setUser({ id: 12, username: 'admin', role: 100 })
+  const alert = channelAlert
+  vi.spyOn(api, 'get').mockResolvedValue({
+    data: { success: true, data: { items: [alert], total: 1 } },
+  })
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  })
+  render(
+    <QueryClientProvider client={client}>
+      <AuditLogs />
+    </QueryClientProvider>
+  )
+  await userEvent.click(
+    screen.getByRole('tab', { name: /Administrator alerts/ })
+  )
+  const row = (await screen.findAllByRole('row')).find((element) =>
+    element.textContent?.includes('Automatically disabled channel MJ primary')
+  )
+  expect(row).toHaveClass('text-destructive')
+  if (!row) throw new Error('Missing disabled channel audit row')
+  expect(within(row).getByText('Disabled')).toBeVisible()
+  await waitFor(() =>
+    expect(
+      screen.getByRole('tab', { name: 'Administrator alerts' })
+    ).toBeVisible()
+  )
+  expect(
+    screen.getByRole('button', { name: 'Mark recent alerts as read' })
+  ).toBeDisabled()
+  expect(useNotificationStore.getState().adminReadIds[12]).toEqual([
+    'disable-event',
+  ])
+  expect(useNotificationStore.getState().adminReadIds[13]).toBeUndefined()
+  expect(within(row).getByText('Disabled')).toBeVisible()
+  await userEvent.click(screen.getByRole('tab', { name: 'Only Mine' }))
+  act(() =>
+    useAuthStore
+      .getState()
+      .auth.setUser({ id: 13, username: 'other-admin', role: 100 })
+  )
+  expect(
+    await screen.findByRole('tab', { name: 'Administrator alerts (1)' })
+  ).toBeVisible()
+  client.clear()
+})
+
+it('keeps unseen and background alerts unread and counts new alerts after leaving the list', async () => {
+  useAuthStore.getState().auth.setUser({ id: 12, username: 'admin', role: 100 })
+  let visibility: DocumentVisibilityState = 'hidden'
+  vi.spyOn(document, 'visibilityState', 'get').mockImplementation(
+    () => visibility
+  )
+  const unseen = { ...channelAlert, event_id: 'unseen-event' }
+  const latest = { ...channelAlert, event_id: 'new-event' }
+  let recent = [channelAlert, unseen]
+  vi.spyOn(api, 'get').mockImplementation(async (_url, config) => ({
+    data: {
+      success: true,
+      data: {
+        items: config?.params.page_size === 100 ? recent : [channelAlert],
+        total: 2,
+      },
+    },
+  }))
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  })
+  render(
+    <QueryClientProvider client={client}>
+      <AuditLogs />
+    </QueryClientProvider>
+  )
+  await screen.findByRole('tab', { name: 'Administrator alerts (2)' })
+  await screen.findByRole('button', { name: 'Details' })
+  expect(useNotificationStore.getState().adminReadIds).toEqual({})
+  act(() => {
+    visibility = 'visible'
+    document.dispatchEvent(new Event('visibilitychange'))
+  })
+  expect(
+    await screen.findByRole('tab', { name: 'Administrator alerts (1)' })
+  ).toBeVisible()
+  expect(useNotificationStore.getState().adminReadIds[12]).toEqual([
+    'disable-event',
+  ])
+  await userEvent.click(screen.getByRole('tab', { name: 'Only Mine' }))
+  recent = [latest, channelAlert, unseen]
+  await act(async () => {
+    await client.invalidateQueries({ queryKey: ['admin-notifications'] })
+  })
+  expect(
+    await screen.findByRole('tab', { name: 'Administrator alerts (2)' })
+  ).toBeVisible()
+  expect(useNotificationStore.getState().adminReadIds[12]).toEqual([
+    'disable-event',
+  ])
+  client.clear()
+})
+
+it.each([
+  ['zh', zh, '自动禁用渠道 audio-jieapi（ID：209）'],
+  ['zh-TW', zhTW, '自動停用渠道 audio-jieapi（ID：209）'],
+  ['ja', ja, 'チャネル audio-jieapi を自動無効化（ID: 209）'],
+  ['ru', ru, 'Канал audio-jieapi автоматически отключён (ID: 209)'],
+  ['fr', fr, 'Canal audio-jieapi désactivé automatiquement (ID : 209)'],
+  ['vi', viLocale, 'Đã tự động vô hiệu hóa kênh audio-jieapi (ID: 209)'],
+] as const)(
+  'renders the automatic disable alert without encoding loss in %s',
+  async (locale, resources, expected) => {
+    const i18n = createInstance()
+    await i18n.init({
+      lng: locale,
+      fallbackLng: false,
+      resources: { [locale]: resources },
+    })
+    expect(
+      i18n.t('Automatically disabled channel {{name}} (ID: {{id}})', {
+        name: 'audio-jieapi',
+        id: 209,
+      })
+    ).toBe(expected)
+  }
+)
+
+it('alert fetch failures leave stale alerts unread and disable the read action', async () => {
+  useNotificationStore.setState({ adminReadIds: {} })
+  useAuthStore.getState().auth.setUser({ id: 12, username: 'admin', role: 100 })
+  vi.spyOn(api, 'get').mockRejectedValue(new Error('offline'))
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  })
+  render(
+    <QueryClientProvider client={client}>
+      <AuditLogs />
+    </QueryClientProvider>
+  )
+  await userEvent.click(
+    screen.getByRole('tab', { name: 'Administrator alerts' })
+  )
+  expect(await screen.findByRole('alert')).toHaveTextContent(
+    'Failed to load audit records'
+  )
+  expect(
+    screen.getByRole('button', { name: 'Mark recent alerts as read' })
+  ).toBeDisabled()
+  expect(useNotificationStore.getState().adminReadIds).toEqual({})
+  client.clear()
 })

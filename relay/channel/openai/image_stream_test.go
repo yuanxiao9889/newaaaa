@@ -15,6 +15,7 @@ import (
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
 	"github.com/QuantumNous/new-api/relaykit/dto"
+	"github.com/QuantumNous/new-api/service"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -562,49 +563,49 @@ func TestOpenaiImageStreamHandlerWrapsNonStandardDataShapes(t *testing.T) {
 // entry points: the non-streaming handler and the stream handler's non-SSE
 // fallback. Neither must leak the error body to the client.
 func TestOpenaiImageHandlersReturnJSONError(t *testing.T) {
-	oldMode := gin.Mode()
-	gin.SetMode(gin.TestMode)
-	t.Cleanup(func() { gin.SetMode(oldMode) })
-
-	body := `{"error":{"message":"content moderation failed","type":"upstream_error","code":"content_moderation_failed","status":502}}`
-
-	t.Run("non-streaming handler", func(t *testing.T) {
-		c, recorder, resp, info := newImageTestContext(t, body, "application/json", false)
-
-		usage, err := OpenaiImageHandler(c, info, resp)
-		require.Nil(t, usage)
-		require.NotNil(t, err)
-		require.Equal(t, http.StatusOK, err.StatusCode)
-		oaiError := err.ToOpenAIError()
-		require.Equal(t, "content moderation failed", oaiError.Message)
-		require.Equal(t, "upstream_error", oaiError.Type)
-		require.Equal(t, "content_moderation_failed", oaiError.Code)
-		require.Empty(t, recorder.Body.String())
-	})
-
-	t.Run("stream handler JSON fallback", func(t *testing.T) {
-		c, recorder, resp, info := newImageTestContext(t, body, "application/json", true)
-
-		usage, err := OpenaiImageStreamHandler(c, info, resp)
-		require.Nil(t, usage)
-		require.NotNil(t, err)
-		require.Equal(t, http.StatusOK, err.StatusCode)
-		require.Equal(t, "content moderation failed", err.ToOpenAIError().Message)
-		require.Empty(t, recorder.Body.String())
-	})
-
-	t.Run("stream handler non-2xx stays JSON error", func(t *testing.T) {
-		c, recorder, resp, info := newImageTestContext(t, body, "application/json", true)
-		resp.StatusCode = http.StatusBadGateway
-
-		usage, err := OpenaiImageStreamHandler(c, info, resp)
-		require.Nil(t, usage)
-		require.NotNil(t, err)
-		require.Equal(t, http.StatusBadGateway, err.StatusCode)
-		require.Equal(t, "content moderation failed", err.ToOpenAIError().Message)
-		require.Empty(t, recorder.Body.String())
-		require.NotContains(t, recorder.Header().Get("Content-Type"), "text/event-stream")
-	})
+	for _, tc := range []struct {
+		name, body, mapping string
+		status, wantStatus  int
+		wantRetry           bool
+	}{
+		{name: "HTTP 200 upstream failure", body: `{"error":{"message":"temporary upload failure","type":"upstream_error","code":"upstream_unavailable"}}`, status: 200, wantStatus: 502, wantRetry: true},
+		{name: "moderation remains non-retryable", body: `{"error":{"message":"content moderation failed","type":"upstream_error","code":"content_moderation_failed"}}`, status: 200, wantStatus: 502},
+		{name: "mapped HTTP 400 rejection", body: `{"error":{"message":"temporary provider failure","type":"upstream_error","code":"upstream_unavailable"}}`, mapping: `{"400":"502"}`, status: 400, wantStatus: 502, wantRetry: true},
+		{name: "HTTP 403 cannot bypass transfer guard", body: `{"error":{"message":"forbidden","type":"upstream_error","code":"forbidden"}}`, mapping: `{"403":"502"}`, status: 403, wantStatus: 502},
+		{name: "HTTP 504 cannot bypass transfer guard", body: `{"error":{"message":"timeout","type":"upstream_error","code":"timeout"}}`, mapping: `{"504":"502"}`, status: 504, wantStatus: 502},
+		{name: "accepted task is not resubmitted", body: `{"id":"accepted-task","error":{"message":"temporary failure","type":"upstream_error","code":"upstream_unavailable"}}`, status: 200, wantStatus: 502},
+		{name: "task_id is not resubmitted", body: `{"task_id":"accepted-task","error":{"message":"temporary failure","type":"upstream_error","code":"upstream_unavailable"}}`, status: 200, wantStatus: 502},
+		{name: "pending status is not resubmitted", body: `{"status":"queued","error":{"message":"temporary failure","type":"upstream_error","code":"upstream_unavailable"}}`, status: 200, wantStatus: 502},
+		{name: "partial result is not resubmitted", body: `{"data":[{"b64_json":"image"}],"error":{"message":"second image failed","type":"upstream_error","code":"upstream_unavailable"}}`, status: 200, wantStatus: 502},
+		{name: "non-2xx failure", body: `{"error":{"message":"temporary failure","type":"upstream_error","code":"upstream_unavailable"}}`, status: 502, wantStatus: 502, wantRetry: true},
+	} {
+		for _, stream := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/stream=%t", tc.name, stream), func(t *testing.T) {
+				c, recorder, resp, info := newImageTestContext(t, tc.body, "application/json", stream)
+				c.Set("transfer_execution_id", "confirmed-error-fixture")
+				resp.StatusCode = tc.status
+				handler := OpenaiImageHandler
+				if stream {
+					handler = OpenaiImageStreamHandler
+				}
+				usage, apiErr := handler(c, info, resp)
+				require.Nil(t, usage)
+				require.NotNil(t, apiErr)
+				original := apiErr.ToOpenAIError()
+				assert.Equal(t, "upstream_error", original.Type)
+				assert.NotEmpty(t, original.Message)
+				assert.Contains(t, tc.body, original.Message)
+				assert.NotEmpty(t, original.Code)
+				service.ResetStatusCode(apiErr, tc.mapping)
+				assert.Equal(t, tc.wantStatus, apiErr.StatusCode)
+				assert.Equal(t, original, apiErr.ToOpenAIError(), "status mapping must preserve provider diagnostics")
+				assert.Equal(t, tc.wantRetry, service.ShouldRetryRelayError(c, apiErr, 2))
+				assert.False(t, service.ShouldRetryRelayError(c, apiErr, 0))
+				assert.Empty(t, recorder.Body.String())
+				assert.NotContains(t, recorder.Header().Get("Content-Type"), "text/event-stream")
+			})
+		}
+	}
 }
 
 // TestOpenaiImageStreamHandlerRecordsUpstreamErrorEvent verifies that an error

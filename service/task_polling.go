@@ -89,6 +89,9 @@ func sweepTimedOutTasks(ctx context.Context) {
 	timedOutCount := 0
 
 	for _, task := range tasks {
+		if task.PrivateData.AudioQueue != nil {
+			continue // The audio queue owns timeout, persistence and settlement.
+		}
 		if retry := task.PrivateData.VideoRetry; retry != nil && (retry.Submitting ||
 			!retry.Ready && retry.AcceptedAt > 0 && now-retry.AcceptedAt < VideoTaskRetrySubmitTimeoutSeconds) {
 			if _, err := prepareVideoTaskForPolling(ctx, task); err != nil {
@@ -173,6 +176,9 @@ func RunTaskPollingOnce(ctx context.Context, report func(processed, total int)) 
 	summary.UnfinishedTasks = len(allTasks)
 	platformTask := make(map[constant.TaskPlatform][]*model.Task)
 	for _, t := range allTasks {
+		if t.PrivateData.AudioQueue != nil {
+			continue
+		}
 		platformTask[t.Platform] = append(platformTask[t.Platform], t)
 	}
 

@@ -228,7 +228,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 	budget := service.NewRetryBudget(time.Now())
 	cycle := &service.ChannelRetryCycle{Enabled: model.CurrentRequestPolicy().RetryCycleEnabled, Budget: budget}
 	retryParam.Cycle = cycle
-	for firstAttempt := true; firstAttempt || budget.Remaining(common.RetryTimes-retryParam.GetRetry()+1, time.Now()) > 0; retryParam.IncreaseRetry() {
+	for firstAttempt := true; firstAttempt || budget.Remaining(common.RetryTimes-retryParam.GetRetry()+1, len(c.GetStringSlice("use_channel")), time.Now()) > 0; retryParam.IncreaseRetry() {
 		firstAttempt = false
 		cycle.History = c.GetStringSlice("use_channel")
 		if requestErr := c.Request.Context().Err(); requestErr != nil {
@@ -245,7 +245,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 			newAPIError = channelErr
 			break
 		}
-		if len(cycle.History) > 0 && budget.Remaining(1, time.Now()) == 0 {
+		if len(cycle.History) > 0 && budget.Remaining(1, len(cycle.History), time.Now()) == 0 {
 			break
 		}
 		service.AppendUsedChannel(c, channel.Id)
@@ -286,7 +286,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		newAPIError = service.NormalizeViolationFeeError(newAPIError)
 		relayInfo.LastError = newAPIError
 
-		decision := service.DecideRelayRetry(c, newAPIError, budget.Remaining(common.RetryTimes-retryParam.GetRetry(), time.Now()))
+		decision := service.DecideRelayRetry(c, newAPIError, budget.Remaining(common.RetryTimes-retryParam.GetRetry(), len(c.GetStringSlice("use_channel")), time.Now()))
 		service.RecordPolicyFailure(c, channel.Id, newAPIError, decision)
 		processChannelError(c, *types.NewChannelError(channel.Id, channel.Type, channel.Name, channel.ChannelInfo.IsMultiKey, common.GetContextKeyString(c, constant.ContextKeyChannelKey), channel.GetAutoBan()), newAPIError, relayInfo)
 
@@ -454,7 +454,7 @@ func RelayMidjourney(c *gin.Context) {
 	case relayconstant.RelayModeSwapFace:
 		mjErr = relay.RelaySwapFace(c, relayInfo)
 	default:
-		mjErr = relay.RelayMidjourneySubmit(c, relayInfo)
+		mjErr = relayMidjourneyWithRetry(c, relayInfo)
 	}
 	//err = relayMidjourneySubmit(c, relayMode)
 	log.Println(mjErr)
@@ -466,8 +466,90 @@ func RelayMidjourney(c *gin.Context) {
 	}
 }
 
+func relayMidjourneyWithRetry(c *gin.Context, info *relaycommon.RelayInfo) *taskdto.MidjourneyResponse {
+	budget := service.NewRetryBudget(time.Now())
+	constraints := service.GetChannelConstraints(c)
+	for {
+		mjErr := relay.RelayMidjourneySubmit(c, info)
+		if mjErr == nil || !mjErr.UpstreamQuotaExhausted {
+			return mjErr
+		}
+
+		channelID := c.GetInt("channel_id")
+		service.RecordAutoSwitchRequestResult(c, false, types.NewOpenAIError(errors.New("quota_not_enough"), types.ErrorCode("quota_not_enough"), http.StatusServiceUnavailable))
+		event := service.PolicyEvent{ChannelID: channelID, ErrorCode: "quota_not_enough", ErrorSource: "upstream", Health: "unchanged",
+			Decision: service.PolicyDecision{Action: "retry", Reason: "upstream_failure", Source: "upstream"}}
+		if common.AutomaticDisableChannelEnabled {
+			channel, err := model.GetChannelById(channelID, true)
+			if err != nil {
+				logger.LogError(c, fmt.Sprintf("load exhausted Midjourney channel #%d: %s", channelID, err))
+			} else if channel.GetAutoBan() {
+				service.DisableChannel(*types.NewChannelError(channel.Id, channel.Type, channel.Name, channel.ChannelInfo.IsMultiKey,
+					common.GetContextKeyString(c, constant.ContextKeyChannelKey), true), "quota_not_enough")
+				event.Health = "channel_disable_requested"
+				if channel.ChannelInfo.IsMultiKey {
+					event.Health = "key_disable_requested"
+				}
+			}
+		}
+
+		// Only independent submissions may change providers. Actions on an
+		// existing task require that task's original upstream account.
+		var request taskdto.MidjourneyRequest
+		bodyErr := common.UnmarshalBodyReusable(c, &request)
+		independent := false
+		switch info.RelayMode {
+		case relayconstant.RelayModeMidjourneyImagine, relayconstant.RelayModeMidjourneyDescribe,
+			relayconstant.RelayModeMidjourneyBlend, relayconstant.RelayModeMidjourneyShorten,
+			relayconstant.RelayModeMidjourneyEdits, relayconstant.RelayModeMidjourneyUpload,
+			relayconstant.RelayModeMidjourneyVideo:
+			independent = bodyErr == nil && request.TaskId == "" && request.CustomId == ""
+		}
+		_, pinned, _ := constraints.ResolvedPin()
+		switch {
+		case !independent || pinned:
+			event.Decision = service.PolicyDecision{Action: "stop", Reason: "pinned_channel", Source: "channel_constraint"}
+		case service.ShouldSkipRetryAfterChannelAffinityFailure(c):
+			event.Decision = service.PolicyDecision{Action: "stop", Reason: "strict_session", Source: "session_rule"}
+		case c.Request.Context().Err() != nil:
+			event.Decision = service.PolicyDecision{Action: "stop", Reason: "non_retryable_error", Source: "system"}
+		case budget.Remaining(common.RetryTimes-info.RetryIndex, info.RetryIndex+1, time.Now()) <= 0:
+			event.Decision = service.PolicyDecision{Action: "stop", Reason: "attempt_budget_exhausted", Source: "global"}
+		}
+		service.RequestPolicy(c).AddEvent(event)
+		if event.Decision.Action != "retry" {
+			return mjErr
+		}
+
+		// Keep exclusions even when automatic disabling is turned off, and
+		// select from the best remaining priority without revisiting a failure.
+		constraints.AddFilter(taskdto.ChannelFilter{Kind: taskdto.FilterChannelIdentity, ExcludedChannelIDs: []int{channelID}})
+		channel, group, err := service.CacheGetRandomSatisfiedChannel(&service.RetryParam{
+			Ctx: c, TokenGroup: info.TokenGroup, ModelName: info.OriginModelName, RequestPath: c.Request.URL.Path,
+		})
+		if err != nil || channel == nil {
+			service.RequestPolicy(c).AddEvent(service.PolicyEvent{ChannelID: channelID,
+				Decision: service.PolicyDecision{Action: "stop", Reason: "no_available_channel", Source: "routing"}})
+			return mjErr
+		}
+		if c.Request.Context().Err() != nil || budget.Remaining(common.RetryTimes-info.RetryIndex, info.RetryIndex+1, time.Now()) <= 0 {
+			service.ReleaseAutoSwitchAttempt(c)
+			return mjErr
+		}
+		if channelErr := middleware.SetupContextForSelectedChannel(c, channel, info.OriginModelName); channelErr != nil {
+			service.ReleaseAutoSwitchAttempt(c)
+			return service.MidjourneyErrorWrapper(constant.MjRequestError, "get_channel_info_failed")
+		}
+		info.UsingGroup = group
+		info.RetryIndex++
+	}
+}
+
 func respondMidjourneyError(c *gin.Context, mjErr *taskdto.MidjourneyResponse) int {
 	statusCode := http.StatusBadRequest
+	if mjErr.UpstreamQuotaExhausted {
+		statusCode = http.StatusServiceUnavailable
+	}
 	if mjErr.Code == 30 {
 		statusCode = http.StatusTooManyRequests
 	}
@@ -571,6 +653,10 @@ func RelayTask(c *gin.Context) {
 		respondTaskSubmissionError(c, taskErr)
 		return
 	}
+	if relayInfo.Action == "audio_generation" && (c.Query("async") == "true" || c.Query("async") == "1") {
+		enqueueTaskPluginAudio(c, relayInfo)
+		return
+	}
 
 	outcome, taskErr := executeTaskSubmission(c, relayInfo)
 	if taskErr != nil {
@@ -627,7 +713,7 @@ func executeTaskSubmissionWith(
 	budget := service.NewRetryBudget(time.Now())
 	cycle := &service.ChannelRetryCycle{Enabled: model.CurrentRequestPolicy().RetryCycleEnabled, Budget: budget}
 	retryParam.Cycle = cycle
-	for firstAttempt := true; firstAttempt || budget.Remaining(common.RetryTimes-retryParam.GetRetry()+1, time.Now()) > 0; retryParam.IncreaseRetry() {
+	for firstAttempt := true; firstAttempt || budget.Remaining(common.RetryTimes-retryParam.GetRetry()+1, len(c.GetStringSlice("use_channel")), time.Now()) > 0; retryParam.IncreaseRetry() {
 		firstAttempt = false
 		cycle.History = c.GetStringSlice("use_channel")
 		stage = "select_channel"
@@ -659,7 +745,7 @@ func executeTaskSubmissionWith(
 		}
 		diagnostics.attempt(retryParam.GetRetry()+1, channel, relayInfo.LockedChannel != nil)
 
-		if len(cycle.History) > 0 && budget.Remaining(1, time.Now()) == 0 {
+		if len(cycle.History) > 0 && budget.Remaining(1, len(cycle.History), time.Now()) == 0 {
 			break
 		}
 		service.AppendUsedChannel(c, channel.Id)
@@ -698,7 +784,7 @@ func executeTaskSubmissionWith(
 
 		taskAPIError := taskSubmissionAPIError(taskErr)
 		relayInfo.LastError = taskAPIError
-		decision := decideTaskRetry(c, taskErr, budget.Remaining(common.RetryTimes-retryParam.GetRetry(), time.Now()))
+		decision := decideTaskRetry(c, taskErr, budget.Remaining(common.RetryTimes-retryParam.GetRetry(), len(c.GetStringSlice("use_channel")), time.Now()))
 		service.RecordAutoSwitchTaskSubmissionFailure(c, taskErr)
 		service.RecordPolicyFailure(c, channel.Id, taskAPIError, decision)
 		if !taskErr.LocalError {
@@ -905,6 +991,11 @@ func executeTaskSubmissionWith(
 				logger.LogError(c, "immediate task billing settlement failed: "+err.Error())
 			}
 		}
+	}
+	// Settlement reloads the durable row. Inline-only results deliberately
+	// have no data column, so restore this request's response for presentation.
+	if immediateTerminal && task.PrivateData.ResultDiscarded {
+		task.Data = result.TaskData
 	}
 	diagnostics.complete(task, result.Quota)
 

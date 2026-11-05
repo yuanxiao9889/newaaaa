@@ -20,6 +20,7 @@ import (
 	"github.com/QuantumNous/new-api/i18n"
 	"github.com/QuantumNous/new-api/middleware"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/service/authz"
 	"github.com/gin-gonic/gin"
@@ -1288,3 +1289,103 @@ CREATE TABLE IF NOT EXISTS logs (
 ENGINE = MergeTree()
 PARTITION BY toYYYYMM(toDateTime(created_at))
 ORDER BY (created_at, request_id)`
+
+func TestAdministratorChannelAlerts(t *testing.T) {
+	kind := os.Getenv("TEST_TASK_DB_DIALECT")
+	if kind == "" {
+		kind = "sqlite"
+	}
+	dsn := os.Getenv("TEST_MYSQL_DSN")
+	if kind == "postgres" {
+		dsn = os.Getenv("TEST_POSTGRES_URL")
+	}
+	db, _ := newAuditTestDatabase(t, kind, dsn)
+	logDB, _ := newAuditTestDatabase(t, kind, dsn)
+	require.NoError(t, db.AutoMigrate(&model.User{}, &model.Channel{}, &model.Ability{}))
+	require.NoError(t, logDB.AutoMigrate(&model.AuditLog{}))
+	oldDB, oldLogDB := model.DB, model.LOG_DB
+	oldMain, oldLog := common.MainDatabaseType(), common.LogDatabaseType()
+	oldCache, oldRedis := common.MemoryCacheEnabled, common.RedisEnabled
+	model.DB, model.LOG_DB = db, logDB
+	common.SetDatabaseTypes(common.DatabaseType(kind), common.DatabaseType(kind))
+	common.MemoryCacheEnabled, common.RedisEnabled = false, false
+	t.Cleanup(func() {
+		model.DB, model.LOG_DB = oldDB, oldLogDB
+		common.SetDatabaseTypes(oldMain, oldLog)
+		common.MemoryCacheEnabled, common.RedisEnabled = oldCache, oldRedis
+	})
+	root := model.User{Username: "alerts-root", AffCode: "alerts-root", Role: common.RoleRootUser}
+	require.NoError(t, db.Create(&root).Error)
+	var version string
+	versionSQL := "SELECT version()"
+	if kind == "sqlite" {
+		versionSQL = "SELECT sqlite_version()"
+	}
+	require.NoError(t, db.Raw(versionSQL).Scan(&version).Error)
+	t.Logf("main and independent log database: %s %s", kind, version)
+	for _, multi := range []bool{false, true} {
+		channel := model.Channel{Name: fmt.Sprintf("alerts-%t", multi), Key: "secret-key-one", Status: common.ChannelStatusEnabled, Models: "mj_imagine", Group: "default"}
+		if multi {
+			channel.Key = "secret-key-one\nsecret-key-two"
+			channel.ChannelInfo = model.ChannelInfo{IsMultiKey: true, MultiKeySize: 2}
+		}
+		require.NoError(t, channel.Insert())
+		failure := types.NewChannelError(channel.Id, channel.Type, channel.Name, multi, "secret-key-one", true)
+		service.DisableChannel(*failure, "quota_not_enough Authorization: Bearer secret-key-one https://upstream.invalid/?token=private")
+		entries, total, err := model.GetAuditLogs(model.AuditLogFilter{Category: model.AuditCategorySystem}, 0, 20, common.RoleAdminUser)
+		require.NoError(t, err)
+		wantCount := int64(1)
+		action := "channel.auto_disable"
+		if multi {
+			wantCount = 2
+			action = "channel.key_auto_disable"
+		}
+		require.Equal(t, wantCount, total)
+		var entry *model.AuditLog
+		for _, candidate := range entries {
+			if candidate.Action == action {
+				entry = candidate
+				break
+			}
+		}
+		require.NotNil(t, entry)
+		assert.True(t, entry.Success)
+		encoded, err := common.Marshal(entry)
+		require.NoError(t, err)
+		assert.NotContains(t, string(encoded), "secret-key")
+		assert.NotContains(t, string(encoded), "upstream.invalid")
+		assert.NotContains(t, string(encoded), "private")
+		assert.Contains(t, string(encoded), "service_quota_exceeded")
+		if !multi {
+			service.DisableChannel(*failure, "quota_not_enough")
+			_, total, err = model.GetAuditLogs(model.AuditLogFilter{Category: model.AuditCategorySystem}, 0, 20, common.RoleAdminUser)
+			require.NoError(t, err)
+			assert.EqualValues(t, 1, total)
+		}
+	}
+	// Even a wrongly attributed alert cannot leak through the personal endpoint.
+	model.RecordAuditLog(nil, model.AuditLog{UserId: 42, Username: "misattributed", ActorRole: common.RoleAdminUser, Category: model.AuditCategorySystem, Action: "channel.auto_disable", Success: true})
+	for _, tc := range []struct {
+		role int
+		self bool
+		want int64
+	}{
+		{common.RoleCommonUser, false, 0}, {common.RoleAdminUser, true, 0}, {common.RoleRootUser, true, 0},
+		{common.RoleAdminUser, false, 3}, {common.RoleRootUser, false, 3},
+	} {
+		entries, total, err := model.GetAuditLogs(model.AuditLogFilter{SelfView: tc.self, Category: model.AuditCategorySystem}, 0, 20, tc.role)
+		require.NoError(t, err)
+		assert.Equal(t, tc.want, total)
+		assert.Len(t, entries, int(tc.want))
+	}
+	var mainCount int64
+	model.RecordAuditLog(nil, model.AuditLog{EventId: "legacy-null-category", UserId: 42, Username: "legacy", ActorRole: common.RoleCommonUser})
+	require.NoError(t, logDB.Model(&model.AuditLog{}).Where("event_id = ?", "legacy-null-category").Update("category", nil).Error)
+	personal, count, err := model.GetAuditLogs(model.AuditLogFilter{SelfView: true, UserId: 42}, 0, 20, common.RoleCommonUser)
+	require.NoError(t, err)
+	require.EqualValues(t, 1, count)
+	assert.Equal(t, "legacy-null-category", personal[0].EventId)
+	assert.False(t, db.Migrator().HasTable(&model.AuditLog{}))
+	require.NoError(t, logDB.Model(&model.AuditLog{}).Count(&mainCount).Error)
+	assert.EqualValues(t, 4, mainCount)
+}

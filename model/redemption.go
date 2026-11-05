@@ -19,9 +19,9 @@ type Redemption struct {
 	Name         string         `json:"name" gorm:"index"`
 	Quota        int            `json:"quota" gorm:"default:100"`
 	CreatedTime  int64          `json:"created_time" gorm:"bigint"`
-	RedeemedTime int64          `json:"redeemed_time" gorm:"bigint"`
+	RedeemedTime int64          `json:"redeemed_time" gorm:"bigint;index"`
 	Count        int            `json:"count" gorm:"-:all"` // only for api request
-	UsedUserId   int            `json:"used_user_id"`
+	UsedUserId   int            `json:"used_user_id" gorm:"index"`
 	DeletedAt    gorm.DeletedAt `gorm:"index"`
 	ExpiredTime  int64          `json:"expired_time" gorm:"bigint"` // 过期时间，0 表示不过期
 }
@@ -153,7 +153,7 @@ func Redeem(key string, userId int) (quota int, err error) {
 		if err != nil {
 			return errors.New("无效的兑换码")
 		}
-		if redemption.Status != common.RedemptionCodeStatusEnabled {
+		if redemption.Status != common.RedemptionCodeStatusEnabled || redemption.UsedUserId > 0 || redemption.RedeemedTime > 0 {
 			return errors.New("该兑换码已被使用")
 		}
 		if redemption.ExpiredTime != 0 && redemption.ExpiredTime < common.GetTimestamp() {
@@ -163,7 +163,7 @@ func Redeem(key string, userId int) (quota int, err error) {
 		// enabled -> used may credit quota, so a concurrent redeem of the
 		// same code loses here even without a row lock (e.g. on SQLite).
 		result := tx.Model(&Redemption{}).
-			Where("id = ? AND status = ?", redemption.Id, common.RedemptionCodeStatusEnabled).
+			Where("id = ? AND status = ? AND used_user_id = 0 AND redeemed_time = 0", redemption.Id, common.RedemptionCodeStatusEnabled).
 			Updates(map[string]any{
 				"redeemed_time": common.GetTimestamp(),
 				"status":        common.RedemptionCodeStatusUsed,
@@ -200,7 +200,7 @@ func (redemption *Redemption) Insert() error {
 
 func (redemption *Redemption) SelectUpdate() error {
 	// This can update zero values
-	return DB.Model(redemption).Select("redeemed_time", "status").Updates(redemption).Error
+	return redemption.Update()
 }
 
 // Update Make sure your token's fields is completed, because this will update non-zero values
@@ -211,9 +211,18 @@ func (redemption *Redemption) Update() error {
 	if err := common.ValidateWalletQuota(redemption.Quota); err != nil {
 		return err
 	}
-	var err error
-	err = DB.Model(redemption).Select("name", "status", "quota", "redeemed_time", "expired_time").Updates(redemption).Error
-	return err
+	// A redeemed code is a financial record, including after soft deletion.
+	// Check persisted state atomically so an edit racing redemption cannot reset it.
+	result := DB.Model(redemption).
+		Where("used_user_id = 0 AND redeemed_time = 0 AND status <> ?", common.RedemptionCodeStatusUsed).
+		Select("name", "status", "quota", "expired_time").Updates(redemption)
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return errors.New("redeemed codes cannot be modified")
+	}
+	return nil
 }
 
 func (redemption *Redemption) Delete() error {

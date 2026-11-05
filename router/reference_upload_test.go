@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/controller"
 	"github.com/QuantumNous/new-api/middleware"
 	"github.com/QuantumNous/new-api/model"
@@ -111,7 +112,7 @@ func TestDomesticTaskRetentionAndRecovery(t *testing.T) {
 	assert.Equal(t, 200, post(true, body).Code)
 	assert.EqualValues(t, 1, generations.Load())
 	assert.EqualValues(t, 2, transport.calls.Load())
-	legacyID := "legacy:7:"+task.TaskID
+	legacyID := "legacy:7:" + task.TaskID
 	stateBody, err := common.Marshal(map[string]any{"execution_ids": []string{task.PrivateData.TransferExecutionID, legacyID}})
 	require.NoError(t, err)
 	query := func(stamp string, tamper bool) *httptest.ResponseRecorder {
@@ -139,7 +140,7 @@ func TestDomesticTaskRetentionAndRecovery(t *testing.T) {
 	finished := query(stamp, false)
 	require.Equal(t, 200, finished.Code)
 	assert.Contains(t, finished.Body.String(), strconv.FormatInt(now, 10))
-	assert.Contains(t, finished.Body.String(), `"`+legacyID+`":`+strconv.FormatInt(now,10))
+	assert.Contains(t, finished.Body.String(), `"`+legacyID+`":`+strconv.FormatInt(now, 10))
 	assert.Empty(t, service.DomesticReferenceFiles([]byte(`{"url":"https://evil.test/seedance-reference/storyboard-resumable-11111111111111111111111111111111.mp4"}`)))
 }
 
@@ -409,7 +410,29 @@ func TestReferenceURLRenewalBeforeSubmissionAndRetry(t *testing.T) {
 
 func TestResumableReferenceHTTPAuthorizationAndRangeContract(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	setupRelayRouterTestDB(t)
+	setupBridgeSecurityDB(t)
+	previousLogDB, previousErrorLogs := model.LOG_DB, constant.ErrorLogEnabled
+	model.LOG_DB, constant.ErrorLogEnabled = model.DB, true
+	previousLogType := common.LogDatabaseType()
+	if dsn := os.Getenv("REFERENCE_RETENTION_LOG_TEST_DSN"); dsn != "" {
+		require.Contains(t, dsn, "bridge_security_test_refcleanup_log")
+		t.Setenv("LOG_SQL_DSN", dsn)
+		require.NoError(t, model.InitLogDB())
+	}
+	require.NoError(t, model.LOG_DB.AutoMigrate(&model.Log{}))
+	require.NoError(t, model.DB.AutoMigrate(&model.Task{}))
+	t.Cleanup(func() {
+		require.NoError(t, model.LOG_DB.Migrator().DropTable(&model.Log{}))
+		require.NoError(t, model.DB.Migrator().DropTable(&model.Task{}))
+		if model.LOG_DB != model.DB {
+			conn, err := model.LOG_DB.DB()
+			require.NoError(t, err)
+			require.NoError(t, conn.Close())
+		}
+		model.LOG_DB, constant.ErrorLogEnabled = previousLogDB, previousErrorLogs
+		common.SetLogDatabaseType(previousLogType)
+	})
+	t.Setenv("MIDJOURNEY_UPLOAD_STORAGE_PATH", t.TempDir())
 	users := []model.User{
 		{Username: "resume-owner", Status: common.UserStatusEnabled, Group: "default", AffCode: "resume-owner"},
 		{Username: "resume-other", Status: common.UserStatusEnabled, Group: "default", AffCode: "resume-other"},
@@ -436,6 +459,10 @@ func TestResumableReferenceHTTPAuthorizationAndRangeContract(t *testing.T) {
 		}
 		request.Header.Set("X-Chunk-SHA256", digest)
 		request.Header.Set("Idempotency-Key", "upload_not_generation_123")
+		if path == "/mj/submit/upload-discord-images" {
+			request.Header.Set("Content-Type", "application/json")
+			request.Header.Set("X-New-Api-Reference-Assets", "1")
+		}
 		response := httptest.NewRecorder()
 		engine.ServeHTTP(response, request)
 		return response
@@ -458,6 +485,13 @@ func TestResumableReferenceHTTPAuthorizationAndRangeContract(t *testing.T) {
 	path := "/v1/uploads/references/resumable/" + prepared.UploadID
 	assert.Equal(t, 410, call("GET", path, nil, tokens[1].Key, "").Code)
 	assert.Equal(t, 409, call("PUT", path+"/chunks/0", data, tokens[0].Key, strings.Repeat("a", 64)).Code)
+	var uploadLog model.Log
+	require.NoError(t, model.LOG_DB.Where("user_id = ? AND type = ?", users[0].Id, model.LogTypeError).Last(&uploadLog).Error)
+	assert.Equal(t, "reference-upload", uploadLog.ModelName)
+	assert.Zero(t, uploadLog.ChannelId)
+	assert.Zero(t, uploadLog.Quota)
+	assert.Contains(t, uploadLog.Other, "reference_upload_conflict")
+	assert.NotContains(t, uploadLog.Other+uploadLog.Content, tokens[0].Key)
 	response = call("PUT", path+"/chunks/0", data, tokens[0].Key, digest)
 	require.Equal(t, 200, response.Code, response.Body.String())
 	response = call("POST", path+"/complete", []byte(`{}`), tokens[0].Key, "")
@@ -482,6 +516,37 @@ func TestResumableReferenceHTTPAuthorizationAndRangeContract(t *testing.T) {
 	engine.ServeHTTP(response, request)
 	assert.Equal(t, 200, response.Code)
 	assert.Equal(t, data, response.Body.Bytes())
+	// The same authenticated asset uploaded by any transport is published on the
+	// relay before MJ sees it. Another account cannot publish that asset.
+	publishBody, err := common.Marshal(map[string]any{
+		"base64Array": []string{"newapi-asset://" + digest + "/data-url"},
+	})
+	require.NoError(t, err)
+	const publishPath = "/mj/submit/upload-discord-images"
+	assert.Equal(t, 401, call("POST", publishPath, publishBody, "", "").Code)
+	assert.Equal(t, 410, call("POST", publishPath, publishBody, tokens[1].Key, "").Code)
+	response = call("POST", publishPath, publishBody, tokens[0].Key, "")
+	require.Equal(t, 200, response.Code, response.Body.String())
+	var published struct {
+		Result []string `json:"result"`
+	}
+	require.NoError(t, common.Unmarshal(response.Body.Bytes(), &published))
+	require.Len(t, published.Result, 1)
+	assert.True(t, strings.HasPrefix(published.Result[0], "https://www.oopii.cc/mj/upload/"))
+	publicURL, err := url.Parse(published.Result[0])
+	require.NoError(t, err)
+	response = call("GET", publicURL.RequestURI(), nil, "", "")
+	assert.Equal(t, 200, response.Code)
+	assert.Equal(t, data, response.Body.Bytes(), "published image keeps complete original bytes")
+	response = call("HEAD", publicURL.RequestURI(), nil, "", "")
+	assert.Equal(t, 200, response.Code)
+	assert.Equal(t, strconv.Itoa(len(data)), response.Header().Get("Content-Length"))
+	assert.Empty(t, response.Body.Bytes(), "upstream metadata probes do not transfer image bytes")
+	missingBody, err := common.Marshal(map[string]any{
+		"base64Array": []string{"newapi-asset://" + strings.Repeat("b", 64) + "/data-url"},
+	})
+	require.NoError(t, err)
+	assert.Equal(t, 410, call("POST", publishPath, missingBody, tokens[0].Key, "").Code)
 	for _, token := range tokens {
 		var stored model.Token
 		require.NoError(t, model.DB.First(&stored, token.Id).Error)
@@ -587,7 +652,7 @@ func TestResumableReferencePersistsAcknowledgementsAndValidatesPublication(t *te
 	assert.ErrorIs(t, err, service.ErrReferenceConflict)
 }
 
-func TestResumableReferenceReservesQuotaAndCleansExpiredSessions(t *testing.T) {
+func TestResumableReferenceIgnoresLegacyQuotaAndCleansExpiredSessions(t *testing.T) {
 	setupRelayRouterTestDB(t)
 	require.NoError(t, model.DB.AutoMigrate(&model.Task{}))
 	directory := t.TempDir()
@@ -601,7 +666,7 @@ func TestResumableReferenceReservesQuotaAndCleansExpiredSessions(t *testing.T) {
 	require.NoError(t, err)
 	_, err = store.PrepareResumable(7, service.ReferencePrepareRequest{
 		SHA256: strings.Repeat("b", 64), Size: 4 << 20, MIME: "image/png"})
-	assert.ErrorIs(t, err, service.ErrReferenceBusy, "unreceived bytes are reserved")
+	require.NoError(t, err, "legacy byte quotas must not block uploads with sufficient disk space")
 	path := filepath.Join(directory, "7-"+first.UploadID+".upload")
 	raw, err := os.ReadFile(path)
 	require.NoError(t, err)
@@ -1112,7 +1177,7 @@ func TestReferenceUploadProtocol(t *testing.T) {
 		engine.ServeHTTP(reply, httptest.NewRequest("POST", "/prepare", strings.NewReader(`{}`)))
 		assert.Equal(t, http.StatusUnauthorized, reply.Code)
 	})
-	t.Run("per-user cache capacity preserves other users", func(t *testing.T) {
+	t.Run("legacy per-user byte quota no longer rejects uploads", func(t *testing.T) {
 		quotaDir := t.TempDir()
 		quotaStore, err := service.NewReferenceUploadStore(service.ReferenceUploadConfig{AccessKey: "test-ak", SecretKey: "test-secret", Bucket: "test-bucket", UploadURL: origin.URL, DownloadURL: origin.URL, Directory: quotaDir, MaxCacheBytes: 32 << 20, MaxUserCacheBytes: 8 << 20})
 		require.NoError(t, err)
@@ -1121,7 +1186,7 @@ func TestReferenceUploadProtocol(t *testing.T) {
 		require.NoError(t, occupied.Truncate(8<<20))
 		require.NoError(t, occupied.Close())
 		_, err = quotaStore.Complete(context.Background(), 7, prepared.Ticket)
-		assert.ErrorIs(t, err, service.ErrReferenceBusy)
+		require.NoError(t, err)
 		other, err := quotaStore.Prepare(8, input)
 		require.NoError(t, err)
 		_, err = quotaStore.Complete(context.Background(), 8, other.Ticket)

@@ -470,6 +470,8 @@ export const STATIC_I18N_KEYS = [
 
   // API Keys
   'Enabled',
+  'Automatically disabled channel {{name}} (ID: {{id}})',
+  'Automatically disabled a key in channel {{name}} (ID: {{id}})',
   'Disabled',
   'Expired',
   'Exhausted',

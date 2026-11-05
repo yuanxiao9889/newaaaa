@@ -27,6 +27,7 @@ type RequestPolicySnapshot struct {
 	RetryCycleEnabled          bool
 	RetryTimeBudgetEnabled     bool
 	RetryTimeBudgetSeconds     int
+	RetryTimeBudgetMaxRetries  int
 	ImageInputRetentionMinutes int
 	RetryCodes                 []operation_setting.StatusCodeRange
 	DisableCodes               []operation_setting.StatusCodeRange
@@ -59,6 +60,7 @@ func requestPolicyDefaultOptions() map[string]string {
 	defaults["RetryCycleEnabled"] = "false"
 	defaults["RetryTimeBudgetEnabled"] = "false"
 	defaults["RetryTimeBudgetSeconds"] = "60"
+	defaults["RetryTimeBudgetMaxRetries"] = "15"
 	defaults["ImageInputRetentionMinutes"] = "20"
 	defaults["AutomaticRetryStatusCodes"] = operation_setting.AutomaticRetryStatusCodesToString()
 	defaults["AutomaticDisableStatusCodes"] = operation_setting.AutomaticDisableStatusCodesToString()
@@ -73,7 +75,7 @@ func requestPolicyDefaultOptions() map[string]string {
 }
 
 func IsRequestPolicyOption(key string) bool {
-	if key == "RetryCycleEnabled" || key == "RetryTimeBudgetEnabled" || key == "RetryTimeBudgetSeconds" || key == "ImageInputRetentionMinutes" {
+	if key == "RetryCycleEnabled" || key == "RetryTimeBudgetEnabled" || key == "RetryTimeBudgetSeconds" || key == "RetryTimeBudgetMaxRetries" || key == "ImageInputRetentionMinutes" {
 		return true
 	}
 	if strings.HasPrefix(key, "channel_affinity_setting.") {
@@ -153,9 +155,13 @@ func BuildRequestPolicy(options map[string]string) (*RequestPolicySnapshot, erro
 	if err != nil || snapshot.RetryTimeBudgetSeconds < 1 || snapshot.RetryTimeBudgetSeconds > 3600 {
 		return nil, fmt.Errorf("retry time budget must be an integer between 1 and 3600 seconds")
 	}
+	snapshot.RetryTimeBudgetMaxRetries, err = strconv.Atoi(raw["RetryTimeBudgetMaxRetries"])
+	if err != nil || snapshot.RetryTimeBudgetMaxRetries < 0 || snapshot.RetryTimeBudgetMaxRetries > 99 {
+		return nil, fmt.Errorf("retry time budget maximum retries must be an integer between 0 and 99")
+	}
 	snapshot.ImageInputRetentionMinutes, err = strconv.Atoi(raw["ImageInputRetentionMinutes"])
-	if err != nil || (snapshot.ImageInputRetentionMinutes != 10 && snapshot.ImageInputRetentionMinutes != 20 && snapshot.ImageInputRetentionMinutes != 30) {
-		return nil, fmt.Errorf("image input retention must be 10, 20 or 30 minutes")
+	if err != nil || (snapshot.ImageInputRetentionMinutes != 10 && snapshot.ImageInputRetentionMinutes != 20 && snapshot.ImageInputRetentionMinutes != 30 && snapshot.ImageInputRetentionMinutes != 60) {
+		return nil, fmt.Errorf("image input retention must be 10, 20, 30 or 60 minutes")
 	}
 	snapshot.AutoDisable, err = strconv.ParseBool(raw["AutomaticDisableChannelEnabled"])
 	if err != nil {

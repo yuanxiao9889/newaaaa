@@ -26,8 +26,14 @@ import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { requireServerSuccess } from '@/lib/server-error-message'
 import { useAuthStore } from '@/stores/auth-store'
+import { useNotificationStore } from '@/stores/notification-store'
 
-import { getAuditLogs, type AuditFilters, type AuditLog } from '../api'
+import {
+  getAuditLogs,
+  isChannelDisableAudit,
+  type AuditFilters,
+  type AuditLog,
+} from '../api'
 import { useAuditLogColumns } from './audit-log-columns'
 import { AuditLogFilterBar } from './audit-log-filter-bar'
 
@@ -36,6 +42,7 @@ const EMPTY_LOGS: AuditLog[] = []
 export function AuditLogViewer(props: {
   scope: 'all' | 'self'
   accessOnly?: boolean
+  systemOnly?: boolean
   currentTokenRef?: string
   // The token scope the viewer opens with and returns to on reset.
   defaultTokenScope?: 'all' | 'current'
@@ -47,6 +54,7 @@ export function AuditLogViewer(props: {
   const defaultTokenScope = props.defaultTokenScope ?? 'all'
   const [tokenScope, setTokenScope] = useState<string>(defaultTokenScope)
   const params = { ...filters }
+  if (props.systemOnly) params.category = 'system'
   if (props.accessOnly) params.category = 'access_token'
   if (tokenScope === 'current') params.token_ref = props.currentTokenRef
   if (tokenScope === 'historical') {
@@ -66,6 +74,7 @@ export function AuditLogViewer(props: {
       requireServerSuccess(await getAuditLogs(props.scope, params)),
     enabled: canQuery && !invalidRange,
     retry: false,
+    refetchInterval: props.systemOnly ? 30_000 : false,
   })
   const accessDenied =
     props.scope === 'all' &&
@@ -75,13 +84,38 @@ export function AuditLogViewer(props: {
   useEffect(() => {
     if (accessDenied) void onAccessDenied?.()
   }, [accessDenied, onAccessDenied])
+  const displayedLogs =
+    canQuery && !query.isError ? (query.data?.items ?? EMPTY_LOGS) : EMPTY_LOGS
+  const markAlertsRead = useNotificationStore(
+    (state) => state.markAdminAlertsRead
+  )
+  useEffect(() => {
+    if (props.scope !== 'all' || !userId || invalidRange) return
+    const markVisibleAlertsRead = () => {
+      if (document.visibilityState !== 'visible') return
+      const readIds = useNotificationStore.getState().adminReadIds[userId] ?? []
+      const unreadIds = displayedLogs
+        .filter(
+          (entry) =>
+            entry.category === 'system' && !readIds.includes(entry.event_id)
+        )
+        .map((entry) => entry.event_id)
+      if (!unreadIds.length) return
+      try {
+        markAlertsRead(userId, unreadIds)
+      } catch {
+        // The in-memory update still works when browser storage is unavailable.
+      }
+    }
+    markVisibleAlertsRead()
+    document.addEventListener('visibilitychange', markVisibleAlertsRead)
+    return () =>
+      document.removeEventListener('visibilitychange', markVisibleAlertsRead)
+  }, [displayedLogs, invalidRange, markAlertsRead, props.scope, userId])
   const columns = useAuditLogColumns(props.accessOnly)
   const { table } = useDataTable({
     columns,
-    data:
-      canQuery && !query.isError
-        ? (query.data?.items ?? EMPTY_LOGS)
-        : EMPTY_LOGS,
+    data: displayedLogs,
     getRowId: (entry) => entry.event_id,
     totalCount: query.isError ? 0 : (query.data?.total ?? 0),
     pagination: { pageIndex: filters.p - 1, pageSize: filters.page_size },
@@ -122,6 +156,11 @@ export function AuditLogViewer(props: {
         paginationInFooter={!props.accessOnly}
         className='h-auto min-h-0 flex-1'
         applyHeaderSize
+        getRowClassName={(row) =>
+          isChannelDisableAudit(row.original)
+            ? 'bg-destructive/5 text-destructive'
+            : undefined
+        }
         getColumnClassName={() => 'py-2'}
         tableClassName='[&_[data-slot=table]]:text-[13px] [&_[data-slot=table]_td]:text-[13px] [&_[data-slot=table]_td_*]:text-[13px] [&_[data-slot=table]_th]:text-[13px] [&_[data-slot=table]_th_*]:text-[13px]'
         toolbar={
@@ -132,6 +171,7 @@ export function AuditLogViewer(props: {
               onChange={update}
               scope={props.scope}
               accessOnly={props.accessOnly}
+              systemOnly={props.systemOnly}
               tokenScope={tokenScope}
               defaultTokenScope={defaultTokenScope}
               currentTokenRef={props.currentTokenRef}

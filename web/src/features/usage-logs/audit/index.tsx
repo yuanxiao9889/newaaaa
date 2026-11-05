@@ -21,8 +21,10 @@ import { useCallback, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { SectionPageLayout } from '@/components/layout'
+import { Button } from '@/components/ui/button'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { getUserProfile } from '@/features/profile/api'
+import { useAdminNotifications } from '@/hooks/use-admin-notifications'
 import {
   ADMIN_PERMISSION_RESOURCES,
   ADMIN_PERMISSION_ACTIONS,
@@ -37,7 +39,8 @@ export function AuditLogs() {
   const { t } = useTranslation()
   const user = useAuthStore((state) => state.auth.user)
   const queryClient = useQueryClient()
-  const [scope, setScope] = useState<'all' | 'self'>('all')
+  const [scope, setScope] = useState<'all' | 'self' | 'alerts'>('all')
+  const alerts = useAdminNotifications()
   const [accessRevoked, setAccessRevoked] = useState(false)
   const canReadAll =
     !!user &&
@@ -47,7 +50,9 @@ export function AuditLogs() {
       ADMIN_PERMISSION_RESOURCES.AUDIT,
       ADMIN_PERMISSION_ACTIONS.READ
     )
-  const effectiveScope = canReadAll && !accessRevoked ? scope : 'self'
+  const effectiveScope =
+    canReadAll && !accessRevoked && scope !== 'self' ? 'all' : 'self'
+  const systemOnly = effectiveScope === 'all' && scope === 'alerts'
   const userId = user?.id
   const handleAccessDenied = useCallback(async () => {
     setAccessRevoked(true)
@@ -94,12 +99,17 @@ export function AuditLogs() {
         {canReadAll && !accessRevoked && (
           <Tabs
             value={scope}
-            onValueChange={(value) =>
-              setScope(value === 'all' ? 'all' : 'self')
-            }
+            onValueChange={(value) => {
+              if (value === 'alerts' || value === 'all') setScope(value)
+              else setScope('self')
+            }}
           >
             <TabsList aria-label={t('View scope')}>
               <TabsTrigger value='all'>{t('All')}</TabsTrigger>
+              <TabsTrigger value='alerts'>
+                {t('Administrator alerts')}
+                {alerts.unreadCount > 0 && ` (${alerts.unreadCount})`}
+              </TabsTrigger>
               <TabsTrigger value='self'>{t('Only Mine')}</TabsTrigger>
             </TabsList>
           </Tabs>
@@ -107,6 +117,23 @@ export function AuditLogs() {
       </SectionPageLayout.Actions>
       <SectionPageLayout.Content>
         <div className='flex h-full min-h-0 flex-col gap-3'>
+          {systemOnly && (
+            <div className='flex flex-wrap items-center justify-between gap-2'>
+              <p className='text-muted-foreground text-xs'>
+                {t(
+                  'Unread counts cover the latest 100 alerts. Read status is saved for this account in this browser.'
+                )}
+              </p>
+              <Button
+                variant='outline'
+                size='sm'
+                onClick={alerts.markRecentRead}
+                disabled={!alerts.unreadCount || alerts.isError}
+              >
+                {t('Mark recent alerts as read')}
+              </Button>
+            </div>
+          )}
           {accessRevoked && (
             <p role='status' className='text-muted-foreground shrink-0 text-xs'>
               {t('Audit access changed. Showing only your records.')}
@@ -114,8 +141,9 @@ export function AuditLogs() {
           )}
           <div className='min-h-0 flex-1'>
             <AuditLogViewer
-              key={`${userId}:${effectiveScope}`}
+              key={`${userId}:${effectiveScope}:${systemOnly}`}
               scope={effectiveScope}
+              systemOnly={systemOnly}
               onAccessDenied={handleAccessDenied}
             />
           </div>

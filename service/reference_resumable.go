@@ -16,7 +16,6 @@ import (
 )
 
 const ReferenceChunkBytes = 1 << 20
-const referenceUploadLifetime = 24 * time.Hour
 
 var ErrReferenceConflict = errors.New("reference upload content conflicts with the prepared asset")
 
@@ -73,7 +72,17 @@ func (s *ReferenceUploadStore) loadUpload(user int, id string) (*referenceUpload
 		len(manifest.Chunks) > 8 || manifest.Chunks == nil {
 		return nil, ErrReferenceInvalid
 	}
-	if manifest.ExpiresAt <= time.Now().Unix() {
+	info, err := os.Stat(manifestPath)
+	if err != nil {
+		return nil, ErrReferenceUnavailable
+	}
+	// Cap old 24-hour receipts by the same idle lifetime as their files. A
+	// renewed, verified asset remains authoritative even if its receipt is old.
+	manifest.ExpiresAt = min(manifest.ExpiresAt, info.ModTime().Add(ReferenceRetention()).Unix())
+	result := s.uploadResult(&manifest)
+	if result.Status == "ready" {
+		manifest.ExpiresAt = result.ExpiresAt
+	} else if manifest.Complete || manifest.ExpiresAt <= time.Now().Unix() {
 		return nil, ErrReferenceMissing
 	}
 	for index, digest := range manifest.Chunks {
@@ -97,6 +106,7 @@ func syncReferenceDirectory(directory string) error {
 }
 
 func (s *ReferenceUploadStore) saveUpload(manifest *referenceUploadManifest) error {
+	manifest.ExpiresAt = time.Now().Add(ReferenceRetention()).Unix()
 	raw, err := common.Marshal(manifest)
 	if err != nil {
 		return err
@@ -184,8 +194,7 @@ func (s *ReferenceUploadStore) PrepareResumable(user int, input ReferencePrepare
 		return ReferenceResumableResult{}, err
 	}
 	manifestPath, stalePart := s.uploadPaths(user, id)
-	// A completed object may have reached its independent 12-hour cache
-	// lifetime before the upload receipt expires. Restart its empty session.
+	// A missing or expired object cannot reuse old chunk acknowledgements.
 	if os.Remove(manifestPath) != nil && fileExistsReference(manifestPath) {
 		return ReferenceResumableResult{}, ErrReferenceUnavailable
 	}
@@ -194,7 +203,7 @@ func (s *ReferenceUploadStore) PrepareResumable(user int, input ReferencePrepare
 	}
 	now := time.Now()
 	manifest = &referenceUploadManifest{Version: 1, UserID: user, UploadID: id, Input: input,
-		CreatedAt: now.Unix(), ExpiresAt: now.Add(referenceUploadLifetime).Unix(), Chunks: map[int]string{}}
+		CreatedAt: now.Unix(), ExpiresAt: now.Add(ReferenceRetention()).Unix(), Chunks: map[int]string{}}
 	result := s.uploadResult(manifest)
 	if result.Status == "ready" {
 		asset := filepath.Join(s.config.Directory, fmt.Sprintf("%d-%s.asset", user, input.SHA256))
@@ -204,13 +213,14 @@ func (s *ReferenceUploadStore) PrepareResumable(user int, input ReferencePrepare
 		result.ExpiresAt = now.Add(ReferenceRetention()).Unix()
 		return result, nil
 	}
-	used, files := s.cleanupLocked()
-	userUsed, userFiles := s.referenceUserUsageLocked(user)
+	_, files := s.cleanupLocked()
 	// Reserve the full eventual file, including sparse/unreceived bytes. This
 	// prevents many cheap prepares from overcommitting available disk capacity.
-	if used+s.reserved+input.Size+8192 > s.config.MaxCacheBytes || files >= 10000 ||
-		userUsed+s.userReserved[user]+input.Size+8192 > s.config.MaxUserCacheBytes || userFiles >= 1000 {
+	if files >= 10000 {
 		return ReferenceResumableResult{}, ErrReferenceBusy
+	}
+	if err := s.reclaimReferenceSpaceLocked(input.Size + 8192); err != nil {
+		return ReferenceResumableResult{}, err
 	}
 	_, part := s.uploadPaths(user, id)
 	if err = os.Remove(part); err != nil && !errors.Is(err, os.ErrNotExist) {
@@ -276,6 +286,9 @@ func (s *ReferenceUploadStore) WriteResumableChunk(user int, id string, index in
 	}
 	if s.uploadResult(manifest).Status == "ready" {
 		return s.uploadResult(manifest), nil
+	}
+	if err := s.reclaimReferenceSpaceLocked(0); err != nil {
+		return ReferenceResumableResult{}, err
 	}
 	_, part := s.uploadPaths(user, id)
 	file, err := os.OpenFile(part, os.O_CREATE|os.O_RDWR, 0600)
@@ -363,7 +376,7 @@ func (s *ReferenceUploadStore) resumableUsageLocked(user int) (int64, int) {
 			manifestPath := strings.TrimSuffix(path, "-part")
 			if !fileExistsReference(manifestPath) {
 				if info, err := entry.Info(); err == nil {
-					if time.Since(info.ModTime()) >= time.Hour && os.Remove(path) == nil {
+					if time.Since(info.ModTime()) >= ReferenceRetention() && os.Remove(path) == nil {
 						continue
 					}
 					used += info.Size()
@@ -372,8 +385,8 @@ func (s *ReferenceUploadStore) resumableUsageLocked(user int) (int64, int) {
 			}
 			continue
 		}
-		if strings.HasPrefix(entry.Name(), ".upload-manifest-") {
-			if info, err := entry.Info(); err == nil && time.Since(info.ModTime()) > time.Hour {
+		if strings.HasPrefix(entry.Name(), ".upload-manifest-") || strings.HasPrefix(entry.Name(), ".reference-url-") {
+			if info, err := entry.Info(); err == nil && time.Since(info.ModTime()) >= ReferenceRetention() {
 				_ = os.Remove(filepath.Join(s.config.Directory, entry.Name()))
 			}
 			continue
@@ -391,7 +404,7 @@ func (s *ReferenceUploadStore) resumableUsageLocked(user int) (int64, int) {
 			entry.Name() != fmt.Sprintf("%d-%s.upload", manifest.UserID, manifest.UploadID) {
 			// Corrupt metadata is not silently reusable. Quarantine it by charging
 			// a maximum file until an operator or the age-based cleanup removes it.
-			if info, err := entry.Info(); err == nil && time.Since(info.ModTime()) > referenceUploadLifetime {
+			if info, err := entry.Info(); err == nil && time.Since(info.ModTime()) >= ReferenceRetention() {
 				if os.Remove(name) == nil {
 					continue
 				}
@@ -400,8 +413,17 @@ func (s *ReferenceUploadStore) resumableUsageLocked(user int) (int64, int) {
 			count++
 			continue
 		}
-		if manifest.ExpiresAt <= time.Now().Unix() {
-			_, part := s.uploadPaths(manifest.UserID, manifest.UploadID)
+		info, err := entry.Info()
+		if err != nil {
+			return s.config.MaxCacheBytes, 10000
+		}
+		manifest.ExpiresAt = min(manifest.ExpiresAt, info.ModTime().Add(ReferenceRetention()).Unix())
+		ready := s.uploadResult(&manifest).Status == "ready"
+		_, part := s.uploadPaths(manifest.UserID, manifest.UploadID)
+		// A completed receipt whose asset was reclaimed is not an outstanding
+		// upload reservation. Remove it immediately, including pre-upgrade ones.
+		if !ready && (manifest.Complete || manifest.ExpiresAt <= time.Now().Unix() ||
+			len(manifest.Chunks) > 0 && !fileExistsReference(part)) {
 			if os.Remove(part) == nil || !fileExistsReference(part) {
 				if os.Remove(name) == nil {
 					continue
@@ -409,7 +431,7 @@ func (s *ReferenceUploadStore) resumableUsageLocked(user int) (int64, int) {
 			}
 		}
 		used += 8192
-		if s.uploadResult(&manifest).Status != "ready" {
+		if !ready && !manifest.Complete {
 			used += manifest.Input.Size
 		}
 		count++
@@ -420,23 +442,4 @@ func (s *ReferenceUploadStore) resumableUsageLocked(user int) (int64, int) {
 func fileExistsReference(path string) bool {
 	_, err := os.Stat(path)
 	return !errors.Is(err, os.ErrNotExist)
-}
-
-func (s *ReferenceUploadStore) referenceUserUsageLocked(user int) (int64, int) {
-	entries, err := os.ReadDir(s.config.Directory)
-	if err != nil {
-		return s.config.MaxCacheBytes, 10000
-	}
-	used, count := s.resumableUsageLocked(user)
-	for _, entry := range entries {
-		if entry.IsDir() || !strings.HasPrefix(entry.Name(), strconv.Itoa(user)+"-") ||
-			(!strings.HasSuffix(entry.Name(), ".asset") && !strings.HasSuffix(entry.Name(), ".url") && !strings.HasSuffix(entry.Name(), ".part")) {
-			continue
-		}
-		if info, err := entry.Info(); err == nil {
-			used += info.Size()
-			count++
-		}
-	}
-	return used, count
 }

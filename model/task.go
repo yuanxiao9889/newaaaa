@@ -181,7 +181,8 @@ type TaskPrivateData struct {
 	ResponsesBackground bool `json:"responses_background,omitempty"`
 	// PluginState is plugin-owned cross-round data. Unlike Task.Data it is
 	// only replaced when a hook explicitly returns state.
-	PluginState json.RawMessage `json:"plugin_state,omitempty"`
+	PluginState json.RawMessage       `json:"plugin_state,omitempty"`
+	AudioQueue  *AsyncAudioQueueState `json:"audio_queue,omitempty"`
 	// PollFailures counts consecutive unrecognized or transient poll outcomes.
 	PollFailures int `json:"poll_failures,omitempty"`
 	// ResultDiscarded marks an immediate terminal result whose submit route

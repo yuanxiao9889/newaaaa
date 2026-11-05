@@ -250,6 +250,14 @@ var accessTokenRouteRules = map[string]accessTokenRouteRule{
 	"DELETE /api/redemption/invalid": accessTokenScopeRule("redemption:write"),
 	"DELETE /api/redemption/:id":     accessTokenScopeRule("redemption:write"),
 
+	// router/api-router.go: /api/recharge-records
+	"GET /api/recharge-records/config":                       accessTokenAnyRule,
+	"GET /api/recharge-records/self":                         accessTokenScopeRule("wallet:read"),
+	"POST /api/recharge-records/invoice-markings":            accessTokenSessionRule,
+	"POST /api/recharge-records/historical-jobs":             accessTokenSessionRule,
+	"POST /api/recharge-records/historical-jobs/:id/advance": accessTokenSessionRule,
+	"POST /api/recharge-records/historical-review/:id":       accessTokenSessionRule,
+
 	// router/api-router.go: /api/audit, /api/log, /api/data
 	"GET /api/audit/self":                       accessTokenScopeRule("usage:read"),
 	"GET /api/log/":                             accessTokenScopeRule("log:read"),

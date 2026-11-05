@@ -136,7 +136,7 @@ export function BridgeManagement() {
                         <>
                           <p>
                             {t(
-                              'Stored: {{stored}} MiB · Reserved: {{reserved}} MiB · Limit: {{limit}} MiB',
+                              'Stored: {{stored}} MiB · Reserved: {{reserved}} MiB',
                               {
                                 stored: formatNumber(
                                   storage.stored_bytes / 1048576,
@@ -144,10 +144,6 @@ export function BridgeManagement() {
                                 ),
                                 reserved: formatNumber(
                                   storage.reserved_bytes / 1048576,
-                                  locale
-                                ),
-                                limit: formatNumber(
-                                  storage.max_cache_bytes / 1048576,
                                   locale
                                 ),
                               }

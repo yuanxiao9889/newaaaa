@@ -317,6 +317,11 @@ export interface LogStatistics {
   quota: number
   rpm: number
   tpm: number
+  topup?: {
+    quota: string
+    amounts: Record<string, string>
+    uncounted: number
+  } | null
 }
 
 // ============================================================================

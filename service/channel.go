@@ -36,6 +36,23 @@ func DisableChannel(channelError types.ChannelError, reason string) {
 
 	success := model.UpdateChannelStatus(channelError.ChannelId, channelError.UsingKey, common.ChannelStatusAutoDisabled, reason)
 	if success {
+		// Store a classified diagnostic, never the raw upstream response or key.
+		diagnostic := common.ClassifyPublicError("", reason, 0, false)
+		if strings.Contains(strings.ToLower(reason), "quota_not_enough") {
+			diagnostic = common.ClassifyPublicError("insufficient_quota", "", 0, false)
+		}
+		action := "channel.auto_disable"
+		if channelError.IsMultiKey {
+			action = "channel.key_auto_disable"
+		}
+		model.RecordAuditLog(nil, model.AuditLog{
+			Username: "system", ActorRole: common.RoleAdminUser, Category: model.AuditCategorySystem,
+			Action: action, AuthMethod: "system", Success: true,
+			Other: model.AuditOther{Op: &model.AuditOperation{Action: action, Params: model.AuditFields{
+				"id": channelError.ChannelId, "name": channelError.ChannelName,
+				"reason": diagnostic.Message, "error_code": diagnostic.Code,
+			}}},
+		})
 		if shouldCloseActiveWebSocketsAfterDisable(channelError.ChannelId) {
 			CloseActiveWebSocketsForChannel(channelError.ChannelId, ChannelDisabledCloseReason)
 		}

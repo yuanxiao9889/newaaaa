@@ -2210,10 +2210,18 @@ func TestAsyncImageRetryCycleBudget(t *testing.T) {
 		unavailableGroup                     bool
 		contentRejected, direct              bool
 		safetyKeyword                        bool
+		alwaysFail, resumeAtLimit            bool
+		limit                                string
 		status, retries, wantPosts           int
 		success                              bool
 	}{
 		{name: "task submission cycles within time budget", cycle: true, timed: true, submission: true, status: 503, wantPosts: 4, success: true},
+		{name: "timed bridge stops after fifteen retries", cycle: true, timed: true, alwaysFail: true, status: 503, wantPosts: 16},
+		{name: "timed direct caps larger configured count", cycle: true, timed: true, alwaysFail: true, direct: true, retries: 99, status: 502, wantPosts: 16},
+		{name: "timed task submission stops after fifteen retries", cycle: true, timed: true, submission: true, alwaysFail: true, status: 503, wantPosts: 16},
+		{name: "resumed task retains exhausted attempt budget", cycle: true, timed: true, resumeAtLimit: true, retries: 99, status: 503},
+		{name: "custom timed limit stops after three retries", cycle: true, timed: true, alwaysFail: true, limit: "3", status: 503, wantPosts: 4},
+		{name: "zero timed limit only submits once", cycle: true, timed: true, alwaysFail: true, limit: "0", status: 503, retries: 99, wantPosts: 1},
 		{name: "bridge content rejection overrides cycle budget", cycle: true, timed: true, contentRejected: true, status: 400, retries: 9, wantPosts: 1},
 		{name: "direct content rejection overrides cycle budget", cycle: true, timed: true, contentRejected: true, direct: true, status: 502, retries: 9, wantPosts: 1},
 		{name: "bridge safe keyword overrides cycle budget", cycle: true, timed: true, safetyKeyword: true, status: 502, retries: 9, wantPosts: 1},
@@ -2251,6 +2259,11 @@ func TestAsyncImageRetryCycleBudget(t *testing.T) {
 			previous := model.CurrentRequestPolicy().Options
 			previousRetry := common.RetryTimes
 			require.NoError(t, model.UpdateRequestPolicyOptions(map[string]string{"RetryCycleEnabled": strconv.FormatBool(tc.cycle), "RetryTimeBudgetEnabled": strconv.FormatBool(tc.timed), "RetryTimeBudgetSeconds": "60", "AutomaticRetryStatusCodes": "400,403-404,429,500-503"}))
+			limit := tc.limit
+			if limit == "" {
+				limit = "15"
+			}
+			require.NoError(t, model.UpdateRequestPolicyOptions(map[string]string{"RetryTimeBudgetMaxRetries": limit}))
 			t.Cleanup(func() {
 				require.NoError(t, model.UpdateRequestPolicyOptions(previous))
 				common.RetryTimes = previousRetry
@@ -2270,7 +2283,7 @@ func TestAsyncImageRetryCycleBudget(t *testing.T) {
 			var posts atomic.Int32
 			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				w.Header().Set("Content-Type", "application/json")
-				if posts.Add(1) < 4 && !tc.resumeCycle {
+				if (posts.Add(1) < 4 || tc.alwaysFail) && !tc.resumeCycle {
 					w.WriteHeader(tc.status)
 					if tc.safetyKeyword {
 						_, _ = io.WriteString(w, `{"error":{"code":"server_error","message":"SAFE"}}`)
@@ -2347,6 +2360,13 @@ func TestAsyncImageRetryCycleBudget(t *testing.T) {
 					assert.Equal(t, []string{"701"}, c.GetStringSlice("use_channel"))
 					return
 				}
+				if tc.alwaysFail {
+					require.NotNil(t, taskErr)
+					assert.Nil(t, outcome)
+					assert.EqualValues(t, tc.wantPosts, posts.Load())
+					assert.Len(t, c.GetStringSlice("use_channel"), 16)
+					return
+				}
 				require.Nil(t, taskErr)
 				require.NotNil(t, outcome)
 				assert.EqualValues(t, 4, posts.Load())
@@ -2373,6 +2393,14 @@ func TestAsyncImageRetryCycleBudget(t *testing.T) {
 				task.PrivateData.ChannelRetryPath = []string{"701"}
 				require.NoError(t, db.Save(&task).Error)
 			}
+			if tc.resumeAtLimit {
+				task.PrivateData.ImageRetry.StartedAtMS = time.Now().UnixMilli()
+				task.PrivateData.ImageRetry.CycleStart = 14
+				for range 8 {
+					task.PrivateData.ChannelRetryPath = append(task.PrivateData.ChannelRetryPath, "701", "809")
+				}
+				require.NoError(t, db.Save(&task).Error)
+			}
 			require.True(t, claimInternalAsyncImageTask(&task))
 			require.NoError(t, db.First(&task, task.ID).Error)
 			err := executeInternalAsyncImageTask(context.Background(), &task)
@@ -2385,6 +2413,12 @@ func TestAsyncImageRetryCycleBudget(t *testing.T) {
 			var stored model.Task
 			require.NoError(t, db.First(&stored, task.ID).Error)
 			assert.NotContains(t, stored.PrivateData.ChannelRetryPath, "810", "disabled channel must stay excluded in every round")
+			if tc.alwaysFail {
+				assert.Len(t, stored.PrivateData.ChannelRetryPath, tc.wantPosts)
+			}
+			if tc.resumeAtLimit {
+				assert.Len(t, stored.PrivateData.ChannelRetryPath, 16)
+			}
 			if tc.localConfig {
 				assert.Equal(t, []string{"701"}, stored.PrivateData.ChannelRetryPath, "local setup failure must stop before selecting the next channel")
 			}
@@ -2412,10 +2446,14 @@ func TestAsyncImageRetryCycleBudget(t *testing.T) {
 
 func TestRetryBudgetDeadline(t *testing.T) {
 	start := time.Unix(1000, 0)
-	budget := service.RetryBudget{Deadline: start.Add(time.Minute)}
-	assert.Equal(t, 1, budget.Remaining(-10, start.Add(59*time.Second)))
-	assert.Zero(t, budget.Remaining(99, start.Add(time.Minute)))
-	assert.Zero(t, budget.Remaining(99, start.Add(61*time.Second)))
-	assert.Equal(t, -1, (service.RetryBudget{}).Remaining(-1, start))
-	assert.Equal(t, 3, (service.RetryBudget{}).Remaining(3, start))
+	budget := service.RetryBudget{Deadline: start.Add(time.Minute), MaxRetries: 15}
+	assert.Equal(t, 1, budget.Remaining(-10, 14, start.Add(59*time.Second)))
+	assert.Equal(t, 15, budget.Remaining(99, 1, start))
+	assert.Equal(t, 1, budget.Remaining(99, 15, start))
+	assert.Zero(t, budget.Remaining(99, 16, start))
+	assert.Zero(t, budget.Remaining(99, 25, start))
+	assert.Zero(t, budget.Remaining(99, 1, start.Add(time.Minute)))
+	assert.Zero(t, budget.Remaining(99, 1, start.Add(61*time.Second)))
+	assert.Equal(t, -1, (service.RetryBudget{}).Remaining(-1, 16, start))
+	assert.Equal(t, 3, (service.RetryBudget{}).Remaining(3, 16, start))
 }

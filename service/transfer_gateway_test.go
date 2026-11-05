@@ -142,5 +142,7 @@ func TestQiniuResultsCopyOnceAndVerifyContentVersion(t *testing.T) {
 	assert.Equal(t, 1, uploads)
 	files, err := os.ReadDir(store.config.Directory)
 	require.NoError(t, err)
-	assert.Empty(t, files, "temporary result copy must be removed")
+	for _, file := range files {
+		assert.Equal(t, ".resumable.lock", file.Name(), "temporary result copy must be removed")
+	}
 }

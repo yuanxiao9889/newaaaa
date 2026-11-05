@@ -15,6 +15,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
+	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/gin-gonic/gin"
 )
@@ -22,7 +23,35 @@ import (
 const ReferenceAssetsHeader = "X-New-Api-Reference-Assets"
 
 func ReferenceUploadRateLimit() gin.HandlerFunc {
-	return userRateLimitFactory(120, 60, "reference-upload")
+	limit := userRateLimitFactory(120, 60, "reference-upload")
+	return func(c *gin.Context) {
+		limit(c)
+		if !c.IsAborted() {
+			c.Next()
+		}
+		status := c.Writer.Status()
+		if status < 400 || !constant.ErrorLogEnabled || c.GetInt("id") <= 0 {
+			return
+		}
+		code, message := c.GetString("reference_upload_error_code"), c.GetString("reference_upload_error_message")
+		if code == "" {
+			code, message = "reference_upload_failed", "Reference upload failed"
+			if status == http.StatusTooManyRequests {
+				code, message = "reference_upload_rate_limited", "Reference upload request rate limit reached"
+			}
+		}
+		other := model.NewLogOther()
+		other.SetPublic("request_path", c.FullPath())
+		other.SetPublic("request_method", c.Request.Method)
+		other.SetPublic("error_type", "reference_upload_error")
+		other.SetPublic("error_code", code)
+		other.SetPublic("status_code", status)
+		other.SetPublic("error_scope", "origin")
+		// Preparation has no model/channel yet. Keep it searchable by user and
+		// request ID without attributing the failure to an upstream provider.
+		model.RecordErrorLog(c, c.GetInt("id"), 0, "reference-upload", c.GetString("token_name"),
+			message, c.GetInt("token_id"), 0, false, c.GetString("group"), other)
+	}
 }
 
 // ResolveReferenceAssets runs after authentication and before model routing,

@@ -24,6 +24,7 @@ export type RetrySettings = {
   RetryCycleEnabled: boolean
   RetryTimeBudgetEnabled: boolean
   RetryTimeBudgetSeconds: number
+  RetryTimeBudgetMaxRetries: number
   RetryTimes: number
   AutomaticRetryStatusCodes: string
 }
@@ -55,6 +56,7 @@ export const defaultRequestPolicySettings: RequestPolicySettings = {
   RetryCycleEnabled: false,
   RetryTimeBudgetEnabled: false,
   RetryTimeBudgetSeconds: 60,
+  RetryTimeBudgetMaxRetries: 15,
   RetryTimes: 0,
   AutomaticRetryStatusCodes:
     '100-199,300-399,401-407,409-499,500-503,505-523,525-599',

@@ -32,6 +32,7 @@ import {
   Percent,
   PlugZap,
   Radio,
+  ReceiptText,
   ServerCog,
   Settings,
   ShieldCheck,
@@ -45,6 +46,8 @@ import { useTranslation } from 'react-i18next'
 import type { SidebarData } from '@/components/layout/types'
 import { ROLE } from '@/lib/roles'
 
+import { useAdminNotifications } from './use-admin-notifications'
+
 /**
  * Root navigation groups for the application sidebar.
  *
@@ -53,6 +56,7 @@ import { ROLE } from '@/lib/roles'
  */
 export function useSidebarData(): SidebarData {
   const { t } = useTranslation()
+  const alerts = useAdminNotifications()
 
   return {
     navGroups: [
@@ -99,6 +103,9 @@ export function useSidebarData(): SidebarData {
           {
             title: t('Audit Logs'),
             url: '/usage-logs/audit',
+            badge: alerts.unreadCount ? String(alerts.unreadCount) : undefined,
+            badgeVariant: 'destructive',
+            badgeLabel: t('Unread administrator alerts'),
             icon: ClipboardList,
           },
           {
@@ -162,6 +169,11 @@ export function useSidebarData(): SidebarData {
             title: t('Redemption Codes'),
             url: '/redemption-codes',
             icon: Ticket,
+          },
+          {
+            title: t('Recharge Records'),
+            url: '/recharge-records',
+            icon: ReceiptText,
           },
           {
             title: t('Subscriptions'),

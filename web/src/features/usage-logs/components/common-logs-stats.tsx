@@ -18,15 +18,24 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { useQuery } from '@tanstack/react-query'
 import { getRouteApi } from '@tanstack/react-router'
+import { useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { Skeleton } from '@/components/ui/skeleton'
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from '@/components/ui/tooltip'
+import { toIntlLocale } from '@/i18n/languages'
+import { getCurrencyDisplay } from '@/lib/currency'
 import { formatLogQuota } from '@/lib/format'
 import { requireServerSuccess } from '@/lib/server-error-message'
 import { cn } from '@/lib/utils'
+import { useSystemConfigStore } from '@/stores/system-config-store'
 
 import { getLogStats, getUserLogStats } from '../api'
-import { DEFAULT_LOG_STATS } from '../constants'
+import { DEFAULT_LOG_STATS, LOG_TYPE_ENUM } from '../constants'
 import { buildApiParams } from '../lib/utils'
 import { useLogsViewScope, useUsageLogsContext } from './usage-logs-provider'
 
@@ -49,22 +58,28 @@ function StatBadge(props: {
 }
 
 export function CommonLogsStats() {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
   const { isAdminView: isAdmin } = useLogsViewScope()
   const searchParams = route.useSearch()
   const { sensitiveVisible } = useUsageLogsContext()
-
-  const { data: stats, isLoading } = useQuery({
-    queryKey: ['usage-logs-stats', isAdmin, searchParams],
-    queryFn: async () => {
-      const params = buildApiParams({
+  useSystemConfigStore((state) => state.config.currency)
+  const locale = toIntlLocale(i18n.resolvedLanguage || i18n.language)
+  const params = useMemo(
+    () =>
+      buildApiParams({
         page: 1,
         pageSize: 1,
         searchParams,
         columnFilters: [],
         isAdmin,
-      })
+      }),
+    [searchParams, isAdmin]
+  )
+  const showTopup = params.type === LOG_TYPE_ENUM.TOPUP
 
+  const { data: stats, isLoading } = useQuery({
+    queryKey: ['usage-logs-stats', isAdmin, params],
+    queryFn: async () => {
       const result = isAdmin
         ? requireServerSuccess(await getLogStats(params))
         : requireServerSuccess(await getUserLogStats(params))
@@ -73,13 +88,39 @@ export function CommonLogsStats() {
         ? result.data || DEFAULT_LOG_STATS
         : DEFAULT_LOG_STATS
     },
-    placeholderData: (previousData) => previousData,
   })
+
+  const amounts = new Map(
+    Object.entries(stats?.topup?.amounts ?? {}).map(([symbol, amount]) => [
+      symbol,
+      Number(amount),
+    ])
+  )
+  const quota = Number(stats?.topup?.quota ?? 0)
+  const { config, meta } = getCurrencyDisplay()
+  const symbol = meta.kind === 'tokens' ? '' : meta.symbol
+  const creditedAmount =
+    meta.kind === 'tokens'
+      ? quota
+      : (quota / config.quotaPerUnit) * meta.exchangeRate
+  if (creditedAmount !== 0 || amounts.size === 0) {
+    amounts.set(symbol, (amounts.get(symbol) ?? 0) + creditedAmount)
+  }
+  // The shared number formatter is limited to two decimals; log amounts need six.
+  const numberFormat = new Intl.NumberFormat(locale, {
+    maximumFractionDigits: 6,
+  })
+  const topupTotal = [...amounts]
+    .map(([currency, amount]) => `${currency}${numberFormat.format(amount)}`)
+    .join(' + ')
+  let topupValue = stats?.topup ? topupTotal : '—'
+  if (!sensitiveVisible) topupValue = '••••'
 
   if (isLoading) {
     return (
-      <div className='flex items-center gap-2'>
+      <div className='flex flex-wrap items-center gap-2'>
         <Skeleton className='h-7 w-[150px] rounded-md' />
+        {showTopup && <Skeleton className='h-7 w-[150px] rounded-md' />}
         <Skeleton className='h-7 w-[100px] rounded-md' />
         <Skeleton className='h-7 w-[120px] rounded-md' />
       </div>
@@ -93,6 +134,29 @@ export function CommonLogsStats() {
         value={sensitiveVisible ? formatLogQuota(stats?.quota || 0) : '••••'}
         accent='bg-sky-500/70'
       />
+      {showTopup && (
+        <Tooltip>
+          <TooltipTrigger render={<span tabIndex={0} />}>
+            <StatBadge
+              label={t('Top-up total')}
+              value={topupValue}
+              accent='bg-emerald-500/70'
+            />
+          </TooltipTrigger>
+          <TooltipContent>
+            {t(
+              'Total credited across all pages for the selected filters. Excludes balance deductions and subscription purchases. Historical amounts retain their recorded currency.'
+            )}
+          </TooltipContent>
+        </Tooltip>
+      )}
+      {showTopup && stats?.topup && stats.topup.uncounted > 0 && (
+        <span className='text-muted-foreground text-xs'>
+          {t('{{count}} records could not be included', {
+            count: stats.topup.uncounted,
+          })}
+        </span>
+      )}
       <StatBadge
         label={t('RPM')}
         value={stats?.rpm || 0}

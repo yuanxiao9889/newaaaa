@@ -364,6 +364,11 @@ func migrateDB() error {
 		&Log{},
 		&Midjourney{},
 		&TopUp{},
+		&RechargeRecordInvoice{},
+		&RechargeRecordInvoiceHistory{},
+		&RechargeRecordInvoiceRequest{},
+		&HistoricalRecharge{},
+		&RechargeImportJob{},
 	}
 	if !common.UsingMainDatabase(common.DatabaseTypeSQLite) {
 		models = append(models, &AffiliateRewardRecord{})

@@ -56,6 +56,7 @@ export function AuditLogFilterBar(props: {
   onChange: (patch: Partial<AuditFilters>) => void
   scope: 'all' | 'self'
   accessOnly?: boolean
+  systemOnly?: boolean
   tokenScope: string
   defaultTokenScope: string
   currentTokenRef?: string
@@ -103,7 +104,7 @@ export function AuditLogFilterBar(props: {
           props.onChange({ success: value === 'all' ? undefined : value })
         }
       />
-      {props.accessOnly ? (
+      {props.accessOnly && (
         <AuditFilterSelect
           label={t('Token scope')}
           value={props.tokenScope}
@@ -122,7 +123,8 @@ export function AuditLogFilterBar(props: {
           ]}
           onChange={props.onTokenScopeChange}
         />
-      ) : (
+      )}
+      {!props.accessOnly && !props.systemOnly && (
         <AuditFilterSelect
           label={t('Category')}
           value={props.filters.category ?? 'all'}
@@ -132,6 +134,9 @@ export function AuditLogFilterBar(props: {
             { value: 'security', label: t('Account security') },
             { value: 'operation', label: t('Operation audit') },
             { value: 'access_token', label: t('Access Token') },
+            ...(props.scope === 'all'
+              ? [{ value: 'system', label: t('Administrator alerts') }]
+              : []),
           ]}
           onChange={(value) =>
             props.onChange({ category: value === 'all' ? undefined : value })

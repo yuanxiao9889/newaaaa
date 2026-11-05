@@ -113,8 +113,20 @@ export function NavGroup({ title, items }: NavGroupProps) {
 /**
  * Navigation badge component
  */
-function NavBadge({ children }: { children: ReactNode }) {
-  return <Badge className='shrink-0 px-1 py-0 text-xs'>{children}</Badge>
+function NavBadge(props: {
+  children: ReactNode
+  variant?: 'default' | 'destructive'
+  label?: string
+}) {
+  return (
+    <Badge
+      variant={props.variant}
+      aria-label={props.label}
+      className='shrink-0 px-1 py-0 text-xs'
+    >
+      {props.children}
+    </Badge>
+  )
 }
 
 /**
@@ -137,8 +149,18 @@ function SidebarMenuLink({ item, href }: { item: NavLink; href: string }) {
       >
         {item.icon && <item.icon className='shrink-0' />}
         <span className='min-w-0 flex-1 truncate'>{item.title}</span>
-        {item.badge && <NavBadge>{item.badge}</NavBadge>}
+        {item.badge && (
+          <NavBadge variant={item.badgeVariant} label={item.badgeLabel}>
+            {item.badge}
+          </NavBadge>
+        )}
       </SidebarMenuButton>
+      {item.badge && item.badgeVariant === 'destructive' && (
+        <span
+          aria-label={item.badgeLabel}
+          className='bg-destructive absolute end-1 top-1 hidden size-2 rounded-full group-data-[collapsible=icon]:block'
+        />
+      )}
     </SidebarMenuItem>
   )
 }

@@ -28,6 +28,7 @@ const options = {
   RetryCycleEnabled: 'false',
   RetryTimeBudgetEnabled: 'false',
   RetryTimeBudgetSeconds: '60',
+  RetryTimeBudgetMaxRetries: '15',
   RetryTimes: '2',
   ImageInputRetentionMinutes: '20',
   'channel_affinity_setting.enabled': 'true',
@@ -184,14 +185,22 @@ it('opens global affinity settings and the complete rules table without switchin
 })
 it('saves image input retention from the retry policy and restores the selected duration', async () => {
   show()
-  const retention = await screen.findByRole('combobox', { name: 'Image input retention' })
+  const retention = await screen.findByRole('combobox', {
+    name: 'Image input retention',
+  })
   expect(retention).toHaveValue('20')
-  expect(within(retention).getAllByRole('option').map(option => (option as HTMLOptionElement).value)).toEqual(['10', '20', '30'])
-  await userEvent.selectOptions(retention, '10')
+  expect(
+    within(retention)
+      .getAllByRole('option')
+      .map((option) => (option as HTMLOptionElement).value)
+  ).toEqual(['10', '20', '30', '60'])
+  await userEvent.selectOptions(retention, '60')
   await userEvent.click(screen.getByRole('button', { name: 'Save Changes' }))
   await waitFor(() => expect(api.patch).toHaveBeenCalledTimes(1))
-  expect(vi.mocked(api.patch).mock.calls[0][1]).toEqual({ options: { ImageInputRetentionMinutes: '10' } })
-  await waitFor(() => expect(retention).toHaveValue('10'))
+  expect(vi.mocked(api.patch).mock.calls[0][1]).toEqual({
+    options: { ImageInputRetentionMinutes: '60' },
+  })
+  await waitFor(() => expect(retention).toHaveValue('60'))
 })
 
 it('session rules sit between the session defaults and the retry budget', async () => {
@@ -819,6 +828,11 @@ it('channel cycling and time budget save together and the duration follows its s
   })
   expect(duration).toBeDisabled()
   expect(duration).toHaveValue(60)
+  const limit = screen.getByRole('spinbutton', {
+    name: 'Maximum retries within the time budget',
+  })
+  expect(limit).toHaveValue(15)
+  expect(limit).toBeDisabled()
   await userEvent.click(
     screen.getByRole('switch', {
       name: 'Cycle through channels after exhaustion',
@@ -830,6 +844,8 @@ it('channel cycling and time budget save together and the duration follows its s
     })
   )
   expect(duration).toBeEnabled()
+  expect(limit).toBeEnabled()
+  fireEvent.change(limit, { target: { value: '8' } })
   fireEvent.change(duration, { target: { value: '90' } })
   await userEvent.click(screen.getByRole('button', { name: 'Save Changes' }))
   await waitFor(() => expect(api.patch).toHaveBeenCalledTimes(1))
@@ -837,8 +853,34 @@ it('channel cycling and time budget save together and the duration follows its s
     RetryCycleEnabled: 'true',
     RetryTimeBudgetEnabled: 'true',
     RetryTimeBudgetSeconds: '90',
+    RetryTimeBudgetMaxRetries: '8',
   })
+  await userEvent.click(
+    screen.getByRole('switch', {
+      name: 'Use a time budget instead of the retry count',
+    })
+  )
+  expect(limit).toBeDisabled()
+  expect(limit).toHaveValue(8)
 })
+it.each(['-1', '100', '1.5'])(
+  'invalid timed retry limit %s prevents saving',
+  async (value) => {
+    show()
+    await userEvent.click(
+      await screen.findByRole('switch', {
+        name: 'Use a time budget instead of the retry count',
+      })
+    )
+    const limit = screen.getByRole('spinbutton', {
+      name: 'Maximum retries within the time budget',
+    })
+    fireEvent.change(limit, { target: { value } })
+    await userEvent.click(screen.getByRole('button', { name: 'Save Changes' }))
+    await waitFor(() => expect(limit).toHaveAttribute('aria-invalid', 'true'))
+    expect(api.patch).not.toHaveBeenCalled()
+  }
+)
 it('an invalid retry duration prevents saving', async () => {
   show()
   await userEvent.click(

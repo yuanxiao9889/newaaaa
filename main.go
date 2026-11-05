@@ -141,6 +141,7 @@ func main() {
 		common.SysError("reference upload acceleration is disabled: invalid configuration or unavailable cache directory")
 	}
 	controller.StartInternalAsyncImageWorkerLoop()
+	controller.StartAsyncAudioWorkerLoop()
 
 	// Report this process as a system instance so the System Info page can show
 	// all currently alive nodes in multi-instance deployments.
@@ -352,14 +353,8 @@ func InitResources() error {
 	if err != nil {
 		return err
 	}
-	if common.IsMasterNode {
-		count, backfillErr := model.BackfillAdminQuotaTopUps()
-		if backfillErr != nil {
-			common.SysError("failed to backfill administrator quota top-ups: " + backfillErr.Error())
-		} else if count > 0 {
-			common.SysLog(fmt.Sprintf("backfilled %d administrator quota top-ups", count))
-		}
-	}
+	// Historical recharge imports are explicitly advanced and reviewed in the
+	// dashboard. Startup must not scan usage logs or create inferred orders.
 
 	// Initialize Redis
 	err = common.InitRedisClient()

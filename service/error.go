@@ -94,6 +94,23 @@ type upstreamFailure struct {
 
 func (e *upstreamFailure) Unwrap() error { return e.error }
 
+// NewUpstreamImageResponseError handles a fully read image error envelope.
+// Success HTTP statuses do not turn an explicit rejection into a success, but
+// mixed results or an accepted job are not evidence that resubmission is safe.
+func NewUpstreamImageResponseError(providerError types.OpenAIError, status int, accepted bool) *types.NewAPIError {
+	upstreamStatus := status
+	if status >= 200 && status < 300 {
+		status = http.StatusBadGateway
+	}
+	apiErr := types.WithOpenAIError(providerError, status)
+	if accepted {
+		types.ErrOptionWithSkipRetry()(apiErr)
+		return apiErr
+	}
+	apiErr.Err = &upstreamFailure{error: apiErr.Err, statusCode: upstreamStatus}
+	return apiErr
+}
+
 // NewUpstreamTaskFailure is for a task whose upstream status explicitly says
 // failed, never for polling errors, accepted work or local processing failures.
 func NewUpstreamTaskFailure(err error, code types.ErrorCode, providerType string, status int) *types.NewAPIError {

@@ -3,9 +3,12 @@ package controller
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
+	"strings"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
@@ -25,21 +28,28 @@ type midjourneyPollSummary struct {
 	UnfinishedTasks int `json:"unfinished_tasks"`
 	ChannelsScanned int `json:"channels_scanned"`
 	NullTasksFailed int `json:"null_tasks_failed"`
+	TasksFetched    int `json:"tasks_fetched"`
+	TasksUpdated    int `json:"tasks_updated"`
+	ChannelsFailed  int `json:"channels_failed"`
 }
 
 // runMidjourneyTaskUpdateOnce performs one Midjourney polling pass synchronously.
 // It honors ctx cancellation (the system-task runner cancels it when the lease
 // is lost) and, when report is non-nil, reports progress as (processedChannels,
 // totalChannels) so the system task surfaces a percentage.
-func runMidjourneyTaskUpdateOnce(ctx context.Context, report func(processed, total int)) midjourneyPollSummary {
+func runMidjourneyTaskUpdateOnce(ctx context.Context, report func(processed, total int)) (midjourneyPollSummary, error) {
 	summary := midjourneyPollSummary{}
+	var pollErrors []error
 	if ctx == nil {
 		ctx = context.Background()
 	}
 
-	tasks := model.GetAllUnFinishTasks()
+	tasks, err := model.GetAllUnFinishTasks()
+	if err != nil {
+		return summary, fmt.Errorf("read unfinished Midjourney tasks: %w", err)
+	}
 	if len(tasks) == 0 {
-		return summary
+		return summary, errors.Join(pollErrors...)
 	}
 	summary.UnfinishedTasks = len(tasks)
 
@@ -64,18 +74,20 @@ func runMidjourneyTaskUpdateOnce(ctx context.Context, report func(processed, tot
 		})
 		if err != nil {
 			logger.LogError(ctx, fmt.Sprintf("Fix null mj_id task error: %v", err))
+			pollErrors = append(pollErrors, fmt.Errorf("repair tasks without upstream IDs: %w", err))
 		} else {
 			logger.LogInfo(ctx, fmt.Sprintf("Fix null mj_id task success: %v", nullTaskIds))
 		}
 	}
 	if len(taskChannelM) == 0 {
-		return summary
+		return summary, errors.Join(pollErrors...)
 	}
 
 	totalChannels := len(taskChannelM)
 	processedChannels := 0
 	for channelId, taskIds := range taskChannelM {
-		if ctx != nil && ctx.Err() != nil {
+		if ctx.Err() != nil {
+			pollErrors = append(pollErrors, ctx.Err())
 			break
 		}
 		if report != nil {
@@ -89,79 +101,33 @@ func runMidjourneyTaskUpdateOnce(ctx context.Context, report func(processed, tot
 		}
 		midjourneyChannel, err := model.CacheGetChannel(channelId)
 		if err != nil {
-			logger.LogError(ctx, fmt.Sprintf("CacheGetChannel: %v", err))
-			err := model.MjBulkUpdate(taskIds, map[string]any{
-				"fail_reason": fmt.Sprintf("获取渠道信息失败，请联系管理员，渠道ID：%d", channelId),
-				"status":      "FAILURE",
-				"progress":    "100%",
-			})
-			if err != nil {
-				logger.LogInfo(ctx, fmt.Sprintf("UpdateMidjourneyTask error: %v", err))
-			}
+			// A failed channel lookup is a synchronization failure, not proof
+			// that the upstream generation failed.
+			summary.ChannelsFailed++
+			pollErrors = append(pollErrors, fmt.Errorf("channel %d lookup: %w", channelId, err))
 			continue
 		}
-		requestUrl := fmt.Sprintf("%s/mj/task/list-by-condition", *midjourneyChannel.BaseURL)
-
-		body, err := common.Marshal(map[string]any{
-			"ids": taskIds,
-		})
-		if err != nil {
-			logger.LogError(ctx, fmt.Sprintf("Get Task marshal body error: %v", err))
-			continue
-		}
-		timeout := time.Second * 15
-		requestCtx, cancel := context.WithTimeout(ctx, timeout)
-		req, err := http.NewRequestWithContext(requestCtx, "POST", requestUrl, bytes.NewBuffer(body))
-		if err != nil {
-			cancel()
-			logger.LogError(ctx, fmt.Sprintf("Get Task error: %v", err))
-			continue
-		}
-		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("mj-api-secret", midjourneyChannel.Key)
-		resp, err := service.GetHttpClient().Do(req)
-		if err != nil {
-			logger.LogError(ctx, fmt.Sprintf("Get Task Do req error: %v", err))
-			cancel()
-			continue
-		}
-		if resp.StatusCode != http.StatusOK {
-			logger.LogError(ctx, fmt.Sprintf("Get Task status code: %d", resp.StatusCode))
-			resp.Body.Close()
-			cancel()
-			continue
-		}
-		responseBody, err := io.ReadAll(resp.Body)
-		if err != nil {
-			logger.LogError(ctx, fmt.Sprintf("Get Mjp Task parse body error: %v", err))
-			resp.Body.Close()
-			cancel()
-			continue
-		}
-		var responseItems []dto.MidjourneyDto
-		err = common.Unmarshal(responseBody, &responseItems)
-		if err != nil {
-			logger.LogError(ctx, fmt.Sprintf("Get Mjp Task parse body error2: %v, body: %s", err, string(responseBody)))
-			resp.Body.Close()
-			cancel()
-			continue
-		}
-		resp.Body.Close()
-		req.Body.Close()
+		channelCtx, cancel := context.WithTimeout(ctx, 45*time.Second)
+		responseItems, queryErr := fetchMidjourneyTasks(channelCtx, midjourneyChannel, taskIds)
 		cancel()
+		if queryErr != nil {
+			summary.ChannelsFailed++
+			pollErrors = append(pollErrors, fmt.Errorf("channel %d task query: %w", channelId, queryErr))
+			logger.LogError(ctx, fmt.Sprintf("Midjourney channel %d polling failed: %v", channelId, queryErr))
+		}
+		summary.TasksFetched += len(responseItems)
 
 		for _, responseItem := range responseItems {
 			task := taskM[responseItem.MjId]
-			if task == nil {
+			if task == nil || task.ChannelId != channelId {
 				logger.LogWarn(ctx, fmt.Sprintf("Midjourney task response ignored: unknown mj_id=%s", responseItem.MjId))
 				continue
 			}
 
-			useTime := (time.Now().UnixNano() / int64(time.Millisecond)) - task.SubmitTime
-			// 如果时间超过一小时，且进度不是100%，则认为任务失败
-			if useTime > 3600000 && task.Progress != "100%" {
-				responseItem.FailReason = "上游任务超时（超过1小时）"
-				responseItem.Status = "FAILURE"
+			// Elapsed wall time does not prove upstream failure. A query outage
+			// must not cause a refund for a task that can still finish upstream.
+			if responseItem.Status == "SUCCESS" || responseItem.Status == "FAILURE" {
+				responseItem.Progress = "100%"
 			}
 			if !checkMjTaskNeedUpdate(task, responseItem) {
 				continue
@@ -209,15 +175,17 @@ func runMidjourneyTaskUpdateOnce(ctx context.Context, report func(processed, tot
 					shouldReturnQuota = true
 				}
 			}
-			won, err := task.UpdateWithStatus(preStatus)
+			asyncTask, asyncTaskExists, won, err := syncMidjourneyAsyncTask(ctx, task, preStatus, responseItem)
 			if err != nil {
 				logger.LogError(ctx, "UpdateMidjourneyTask task error: "+err.Error())
+				pollErrors = append(pollErrors, fmt.Errorf("save Midjourney task %s: %w", task.MjId, err))
 			} else if won {
-				asyncTask, asyncTaskExists := syncMidjourneyAsyncTask(ctx, task, responseItem)
+				summary.TasksUpdated++
 				if shouldReturnQuota {
 					if asyncTask != nil {
 						if err := service.RefundTaskQuota(ctx, asyncTask, "构图失败"); err != nil {
 							logger.LogError(ctx, fmt.Sprintf("refund Midjourney async task %s failed: %v", asyncTask.TaskID, err))
+							pollErrors = append(pollErrors, fmt.Errorf("refund Midjourney task %s: %w", task.MjId, err))
 						}
 					} else if !asyncTaskExists {
 						service.RefundMidjourneyQuota(ctx, task, "构图失败")
@@ -229,7 +197,94 @@ func runMidjourneyTaskUpdateOnce(ctx context.Context, report func(processed, tot
 	if report != nil && (ctx == nil || ctx.Err() == nil) {
 		report(totalChannels, totalChannels)
 	}
-	return summary
+	return summary, errors.Join(pollErrors...)
+}
+
+// fetchMidjourneyTasks uses bounded batches and recovers missing results through
+// the standard single-task endpoint. Stop after the first failed fallback so an
+// upstream outage cannot turn one batch into hundreds of timed-out requests.
+func fetchMidjourneyTasks(ctx context.Context, channel *model.Channel, taskIDs []string) ([]dto.MidjourneyDto, error) {
+	var results []dto.MidjourneyDto
+	for len(taskIDs) > 0 {
+		batch := taskIDs[:min(len(taskIDs), 100)]
+		taskIDs = taskIDs[len(batch):]
+		items, batchErr := queryMidjourneyTasks(ctx, channel, batch, false)
+		byID := make(map[string]dto.MidjourneyDto, len(items))
+		for _, item := range items {
+			byID[item.MjId] = item
+		}
+		var missing []string
+		for _, id := range batch {
+			if item, ok := byID[id]; ok {
+				results = append(results, item)
+			} else {
+				missing = append(missing, id)
+			}
+		}
+		for _, id := range missing {
+			items, err := queryMidjourneyTasks(ctx, channel, []string{id}, true)
+			if err != nil {
+				return results, errors.Join(batchErr, fmt.Errorf("single task %s: %w", id, err))
+			}
+			if len(items) != 1 || items[0].MjId != id {
+				return results, fmt.Errorf("upstream omitted or mismatched task %s", id)
+			}
+			results = append(results, items[0])
+		}
+	}
+	return results, nil
+}
+
+func queryMidjourneyTasks(ctx context.Context, channel *model.Channel, taskIDs []string, individual bool) ([]dto.MidjourneyDto, error) {
+	requestURL := strings.TrimRight(channel.GetBaseURL(), "/") + "/mj/task/list-by-condition"
+	method := http.MethodPost
+	var body io.Reader
+	if individual {
+		method = http.MethodGet
+		requestURL = strings.TrimRight(channel.GetBaseURL(), "/") + "/mj/task/" + url.PathEscape(taskIDs[0]) + "/fetch"
+	} else {
+		encoded, err := common.Marshal(map[string]any{"ids": taskIDs})
+		if err != nil {
+			return nil, err
+		}
+		body = bytes.NewReader(encoded)
+	}
+	requestCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(requestCtx, method, requestURL, body)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("mj-api-secret", channel.Key)
+	resp, err := service.GetHttpClient().Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("upstream task query HTTP %d", resp.StatusCode)
+	}
+	// Never log raw upstream bodies: they may include prompts or signed URLs.
+	const maxResponseBytes = 8 << 20
+	data, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(data) > maxResponseBytes {
+		return nil, errors.New("upstream task query response exceeds 8 MiB")
+	}
+	var items []dto.MidjourneyDto
+	if individual {
+		var item dto.MidjourneyDto
+		if err := common.Unmarshal(data, &item); err != nil {
+			return nil, fmt.Errorf("invalid upstream task response: %w", err)
+		}
+		items = []dto.MidjourneyDto{item}
+	} else if err := common.Unmarshal(data, &items); err != nil {
+		return nil, fmt.Errorf("invalid upstream task list: %w", err)
+	}
+	return items, nil
 }
 
 func checkMjTaskNeedUpdate(oldTask *model.Midjourney, newTask dto.MidjourneyDto) bool {
@@ -287,36 +342,27 @@ func checkMjTaskNeedUpdate(oldTask *model.Midjourney, newTask dto.MidjourneyDto)
 	return false
 }
 
-func syncMidjourneyAsyncTask(ctx context.Context, mjTask *model.Midjourney, responseItem dto.MidjourneyDto) (*model.Task, bool) {
-	if mjTask == nil || mjTask.MjId == "" {
-		return nil, false
-	}
+func syncMidjourneyAsyncTask(ctx context.Context, mjTask *model.Midjourney, preStatus string, responseItem dto.MidjourneyDto) (*model.Task, bool, bool, error) {
 	asyncTask, exists, err := model.GetByTaskId(mjTask.UserId, mjTask.MjId)
 	if err != nil {
-		logger.LogError(ctx, fmt.Sprintf("Get Midjourney async task error: %v", err))
-		return nil, false
+		return nil, true, false, err
 	}
 	if !exists {
-		return nil, false
+		asyncTask = nil
 	}
-	if asyncTask.Platform != constant.TaskPlatformMidjourney {
-		logger.LogWarn(ctx, fmt.Sprintf("Task id %s exists but platform is %s, skip Midjourney async sync", mjTask.MjId, asyncTask.Platform))
-		return nil, false
+	if exists && asyncTask.Platform != constant.TaskPlatformMidjourney {
+		return nil, true, false, fmt.Errorf("task %s has unexpected platform %s", mjTask.MjId, asyncTask.Platform)
 	}
-	preStatus := asyncTask.Status
-	if !service.ApplyMidjourneyUpdateToAsyncTask(asyncTask, responseItem) {
-		return asyncTask, true
+	var changedTask *model.Task
+	var preAsyncStatus model.TaskStatus
+	if exists {
+		preAsyncStatus = asyncTask.Status
+		if service.ApplyMidjourneyUpdateToAsyncTask(asyncTask, responseItem) {
+			changedTask = asyncTask
+		}
 	}
-	won, err := asyncTask.UpdateWithStatus(preStatus)
-	if err != nil {
-		logger.LogError(ctx, fmt.Sprintf("Update Midjourney async task error: %v", err))
-		return nil, true
-	}
-	if !won {
-		logger.LogWarn(ctx, fmt.Sprintf("Midjourney async task %s already transitioned, skip billing", mjTask.MjId))
-		return nil, true
-	}
-	return asyncTask, true
+	won, err := mjTask.UpdateWithAsyncTask(ctx, preStatus, changedTask, preAsyncStatus)
+	return asyncTask, exists, won, err
 }
 
 func refundLegacyMidjourneyTask(ctx context.Context, task *model.Midjourney) {

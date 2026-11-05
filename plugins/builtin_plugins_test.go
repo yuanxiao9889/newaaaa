@@ -198,6 +198,16 @@ func TestHuiquH3PreservesVideoTaskContract(t *testing.T) {
 	assert.Nil(t, value, "legacy administrator per-call prices must keep their multiplier")
 }
 
+func TestHuiquH3ResultFixtures(t *testing.T) {
+	source, err := Source("huiqu-h3")
+	require.NoError(t, err)
+	data, err := fs.ReadFile(taskPlugins, "tasks/huiqu-h3/fixtures.json")
+	require.NoError(t, err)
+	report, err := jsplugin.ReplayFixture(t.Context(), source, data)
+	require.NoError(t, err)
+	assert.Equal(t, report.Total, report.Passed)
+}
+
 func TestBuiltInResponsesDecodersEchoChannelMappedAlias(t *testing.T) {
 	bodyOverrides := map[string]map[string]any{}
 	for _, key := range expectedKeys {

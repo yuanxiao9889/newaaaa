@@ -43,10 +43,14 @@ func protectedTaskReferences(tx *gorm.DB, user int) (map[string]bool, error) {
 // or process-local heartbeat is needed, so restart cannot release active input.
 func InsertImageTaskWithReferences(task *model.Task) error {
 	store := ReferenceUploads
-	if store == nil || task.PrivateData.ImageRetry == nil {
+	if store == nil || task.PrivateData.ImageRetry == nil && task.PrivateData.AudioQueue == nil {
 		return task.Insert()
 	}
-	body, err := os.ReadFile(task.PrivateData.ImageRetry.BodyPath)
+	requestPath := task.PrivateData.RequestBodyPath
+	if task.PrivateData.ImageRetry != nil {
+		requestPath = task.PrivateData.ImageRetry.BodyPath
+	}
+	body, err := os.ReadFile(requestPath)
 	if err != nil {
 		return err
 	}

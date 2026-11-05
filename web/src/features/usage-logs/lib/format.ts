@@ -542,6 +542,10 @@ const AUDIT_TEMPLATES: Record<string, string> = {
   'performance.gc': 'Triggered garbage collection',
   'performance.clear_logs': 'Cleared log files',
   // Channel
+  'channel.auto_disable':
+    'Automatically disabled channel {{name}} (ID: {{id}})',
+  'channel.key_auto_disable':
+    'Automatically disabled a key in channel {{name}} (ID: {{id}})',
   'channel.create': 'Created channel {{name}} (type {{type}}, count {{count}})',
   'channel.update': 'Updated channel {{name}} (ID: {{id}})',
   'channel.status_update': 'Updated channel status (ID: {{id}})',

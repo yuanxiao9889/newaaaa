@@ -1094,6 +1094,8 @@ func TestSettle_PerCallBilling_SkipsAdaptorAdjust(t *testing.T) {
 	adaptor := &mockAdaptor{adjustReturn: 2000}
 	taskResult := &relaycommon.TaskInfo{Status: model.TaskStatusSuccess}
 
+	require.NoError(t, model.DB.Create(task).Error)
+
 	settled := SettleTaskBillingOnComplete(ctx, adaptor, task, taskResult)
 
 	// Per-call: no adjustment despite adaptor returning 2000
@@ -1121,6 +1123,8 @@ func TestSettle_PerCallBilling_SkipsTotalTokens(t *testing.T) {
 
 	adaptor := &mockAdaptor{adjustReturn: 0}
 	taskResult := &relaycommon.TaskInfo{Status: model.TaskStatusSuccess, TotalTokens: 9999}
+
+	require.NoError(t, model.DB.Create(task).Error)
 
 	settled := SettleTaskBillingOnComplete(ctx, adaptor, task, taskResult)
 
@@ -1150,6 +1154,8 @@ func TestSettle_NonPerCallBilling_AppliesAdaptorAdjustment(t *testing.T) {
 
 	adaptor := &mockAdaptor{adjustReturn: adaptorQuota}
 	taskResult := &relaycommon.TaskInfo{Status: model.TaskStatusSuccess}
+
+	require.NoError(t, model.DB.Create(task).Error)
 
 	settled := SettleTaskBillingOnComplete(ctx, adaptor, task, taskResult)
 
@@ -1182,6 +1188,8 @@ func TestSettle_TieredEvaluationFailureKeepsPreConsumedCharge(t *testing.T) {
 		TaskUsageBilling: true,
 	}
 
+	require.NoError(t, model.DB.Create(task).Error)
+
 	settled := SettleTaskBillingOnComplete(ctx, &mockAdaptor{}, task, &relaycommon.TaskInfo{Status: model.TaskStatusSuccess})
 
 	assert.Error(t, settled)
@@ -1211,6 +1219,8 @@ func TestSettle_TieredFailureRefundsOnce(t *testing.T) {
 		UsageFacts:       map[string]any{"seconds": float64(5), "clips": float64(2)},
 		EstimatedTier:    "base",
 	}
+
+	require.NoError(t, model.DB.Create(task).Error)
 
 	settled := SettleTaskBillingOnComplete(
 		ctx,
@@ -1251,6 +1261,8 @@ func TestSettle_TieredSuccessStillRecomputes(t *testing.T) {
 		UsageFacts:       map[string]any{"seconds": float64(5), "clips": float64(2)},
 		EstimatedTier:    "base",
 	}
+
+	require.NoError(t, model.DB.Create(task).Error)
 
 	settled := SettleTaskBillingOnComplete(
 		ctx,
@@ -1325,6 +1337,8 @@ func TestSettle_TieredUsageFactsMergeCompletionOverSubmission(t *testing.T) {
 				EstimatedTier:    "base",
 			}
 
+			require.NoError(t, model.DB.Create(task).Error)
+
 			settled := SettleTaskBillingOnComplete(
 				context.Background(),
 				&mockAdaptor{},
@@ -1373,6 +1387,8 @@ func TestSettle_TieredSnapshotWriteBackUsesSettledFactsAndMatchedTier(t *testing
 		UsageFacts:       map[string]any{"resolution": "720P", "seconds": float64(5)},
 		EstimatedTier:    "720P",
 	}
+
+	require.NoError(t, model.DB.Create(task).Error)
 
 	settled := SettleTaskBillingOnComplete(
 		context.Background(),
@@ -1450,6 +1466,7 @@ func TestSettle_TokenRecalcFallsBackToCompletionTokens(t *testing.T) {
 			seedChannel(t, channelID)
 
 			task := makeTask(userID, channelID, preConsumed, tokenID, BillingSourceWallet, 0)
+			require.NoError(t, model.DB.Create(task).Error)
 			settled := SettleTaskBillingOnComplete(
 				context.Background(),
 				&mockAdaptor{},

@@ -47,6 +47,7 @@ import { Route as AuthenticatedModelsSectionRouteImport } from './routes/_authen
 import { Route as AuthenticatedPlaygroundIndexRouteImport } from './routes/_authenticated/playground/index'
 import { Route as AuthenticatedProfileIndexRouteImport } from './routes/_authenticated/profile/index'
 import { Route as AuthenticatedProfitIndexRouteImport } from './routes/_authenticated/profit/index'
+import { Route as AuthenticatedRechargeRecordsIndexRouteImport } from './routes/_authenticated/recharge-records/index'
 import { Route as AuthenticatedRedemptionCodesIndexRouteImport } from './routes/_authenticated/redemption-codes/index'
 import { Route as AuthenticatedSecurityIndexRouteImport } from './routes/_authenticated/security/index'
 import { Route as AuthenticatedSubscriptionsIndexRouteImport } from './routes/_authenticated/subscriptions/index'
@@ -275,6 +276,12 @@ const AuthenticatedProfitIndexRoute =
     path: '/profit/',
     getParentRoute: () => AuthenticatedRouteRoute,
   } as any)
+const AuthenticatedRechargeRecordsIndexRoute =
+  AuthenticatedRechargeRecordsIndexRouteImport.update({
+    id: '/recharge-records/',
+    path: '/recharge-records/',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
 const AuthenticatedRedemptionCodesIndexRoute =
   AuthenticatedRedemptionCodesIndexRouteImport.update({
     id: '/redemption-codes/',
@@ -481,6 +488,7 @@ export interface FileRoutesByFullPath {
   '/playground/': typeof AuthenticatedPlaygroundIndexRoute
   '/profile/': typeof AuthenticatedProfileIndexRoute
   '/profit/': typeof AuthenticatedProfitIndexRoute
+  '/recharge-records/': typeof AuthenticatedRechargeRecordsIndexRoute
   '/redemption-codes/': typeof AuthenticatedRedemptionCodesIndexRoute
   '/security/': typeof AuthenticatedSecurityIndexRoute
   '/subscriptions/': typeof AuthenticatedSubscriptionsIndexRoute
@@ -546,6 +554,7 @@ export interface FileRoutesByTo {
   '/playground': typeof AuthenticatedPlaygroundIndexRoute
   '/profile': typeof AuthenticatedProfileIndexRoute
   '/profit': typeof AuthenticatedProfitIndexRoute
+  '/recharge-records': typeof AuthenticatedRechargeRecordsIndexRoute
   '/redemption-codes': typeof AuthenticatedRedemptionCodesIndexRoute
   '/security': typeof AuthenticatedSecurityIndexRoute
   '/subscriptions': typeof AuthenticatedSubscriptionsIndexRoute
@@ -615,6 +624,7 @@ export interface FileRoutesById {
   '/_authenticated/playground/': typeof AuthenticatedPlaygroundIndexRoute
   '/_authenticated/profile/': typeof AuthenticatedProfileIndexRoute
   '/_authenticated/profit/': typeof AuthenticatedProfitIndexRoute
+  '/_authenticated/recharge-records/': typeof AuthenticatedRechargeRecordsIndexRoute
   '/_authenticated/redemption-codes/': typeof AuthenticatedRedemptionCodesIndexRoute
   '/_authenticated/security/': typeof AuthenticatedSecurityIndexRoute
   '/_authenticated/subscriptions/': typeof AuthenticatedSubscriptionsIndexRoute
@@ -683,6 +693,7 @@ export interface FileRouteTypes {
     | '/playground/'
     | '/profile/'
     | '/profit/'
+    | '/recharge-records/'
     | '/redemption-codes/'
     | '/security/'
     | '/subscriptions/'
@@ -748,6 +759,7 @@ export interface FileRouteTypes {
     | '/playground'
     | '/profile'
     | '/profit'
+    | '/recharge-records'
     | '/redemption-codes'
     | '/security'
     | '/subscriptions'
@@ -816,6 +828,7 @@ export interface FileRouteTypes {
     | '/_authenticated/playground/'
     | '/_authenticated/profile/'
     | '/_authenticated/profit/'
+    | '/_authenticated/recharge-records/'
     | '/_authenticated/redemption-codes/'
     | '/_authenticated/security/'
     | '/_authenticated/subscriptions/'
@@ -1132,6 +1145,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedProfitIndexRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/_authenticated/recharge-records/': {
+      id: '/_authenticated/recharge-records/'
+      path: '/recharge-records'
+      fullPath: '/recharge-records/'
+      preLoaderRoute: typeof AuthenticatedRechargeRecordsIndexRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
     '/_authenticated/redemption-codes/': {
       id: '/_authenticated/redemption-codes/'
       path: '/redemption-codes'
@@ -1437,6 +1457,7 @@ interface AuthenticatedRouteRouteChildren {
   AuthenticatedPlaygroundIndexRoute: typeof AuthenticatedPlaygroundIndexRoute
   AuthenticatedProfileIndexRoute: typeof AuthenticatedProfileIndexRoute
   AuthenticatedProfitIndexRoute: typeof AuthenticatedProfitIndexRoute
+  AuthenticatedRechargeRecordsIndexRoute: typeof AuthenticatedRechargeRecordsIndexRoute
   AuthenticatedRedemptionCodesIndexRoute: typeof AuthenticatedRedemptionCodesIndexRoute
   AuthenticatedSecurityIndexRoute: typeof AuthenticatedSecurityIndexRoute
   AuthenticatedSubscriptionsIndexRoute: typeof AuthenticatedSubscriptionsIndexRoute
@@ -1466,6 +1487,8 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedPlaygroundIndexRoute: AuthenticatedPlaygroundIndexRoute,
   AuthenticatedProfileIndexRoute: AuthenticatedProfileIndexRoute,
   AuthenticatedProfitIndexRoute: AuthenticatedProfitIndexRoute,
+  AuthenticatedRechargeRecordsIndexRoute:
+    AuthenticatedRechargeRecordsIndexRoute,
   AuthenticatedRedemptionCodesIndexRoute:
     AuthenticatedRedemptionCodesIndexRoute,
   AuthenticatedSecurityIndexRoute: AuthenticatedSecurityIndexRoute,

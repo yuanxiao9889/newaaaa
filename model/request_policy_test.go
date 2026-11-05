@@ -93,18 +93,29 @@ func TestRequestPolicyDatabaseMatrix(t *testing.T) {
 			assert.Equal(t, "strict", CurrentRequestPolicy().Affinity.SessionMode)
 			assert.Equal(t, rules, CurrentRequestPolicy().Options["channel_affinity_setting.rules"], "a global mode never rewrites rule fields")
 			require.NoError(t, UpdateRequestPolicyOptions(map[string]string{"RetryCycleEnabled": "true", "RetryTimeBudgetEnabled": "true", "RetryTimeBudgetSeconds": "60"}))
+			assert.Equal(t, 15, CurrentRequestPolicy().RetryTimeBudgetMaxRetries, "existing settings without the new key retain the default limit")
+			for _, limit := range []int{0, 3, 99, 15} {
+				require.NoError(t, UpdateRequestPolicyOptions(map[string]string{"RetryTimeBudgetMaxRetries": strconv.Itoa(limit)}))
+				loadOptionsFromDatabase()
+				loadOptionsFromDatabase()
+				assert.Equal(t, limit, CurrentRequestPolicy().RetryTimeBudgetMaxRetries)
+			}
 			loadOptionsFromDatabase()
 			loadOptionsFromDatabase()
 			assert.True(t, CurrentRequestPolicy().RetryCycleEnabled)
 			assert.True(t, CurrentRequestPolicy().RetryTimeBudgetEnabled)
 			assert.Equal(t, 60, CurrentRequestPolicy().RetryTimeBudgetSeconds)
-			for _, minutes := range []int{10, 20, 30} {
+			for _, minutes := range []int{10, 20, 30, 60} {
 				require.NoError(t, UpdateRequestPolicyOptions(map[string]string{"ImageInputRetentionMinutes": strconv.Itoa(minutes)}))
 				loadOptionsFromDatabase()
 				assert.Equal(t, minutes, CurrentRequestPolicy().ImageInputRetentionMinutes)
 			}
 			snapshot := CurrentRequestPolicy()
-			for _, value := range []string{"0", "15", "60", "12h", "1.5", ""} {
+			for _, value := range []string{"-1", "100", "1.5", "bad", ""} {
+				assert.Error(t, UpdateRequestPolicyOptions(map[string]string{"RetryTimeBudgetMaxRetries": value}))
+				assert.Same(t, snapshot, CurrentRequestPolicy())
+			}
+			for _, value := range []string{"0", "15", "61", "12h", "1.5", ""} {
 				assert.Error(t, UpdateRequestPolicyOptions(map[string]string{"ImageInputRetentionMinutes": value}))
 				assert.Same(t, snapshot, CurrentRequestPolicy())
 			}

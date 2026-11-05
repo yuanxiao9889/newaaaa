@@ -17,7 +17,8 @@ export const meta = {
   key: "jieapi-audio",
   name: "JieAPI Seed Audio",
   icon: "text:音频",
-  version: "1.0.0",
+  version: "1.1.0",
+  requiredCapabilities: ["native-audio-queue@1"],
   author: { name: "OOpii" },
   description: {
     en: "Synchronous Seed Audio generation through JieAPI",

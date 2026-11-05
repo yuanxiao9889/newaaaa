@@ -54,6 +54,26 @@ export interface AuditFilters {
   username?: string
   request_id?: string
 }
+
+export function isChannelDisableAudit(entry: AuditLog): boolean {
+  if (!entry.success) return false
+  if (
+    [
+      'channel.auto_disable',
+      'channel.key_auto_disable',
+      'channel.tag_disable',
+    ].includes(entry.action)
+  ) {
+    return true
+  }
+  const op = entry.other?.op as { params?: { status?: number } } | undefined
+  return (
+    ['channel.status_update', 'channel.status_update_batch'].includes(
+      entry.action
+    ) &&
+    (op?.params?.status === 2 || op?.params?.status === 3)
+  )
+}
 export async function getAuditLogs(
   scope: 'all' | 'self',
   params: AuditFilters

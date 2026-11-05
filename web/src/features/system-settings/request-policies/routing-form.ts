@@ -5,10 +5,13 @@ import { parseHttpStatusCodeRules } from '@/lib/http-status-code-rules'
 
 export function createRoutingPolicySchema(t: TFunction) {
   return z.object({
-    ImageInputRetentionMinutes: z.number().refine(value => [10, 20, 30].includes(value)),
+    ImageInputRetentionMinutes: z
+      .number()
+      .refine((value) => [10, 20, 30, 60].includes(value)),
     RetryCycleEnabled: z.boolean(),
     RetryTimeBudgetEnabled: z.boolean(),
     RetryTimeBudgetSeconds: z.number().int().min(1).max(3600),
+    RetryTimeBudgetMaxRetries: z.number().int().min(0).max(99),
     RetryTimes: z.number().int().min(0).max(99),
     AutomaticRetryStatusCodes: z
       .string()
@@ -51,10 +54,13 @@ export function routingPolicyFormValues(
   options: Record<string, string>
 ): RoutingPolicyFormValues {
   return {
-    ImageInputRetentionMinutes: Number(options.ImageInputRetentionMinutes ?? 20),
+    ImageInputRetentionMinutes: Number(
+      options.ImageInputRetentionMinutes ?? 20
+    ),
     RetryCycleEnabled: options.RetryCycleEnabled === 'true',
     RetryTimeBudgetEnabled: options.RetryTimeBudgetEnabled === 'true',
     RetryTimeBudgetSeconds: Number(options.RetryTimeBudgetSeconds ?? 60),
+    RetryTimeBudgetMaxRetries: Number(options.RetryTimeBudgetMaxRetries ?? 15),
     RetryTimes: Number(options.RetryTimes),
     AutomaticRetryStatusCodes: options.AutomaticRetryStatusCodes,
     channel_affinity_setting: {
@@ -82,6 +88,7 @@ export function routingPolicyOptions(
     RetryCycleEnabled: String(values.RetryCycleEnabled),
     RetryTimeBudgetEnabled: String(values.RetryTimeBudgetEnabled),
     RetryTimeBudgetSeconds: String(values.RetryTimeBudgetSeconds),
+    RetryTimeBudgetMaxRetries: String(values.RetryTimeBudgetMaxRetries),
     RetryTimes: String(values.RetryTimes),
     AutomaticRetryStatusCodes: values.AutomaticRetryStatusCodes,
     ...Object.fromEntries(

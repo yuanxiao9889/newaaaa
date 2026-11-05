@@ -52,8 +52,13 @@ export function RetrySection() {
             <FormItem>
               <FormLabel>{t('Image input retention')}</FormLabel>
               <FormControl>
-                <NativeSelect {...field} onChange={event => field.onChange(Number(event.target.value))}>
-                  {[10, 20, 30].map(minutes => (
+                <NativeSelect
+                  {...field}
+                  onChange={(event) =>
+                    field.onChange(Number(event.target.value))
+                  }
+                >
+                  {[10, 20, 30, 60].map((minutes) => (
                     <NativeSelectOption key={minutes} value={minutes}>
                       {t('{{minutes}} minutes', { minutes })}
                     </NativeSelectOption>
@@ -61,7 +66,9 @@ export function RetrySection() {
                 </NativeSelect>
               </FormControl>
               <FormDescription>
-                {t('Keep uploaded image references and original inputs of successful or failed tasks for this duration. New preparation or accepted resubmission renews retention; status checks do not. The selected duration applies on the next preparation, use or completion.')}
+                {t(
+                  'Keep uploaded image references and original inputs of successful or failed tasks for this duration. New preparation or accepted resubmission renews retention; status checks do not. The selected duration applies on the next preparation, use or completion.'
+                )}
               </FormDescription>
               <FormMessage />
             </FormItem>
@@ -140,6 +147,33 @@ export function RetrySection() {
               <FormDescription>
                 {t(
                   'Counted from the first upstream attempt, including request and wait time. At expiry, no new attempt starts; an in-flight request may finish later. Accepted video jobs keep their existing polling policy.'
+                )}
+              </FormDescription>
+              <FormMessage />
+            </FormItem>
+          )}
+        />
+        <FormField
+          control={form.control}
+          name='RetryTimeBudgetMaxRetries'
+          render={({ field }) => (
+            <FormItem>
+              <FormLabel>
+                {t('Maximum retries within the time budget')}
+              </FormLabel>
+              <FormControl>
+                <Input
+                  type='number'
+                  min={0}
+                  max={99}
+                  step={1}
+                  disabled={!timed}
+                  {...safeNumberFieldProps(field)}
+                />
+              </FormControl>
+              <FormDescription>
+                {t(
+                  'Excludes the first attempt. Stop when this limit or the time budget is reached. Channel cycling does not reset the count. Set 0 to disable retries in time-budget mode.'
                 )}
               </FormDescription>
               <FormMessage />

@@ -38,7 +38,8 @@ func OpenaiImageHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.
 	}
 
 	if oaiError := usageResp.GetOpenAIError(); oaiError != nil && oaiError.Type != "" {
-		return nil, types.WithOpenAIError(*oaiError, resp.StatusCode)
+		accepted := openaiImageResponseCount(responseBody) > 0 || gjson.GetBytes(responseBody, "id").Exists() || gjson.GetBytes(responseBody, "task_id").Exists() || gjson.GetBytes(responseBody, "status").Exists()
+		return nil, service.NewUpstreamImageResponseError(*oaiError, resp.StatusCode, accepted)
 	}
 
 	if err = service.ValidateOpenAIImageResponseForBilling(responseBody); err != nil {
@@ -248,7 +249,8 @@ func openaiImageJSONAsStreamHandler(c *gin.Context, info *relaycommon.RelayInfo,
 		return nil, types.NewOpenAIError(err, types.ErrorCodeBadResponseBody, http.StatusInternalServerError)
 	}
 	if oaiError := usageResp.GetOpenAIError(); oaiError != nil && oaiError.Type != "" {
-		return nil, types.WithOpenAIError(*oaiError, resp.StatusCode)
+		accepted := openaiImageResponseCount(responseBody) > 0 || gjson.GetBytes(responseBody, "id").Exists() || gjson.GetBytes(responseBody, "task_id").Exists() || gjson.GetBytes(responseBody, "status").Exists()
+		return nil, service.NewUpstreamImageResponseError(*oaiError, resp.StatusCode, accepted)
 	}
 	service.NormalizeOpenAIImageUsage(&usageResp.Usage)
 	applyUsagePostProcessing(info, &usageResp.Usage, responseBody)

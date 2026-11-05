@@ -160,21 +160,21 @@ describe('bridge policy permissions and state', () => {
       reserved_bytes: 2097152,
       ready_assets: 3,
       active_uploads: 1,
-      max_cache_bytes: 33554432,
-      max_user_cache_bytes: 16777216,
+      max_cache_bytes: 0,
+      max_user_cache_bytes: 0,
       free_bytes: 1073741824,
-      required_free_bytes: 2147483648,
+      required_free_bytes: 21474836480,
       retention_seconds: 1200,
     }
     show(ROLE.ADMIN)
     expect(
-      await screen.findByText('Stored: 1 MiB · Reserved: 2 MiB · Limit: 32 MiB')
+      await screen.findByText('Stored: 1 MiB · Reserved: 2 MiB')
     ).toBeVisible()
     expect(
       screen.getByText('Ready references: 3 · Active uploads: 1')
     ).toBeVisible()
     expect(
-      screen.getByText('Available disk space: 1 GiB · Required reserve: 2 GiB')
+      screen.getByText('Available disk space: 1 GiB · Required reserve: 20 GiB')
     ).toBeVisible()
     expect(screen.getByText('Unavailable')).toBeVisible()
   })
@@ -637,14 +637,20 @@ describe('bridge runtime status and configuration', () => {
 
   it('applies the upload burst adjustment without changing other runtime settings', async () => {
     enableCapacity()
-    const original = structuredClone(saved.runtime!.status!.config)
-    const post = vi.spyOn(api, 'post').mockImplementation(async (_url, body) => {
-      const request = body as { config: BridgeRuntimeConfig }
-      const status = saved.runtime!.status!
-      status.config = request.config
-      status.applied_revision = request.config.revision
-      return { data: { success: true, data: structuredClone(saved) } }
-    })
+    const status = saved.runtime?.status
+    if (!status?.config.capacity) {
+      throw new Error('Expected runtime capacity fixture')
+    }
+    const original = structuredClone(status.config)
+    const originalUpload = structuredClone(status.config.capacity.upload)
+    const post = vi
+      .spyOn(api, 'post')
+      .mockImplementation(async (_url, body) => {
+        const request = body as { config: BridgeRuntimeConfig }
+        status.config = request.config
+        status.applied_revision = request.config.revision
+        return { data: { success: true, data: structuredClone(saved) } }
+      })
     show()
     await screen.findByText('Applied bridge configuration: v5')
     for (const name of [
@@ -655,10 +661,15 @@ describe('bridge runtime status and configuration', () => {
         target: { value: '3' },
       })
     }
-    fireEvent.change(screen.getByRole('textbox', { name: 'Runtime change reason' }), {
-      target: { value: 'Increase upload burst allowance' },
-    })
-    await userEvent.click(screen.getByRole('button', { name: 'Apply bridge runtime settings' }))
+    fireEvent.change(
+      screen.getByRole('textbox', { name: 'Runtime change reason' }),
+      {
+        target: { value: 'Increase upload burst allowance' },
+      }
+    )
+    await userEvent.click(
+      screen.getByRole('button', { name: 'Apply bridge runtime settings' })
+    )
     await screen.findByText('Applied bridge configuration: v6')
     expect(post).toHaveBeenCalledOnce()
     expect(post).toHaveBeenCalledWith('/api/bridge-management/runtime', {
@@ -668,7 +679,7 @@ describe('bridge runtime status and configuration', () => {
         revision: 6,
         capacity: {
           ...original.capacity,
-          upload: { ...original.capacity!.upload, per_account: 3, wait_ms: 3000 },
+          upload: { ...originalUpload, per_account: 3, wait_ms: 3000 },
         },
       },
     })

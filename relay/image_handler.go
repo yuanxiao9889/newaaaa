@@ -2,12 +2,14 @@ package relay
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
@@ -204,6 +206,27 @@ func ImageHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *type
 	}
 
 	statusCodeMappingStr := c.GetString("status_code_mapping")
+
+	if !info.IsStream && !c.GetBool("async_image_worker") {
+		originalRequest := c.Request
+		if err := originalRequest.Context().Err(); err != nil {
+			return types.NewErrorWithStatusCode(err, types.ErrorCodeClientRequestCanceled, 499, types.ErrOptionWithSkipRetry())
+		}
+		// A submitted image may still be generated and charged after the caller
+		// disconnects. Read its final response and settle normally instead of
+		// turning client cancellation into a failed request and a full refund.
+		// Bound the entire operation even when RELAY_TIMEOUT is disabled.
+		timeout := 30 * time.Minute
+		if seconds := common.RelayTimeout; seconds > 0 {
+			timeout = time.Duration(min(seconds, int(time.Duration(1<<63-1)/time.Second))) * time.Second
+		}
+		ctx, cancel := context.WithTimeout(context.WithoutCancel(originalRequest.Context()), timeout)
+		c.Request = originalRequest.WithContext(ctx)
+		defer func() {
+			c.Request = originalRequest
+			cancel()
+		}()
+	}
 
 	resp, err := adaptor.DoRequest(c, info, requestBody)
 	if err != nil {

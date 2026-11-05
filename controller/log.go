@@ -118,6 +118,19 @@ func GetLogsStat(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
+	var topup *model.TopupStatistics
+	if logType == model.LogTypeTopup {
+		result, err := model.SumTopupLogs(c.Request.Context(), model.TopupLogFilter{
+			StartTimestamp: startTimestamp, EndTimestamp: endTimestamp,
+			Username: username, ModelName: modelName, TokenName: tokenName,
+			Channel: channel, Group: group, RequestID: c.Query("request_id"), UpstreamRequestID: c.Query("upstream_request_id"),
+		})
+		if err != nil {
+			common.ApiError(c, err)
+			return
+		}
+		topup = &result
+	}
 	//tokenNum := model.SumUsedToken(logType, startTimestamp, endTimestamp, modelName, username, "")
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
@@ -126,6 +139,7 @@ func GetLogsStat(c *gin.Context) {
 			"quota": stat.Quota,
 			"rpm":   stat.Rpm,
 			"tpm":   stat.Tpm,
+			"topup": topup,
 		},
 	})
 	return
@@ -145,6 +159,22 @@ func GetLogsSelfStat(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
+	var topup *model.TopupStatistics
+	if logType == model.LogTypeTopup {
+		if c.Query("upstream_request_id") != "" || c.Query("channel") != "" {
+			common.ApiErrorMsg(c, "Unsupported log filter")
+			return
+		}
+		result, err := model.SumTopupLogs(c.Request.Context(), model.TopupLogFilter{
+			UserID: c.GetInt("id"), StartTimestamp: startTimestamp, EndTimestamp: endTimestamp,
+			ModelName: modelName, TokenName: tokenName, Group: group, RequestID: c.Query("request_id"),
+		})
+		if err != nil {
+			common.ApiError(c, err)
+			return
+		}
+		topup = &result
+	}
 	//tokenNum := model.SumUsedToken(logType, startTimestamp, endTimestamp, modelName, username, tokenName)
 	c.JSON(200, gin.H{
 		"success": true,
@@ -153,6 +183,7 @@ func GetLogsSelfStat(c *gin.Context) {
 			"quota": quotaNum.Quota,
 			"rpm":   quotaNum.Rpm,
 			"tpm":   quotaNum.Tpm,
+			"topup": topup,
 			//"token": tokenNum,
 		},
 	})

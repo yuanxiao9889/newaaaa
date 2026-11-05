@@ -220,7 +220,7 @@
       }
     },
     {
-      "name": "no final video preserves successful generation",
+      "name": "no final video waits for final video",
       "hook": "parseTaskResult",
       "args": [
         {
@@ -239,8 +239,8 @@
         }
       ],
       "expected": {
-        "status": "SUCCESS",
-        "progress": "100%"
+        "status": "IN_PROGRESS",
+        "progress": "99%"
       }
     },
     {
@@ -268,7 +268,7 @@
       "expectedError": "artifact_gone"
     },
     {
-      "name": "audio node preserves successful generation",
+      "name": "audio node waits for final video",
       "hook": "parseTaskResult",
       "args": [
         {
@@ -292,8 +292,8 @@
         }
       ],
       "expected": {
-        "status": "SUCCESS",
-        "progress": "100%"
+        "status": "IN_PROGRESS",
+        "progress": "99%"
       }
     },
     {
@@ -326,7 +326,7 @@
       "expectedError": "artifact_gone"
     },
     {
-      "name": "protected content preserves successful generation",
+      "name": "signed upstream content is a final video",
       "hook": "parseTaskResult",
       "args": [
         {
@@ -340,7 +340,7 @@
             "data": {
               "results": [
                 {
-                  "url": "https://ivd.example.com/v1/videos/t/content",
+                  "url": "https://ivd.example.com/v1/videos/task_upstream/content?signature=fixture",
                   "outputType": "mp4"
                 }
               ]
@@ -351,11 +351,12 @@
       ],
       "expected": {
         "status": "SUCCESS",
-        "progress": "100%"
+        "progress": "100%",
+        "url": "https://ivd.example.com/v1/videos/task_upstream/content?signature=fixture"
       }
     },
     {
-      "name": "protected content cannot download",
+      "name": "signed upstream content downloads without caller or channel credentials",
       "hook": "buildContentRequest",
       "args": [
         {
@@ -368,7 +369,7 @@
               "data": {
                 "results": [
                   {
-                    "url": "https://ivd.example.com/v1/videos/t/content",
+                    "url": "https://ivd.example.com/v1/videos/task_upstream/content?signature=fixture",
                     "outputType": "mp4"
                   }
                 ]
@@ -377,14 +378,22 @@
             }
           },
           "clientRequest": {
-            "method": "GET"
-          }
+            "method": "GET",
+            "headers": {
+              "Authorization": "Bearer caller"
+            }
+          },
+          "apiKey": "fixture-secret"
         }
       ],
-      "expectedError": "artifact_gone"
+      "expected": {
+        "url": "https://ivd.example.com/v1/videos/task_upstream/content?signature=fixture",
+        "method": "GET",
+        "credentialless": true
+      }
     },
     {
-      "name": "embedded credentials preserves successful generation",
+      "name": "embedded credentials waits for final video",
       "hook": "parseTaskResult",
       "args": [
         {
@@ -408,8 +417,8 @@
         }
       ],
       "expected": {
-        "status": "SUCCESS",
-        "progress": "100%"
+        "status": "IN_PROGRESS",
+        "progress": "99%"
       }
     },
     {
@@ -442,7 +451,7 @@
       "expectedError": "artifact_gone"
     },
     {
-      "name": "HTTP URL preserves successful generation",
+      "name": "HTTP URL waits for final video",
       "hook": "parseTaskResult",
       "args": [
         {
@@ -466,8 +475,8 @@
         }
       ],
       "expected": {
-        "status": "SUCCESS",
-        "progress": "100%"
+        "status": "IN_PROGRESS",
+        "progress": "99%"
       }
     },
     {
@@ -500,7 +509,7 @@
       "expectedError": "artifact_gone"
     },
     {
-      "name": "ambiguous videos preserves successful generation",
+      "name": "ambiguous videos waits for final video",
       "hook": "parseTaskResult",
       "args": [
         {
@@ -528,8 +537,8 @@
         }
       ],
       "expected": {
-        "status": "SUCCESS",
-        "progress": "100%"
+        "status": "IN_PROGRESS",
+        "progress": "99%"
       }
     },
     {

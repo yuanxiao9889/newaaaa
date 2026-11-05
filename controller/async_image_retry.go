@@ -99,7 +99,7 @@ func runRetryableAsyncImageRelay(ctx context.Context, task *model.Task) ([]byte,
 			// Return to the retained client snapshot only after a terminal failure.
 			task.PrivateData.RequestRelayFormat = retry.RelayFormat
 		} else {
-			if len(task.PrivateData.ChannelRetryPath) > 0 && budget.Remaining(common.RetryTimes-len(task.PrivateData.ChannelRetryPath)+1, time.Now()) <= 0 {
+			if len(task.PrivateData.ChannelRetryPath) > 0 && budget.Remaining(common.RetryTimes-len(task.PrivateData.ChannelRetryPath)+1, len(task.PrivateData.ChannelRetryPath), time.Now()) <= 0 {
 				return nil, task.ChannelId, "", nil, fmt.Errorf("async image retry budget exhausted")
 			}
 			body, err := os.ReadFile(retry.BodyPath)
@@ -149,7 +149,7 @@ func runRetryableAsyncImageRelay(ctx context.Context, task *model.Task) ([]byte,
 				recordInternalAsyncImageFinalErrorLog(c, task, nil, apiErr, task.PrivateData.ChannelRetryPath, retry.Details)
 				return nil, task.ChannelId, "", nil, apiErr
 			}
-			if len(task.PrivateData.ChannelRetryPath) > 0 && budget.Remaining(1, time.Now()) == 0 {
+			if len(task.PrivateData.ChannelRetryPath) > 0 && budget.Remaining(1, len(task.PrivateData.ChannelRetryPath), time.Now()) == 0 {
 				common.CleanupBodyStorage(c)
 				return nil, task.ChannelId, "", nil, fmt.Errorf("async image retry time budget exhausted")
 			}
@@ -213,7 +213,7 @@ func runRetryableAsyncImageRelay(ctx context.Context, task *model.Task) ([]byte,
 			processChannelError(c, *types.NewChannelError(channel.Id, channel.Type, channel.Name, channel.ChannelInfo.IsMultiKey, key, channel.GetAutoBan()), apiErr, nil)
 		}
 		common.SetContextKey(c, constant.ContextKeyChannelConstraints, &retry.Constraints)
-		remaining := budget.Remaining(common.RetryTimes-len(task.PrivateData.ChannelRetryPath)+1, time.Now())
+		remaining := budget.Remaining(common.RetryTimes-len(task.PrivateData.ChannelRetryPath)+1, len(task.PrivateData.ChannelRetryPath), time.Now())
 		_, pinned, _ := retry.Constraints.ResolvedPin()
 		canRetry := remaining > 0 && !pinned && shouldRetry(c, apiErr, remaining)
 		// A broken connection after POST may hide an accepted job. A status

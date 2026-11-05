@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -351,8 +352,8 @@ func shouldForwardMidjourneySpeedMode(fullRequestURL string) bool {
 }
 
 // RecordMidjourneyPolicyResponse distinguishes accepted tasks from errors inside
-// HTTP 200 responses. Submissions are single-attempt: an ambiguous transport
-// failure must never create a duplicate task on another channel.
+// HTTP 200 responses. Only a confirmed quota rejection permits failover;
+// an ambiguous transport failure must never create a duplicate task.
 func RecordMidjourneyPolicyResponse(c *gin.Context, response *dto.MidjourneyResponseWithStatusCode, requestErr error) bool {
 	if response == nil {
 		response = MidjourneyErrorWithStatusCodeWrapper(constant.MjErrorUnknown, "empty_response", http.StatusBadGateway)
@@ -367,12 +368,57 @@ func RecordMidjourneyPolicyResponse(c *gin.Context, response *dto.MidjourneyResp
 	state := RequestPolicy(c)
 	event := PolicyEvent{ChannelID: c.GetInt("channel_id"), Status: response.StatusCode, ErrorCode: strconv.Itoa(response.Response.Code), ErrorSource: "upstream", Decision: PolicyDecision{Action: "failure", Reason: "upstream_failure", Source: "upstream"}}
 	state.AddEvent(event)
+	if requestErr == nil && response.Response.UpstreamQuotaExhausted {
+		// The controller records the routing decision after applying the retry
+		// budget, task affinity and automatic-disable settings.
+		return false
+	}
 	event.Decision, event.Health = PolicyDecision{Action: "stop", Reason: "non_retryable_error", Source: "system"}, "unchanged"
 	if accepted {
 		event.Decision.Reason = "task_accepted"
 	}
 	state.AddEvent(event)
 	return false
+}
+
+var midjourneyQuotaErrorPattern = regexp.MustCompile(`(?i)(^|[^a-z0-9_])quota_not_enough($|[^a-z0-9_])`)
+
+// midjourneyQuotaRejection accepts native MJ errors and gateway error envelopes.
+// Inspect only error fields, never prompts, properties or arbitrary response text.
+func midjourneyQuotaRejection(body []byte) *dto.MidjourneyResponse {
+	var envelope struct {
+		Code        any    `json:"code"`
+		Description string `json:"description"`
+		Message     string `json:"message"`
+		Result      any    `json:"result"`
+		Error       struct {
+			Code    string `json:"code"`
+			Type    string `json:"type"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if common.Unmarshal(body, &envelope) != nil {
+		return nil
+	}
+	switch fmt.Sprint(envelope.Code) {
+	case "1", "21", "22":
+		return nil
+	}
+	if envelope.Result != nil && envelope.Result != "" {
+		return nil // A task reference makes replay unsafe, even with an error message.
+	}
+	reason := strings.Join([]string{envelope.Description, envelope.Message, envelope.Error.Message}, " ")
+	if !strings.EqualFold(fmt.Sprint(envelope.Code), "quota_not_enough") &&
+		!strings.EqualFold(envelope.Error.Code, "quota_not_enough") &&
+		!strings.EqualFold(envelope.Error.Type, "quota_not_enough") &&
+		!midjourneyQuotaErrorPattern.MatchString(reason) {
+		return nil
+	}
+	reason = strings.TrimSpace(reason)
+	if !midjourneyQuotaErrorPattern.MatchString(reason) {
+		reason = "quota_not_enough: " + reason
+	}
+	return &dto.MidjourneyResponse{Code: constant.MjRequestError, Description: reason, UpstreamQuotaExhausted: true}
 }
 
 func DoMidjourneyHttpRequest(c *gin.Context, timeout time.Duration, fullRequestURL string) (*dto.MidjourneyResponseWithStatusCode, []byte, error) {
@@ -456,6 +502,9 @@ func DoMidjourneyHttpRequest(c *gin.Context, timeout time.Duration, fullRequestU
 	if len(responseBody) == 0 {
 		return MidjourneyErrorWithStatusCodeWrapper(constant.MjErrorUnknown, "empty_response_body", statusCode), responseBody, nil
 	} else {
+		if rejection := midjourneyQuotaRejection(responseBody); rejection != nil {
+			return &dto.MidjourneyResponseWithStatusCode{StatusCode: statusCode, Response: *rejection}, responseBody, nil
+		}
 		err = common.Unmarshal(responseBody, &midjResponse)
 		if err != nil {
 			err2 := common.Unmarshal(responseBody, &midjourneyUploadsResponse)

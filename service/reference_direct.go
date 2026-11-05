@@ -12,17 +12,16 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/google/uuid"
-	"github.com/shirou/gopsutil/disk"
 	"gorm.io/gorm"
 )
 
-const referenceSessionLifetime = 15 * time.Minute
 const referenceUploadDeadline = 90 * time.Second
 
 func (s *ReferenceUploadStore) DirectEnabled() bool {
@@ -96,7 +95,7 @@ func (s *ReferenceUploadStore) PrepareDirect(user int, input ReferencePrepareReq
 	var result ReferenceUploadResult
 	err := model.WithReferenceAdmission(func(tx *gorm.DB) error {
 		now := time.Now().Unix()
-		if err := s.cleanupDirect(tx, now); err != nil {
+		if err := s.cleanupDirect(tx, now, 0); err != nil {
 			return err
 		}
 		var preparation model.ReferencePreparation
@@ -130,14 +129,14 @@ func (s *ReferenceUploadStore) PrepareDirect(user int, input ReferencePrepareReq
 					asset.State, asset.SessionID = "upload_required", uuid.NewString()
 					asset.Generation, asset.FileName = "", ""
 					asset.LeaseUntil, asset.IdleExpires = 0, 0
-					asset.SessionExpires = time.Now().Add(referenceSessionLifetime).Unix()
+					asset.SessionExpires = time.Now().Add(ReferenceRetention()).Unix()
 					if err := tx.Where("asset_id = ?", asset.ID).Delete(&model.ReferencePreparation{}).Error; err != nil {
 						return err
 					}
 					if err := tx.Save(&asset).Error; err != nil {
 						return err
 					}
-					if err := s.cleanupDirect(tx, now); err != nil {
+					if err := s.cleanupDirect(tx, now, 0); err != nil {
 						return err
 					}
 				}
@@ -149,20 +148,14 @@ func (s *ReferenceUploadStore) PrepareDirect(user int, input ReferencePrepareReq
 				}
 			}
 		} else {
+			if err := s.cleanupDirect(tx, now, input.Size); err != nil {
+				return err
+			}
 			var assets []model.ReferenceAsset
 			if err := tx.Where("storage_id = ?", s.storageID).Find(&assets).Error; err != nil {
 				return err
 			}
-			var total, owned int64
-			var userCount int
-			for _, existing := range assets {
-				total += existing.Size
-				if existing.UserID == user {
-					owned += existing.Size
-					userCount++
-				}
-			}
-			space, err := disk.Usage(s.directDir)
+			space, err := s.diskUsage(s.directDir)
 			if err != nil {
 				return ErrReferenceUnavailable
 			}
@@ -174,14 +167,15 @@ func (s *ReferenceUploadStore) PrepareDirect(user int, input ReferencePrepareReq
 					reserved += existing.Size
 				}
 			}
-			if len(assets) >= 10000 || userCount >= 1000 ||
-				total+input.Size > s.config.MaxCacheBytes || owned+input.Size > s.config.MaxUserCacheBytes ||
-				space.Free < max(uint64(2<<30), space.Total*uint64(s.config.MinFreePercent)/100)+uint64(reserved+input.Size) {
+			if len(assets) >= 10000 {
 				return ErrReferenceBusy
+			}
+			if space.Free < s.requiredFreeBytes(space) || space.Free-s.requiredFreeBytes(space) < uint64(reserved+input.Size) {
+				return ErrReferenceDiskSpace
 			}
 			asset = model.ReferenceAsset{UserID: user, SHA256: input.SHA256, StorageID: s.storageID,
 				SessionID: uuid.NewString(), State: "upload_required", Size: input.Size, MIME: input.MIME,
-				SessionExpires: time.Now().Add(referenceSessionLifetime).Unix()}
+				SessionExpires: time.Now().Add(ReferenceRetention()).Unix()}
 			if err := tx.Create(&asset).Error; err != nil {
 				return err
 			}
@@ -389,9 +383,12 @@ func (s *ReferenceUploadStore) UploadDirect(user int, session, ticket string, bo
 			// Commit the released lease so a corrected upload can use the same session.
 			return tx.Model(&current).Updates(map[string]any{"state": "upload_required", "lease_until": 0}).Error
 		}
-		space, err := disk.Usage(s.directDir)
-		if err != nil || space.Free < max(uint64(2<<30), space.Total*uint64(s.config.MinFreePercent)/100)+uint64(len(data)) {
-			return ErrReferenceBusy
+		space, err := s.diskUsage(s.directDir)
+		if err != nil {
+			return ErrReferenceUnavailable
+		}
+		if space.Free < s.requiredFreeBytes(space) || space.Free-s.requiredFreeBytes(space) < uint64(len(data)) {
+			return ErrReferenceDiskSpace
 		}
 		name := asset.Generation + ".asset"
 		part := filepath.Join(s.directDir, asset.Generation+".part")
@@ -491,11 +488,11 @@ func (s *ReferenceUploadStore) CleanupDirect() error {
 		return nil
 	}
 	return model.WithReferenceAdmission(func(tx *gorm.DB) error {
-		return s.cleanupDirect(tx, time.Now().Unix())
+		return s.cleanupDirect(tx, time.Now().Unix(), 0)
 	})
 }
 
-func (s *ReferenceUploadStore) cleanupDirect(tx *gorm.DB, now int64) error {
+func (s *ReferenceUploadStore) cleanupDirect(tx *gorm.DB, now, additional int64) error {
 	protected, err := protectedTaskReferences(tx, 0)
 	if err != nil {
 		return err
@@ -504,11 +501,32 @@ func (s *ReferenceUploadStore) cleanupDirect(tx *gorm.DB, now int64) error {
 	if err := tx.Where("storage_id = ?", s.storageID).Find(&assets).Error; err != nil {
 		return err
 	}
+	space, err := s.diskUsage(s.directDir)
+	if err != nil {
+		return ErrReferenceUnavailable
+	}
+	reserved := uint64(max(0, additional))
+	for _, asset := range assets {
+		if asset.State != "ready" && asset.SessionExpires > now {
+			reserved += uint64(max(0, asset.Size))
+		}
+	}
+	slices.SortFunc(assets, func(a, b model.ReferenceAsset) int {
+		if a.IdleExpires < b.IdleExpires {
+			return -1
+		}
+		if a.IdleExpires > b.IdleExpires {
+			return 1
+		}
+		return strings.Compare(a.FileName, b.FileName)
+	})
 	live := make(map[string]bool)
 	for _, asset := range assets {
 		expired := asset.State == "ready" && asset.IdleExpires <= now && !protected[fmt.Sprintf("%d-%s", asset.UserID, asset.SHA256)] ||
 			asset.State != "ready" && asset.SessionExpires <= now
-		if !expired {
+		pressure := (space.Free < s.requiredFreeBytes(space) || space.Free-s.requiredFreeBytes(space) < reserved) &&
+			asset.State == "ready" && !protected[fmt.Sprintf("%d-%s", asset.UserID, asset.SHA256)]
+		if !expired && !pressure {
 			live[asset.FileName] = true
 			continue
 		}
@@ -517,6 +535,18 @@ func (s *ReferenceUploadStore) cleanupDirect(tx *gorm.DB, now int64) error {
 		}
 		if err := tx.Delete(&asset).Error; err != nil {
 			return err
+		}
+		if asset.FileName != "" {
+			if _, err := uuid.Parse(strings.TrimSuffix(asset.FileName, ".asset")); err != nil || !strings.HasSuffix(asset.FileName, ".asset") {
+				return ErrReferenceUnavailable
+			}
+			if err := os.Remove(filepath.Join(s.directDir, asset.FileName)); err != nil && !errors.Is(err, os.ErrNotExist) {
+				return ErrReferenceUnavailable
+			}
+			space, err = s.diskUsage(s.directDir)
+			if err != nil {
+				return ErrReferenceUnavailable
+			}
 		}
 	}
 	entries, err := os.ReadDir(s.directDir)

@@ -34,6 +34,8 @@ type MidjourneyResponse struct {
 	Result      string `json:"result"`
 	// LocalErrorCode is host-only provenance, never accepted from provider JSON.
 	LocalErrorCode string `json:"-"`
+	// UpstreamQuotaExhausted marks a fully decoded upstream rejection before task acceptance.
+	UpstreamQuotaExhausted bool `json:"-"`
 }
 
 type MidjourneyUploadResponse struct {

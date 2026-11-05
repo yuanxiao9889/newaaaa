@@ -13,15 +13,15 @@ import (
 
 type TopUp struct {
 	Id              int     `json:"id"`
-	UserId          int     `json:"user_id" gorm:"index"`
+	UserId          int     `json:"user_id" gorm:"index;index:idx_topup_user_complete,priority:1;index:idx_topup_user_create,priority:1"`
 	Amount          int64   `json:"amount"`
 	QuotaAmount     int     `json:"quota_amount,omitempty" gorm:"type:int;default:0"`
 	Money           float64 `json:"money"`
 	TradeNo         string  `json:"trade_no" gorm:"unique;type:varchar(255);index"`
 	PaymentMethod   string  `json:"payment_method" gorm:"type:varchar(50)"`
 	PaymentProvider string  `json:"payment_provider" gorm:"type:varchar(50);default:''"`
-	CreateTime      int64   `json:"create_time"`
-	CompleteTime    int64   `json:"complete_time"`
+	CreateTime      int64   `json:"create_time" gorm:"index;index:idx_topup_user_create,priority:2"`
+	CompleteTime    int64   `json:"complete_time" gorm:"index;index:idx_topup_user_complete,priority:2"`
 	Status          string  `json:"status"`
 }
 
@@ -227,6 +227,7 @@ func RechargeEpay(tradeNo string, actualPaymentMethod string, callerIp string) (
 		}
 		topUp.CompleteTime = common.GetTimestamp()
 		topUp.Status = common.TopUpStatusSuccess
+		topUp.QuotaAmount = quotaToAdd
 		if err := tx.Save(topUp).Error; err != nil {
 			return err
 		}
@@ -280,16 +281,16 @@ func Recharge(referenceId string, customerId string, callerIp string) (err error
 
 		topUp.CompleteTime = common.GetTimestamp()
 		topUp.Status = common.TopUpStatusSuccess
-		err = tx.Save(topUp).Error
-		if err != nil {
-			return err
-		}
 
 		quota, err = common.WalletQuotaFromDecimalStrict(
 			decimal.NewFromFloat(topUp.Money).Mul(decimal.NewFromFloat(common.QuotaPerUnit)),
 		)
 		if err != nil || quota <= 0 {
 			return ErrInvalidTopUpQuota
+		}
+		topUp.QuotaAmount = quota
+		if err := tx.Save(topUp).Error; err != nil {
+			return err
 		}
 		if err := creditTopUpQuota(tx, topUp.UserId, quota, map[string]interface{}{
 			"stripe_customer": customerId,
@@ -381,6 +382,7 @@ func ManualCompleteTopUp(tradeNo string, callerIp string) error {
 		// 标记完成
 		topUp.CompleteTime = common.GetTimestamp()
 		topUp.Status = common.TopUpStatusSuccess
+		topUp.QuotaAmount = quotaToAdd
 		if err := tx.Save(topUp).Error; err != nil {
 			return err
 		}
@@ -438,15 +440,15 @@ func RechargeCreem(referenceId string, customerEmail string, customerName string
 
 		topUp.CompleteTime = common.GetTimestamp()
 		topUp.Status = common.TopUpStatusSuccess
-		err = tx.Save(topUp).Error
-		if err != nil {
-			return err
-		}
 
 		// Creem 直接使用 Amount 作为充值额度（整数）
 		quota, err = common.WalletQuotaFromDecimalStrict(decimal.NewFromInt(topUp.Amount))
 		if err != nil || quota <= 0 {
 			return ErrInvalidTopUpQuota
+		}
+		topUp.QuotaAmount = quota
+		if err := tx.Save(topUp).Error; err != nil {
+			return err
 		}
 
 		// 构建更新字段，优先使用邮箱，如果邮箱为空则使用用户名
@@ -524,6 +526,7 @@ func RechargeWaffo(tradeNo string, callerIp string) (err error) {
 
 		topUp.CompleteTime = common.GetTimestamp()
 		topUp.Status = common.TopUpStatusSuccess
+		topUp.QuotaAmount = quotaToAdd
 		if err := tx.Save(topUp).Error; err != nil {
 			return err
 		}
@@ -587,6 +590,7 @@ func RechargeWaffoPancake(tradeNo string) (err error) {
 
 		topUp.CompleteTime = common.GetTimestamp()
 		topUp.Status = common.TopUpStatusSuccess
+		topUp.QuotaAmount = quotaToAdd
 		if err := tx.Save(topUp).Error; err != nil {
 			return err
 		}

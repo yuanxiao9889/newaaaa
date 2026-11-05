@@ -96,26 +96,17 @@ func (s *ReferenceUploadStore) completeURL(ctx context.Context, ticket reference
 	if err != nil {
 		return ReferenceUploadResult{}, ErrReferenceUnavailable
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	used, count := s.cleanupLocked()
-	entries, err := os.ReadDir(s.config.Directory)
+	unlock, err := s.lockResumable()
 	if err != nil {
-		return ReferenceUploadResult{}, ErrReferenceUnavailable
+		return ReferenceUploadResult{}, err
 	}
-	userFiles := 0
-	var userBytes int64
-	for _, entry := range entries {
-		if strings.HasPrefix(entry.Name(), strconv.Itoa(ticket.UserID)+"-") {
-			if info, err := entry.Info(); err == nil {
-				userFiles++
-				userBytes += info.Size()
-			}
-		}
-	}
-	if count >= 10000 || userFiles >= 1000 || used+s.reserved+int64(len(record)) > s.config.MaxCacheBytes ||
-		userBytes+s.userReserved[ticket.UserID]+int64(len(record)) > s.config.MaxUserCacheBytes {
+	defer unlock()
+	_, count := s.cleanupLocked()
+	if count >= 10000 {
 		return ReferenceUploadResult{}, ErrReferenceBusy
+	}
+	if err := s.reclaimReferenceSpaceLocked(int64(len(record))); err != nil {
+		return ReferenceUploadResult{}, err
 	}
 	path := filepath.Join(s.config.Directory, fmt.Sprintf("%d-%s.url", ticket.UserID, ticket.SHA256))
 	tmp, err := os.CreateTemp(s.config.Directory, ".reference-url-*")

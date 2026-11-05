@@ -29,6 +29,7 @@ import {
   Link2,
   CreditCard,
   Crown,
+  ReceiptText,
 } from 'lucide-react'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -48,6 +49,7 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip'
 import type { AdminUserManageAction } from '@/features/auth/secure-verification'
+import { UserRechargeRecordsDialog } from '@/features/recharge-records/components/user-recharge-records-dialog'
 import { UserSubscriptionsDialog } from '@/features/subscriptions/components/dialogs/user-subscriptions-dialog'
 import { handleServerError } from '@/lib/handle-server-error'
 import { AuthOperationError } from '@/lib/secure-verification'
@@ -91,6 +93,7 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
   const [resetTwoFAOpen, setResetTwoFAOpen] = useState(false)
   const [bindingDialogOpen, setBindingDialogOpen] = useState(false)
   const [subscriptionsDialogOpen, setSubscriptionsDialogOpen] = useState(false)
+  const [rechargeRecordsOpen, setRechargeRecordsOpen] = useState(false)
   const [vipDialogOpen, setVIPDialogOpen] = useState(false)
   const canManageVIP = useAuthStore((state) => {
     const role = state.auth.user?.role ?? 0
@@ -293,6 +296,18 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
           </DropdownMenuShortcut>
         </DropdownMenuItem>
 
+        <DropdownMenuItem
+          onSelect={(event) => {
+            event.preventDefault()
+            setRechargeRecordsOpen(true)
+          }}
+        >
+          {t('Recharge Records')}
+          <DropdownMenuShortcut>
+            <ReceiptText size={16} />
+          </DropdownMenuShortcut>
+        </DropdownMenuItem>
+
         <DropdownMenuSeparator />
 
         <DropdownMenuItem
@@ -380,6 +395,12 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
         onOpenChange={setSubscriptionsDialogOpen}
         user={{ id: user.id, username: user.username }}
         onSuccess={triggerRefresh}
+      />
+
+      <UserRechargeRecordsDialog
+        open={rechargeRecordsOpen}
+        onOpenChange={setRechargeRecordsOpen}
+        user={{ id: user.id, username: user.username }}
       />
     </div>
   )

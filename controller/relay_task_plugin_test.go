@@ -250,6 +250,18 @@ func TestExecuteTaskSubmissionPersistsPinnedPluginProvenance(t *testing.T) {
 // asynchronous result on the same route is retained because polling and
 // retrieval depend on it.
 func TestExecuteTaskSubmissionHonorsRouteRetainResult(t *testing.T) {
+	previousRegistry := pluginruntime.DefaultRegistry
+	pluginruntime.DefaultRegistry = pluginruntime.NewRegistry()
+	t.Cleanup(func() { pluginruntime.DefaultRegistry = previousRegistry })
+	plugin, err := pluginruntime.DefaultRegistry.Register(`
+export const meta={apiVersion:1,key:"sync-images",name:"Inline result",version:"1.0.0",author:{name:"Test"},models:["plugin-model"],fetchMode:"per_task",routes:[{method:"POST",path:"/sync/images",type:"submit",decode:"create",render:"created",retainResult:false}]};
+export const native={create(ctx){return {kind:"submit",model:"plugin-model",requestBody:ctx.body.value};},created(ctx,task){return task.data;}};
+export function buildSubmitRequest(){return {};}
+export function parseSubmitResponse(){return {taskId:"task_public"};}
+export function buildQueryRequest(){throw new Error("unexpected poll");}
+export function parseTaskResult(){return {status:"UNKNOWN"};}
+`, pluginruntime.Options{})
+	require.NoError(t, err)
 	retainFalse := false
 	for _, tc := range []struct {
 		name          string
@@ -262,7 +274,12 @@ func TestExecuteTaskSubmissionHonorsRouteRetainResult(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			events := make([]string, 0, 3)
-			database, _ := openTaskDialectDatabase(t, &model.Task{}, &model.User{}, &model.Channel{})
+			database, dialect := openTaskDialectDatabase(t, &model.Task{}, &model.User{}, &model.Channel{})
+			previousMain, previousLog := common.MainDatabaseType(), common.LogDatabaseType()
+			common.SetDatabaseTypes(dialect, dialect)
+			t.Cleanup(func() { common.SetDatabaseTypes(previousMain, previousLog) })
+			require.NoError(t, database.Create(&model.User{Id: 1, Username: "inline-result", AffCode: "inline-result"}).Error)
+			require.NoError(t, database.Create(&model.Channel{Id: 1, Name: "inline-result"}).Error)
 			previousDB := model.DB
 			model.DB = database
 			t.Cleanup(func() { model.DB = previousDB })
@@ -270,10 +287,12 @@ func TestExecuteTaskSubmissionHonorsRouteRetainResult(t *testing.T) {
 			common.LogConsumeEnabled = false
 			t.Cleanup(func() { common.LogConsumeEnabled = previousLogConsumeEnabled })
 
-			c := taskSubmissionTestContext()
+			recorder := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(recorder)
+			c.Request = httptest.NewRequest(http.MethodPost, "/sync/images", strings.NewReader(`{}`))
 			c.Set(pluginruntime.ContextKeyPinnedRoute, pluginruntime.PinnedRoute{
-				Plugin: &pluginruntime.LoadedPlugin{Meta: pluginruntime.Meta{Key: "sync-images"}},
-				Route:  pluginruntime.Route{Method: http.MethodPost, Path: "/sync/images", Type: pluginruntime.RouteTypeSubmit, RetainResult: &retainFalse},
+				Plugin: plugin,
+				Route:  pluginruntime.Route{Method: http.MethodPost, Path: "/sync/images", Type: pluginruntime.RouteTypeSubmit, Render: "created", RetainResult: &retainFalse},
 			})
 			info := taskSubmissionRelayInfo(&taskSubmissionTestBilling{events: &events})
 			upstream := []byte(`{"data":[{"url":"https://cdn.example/a.png"}]}`)
@@ -291,6 +310,11 @@ func TestExecuteTaskSubmissionHonorsRouteRetainResult(t *testing.T) {
 			assert.JSONEq(t, string(upstream), string(outcome.Task.Data), "presenter keeps the in-memory snapshot")
 			assert.Equal(t, tc.wantDiscarded, outcome.Task.PrivateData.ResultDiscarded)
 			assert.Equal(t, !tc.wantDiscarded, outcome.Task.ResultRetrievable())
+			if tc.immediate != nil && tc.immediate.Status == model.TaskStatusSuccess {
+				assert.Equal(t, service.TaskBillingStateSettled, outcome.Task.PrivateData.BillingState)
+			}
+			presentTaskSubmission(c, outcome)
+			assert.JSONEq(t, string(upstream), recorder.Body.String())
 
 			var stored model.Task
 			require.NoError(t, database.Where("task_id = ?", "task_public").First(&stored).Error)

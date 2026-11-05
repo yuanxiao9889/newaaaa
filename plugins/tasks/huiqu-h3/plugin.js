@@ -6,7 +6,7 @@ export const meta = {
     en: "Huiqu MiniMax H3 video generation with final video artifact retrieval",
     zh: "汇取云 MiniMax H3 视频生成及最终视频获取",
   },
-  version: "1.0.1",
+  version: "1.0.2",
   author: { name: "OOpii" },
   baseUrl: "https://api.bjhuiqu.net",
   auth: "api_key",
@@ -58,7 +58,8 @@ function videoArtifact(body) {
     const extension = /\.(mp4|webm|mov)(?:[?#]|$)/i.exec(url);
     const videoType = ["mp4", "webm", "mov"].includes(type) ? type : { "video/mp4": "mp4", "video/webm": "webm", "video/quicktime": "mov" }[type];
     if (type ? !videoType : !extension) continue;
-    if (/\/v1\/videos\/[^/?#]+\/content(?:[?#]|$)/i.test(url)) continue;
+    // Signed upstream content endpoints are valid video artifacts too. The host
+    // rejects self-proxy loops and validates destinations before fetching them.
     const format = videoType || extension[1].toLowerCase();
     if (!videos.some(function (item) { return item.url === url; })) {
       videos.push({ url, mimeType: { mp4: "video/mp4", webm: "video/webm", mov: "video/quicktime" }[format] });
@@ -114,11 +115,13 @@ export function parseTaskResult(ctx, body) {
   if (!status) return { status: "UNKNOWN", reason: "unrecognized Huiqu task status" };
   const result = { status };
   if (status === "SUCCESS") {
-    result.progress = "100%";
     const video = videoArtifact(body);
-    if (video) result.url = video.url;
-    // Generation has completed even when the provider omitted its final artifact.
-    // Do not falsely fail/refund a generated video; content reports artifact_gone.
+    // The provider can report generation success before publishing its video.
+    // Keep polling until a single usable artifact is present; the host's normal
+    // task timeout remains the bound if the provider never publishes one.
+    if (!video) return { status: "IN_PROGRESS", progress: "99%" };
+    result.progress = "100%";
+    result.url = video.url;
   } else if (status === "FAILURE") {
     result.reason = "Huiqu H3 video generation failed";
   } else {

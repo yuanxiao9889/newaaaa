@@ -24,7 +24,7 @@ import { TruncatedCell } from '@/components/data-table'
 import { StatusBadge } from '@/components/status-badge'
 import dayjs from '@/lib/dayjs'
 
-import type { AuditLog } from '../api'
+import { isChannelDisableAudit, type AuditLog } from '../api'
 import { buildAuditDetails } from '../lib/audit-details'
 import { AuditLogDetailsDialog } from './audit-log-details-dialog'
 
@@ -164,8 +164,16 @@ export function useAuditLogColumns(
         size: 82,
         cell: ({ row }) => (
           <StatusBadge
-            label={row.original.success ? t('Success') : t('Failed')}
-            variant={row.original.success ? 'success' : 'danger'}
+            label={
+              isChannelDisableAudit(row.original)
+                ? t('Disabled')
+                : t(row.original.success ? 'Success' : 'Failed')
+            }
+            variant={
+              isChannelDisableAudit(row.original) || !row.original.success
+                ? 'danger'
+                : 'success'
+            }
             copyable={false}
           />
         ),

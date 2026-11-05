@@ -54,6 +54,20 @@ This is an AI API gateway/proxy built with Go. It aggregates 40+ upstream AI pro
 - Pass an explicit external destination to build and packaging commands, including `go build -o`. Keep only build outputs required in place by the toolchain, such as the ignored `web/dist` used by `go:embed`; write final deployment archives outside the repository.
 - Before reusing an older deployment script, replace its hard-coded artifact paths and any assumption that the script's parent directory is the source repository. Keep source checkout and artifact destination as separate paths. Do not package the entire working directory recursively; exclude Git metadata, dependencies, databases, logs, backups, and previous artifacts.
 
+### Deployment Backup and Retention
+
+- Do not back up asynchronous task results during updates. Exclude generated result files, result caches, and persisted task result payloads from deployment backups; do not copy them indirectly through a full data-directory archive or an unfiltered database dump. Preserve the live results and task records in place.
+- Keep only the two most recent deployment backups for this project, in addition to the active release. A backup includes its rollback configuration and the previous program/image needed to restore that release.
+- After a successful deployment and health verification, remove older deployment backups and obsolete release artifacts/images that are not needed by the active release or either retained rollback point. Apply this retention to local deployment artifacts and server deployment backups. Do not prune unrelated projects, channel/plugin operational files, active containers, business data, or shared assets still used by clients.
+- Verify resolved paths and active container/image/configuration references before cleanup. Record the two retained rollback points and the cleanup result in the deployment handoff. Do not remove an older usable backup until the new rollback point is complete and the new release is verified.
+
+### Local Relay Server SSH Key
+
+- The local SSH private key for the relay server is stored at `D:/oopii.cn-id_rsa/id_ed25519-67-230-187-133`.
+- For future conversations in this project, when a requested task requires access to this relay server, use this existing key directly (for example, via `ssh -i`) without asking the user to upload or provide it again. If the file is missing or inaccessible, report that specific blocker.
+- Keep the private key at its existing local path. Do not print its contents or copy them into chat, repository files, logs, or deployment artifacts.
+- This records the credential location for requested server work; it does not authorize unrelated server changes. Confirm the SSH host, username, and port from available project configuration or the user when needed; do not infer them solely from the key filename.
+
 ### Authentication Security (OWASP Mandatory)
 
 - Any implementation, modification, or review involving authentication-related flows MUST comply with the applicable requirements of the latest stable [OWASP Application Security Verification Standard (ASVS)](https://owasp.org/www-project-application-security-verification-standard/) and the relevant [OWASP Cheat Sheet Series](https://cheatsheetseries.owasp.org/). This applies to both backend and frontend changes, including registration, login/logout, password changes and recovery, email verification, MFA, WebAuthn/Passkeys, OAuth/OIDC, account linking/unlinking, sessions, JWTs, API credentials, and re-authentication for sensitive actions.

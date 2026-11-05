@@ -1,6 +1,12 @@
 package model
 
-import "github.com/QuantumNous/new-api/common"
+import (
+	"context"
+	"errors"
+
+	"github.com/QuantumNous/new-api/common"
+	"gorm.io/gorm"
+)
 
 type Midjourney struct {
 	Id          int    `json:"id"`
@@ -109,15 +115,15 @@ func GetAllTasks(startIdx int, num int, queryParams TaskQueryParams) []*Midjourn
 	return tasks
 }
 
-func GetAllUnFinishTasks() []*Midjourney {
+func GetAllUnFinishTasks() ([]*Midjourney, error) {
 	var tasks []*Midjourney
 	var err error
 	// get all tasks progress is not 100%
 	err = DB.Where("progress != ?", "100%").Find(&tasks).Error
 	if err != nil {
-		return nil
+		return nil, err
 	}
-	return tasks
+	return tasks, nil
 }
 
 // HasUnfinishedMidjourneyTasks reports whether at least one Midjourney task is
@@ -213,6 +219,37 @@ func (midjourney *Midjourney) UpdateWithStatus(fromStatus string) (bool, error) 
 		return false, result.Error
 	}
 	return result.RowsAffected > 0, nil
+}
+
+// UpdateWithAsyncTask commits both public representations together. A failed
+// async write must leave the MJ row pending so the next poll can retry it.
+func (midjourney *Midjourney) UpdateWithAsyncTask(ctx context.Context, fromStatus string, task *Task, fromTaskStatus TaskStatus) (bool, error) {
+	conflict := errors.New("Midjourney task changed during synchronization")
+	won := false
+	err := DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		result := tx.Model(midjourney).Where("status = ?", fromStatus).Select("*").Updates(midjourney)
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected == 0 {
+			return conflict
+		}
+		if task != nil {
+			result = tx.Model(task).Where("status = ?", fromTaskStatus).Select("*").Updates(task)
+			if result.Error != nil {
+				return result.Error
+			}
+			if result.RowsAffected == 0 {
+				return conflict
+			}
+		}
+		won = true
+		return nil
+	})
+	if errors.Is(err, conflict) {
+		return false, nil
+	}
+	return won && err == nil, err
 }
 
 func MjBulkUpdate(mjIds []string, params map[string]any) error {

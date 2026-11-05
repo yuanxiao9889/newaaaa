@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/model"
-	"github.com/shirou/gopsutil/disk"
 	"gorm.io/gorm"
 )
 
@@ -65,14 +64,14 @@ func (s *ReferenceUploadStore) DirectStatus() ReferenceStorageStatus {
 		}
 		return nil
 	})
-	space, diskErr := disk.Usage(s.directDir)
+	space, diskErr := s.diskUsage(s.directDir)
 	if err != nil || diskErr != nil {
 		return ReferenceStorageStatus{Enabled: true, RetentionSeconds: status.RetentionSeconds}
 	}
 	status.FreeBytes = space.Free
-	status.RequiredFreeBytes = max(uint64(2<<30), space.Total*uint64(s.config.MinFreePercent)/100)
-	status.Available = space.Free >= status.RequiredFreeBytes+uint64(status.ReservedBytes) &&
-		status.StoredBytes+status.ReservedBytes < status.MaxCacheBytes
+	status.RequiredFreeBytes = s.requiredFreeBytes(space)
+	status.Available = space.Free >= status.RequiredFreeBytes &&
+		space.Free-status.RequiredFreeBytes >= uint64(status.ReservedBytes)
 	status.Measured = true
 	return status
 }

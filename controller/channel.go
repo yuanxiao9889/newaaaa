@@ -411,9 +411,13 @@ func SearchChannels(c *gin.Context) {
 		channelData = channels
 	}
 
-	if statusFilter == common.ChannelStatusEnabled || statusFilter == 0 {
+	// Match complete model IDs after tag expansion, before counts and pagination.
+	if modelKeyword != "" || statusFilter == common.ChannelStatusEnabled || statusFilter == 0 {
 		filtered := make([]*model.Channel, 0, len(channelData))
 		for _, ch := range channelData {
+			if modelKeyword != "" && !slices.Contains(ch.GetModels(), modelKeyword) {
+				continue
+			}
 			if statusFilter == common.ChannelStatusEnabled && ch.Status != common.ChannelStatusEnabled {
 				continue
 			}

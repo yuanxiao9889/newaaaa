@@ -16,7 +16,8 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { renderHook } from '@testing-library/react'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { cleanup, renderHook } from '@testing-library/react'
 import { afterEach, expect, it } from 'vitest'
 
 import { useSidebarData } from '@/hooks/use-sidebar-data'
@@ -24,10 +25,22 @@ import { ROLE } from '@/lib/roles'
 import { Route } from '@/routes/_authenticated/bridge-management'
 import { useAuthStore } from '@/stores/auth-store'
 
-afterEach(() => useAuthStore.getState().auth.reset())
+afterEach(() => {
+  cleanup()
+  useAuthStore.getState().auth.reset()
+})
 
 it('places bridge management between task plugins and system settings with admin access', () => {
-  const { result } = renderHook(() => useSidebarData())
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { gcTime: 0 } },
+  })
+  const { result } = renderHook(() => useSidebarData(), {
+    wrapper: (props) => (
+      <QueryClientProvider client={queryClient}>
+        {props.children}
+      </QueryClientProvider>
+    ),
+  })
   const items =
     result.current.navGroups.find((group) => group.id === 'admin')?.items ?? []
   const index = items.findIndex(

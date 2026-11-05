@@ -247,7 +247,7 @@ func TestBridgeRetryPreservesSubmissionBarriers(t *testing.T) {
 	// turn locally produced errors into retryable upstream rejections.
 	require.NoError(t, operation_setting.AutomaticRetryStatusCodesFromString("400-599"))
 	now := time.Unix(1000, 0)
-	remaining := (service.RetryBudget{Deadline: now.Add(time.Minute)}).Remaining(-10, now)
+	remaining := (service.RetryBudget{Deadline: now.Add(time.Minute), MaxRetries: 15}).Remaining(-10, 14, now)
 	for _, bridge := range []bool{false, true} {
 		for _, tc := range []struct {
 			code   types.ErrorCode

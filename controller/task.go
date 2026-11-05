@@ -189,6 +189,9 @@ func projectTaskArtifacts(task *model.Task) ([]relaychannel.TaskArtifact, error)
 	if task == nil || task.Status != model.TaskStatusSuccess || !task.ResultRetrievable() {
 		return []relaychannel.TaskArtifact{}, nil
 	}
+	if task.PrivateData.AudioQueue != nil && task.PrivateData.AssetType == "audio" {
+		return []relaychannel.TaskArtifact{{Key: "audio", Type: "audio", MimeType: task.PrivateData.MimeType}}, nil
+	}
 	if task.Platform == constant.TaskPlatformInternalImage && task.PrivateData.AssetType == service.AsyncImageAssetType {
 		assets := service.GetAsyncImageAssets(task)
 		artifacts := make([]relaychannel.TaskArtifact, 0, len(assets))
@@ -367,6 +370,14 @@ func TaskArtifactContent(c *gin.Context) {
 	}
 	if task.Status != model.TaskStatusSuccess {
 		writeTaskArtifactError(c, http.StatusConflict, "artifact_not_ready", "Task artifacts are not ready")
+		return
+	}
+	if task.PrivateData.AudioQueue != nil {
+		if artifactKey != "audio" {
+			writeTaskArtifactError(c, 404, "artifact_not_found", "Task or artifact not found")
+			return
+		}
+		service.ServeAudioTaskContent(c, task)
 		return
 	}
 	if task.Platform == constant.TaskPlatformInternalImage && task.PrivateData.AssetType == service.AsyncImageAssetType {

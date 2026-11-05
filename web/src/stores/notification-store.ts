@@ -20,6 +20,8 @@ import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 
 interface NotificationState {
+  adminReadIds: Record<number, string[]>
+  markAdminAlertsRead: (userId: number, ids: string[]) => void
   // Last read Notice content signature (full trimmed message)
   lastReadNotice: string
   // Array of read announcement keys (id or content hash)
@@ -42,6 +44,16 @@ interface NotificationState {
 export const useNotificationStore = create<NotificationState>()(
   persist(
     (set, get) => ({
+      adminReadIds: {},
+      markAdminAlertsRead: (userId, ids) =>
+        set((state) => ({
+          adminReadIds: {
+            ...state.adminReadIds,
+            [userId]: [
+              ...new Set([...ids, ...(state.adminReadIds[userId] ?? [])]),
+            ].slice(0, 1000),
+          },
+        })),
       lastReadNotice: '',
       readAnnouncementKeys: [],
       closedUntilDate: null,
@@ -79,6 +91,7 @@ export const useNotificationStore = create<NotificationState>()(
     {
       name: 'notification-storage',
       partialize: (state) => ({
+        adminReadIds: state.adminReadIds,
         lastReadNotice: state.lastReadNotice,
         readAnnouncementKeys: state.readAnnouncementKeys,
         closedUntilDate: state.closedUntilDate,
