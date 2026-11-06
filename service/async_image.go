@@ -5,10 +5,12 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"image"
 	"io"
 	"mime"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -687,6 +689,12 @@ func downloadAsyncImageBytesWithRetry(assetURL string, proxy string) (string, []
 func shouldRetryAsyncImageDownload(err error) bool {
 	if err == nil {
 		return false
+	}
+	// DNS validation can fail transiently before the SSRF policy can be checked.
+	// Retry the download (including validation), never bypass the policy.
+	var dnsErr *net.DNSError
+	if errors.As(err, &dnsErr) {
+		return !dnsErr.IsNotFound && (dnsErr.Timeout() || dnsErr.Temporary())
 	}
 	message := err.Error()
 	noRetryMessages := []string{

@@ -21,40 +21,11 @@ import { useTranslation } from 'react-i18next'
 import { formatTokens } from '@/lib/format'
 import { cn } from '@/lib/utils'
 
-import type { TaskUsageDetails } from '../types'
-
-type TokenUsageLike = TaskUsageDetails & {
-  prompt_tokens?: number
-  completion_tokens?: number
-  total_tokens?: number
-}
-
-function numberValue(value: unknown): number {
-  const n = Number(value || 0)
-  return Number.isFinite(n) && n > 0 ? n : 0
-}
-
-export function hasTokenUsageDetails(
-  usage: TokenUsageLike | null | undefined
-): boolean {
-  if (!usage) return false
-  const inputDetails = usage.prompt_tokens_details || {}
-  const outputDetails = usage.completion_tokens_details || {}
-  return [
-    usage.prompt_tokens,
-    usage.completion_tokens,
-    usage.total_tokens,
-    inputDetails.text_tokens,
-    inputDetails.cached_tokens,
-    inputDetails.cached_creation_tokens,
-    inputDetails.image_tokens,
-    inputDetails.audio_tokens,
-    outputDetails.text_tokens,
-    outputDetails.image_tokens,
-    outputDetails.audio_tokens,
-    outputDetails.reasoning_tokens,
-  ].some((v) => numberValue(v) > 0)
-}
+import {
+  hasTokenUsageDetails,
+  tokenUsageNumber,
+  type TokenUsageLike,
+} from '../lib/task-details'
 
 export function TokenUsageDetails(props: {
   usage?: TokenUsageLike | null
@@ -67,8 +38,8 @@ export function TokenUsageDetails(props: {
   if (!hasTokenUsageDetails(usage)) return null
 
   const inputDetails = usage?.prompt_tokens_details || {}
-  const cacheReadTokens = numberValue(inputDetails.cached_tokens)
-  const cacheWriteTokens = numberValue(inputDetails.cached_creation_tokens)
+  const cacheReadTokens = tokenUsageNumber(inputDetails.cached_tokens)
+  const cacheWriteTokens = tokenUsageNumber(inputDetails.cached_creation_tokens)
 
   if (cacheReadTokens === 0 && cacheWriteTokens === 0) return null
 

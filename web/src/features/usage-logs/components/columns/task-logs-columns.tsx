@@ -32,12 +32,13 @@ import { translateServerText } from '@/lib/server-error-message'
 import { cn } from '@/lib/utils'
 
 import { taskActionMapper, taskStatusMapper } from '../../lib/mappers'
+import { hasTokenUsageDetails } from '../../lib/task-details'
 import type { TaskLog } from '../../types'
 import { TaskDetailsDialog } from '../dialogs/task-details-dialog'
 import { ModelBadge } from '../model-badge'
 import { PluginAuthorLink } from '../plugin-author-link'
 import { TaskArtifactsCell } from '../task-artifacts'
-import { hasTokenUsageDetails, TokenUsageDetails } from '../token-usage-details'
+import { TokenUsageDetails } from '../token-usage-details'
 import { useUsageLogsContext } from '../usage-logs-provider'
 import {
   createDurationColumn,

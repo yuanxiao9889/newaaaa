@@ -1,6 +1,10 @@
 package service
 
 import (
+	"context"
+	"errors"
+	"fmt"
+	"net"
 	"net/url"
 	"os"
 	"strings"
@@ -12,8 +16,67 @@ import (
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/setting/system_setting"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestAsyncImageDownloadRetriesTransientDNSFailures(t *testing.T) {
+	configureSSRFTestFetchSetting(t)
+	originalResolver := net.DefaultResolver
+	net.DefaultResolver = &net.Resolver{
+		PreferGo: true,
+		Dial: func(context.Context, string, string) (net.Conn, error) {
+			return nil, &net.DNSError{Err: "resolver unavailable", IsTimeout: true, IsTemporary: true}
+		},
+	}
+	t.Cleanup(func() { net.DefaultResolver = originalResolver })
+
+	_, _, err := downloadAsyncImageBytes("https://download.example.test/image.png", "")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "request blocked: DNS resolution failed")
+	var dnsErr *net.DNSError
+	require.ErrorAs(t, err, &dnsErr)
+	assert.True(t, dnsErr.Timeout())
+	assert.True(t, shouldRetryAsyncImageDownload(err))
+
+	// The protected connection path must retain the same retryable cause.
+	dialer := &protectedFetchDialer{
+		resolver:      net.DefaultResolver,
+		getProtection: staticProtection(&common.SSRFProtection{ApplyIPFilterForDomain: true}),
+	}
+	_, err = dialer.DialContext(context.Background(), "tcp", "download.example.test:443")
+	require.Error(t, err)
+	require.ErrorAs(t, err, &dnsErr)
+	assert.True(t, shouldRetryAsyncImageDownload(err))
+
+	_, _, err = downloadAsyncImageBytes("https://127.0.0.1/image.png", "")
+	require.ErrorContains(t, err, "private IP address not allowed")
+	assert.False(t, shouldRetryAsyncImageDownload(err))
+}
+
+func TestAsyncImageDownloadRetryPolicy(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		err   error
+		retry bool
+	}{
+		{"success", nil, false},
+		{"DNS timeout during validation", fmt.Errorf("request blocked: %w", &net.DNSError{Err: "timeout", IsTimeout: true}), true},
+		{"temporary DNS failure", fmt.Errorf("request blocked: %w", &net.DNSError{Err: "server failure", IsTemporary: true}), true},
+		{"missing domain", &url.Error{Op: "Get", Err: &net.DNSError{Err: "no such host", IsNotFound: true}}, false},
+		{"permanent DNS failure", fmt.Errorf("request blocked: %w", &net.DNSError{Err: "invalid DNS name"}), false},
+		{"private address", errors.New("request blocked: private IP address not allowed: 127.0.0.1"), false},
+		{"domain policy", errors.New("request blocked: domain not allowed"), false},
+		{"invalid content", errors.New("invalid image content type: text/html"), false},
+		{"SVG", errors.New("svg image content is not supported"), false},
+		{"oversized image", errors.New("image size exceeds maximum allowed size"), false},
+		{"upstream failure", errors.New("download image failed with status 503"), true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.retry, shouldRetryAsyncImageDownload(tc.err))
+		})
+	}
+}
 
 func TestBuildSignedAsyncImageContentURLIncludesShortLivedToken(t *testing.T) {
 	originalServerAddress := system_setting.ServerAddress

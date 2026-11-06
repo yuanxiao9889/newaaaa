@@ -154,6 +154,8 @@ function ChatRouteComponent() {
   }
 
   return (
+    // Administrator-configured chat clients require their existing browser capabilities (storage, popups and downloads).
+    // eslint-disable-next-line react/iframe-missing-sandbox -- Sandboxing these integrations is a separate compatibility/security change.
     <iframe
       src={iframeSrc}
       key={iframeSrc}

@@ -222,7 +222,7 @@ export function useTableUrlState(
           value.trim() !== '' ? serialize(value) : undefined
       } else {
         const value = Array.isArray(found?.value)
-          ? (found!.value as unknown[])
+          ? (found?.value as unknown[])
           : []
         patch[cfg.searchKey] = value.length > 0 ? serialize(value) : undefined
       }

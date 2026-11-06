@@ -362,7 +362,7 @@ func (p *SSRFProtection) ValidateURL(urlStr string) error {
 	// 解析域名对应IP并检查
 	ips, err := net.LookupIP(host)
 	if err != nil {
-		return fmt.Errorf("DNS resolution failed for %s: %v", host, err)
+		return fmt.Errorf("DNS resolution failed for %s: %w", host, err)
 	}
 	for _, ip := range ips {
 		if err := p.ValidateResolvedIP(host, ip); err != nil {
