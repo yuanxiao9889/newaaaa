@@ -147,12 +147,17 @@ describe('shared model pricing', () => {
     }
   })
 
-  it('reads expression drafts from the form fields over loaded option keys', () => {
+  it('reads expression and unit drafts from the form fields over loaded option keys', () => {
     const options = pricingOptions({
       'billing_setting.billing_mode': '{}',
       'billing_setting.billing_expr': '{}',
+      'billing_setting.fixed_price_unit': '{"example":"request"}',
+      FixedPriceUnit: '{"example":"second"}',
       BillingMode: '{"example":"tiered_expr"}',
       BillingExpr: '{"example":"tier(\\"base\\", p * 2)"}',
+    })
+    expect(JSON.parse(options['billing_setting.fixed_price_unit'])).toEqual({
+      example: 'second',
     })
     expect(JSON.parse(options['billing_setting.billing_expr'])).toEqual({
       example: 'tier("base", p * 2)',

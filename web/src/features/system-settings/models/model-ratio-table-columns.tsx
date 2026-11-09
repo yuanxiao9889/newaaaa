@@ -186,7 +186,9 @@ export function buildModelRatioColumns({
       ),
       cell: ({ row }) => (
         <span className='text-foreground block truncate'>
-          {t(getModeLabel(row.original.billingMode, row.original.fixedPriceUnit))}
+          {t(
+            getModeLabel(row.original.billingMode, row.original.fixedPriceUnit)
+          )}
         </span>
       ),
       filterFn: (row, id, value) => {

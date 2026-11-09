@@ -127,7 +127,9 @@ function getPriceGroups(
       )
     )
   } else {
-    const values: PricingSyncValues = {}
+    const values: PricingSyncValues = {
+      fixed_price_unit: snapshot.fixedPriceUnit,
+    }
     for (const [from, to] of SYNC_FIELDS) {
       if (hasPricingValue(snapshot[from])) values[to] = Number(snapshot[from])
     }

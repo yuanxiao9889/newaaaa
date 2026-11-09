@@ -28,7 +28,9 @@ import { ROLE } from '@/lib/roles'
 import { useAuthStore } from '@/stores/auth-store'
 
 import { SettingsPageProvider } from '../../components/settings-page-context'
+import { buildModelRow } from '../model-pricing-snapshots'
 import { ModelRatioForm } from '../model-ratio-form'
+import { PriceChangesDialog } from '../price-change-diff'
 import type { ModelPricingIssue } from '../pricing-issues'
 
 let client: QueryClient | undefined
@@ -53,6 +55,7 @@ const saved = {
   AudioCompletionRatio: '{}',
   BillingMode: '{}',
   BillingExpr: '{}',
+  FixedPriceUnit: '{}',
   PluginBillingExpr: '{}',
   ExposeRatioEnabled: false,
 }
@@ -321,4 +324,27 @@ it('keeps save in the phone top bar and moves the other actions into a menu', as
       .getAllByRole('menuitem')
       .map((item) => item.textContent)
   ).toEqual(['Reset prices', 'Switch to JSON', 'Discard changes'])
+})
+
+it('shows a change from per-request to per-second without losing the billing unit', () => {
+  const before = {
+    name: 'local-video',
+    billingMode: 'per-request',
+    price: '0.1',
+    fixedPriceUnit: 'request' as const,
+    hasConflict: false,
+  }
+  const after = { ...before, fixedPriceUnit: 'second' as const }
+  const row = buildModelRow(before.name, before, after)
+  expect(row.isDraftChanged).toBe(true)
+  render(
+    <PriceChangesDialog
+      open
+      onOpenChange={() => undefined}
+      rows={[row]}
+      onConfirm={() => undefined}
+    />
+  )
+  expect(screen.getAllByText('Per second').length).toBeGreaterThan(0)
+  expect(screen.getAllByText('Per-request').length).toBeGreaterThan(0)
 })
