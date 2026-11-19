@@ -214,7 +214,7 @@ function UsageFailureCell(props: { type: number; content: string }) {
 }
 
 test.each([5, 6, 8])(
-  'usage log type %s shows the server failure in the row and full details',
+  'usage log type %s keeps the server failure in full details',
   async (type) => {
     const user = userEvent.setup()
     const reason = '[input_too_large] 提示词过长,目前支持1024以下字符'
@@ -228,8 +228,11 @@ test.each([5, 6, 8])(
         <UsageFailureCell type={type} content={reason} />
       </QueryClientProvider>
     )
-    expect(screen.getByText(reason)).toBeVisible()
-    await user.click(screen.getByRole('button', { name: /提示词过长/ }))
+    const preview = type === 6 ? 'Refunded' : reason
+    expect(screen.getByText(preview)).toBeVisible()
+    await user.click(
+      screen.getByRole('button', { name: (name) => name.includes(preview) })
+    )
     expect(within(screen.getByRole('dialog')).getByText(reason)).toBeVisible()
   }
 )

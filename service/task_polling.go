@@ -175,6 +175,9 @@ func RunTaskPollingOnce(ctx context.Context, report func(processed, total int)) 
 	}
 
 	common.SysLog(common.LogText("task progress polling started"))
+	if err := model.PruneTaskRetryBodies(ctx, time.Now().Unix()); err != nil {
+		logger.LogWarn(ctx, "prune expired retry request snapshots: "+err.Error())
+	}
 	sweepTimedOutTasks(ctx)
 	allTasks := model.GetAllUnFinishSyncTasks(constant.TaskQueryLimit)
 	summary.UnfinishedTasks = len(allTasks)

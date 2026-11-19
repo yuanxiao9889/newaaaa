@@ -36,7 +36,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestGuardedVideoTaskDispatchesOnceAndPersistsAcrossReload(t *testing.T) {
+func TestGuardedLegacyVideoTaskDispatchesOnceAndPersistsAcrossReload(t *testing.T) {
 	f := newVideoRetryTestFixture(t)
 	task := f.submit(t, false, "durable-transfer-execution")
 	task = f.load(t, task.TaskID)
@@ -48,6 +48,64 @@ func TestGuardedVideoTaskDispatchesOnceAndPersistsAcrossReload(t *testing.T) {
 	assert.Equal(t, service.TaskBillingStateRefunded, task.PrivateData.BillingState)
 	assert.EqualValues(t, 1, f.submitCalls[0].Load())
 	assert.Zero(t, f.submitCalls[1].Load(), "a persisted guard suppresses replacement generation")
+}
+
+func TestGuardedMediaRetryInitialization(t *testing.T) {
+	for _, scenario := range []string{"image", "video", "disabled", "chat", "pinned", "strict", "origin", "legacy"} {
+		t.Run(scenario, func(t *testing.T) {
+			c, _ := gin.CreateTestContext(httptest.NewRecorder())
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/images/generations", nil)
+			c.Set("transfer_execution_id", "guarded-original-request")
+			settings := kitdto.ChannelOtherSettings{AutoSwitchEnabled: true, AutoSwitchRetryWindowMinutes: common.GetPointer(7), AutoSwitchMaxAttempts: common.GetPointer(4)}
+			info := &relaycommon.RelayInfo{TaskRelayInfo: &relaycommon.TaskRelayInfo{}}
+			switch scenario {
+			case "video":
+				c.Request.URL.Path = "/v1/videos"
+			case "disabled":
+				settings.AutoSwitchEnabled = false
+			case "chat":
+				c.Request.URL.Path = "/v1/chat/completions"
+			case "pinned":
+				service.GetChannelConstraints(c).AddPin(dto.ChannelPin{ChannelId: 7, Source: dto.PinSourceToken, Rank: dto.PinRankToken, RetryMode: dto.PinRetrySingleAttempt})
+			case "strict":
+				c.Set("channel_affinity_skip_retry_on_failure", true)
+			case "origin":
+				info.OriginTaskID = "dependent-original-task"
+			case "legacy":
+				service.BindMediaRetry(c, nil)
+			}
+			common.SetContextKey(c, constant.ContextKeyChannelOtherSetting, settings)
+			service.InitializeMediaRetry(c, info)
+			state := service.MediaRetry(c)
+			if scenario != "image" && scenario != "video" {
+				assert.Nil(t, state, "transfer identity must not bypass existing execution constraints")
+				return
+			}
+			require.NotNil(t, state)
+			assert.Equal(t, 7, state.WindowMinutes)
+			assert.Equal(t, 4, state.MaxAttempts)
+			require.Nil(t, service.BeginMediaRetryDispatch(c))
+			for _, failure := range []*types.NewAPIError{
+				types.NewErrorWithStatusCode(errors.New("connection closed"), types.ErrorCodeDoRequestFailed, 503),
+				types.NewErrorWithStatusCode(errors.New("response truncated"), types.ErrorCodeReadResponseBodyFailed, 502),
+				types.NewErrorWithStatusCode(errors.New("local validation"), types.ErrorCodeInvalidRequest, 400),
+			} {
+				assert.Equal(t, "stop", service.DecideRelayRetry(c, failure, 99).Action)
+			}
+			for _, status := range []int{408, 504, 524} {
+				failure := service.RelayErrorHandler(t.Context(), &http.Response{StatusCode: status, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{"error":{"message":"timed out"}}`))}, false)
+				assert.Equal(t, "stop", service.DecideRelayRetry(c, failure, 99).Action)
+				c.Set("auto_switch_task_rejected", true)
+				assert.Equal(t, "stop", decideTaskRetry(c, &dto.TaskError{Code: "fail_to_fetch_task", StatusCode: status}, 99).Action)
+			}
+			failure := service.RelayErrorHandler(t.Context(), &http.Response{StatusCode: 503, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{"error":{"message":"upstream rejected"}}`))}, false)
+			assert.Equal(t, "retry", service.DecideRelayRetry(c, failure, 0).Action, "channel budget overrides global zero only for confirmed rejection")
+			common.SetContextKey(c, constant.ContextKeyChannelOtherSetting, kitdto.ChannelOtherSettings{AutoSwitchEnabled: false})
+			service.InitializeMediaRetry(c, info)
+			assert.Same(t, state, service.MediaRetry(c), "switching channels must retain the original policy and attempts")
+			assert.Equal(t, 1, state.Attempts)
+		})
+	}
 }
 
 func TestPersistedTransferGuardSurvivesReconstructedContexts(t *testing.T) {

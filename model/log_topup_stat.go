@@ -35,6 +35,8 @@ type TopupStatistics struct {
 // currency instead of guessing the exchange rate in effect when it was written.
 var legacyTopupAmount = regexp.MustCompile(`^(?:使用在线充值成功，充值金额[:：]\s*|管理员补单成功，充值金额[:：]\s*|使用Creem充值成功，充值额度[:：]\s*|Waffo(?: Pancake)?充值成功，充值额度[:：]\s*|通过兑换码充值\s+)([^0-9\s+\-，,:：]*)([0-9]+(?:\.[0-9]+)?)(?:\s*(?:点额度|额度))?(?:，|$)`)
 
+var topupMessageAmount = regexp.MustCompile(`^([^0-9\s+\-，,:：]*)([0-9]+(?:\.[0-9]+)?)$`)
+
 // topupCredit returns raw quota (empty currency), a historical currency amount,
 // or an unrecognized record. Decreases and subscription purchases add no credit.
 func topupCredit(log Log) (decimal.Decimal, string, bool) {
@@ -44,8 +46,13 @@ func topupCredit(log Log) (decimal.Decimal, string, bool) {
 			Action string                     `json:"action"`
 			Params map[string]json.RawMessage `json:"params"`
 		} `json:"op"`
+		ContentParts []struct {
+			Key    string                     `json:"key"`
+			Params map[string]json.RawMessage `json:"params"`
+		} `json:"content_parts"`
 	}
-	if log.Other != "" && common.UnmarshalJsonStr(log.Other, &operation) == nil {
+	decoded := log.Other != "" && common.UnmarshalJsonStr(log.Other, &operation) == nil
+	if decoded {
 		params := make(map[string]decimal.Decimal)
 		for _, key := range []string{"from", "to", "quota", "requested_quota"} {
 			value := operation.Op.Params[key]
@@ -75,8 +82,55 @@ func topupCredit(log Log) (decimal.Decimal, string, bool) {
 			return decimal.Zero, "", false
 		}
 	}
+	// A failed decode can leave partially populated message fields behind.
+	// Requiring valid JSON prevents those fragments from becoming credit.
+	if !decoded {
+		operation.ContentParts = nil
+	}
 	if log.Quota > 0 {
 		return decimal.NewFromInt(int64(log.Quota)), "", true
+	}
+	// Current writers store localized messages separately from their English
+	// fallback text. Only credit messages carry a top-up; payment amounts and
+	// subscription deductions must never contribute to this total.
+	for _, part := range operation.ContentParts {
+		switch part.Key {
+		case "Subscription purchased, plan: {{plan}}, payment amount: {{amount}}, payment method: {{method}}",
+			"Subscription purchased with balance, plan: {{plan}}, payment amount: {{amount}}, quota deducted: {{quota}}":
+			return decimal.Zero, "", true
+		case "Online top-up succeeded, amount added: {{quota}}, payment amount: {{amount}}",
+			"Administrator completed the order, amount added: {{quota}}, payment amount: {{amount}}",
+			"{{provider}} top-up succeeded, amount added: {{quota}}, payment amount: {{amount}}",
+			"Topped up {{quota}} with a redemption code, code ID {{id}}":
+		default:
+			continue
+		}
+		value := part.Params["quota"]
+		var quota string
+		switch common.GetJsonType(value) {
+		case "string":
+			if err := common.Unmarshal(value, &quota); err != nil {
+				return decimal.Zero, "", false
+			}
+		case "number":
+			// Creem records raw quota as a JSON number. Keep decimal precision.
+			quota = string(value)
+		default:
+			return decimal.Zero, "", false
+		}
+		match := topupMessageAmount.FindStringSubmatch(quota)
+		if match == nil {
+			return decimal.Zero, "", false
+		}
+		amount, err := decimal.NewFromString(match[2])
+		if err != nil {
+			return decimal.Zero, "", false
+		}
+		currency := match[1]
+		if currency == "＄" {
+			currency = "$"
+		}
+		return amount, currency, true
 	}
 	if strings.HasPrefix(log.Content, "订阅购买成功，") || strings.HasPrefix(log.Content, "使用余额购买订阅成功，") {
 		return decimal.Zero, "", true

@@ -13,10 +13,46 @@ import (
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/pkg/jsplugin"
 	"github.com/QuantumNous/new-api/plugins"
+	"github.com/QuantumNous/new-api/service"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestDashboardModelCatalogRequiresAdministrator(t *testing.T) {
+	setupRelayRouterTestDB(t)
+	require.NoError(t, model.DB.AutoMigrate(&model.UserSession{}, &model.Option{}))
+	engine := gin.New()
+	SetApiRouter(engine)
+	requestCatalog := func(token string) *httptest.ResponseRecorder {
+		request := httptest.NewRequest(http.MethodGet, "/api/models", nil)
+		if token != "" {
+			request.Header.Set("Authorization", "Bearer "+token)
+		}
+		recorder := httptest.NewRecorder()
+		engine.ServeHTTP(recorder, request)
+		return recorder
+	}
+	assert.Equal(t, http.StatusUnauthorized, requestCatalog("").Code)
+	assert.Equal(t, http.StatusUnauthorized, requestCatalog("invalid-token").Code)
+	for _, role := range []int{common.RoleCommonUser, common.RoleAdminUser, common.RoleRootUser} {
+		user := model.User{Username: fmt.Sprintf("catalog-%d", role), AffCode: fmt.Sprintf("cat%d", role), Role: role, Status: common.UserStatusEnabled, Group: "default", AuthVersion: 1}
+		require.NoError(t, model.DB.Create(&user).Error)
+		bundle, err := service.CreateLoginSession(user.Id, "password", "127.0.0.1", "catalog-test")
+		require.NoError(t, err)
+		response := requestCatalog(bundle.AccessToken)
+		if role < common.RoleAdminUser {
+			assert.Equal(t, http.StatusForbidden, response.Code, response.Body.String())
+		} else {
+			assert.Equal(t, http.StatusOK, response.Code, response.Body.String())
+			assert.Contains(t, response.Body.String(), `"success":true`)
+		}
+		revoked, err := model.RevokeUserSession(user.Id, bundle.Session.SID, "test")
+		require.NoError(t, err)
+		require.True(t, revoked)
+		assert.Equal(t, http.StatusUnauthorized, requestCatalog(bundle.AccessToken).Code)
+	}
+}
 
 func TestListModelsSupportsOpenAIAndGeminiAuthentication(t *testing.T) {
 	setupRelayRouterTestDB(t)

@@ -1281,31 +1281,31 @@ func TestAlibabaOpenAIImageDecodeAndSubmission(t *testing.T) {
 		wantRatios             map[string]any
 	}{
 		{"qwen-image-3.0-pro two images", "qwen-image-3.0-pro", "generate", map[string]any{"prompt": "a white siamese cat", "n": 2, "size": "1024x1024"},
-			"multimodal-generation/generation", "", "text_to_image", 2,
+			"multimodal-generation/generation", "", "image_generate", 2,
 			map[string]any{"image_count": float64(2), "output_image_type": "qima_output_1k", "input_image_count": float64(0)}, map[string]any{"image_count": float64(2)}},
 		{"qwen-image-3.0-pro without size reserves the 2K tier", "qwen-image-3.0", "generate", map[string]any{"prompt": "poster"},
-			"multimodal-generation/generation", "", "text_to_image", 1,
+			"multimodal-generation/generation", "", "image_generate", 1,
 			map[string]any{"image_count": float64(1), "output_image_type": "qima_output_2k", "input_image_count": float64(0)}, map[string]any{"image_count": float64(1)}},
 		{"fixed count model", "qwen-image-plus", "generate", map[string]any{"prompt": "a cat", "size": "1328x1328"},
-			"multimodal-generation/generation", "", "text_to_image", 1, map[string]any{"image_count": float64(1)}, map[string]any{"image_count": float64(1)}},
+			"multimodal-generation/generation", "", "image_generate", 1, map[string]any{"image_count": float64(1)}, map[string]any{"image_count": float64(1)}},
 		{"z-image with prompt rewriting", "z-image-turbo", "generate", map[string]any{"prompt": "a cat", "prompt_extend": true},
-			"multimodal-generation/generation", "", "text_to_image", 1,
+			"multimodal-generation/generation", "", "image_generate", 1,
 			map[string]any{"image_count": float64(1), "prompt_extend": true}, map[string]any{"image_count": float64(1), "prompt_extend_ratio": float64(2)}},
 		{"legacy text-to-image is asynchronous", "wan2.2-t2i-flash", "generate", map[string]any{"prompt": "a cat", "n": 2, "size": "1024x1024"},
-			"text2image/image-synthesis", "enable", "text_to_image", 2, map[string]any{"image_count": float64(2)}, map[string]any{"image_count": float64(2)}},
+			"text2image/image-synthesis", "enable", "image_generate", 2, map[string]any{"image_count": float64(2)}, map[string]any{"image_count": float64(2)}},
 		{"wan2.6 text-to-image is asynchronous by default", "wan2.6-t2i", "generate", map[string]any{"prompt": "a cat", "n": 2},
-			"image-generation/generation", "enable", "text_to_image", 2, map[string]any{"image_count": float64(2)}, map[string]any{"image_count": float64(2)}},
+			"image-generation/generation", "enable", "image_generate", 2, map[string]any{"image_count": float64(2)}, map[string]any{"image_count": float64(2)}},
 		{"qwen edit with an image URL", "qwen-image-edit-plus", "edit", map[string]any{"prompt": "watercolor", "image": "https://cdn.example/input.png"},
-			"multimodal-generation/generation", "", "image_to_image", 1, map[string]any{"image_count": float64(1)}, map[string]any{"image_count": float64(1)}},
+			"multimodal-generation/generation", "", "image_edit", 1, map[string]any{"image_count": float64(1)}, map[string]any{"image_count": float64(1)}},
 		{"qwen-image-3.0 edit counts input images", "qwen-image-3.0-pro", "edit", map[string]any{"prompt": "watercolor", "image": []any{"https://cdn.example/1.png", "https://cdn.example/2.png"}, "size": "2048x2048"},
-			"multimodal-generation/generation", "", "image_to_image", 1,
+			"multimodal-generation/generation", "", "image_edit", 1,
 			map[string]any{"image_count": float64(1), "output_image_type": "qima_output_2k", "input_image_count": float64(2)}, map[string]any{"image_count": float64(1)}},
 		{"wan2.5 legacy edit is asynchronous", "wan2.5-i2i-preview", "edit", map[string]any{"prompt": "watercolor", "image": "https://cdn.example/input.png", "n": 2},
-			"image2image/image-synthesis", "enable", "image_to_image", 2, map[string]any{"image_count": float64(2)}, map[string]any{"image_count": float64(2)}},
+			"image2image/image-synthesis", "enable", "image_edit", 2, map[string]any{"image_count": float64(2)}, map[string]any{"image_count": float64(2)}},
 		{"wanx2.1 function edit is asynchronous", "wanx2.1-imageedit", "edit", map[string]any{"prompt": "make the hair red", "image": "https://cdn.example/input.png", "n": 2},
-			"image2image/image-synthesis", "enable", "image_to_image", 2, map[string]any{"image_count": float64(2)}, map[string]any{"image_count": float64(2)}},
+			"image2image/image-synthesis", "enable", "image_edit", 2, map[string]any{"image_count": float64(2)}, map[string]any{"image_count": float64(2)}},
 		{"provider parameters pass through", "qwen-image-2.0-pro", "generate", map[string]any{"prompt": "a cat", "n": 3, "parameters": map[string]any{"negative_prompt": "blurry", "watermark": false}},
-			"multimodal-generation/generation", "", "text_to_image", 3, map[string]any{"image_count": float64(3)}, map[string]any{"image_count": float64(3)}},
+			"multimodal-generation/generation", "", "image_generate", 3, map[string]any{"image_count": float64(3)}, map[string]any{"image_count": float64(3)}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			body := map[string]any{"model": tc.model}
@@ -1358,7 +1358,7 @@ func TestAlibabaOpenAIImageDecodeAndSubmission(t *testing.T) {
 		})
 		require.NoError(t, err)
 		resolved := alibabaObject(t, value)
-		assert.Equal(t, "image_to_image", resolved["action"])
+		assert.Equal(t, "image_edit", resolved["action"])
 		request := resolved["requestBody"].(map[string]any)
 		assert.Equal(t, float64(2), request["n"])
 		assert.Equal(t, false, request["watermark"])

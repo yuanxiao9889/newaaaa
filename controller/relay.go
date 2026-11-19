@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -111,7 +112,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 			logger.LogError(c, common.LogText("relay error: %s", common.LocalLogPreview(newAPIError.Error())))
 			if c.GetInt("role") < common.RoleAdminUser {
 				publicError := common.ClassifyPublicError(string(newAPIError.GetErrorCode()), newAPIError.Error(), newAPIError.StatusCode,
-					newAPIError.GetErrorType() == types.ErrorTypeNewAPIError)
+					newAPIError.GetErrorType() == types.ErrorTypeNewAPIError, common.PublicErrorSensitiveValues(c)...)
 				newAPIError = types.NewOpenAIError(
 					errors.New(common.MessageWithRequestId(publicError.Summary(), requestId)),
 					types.ErrorCode(publicError.Code), publicError.StatusCode,
@@ -244,8 +245,9 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 	relayInfo.RetryIndex = 0
 	relayInfo.LastError = nil
 
-	budget := service.NewRetryBudget(time.Now())
-	cycle := &service.ChannelRetryCycle{Enabled: model.CurrentRequestPolicy().RetryCycleEnabled, Budget: budget}
+	service.InitializeMediaRetry(c, relayInfo)
+	budget := service.MediaRetryBudget(service.MediaRetry(c), time.Now())
+	cycle := &service.ChannelRetryCycle{Enabled: service.MediaRetry(c) != nil || model.CurrentRequestPolicy().RetryCycleEnabled, Budget: budget}
 	retryParam.Cycle = cycle
 	for firstAttempt := true; firstAttempt || budget.Remaining(common.RetryTimes-retryParam.GetRetry()+1, len(c.GetStringSlice("use_channel")), time.Now()) > 0; retryParam.IncreaseRetry() {
 		firstAttempt = false
@@ -718,15 +720,22 @@ func executeTaskSubmissionWith(
 ) (*taskSubmissionOutcome, *taskdto.TaskError) {
 	policy := service.RequestPolicy(c)
 	defer service.ReleaseAutoSwitchAttempt(c)
-	videoRetry := captureVideoTaskRetry(c, relayInfo)
+	service.InitializeMediaRetry(c, relayInfo)
+	videoRetry, captureErr := captureVideoTaskRetry(c, relayInfo)
 	diagnostics := newTaskPluginSubmitDiagnostics(c)
 	diagnostics.start(relayInfo)
 	var result *relay.TaskSubmitResult
 	var acceptedHealth *model.ChannelAutoSwitchTicket
 	var taskErr *taskdto.TaskError
 	durable := false
+	retainRetryBody := false
 	stage := "start"
 	defer func() {
+		if videoRetry != nil && videoRetry.BodyRef != nil && !retainRetryBody {
+			if err := model.DeleteTaskRetryBody(context.WithoutCancel(c.Request.Context()), videoRetry.BodyRef); err != nil {
+				logger.LogWarn(c, "release unused retry request snapshot: "+err.Error())
+			}
+		}
 		// The client of a relayed event stream already holds the vendor's
 		// work, so the submission is billed instead of refunded.
 		if !durable && relayInfo.Billing != nil && !c.Writer.Written() {
@@ -734,6 +743,12 @@ func executeTaskSubmissionWith(
 			relayInfo.Billing.Refund(c)
 		}
 	}()
+	if captureErr != nil {
+		if common.IsRequestBodyTooLargeError(captureErr) {
+			return nil, service.TaskErrorWrapperLocal(captureErr, "read_request_body_failed", http.StatusRequestEntityTooLarge)
+		}
+		return nil, service.TaskErrorWrapperLocal(captureErr, "retry_snapshot_failed", http.StatusInternalServerError)
+	}
 	stage = "before_attempt"
 	if requestErr := c.Request.Context().Err(); requestErr != nil {
 		diagnostics.cancelled("before_attempt", 0)
@@ -748,8 +763,8 @@ func executeTaskSubmissionWith(
 		Retry:       common.GetPointer(0),
 	}
 
-	budget := service.NewRetryBudget(time.Now())
-	cycle := &service.ChannelRetryCycle{Enabled: model.CurrentRequestPolicy().RetryCycleEnabled, Budget: budget}
+	budget := service.MediaRetryBudget(service.MediaRetry(c), time.Now())
+	cycle := &service.ChannelRetryCycle{Enabled: service.MediaRetry(c) != nil || model.CurrentRequestPolicy().RetryCycleEnabled, Budget: budget}
 	retryParam.Cycle = cycle
 	for firstAttempt := true; firstAttempt || budget.Remaining(common.RetryTimes-retryParam.GetRetry()+1, len(c.GetStringSlice("use_channel")), time.Now()) > 0; retryParam.IncreaseRetry() {
 		firstAttempt = false
@@ -814,6 +829,12 @@ func executeTaskSubmissionWith(
 			taskErr = service.TaskErrorWrapperLocal(requestErr, "request_cancelled", http.StatusRequestTimeout)
 			service.RecordAutoSwitchTaskSubmissionFailure(c, taskErr)
 			break
+		}
+		if taskErr == nil && result != nil && result.Immediate != nil && result.Immediate.Status == model.TaskStatusFailure && service.MediaRetry(c) != nil && !c.Writer.Written() {
+			decision := service.DecideMediaRetry(c, channel.Id, "", result.Immediate.Reason)
+			if decision.Action == "retry" {
+				continue
+			}
 		}
 		if taskErr == nil {
 			diagnostics.attemptSucceeded(retryParam.GetRetry()+1, result)
@@ -911,6 +932,7 @@ func executeTaskSubmissionWith(
 	task.PrivateData.BillingUpdatedAt = time.Now().Unix()
 	task.PrivateData.ChannelRetryPath = append([]string(nil), c.GetStringSlice("use_channel")...)
 	task.PrivateData.AutoSwitch = acceptedHealth
+	task.PrivateData.MediaRetry = service.MediaRetry(c)
 	if videoRetry != nil && (result.Immediate == nil || result.Immediate.Status != model.TaskStatusSuccess && result.Immediate.Status != model.TaskStatusFailure) {
 		videoRetry.AcceptedAt = time.Now().Unix()
 		videoRetry.Action = relayInfo.Action
@@ -1003,6 +1025,7 @@ func executeTaskSubmissionWith(
 		return nil, taskErr
 	}
 	durable = true
+	retainRetryBody = task.PrivateData.VideoRetry != nil
 	stage = "settle"
 	diagnostics.durable(task)
 	diagnostics.settleStart(task, result.Quota)
@@ -1128,7 +1151,7 @@ func respondTaskSubmissionError(c *gin.Context, taskErr *taskdto.TaskError) {
 	if c.Writer.Written() {
 		return
 	}
-	if middleware.RespondTaskPluginError(c, publicTaskError(taskErr)) {
+	if middleware.RespondTaskPluginError(c, publicTaskError(taskErr, common.PublicErrorSensitiveValues(c)...)) {
 		return
 	}
 	respondTaskError(c, taskErr)
@@ -1136,17 +1159,17 @@ func respondTaskSubmissionError(c *gin.Context, taskErr *taskdto.TaskError) {
 
 // respondTaskError writes the public task error projection.
 func respondTaskError(c *gin.Context, taskErr *taskdto.TaskError) {
-	publicError := publicTaskError(taskErr)
+	publicError := publicTaskError(taskErr, common.PublicErrorSensitiveValues(c)...)
 	if requestID := c.GetString(common.RequestIdKey); requestID != "" {
 		publicError.Message = common.MessageWithRequestId(publicError.Message, requestID)
 	}
 	c.JSON(publicError.StatusCode, publicError)
 }
 
-// Public task errors are a projection: diagnostics retain the original error,
-// while provider messages, codes and payloads never cross this boundary.
-func publicTaskError(taskErr *taskdto.TaskError) *taskdto.TaskError {
-	publicError := common.ClassifyPublicError(taskErr.Code, taskErr.Message, taskErr.StatusCode, taskErr.LocalError)
+// Public task errors retain redacted diagnostic messages while raw payloads
+// and private provider identities remain internal.
+func publicTaskError(taskErr *taskdto.TaskError, sensitiveValues ...string) *taskdto.TaskError {
+	publicError := common.ClassifyPublicError(taskErr.Code, taskErr.Message, taskErr.StatusCode, taskErr.LocalError, sensitiveValues...)
 	return &taskdto.TaskError{
 		Code: publicError.Code, Message: publicError.Summary(), StatusCode: publicError.StatusCode,
 		LocalError: true, NoRetry: taskErr.NoRetry,
@@ -1166,6 +1189,12 @@ func taskSubmissionAPIError(taskErr *taskdto.TaskError) *types.NewAPIError {
 // decideTaskRetry is the single retry decision for task submissions. The
 // reason is recorded in the request policy decision events of the log details.
 func decideTaskRetry(c *gin.Context, taskErr *taskdto.TaskError, retryTimes int) service.PolicyDecision {
+	if service.MediaRetry(c) != nil && taskErr != nil {
+		if taskErr.LocalError || taskErr.NoRetry || taskErr.StatusCode == http.StatusRequestTimeout || operation_setting.IsAlwaysSkipRetryStatusCode(taskErr.StatusCode) || !c.GetBool("auto_switch_task_rejected") || c.Writer.Written() {
+			return service.PolicyDecision{Action: "stop", Reason: "submission_unconfirmed", Source: "channel"}
+		}
+		return service.DecideMediaRetry(c, c.GetInt("channel_id"), taskErr.Code, taskErr.Message)
+	}
 	stop := service.PolicyDecision{Action: "stop", Source: "system"}
 	retry := service.PolicyDecision{Action: "retry", Reason: "retry_status_matched", Source: "system"}
 	bridgeBlocksRetry := false

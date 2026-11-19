@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strconv"
 	"time"
 
@@ -15,6 +16,7 @@ import (
 // RetryBudget limits new submissions, not the lifetime of accepted upstream
 // work. In-flight requests keep their existing timeout and cancellation rules.
 type RetryBudget struct {
+	Media      *model.MediaRetryState
 	Deadline   time.Time
 	MaxRetries int
 }
@@ -31,6 +33,9 @@ func NewRetryBudget(start time.Time) RetryBudget {
 // so changing channels, starting another round or resuming a task cannot reset
 // the configured retry limit in time-budget mode.
 func (b RetryBudget) Remaining(countRemaining, attemptsMade int, now time.Time) int {
+	if b.Media != nil {
+		return b.Media.Remaining(now)
+	}
 	if b.Deadline.IsZero() {
 		return countRemaining
 	}
@@ -62,6 +67,12 @@ func (cycle *ChannelRetryCycle) Select(param *RetryParam) (*model.Channel, strin
 	// A temporary copy ensures resetting a round never erases caller filters.
 	copyConstraints := *constraints
 	copyConstraints.Filters = append([]dto.ChannelFilter(nil), constraints.Filters...)
+	if cycle.Budget.Media != nil {
+		copyConstraints.AddFilter(dto.ChannelFilter{Kind: dto.FilterChannelIdentity, ExcludedChannelIDs: slices.Clone(cycle.Budget.Media.Excluded)})
+		used := c.GetStringSlice("use_channel")
+		c.Set("use_channel", cycle.History[cycle.Start:])
+		defer c.Set("use_channel", used)
+	}
 	common.SetContextKey(c, constant.ContextKeyChannelConstraints, &copyConstraints)
 	defer common.SetContextKey(c, constant.ContextKeyChannelConstraints, constraints)
 	identity := dto.ChannelFilter{Kind: dto.FilterChannelIdentity}
@@ -79,12 +90,20 @@ func (cycle *ChannelRetryCycle) Select(param *RetryParam) (*model.Channel, strin
 	selection.Retry = common.GetPointer(0)
 	common.SetContextKey(c, constant.ContextKeyAutoGroupIndex, 0)
 	channel, group, err := cacheGetRandomSatisfiedChannel(&selection)
+	if err == nil && channel == nil && cycle.Budget.Media != nil {
+		c.Set("media_retry_allow_cooling", true)
+		channel, group, err = cacheGetRandomSatisfiedChannel(&selection)
+		c.Set("media_retry_allow_cooling", false)
+	}
 	if err != nil || channel != nil || len(identity.ExcludedChannelIDs) == 0 {
 		return channel, group, err
 	}
 	// Avoid a tight retry loop when all upstreams reject immediately. The
 	// deadline also bounds this wait, and cancellation wakes it immediately.
 	wait := time.Second
+	if state := cycle.Budget.Media; state != nil && state.DeadlineMS > 0 {
+		wait = min(wait, time.Until(time.UnixMilli(state.DeadlineMS)))
+	}
 	if !cycle.Budget.Deadline.IsZero() {
 		wait = min(wait, time.Until(cycle.Budget.Deadline))
 	}
@@ -102,8 +121,19 @@ func (cycle *ChannelRetryCycle) Select(param *RetryParam) (*model.Channel, strin
 		return nil, group, context.DeadlineExceeded
 	}
 	cycle.Start = len(cycle.History)
+	if cycle.Budget.Media != nil {
+		cycle.Budget.Media.CycleStart = cycle.Start
+		cycle.Budget.Media.Round++
+		c.Set("use_channel", []string(nil))
+	}
 	copyConstraints.Filters[filterIndex].ExcludedChannelIDs = nil
 	selection.SetRetry(0)
 	common.SetContextKey(c, constant.ContextKeyAutoGroupIndex, 0)
-	return cacheGetRandomSatisfiedChannel(&selection)
+	channel, group, err = cacheGetRandomSatisfiedChannel(&selection)
+	if err == nil && channel == nil && cycle.Budget.Media != nil {
+		c.Set("media_retry_allow_cooling", true)
+		defer c.Set("media_retry_allow_cooling", false)
+		return cacheGetRandomSatisfiedChannel(&selection)
+	}
+	return channel, group, err
 }

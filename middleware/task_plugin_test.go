@@ -260,7 +260,7 @@ export function parseTaskResult() { return {status: "SUCCESS"}; }
 	router.ServeHTTP(recorder, scoped)
 	assert.Equal(t, http.StatusUnsupportedMediaType, recorder.Code)
 	assert.Contains(t, recorder.Body.String(), `"code":"unsupported_parameter"`)
-	assert.NotContains(t, recorder.Body.String(), "this route requires a JSON body")
+	assert.Contains(t, recorder.Body.String(), "this route requires a JSON body")
 }
 
 func TestPrepareTaskPluginRouteModelScope(t *testing.T) {
@@ -947,7 +947,11 @@ func TestRequestBodyFailuresReportTheirCause(t *testing.T) {
 				code = "input_too_large"
 			}
 			assert.Contains(t, recorder.Body.String(), `"code":"`+code+`"`)
-			assert.NotContains(t, recorder.Body.String(), testCase.message)
+			if testCase.path == "/v1/responses" {
+				assert.Contains(t, recorder.Body.String(), "Invalid task protocol request")
+			} else {
+				assert.Contains(t, recorder.Body.String(), testCase.message)
+			}
 		})
 	}
 }
@@ -1566,7 +1570,7 @@ func TestTaskPluginAndOrdinaryAPIErrorsDistinguishBillingAndHideDetails(t *testi
 			{name: "host permission", status: 403, message: "private channel=153 is forbidden", wantCode: "access_denied"},
 			{name: "host missing task", status: 404, message: "private-task-identifier", wantCode: "task_not_found"},
 			{name: "host conflict", status: 409, message: "private-channel-conflict", wantCode: "request_conflict"},
-			{name: "host invalid request", status: 400, message: "private-plugin validation failed", wantCode: "invalid_parameter"},
+			{name: "host invalid request", status: 400, message: "plugin=private-plugin: reference image must contain one person", wantCode: "invalid_parameter"},
 			{name: "host token quota", status: 403, code: "pre_consume_token_quota_failed", message: "token quota is not enough, token remain quota: private-quota", wantCode: "insufficient_token_quota", wantStatus: 402},
 			{name: "host billing unavailable", status: 403, code: "pre_consume_token_quota_failed", message: "private-database refused request", wantCode: "billing_failed", wantStatus: 500},
 			{name: "host wallet quota", status: 403, code: "insufficient_user_quota", message: "private-user balance", wantCode: "insufficient_user_quota", wantStatus: 402},
@@ -1601,6 +1605,9 @@ func TestTaskPluginAndOrdinaryAPIErrorsDistinguishBillingAndHideDetails(t *testi
 				assert.Contains(t, payload["message"], "public-request-id")
 				assert.NotContains(t, recorder.Body.String(), "private-")
 				assert.NotContains(t, recorder.Body.String(), "153")
+				if tc.name == "host invalid request" {
+					assert.Contains(t, payload["message"], "reference image must contain one person")
+				}
 			})
 		}
 	}
@@ -1615,11 +1622,11 @@ export const native = {error: function(ctx, error) { return {code: error.httpSta
 		status, wantStatus      int
 		local                   bool
 	}{
-		{code: "invalid_image_input", message: "private image detail", status: 400, wantStatus: 400, wantCode: "invalid_image_input"},
-		{code: "invalid_token", message: "private provider key", status: 401, wantStatus: 502, wantCode: "service_auth_error"},
+		{code: "invalid_image_input", message: "image width must be at least 512 pixels; channel=private-channel", status: 400, wantStatus: 400, wantCode: "invalid_image_input"},
+		{code: "invalid_token", message: "API key expired; key=private-provider-key", status: 401, wantStatus: 502, wantCode: "service_auth_error"},
 		{code: "insufficient_token_quota", message: "already projected", status: 403, wantStatus: 402, wantCode: "insufficient_token_quota", local: true},
 		{code: "insufficient_user_quota", status: 403, wantStatus: 402, wantCode: "insufficient_user_quota", local: true},
-		{code: "insufficient_user_quota", message: "private provider balance", status: 402, wantStatus: 503, wantCode: "service_quota_exceeded"},
+		{code: "insufficient_user_quota", message: "daily generation limit reached; provider=private-provider", status: 402, wantStatus: 503, wantCode: "service_quota_exceeded"},
 		{code: "pre_consume_token_quota_failed", message: "private storage failed", status: 403, wantStatus: 500, wantCode: "billing_failed", local: true},
 		{code: "task_timeout", status: 504, wantStatus: 504, wantCode: "task_timeout", local: true},
 	} {
@@ -1757,7 +1764,11 @@ export function parseTaskResult() { return {status: "SUCCESS"}; }
 	router.ServeHTTP(recorder, request)
 
 	assert.Equal(t, http.StatusBadRequest, recorder.Code)
-	assert.JSONEq(t, `{"code":"missing_model","message":"[missing_model] status_code=400, 缺少模型 ID（model）；请填写平台提供的对外模型 ID 后重试","requestId":"native-error-req"}`, recorder.Body.String())
+	var response struct{ Code, Message, RequestID string }
+	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &response))
+	assert.Equal(t, "missing_model", response.Code)
+	assert.Equal(t, "native-error-req", response.RequestID)
+	assert.Contains(t, response.Message, "model is required")
 }
 
 func TestPrepareTaskPluginRouteRejectsNonObjectResultWithFixedMessage(t *testing.T) {
@@ -1823,12 +1834,12 @@ export function parseTaskResult() { return {status: "SUCCESS"}; }
 }
 
 func TestSanitizedTaskPluginErrorIgnoresDetailOn5xx(t *testing.T) {
-	got := sanitizedTaskPluginError(http.StatusInternalServerError, "database secret")
+	got := sanitizedTaskPluginError(nil, http.StatusInternalServerError, "database secret")
 	assert.Equal(t, "generation_failed", got.Code)
 	assert.Contains(t, got.Message, "[generation_failed]")
 	assert.Equal(t, http.StatusInternalServerError, got.HTTPStatus)
 
-	got = sanitizedTaskPluginError(http.StatusBadGateway, "https://user:password@upstream.invalid")
+	got = sanitizedTaskPluginError(nil, http.StatusBadGateway, "https://user:password@upstream.invalid")
 	assert.Equal(t, "generation_failed", got.Code)
 	assert.Contains(t, got.Message, "[generation_failed]")
 }
@@ -2486,7 +2497,7 @@ func TestRouteTaskPluginEndpointUsesSelectedChannel(t *testing.T) {
 							assert.Equal(t, status == http.StatusNoContent, reached)
 							if tc.decoderRejects && status == http.StatusBadRequest {
 								assert.Contains(t, recorder.Body.String(), `"code":"invalid_parameter"`)
-								assert.NotContains(t, recorder.Body.String(), "plugin rejected this request")
+								assert.Contains(t, recorder.Body.String(), "plugin rejected this request")
 							}
 						})
 					}
@@ -2718,7 +2729,7 @@ func TestPrepareTaskPluginRouteReadsQueryStringTaskID(t *testing.T) {
 	missing := performSharedRouteRequest(router, http.MethodGet, "/probe/v1/query/job", "")
 	assert.Equal(t, http.StatusBadRequest, missing.Code)
 	assert.Contains(t, missing.Body.String(), `"code":"invalid_parameter"`)
-	assert.NotContains(t, missing.Body.String(), "task_id is required")
+	assert.Contains(t, missing.Body.String(), "task_id is required")
 	unknown := performSharedRouteRequest(router, http.MethodGet, "/probe/v1/query/job?task_id=task_unknown", "")
 	assert.Equal(t, http.StatusNotFound, unknown.Code)
 }

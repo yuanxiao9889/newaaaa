@@ -137,7 +137,7 @@ it('only copies the public model for users even when upstream metadata is presen
   ).not.toBeInTheDocument()
 })
 
-it('shows model mismatch evidence when tapping the mobile model badge', async () => {
+it('hides the response model in the mobile card and shows evidence when tapping the model badge', async () => {
   const user = userEvent.setup()
   renderLogs({
     logs: [
@@ -153,9 +153,10 @@ it('shows model mismatch evidence when tapping the mobile model badge', async ()
       },
     ],
   })
+  expect(screen.queryByText(/^Response model:/)).not.toBeInTheDocument()
   await user.click(
     screen.getByRole('button', {
-      name: `Model: ${longName}, Response model: unexpected-model`,
+      name: `Model: ${longName}`,
     })
   )
   const dialog = await screen.findByRole('dialog', { name: 'Model' })

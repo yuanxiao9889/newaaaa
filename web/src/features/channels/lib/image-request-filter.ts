@@ -21,33 +21,50 @@ import { z } from 'zod'
 const imageRequestFilterSchema = z.strictObject({
   rules: z
     .array(
-      z.strictObject({
-        models: z
-          .array(
-            z
-              .string()
-              .min(1)
-              .max(256)
-              .refine((value) => value === value.trim())
-          )
-          .min(1)
-          .max(256),
-        qualities: z
-          .array(
-            z
-              .string()
-              .regex(/^[a-z][a-z0-9_-]{0,63}$/)
-              .refine((value) => value !== 'auto')
-          )
-          .min(1)
-          .max(32)
-          .refine((values) => new Set(values).size === values.length),
-        sizes: z
-          .array(z.string().regex(/^[1-9]\d{0,5}x[1-9]\d{0,5}$/))
-          .min(1)
-          .max(256)
-          .refine((values) => new Set(values).size === values.length),
-      })
+      z
+        .strictObject({
+          models: z
+            .array(
+              z
+                .string()
+                .min(1)
+                .max(256)
+                .refine((value) => value === value.trim())
+            )
+            .min(1)
+            .max(256),
+          qualities: z
+            .array(
+              z
+                .string()
+                .regex(/^[a-z][a-z0-9_-]{0,63}$/)
+                .refine((value) => value !== 'auto')
+            )
+            .min(1)
+            .max(32)
+            .refine((values) => new Set(values).size === values.length),
+          sizes: z
+            .array(z.string().regex(/^[1-9]\d{0,5}x[1-9]\d{0,5}$/))
+            .max(256)
+            .refine((values) => new Set(values).size === values.length)
+            .nullish(),
+          custom_size: z
+            .strictObject({
+              min_pixels: z.number().int().min(655360).max(8294400),
+              max_pixels: z.number().int().min(655360).max(8294400),
+              max_edge: z.number().int().min(16).max(3840).multipleOf(16),
+            })
+            .refine(
+              (range) =>
+                range.min_pixels <= range.max_pixels &&
+                range.max_edge * range.max_edge >= range.min_pixels
+            )
+            .optional(),
+        })
+        .refine(
+          (rule) =>
+            (rule.sizes?.length ?? 0) > 0 || rule.custom_size !== undefined
+        )
     )
     .min(1)
     .max(64)
@@ -109,7 +126,7 @@ export function getImageRequestFilterError(
     return 'Image request filter configuration must be a JSON object'
   }
   if (enabled && !imageRequestFilterSchema.safeParse(parsed).success) {
-    return 'Each rule requires unique models, allowed qualities, and exact sizes such as 2880x2880'
+    return 'Each rule requires unique models, allowed qualities, and valid exact sizes or custom size bounds'
   }
   return undefined
 }

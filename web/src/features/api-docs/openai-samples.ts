@@ -21,6 +21,31 @@ import type { ImageModelDoc } from './data'
 
 type ModelOperation = 'generate' | 'edit'
 
+export function buildImage26GifBody(
+  model: ImageModelDoc,
+  operation: ModelOperation = 'generate'
+): Record<string, unknown> {
+  return {
+    model: model.model,
+    prompt: 'A small fox waves in a seamless animated loop.',
+    n: 1,
+    size: 'auto',
+    ...(model.model === 'all-image-2.6-sunburst-H'
+      ? {}
+      : { quality: 'medium' }),
+    output_format: 'gif',
+    frame_count: 9,
+    frame_duration_ms: 200,
+    ...(operation === 'edit'
+      ? {
+          images: [
+            { image_url: 'data:image/png;base64,BASE64_REFERENCE_IMAGE' },
+          ],
+        }
+      : {}),
+  }
+}
+
 export function buildOpenAISamples(
   model: ImageModelDoc,
   baseUrl: string,

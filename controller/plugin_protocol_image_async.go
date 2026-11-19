@@ -2,14 +2,18 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
+	"path/filepath"
+	"strconv"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
-	"github.com/QuantumNous/new-api/middleware"
+	"github.com/QuantumNous/new-api/constant"
+	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
 	pluginruntime "github.com/QuantumNous/new-api/pkg/jsplugin"
 	"github.com/QuantumNous/new-api/relay"
@@ -18,6 +22,7 @@ import (
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
 	"github.com/QuantumNous/new-api/relay/helper"
 	"github.com/QuantumNous/new-api/service"
+	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
 )
@@ -79,57 +84,36 @@ func runQueuedTaskPluginImage(ctx context.Context, task *model.Task) ([]byte, st
 	if task.PrivateData.ImageRetry == nil {
 		return nil, "", fmt.Errorf("plugin image request snapshot is missing")
 	}
-	if task.PrivateData.ImageRetry.Submitting {
-		return nil, "", fmt.Errorf("plugin image submission outcome is unknown; automatic resubmission stopped")
-	}
-	body, err := os.ReadFile(task.PrivateData.ImageRetry.BodyPath)
-	if err != nil {
-		return nil, "", err
-	}
-	c, _, err := buildInternalAsyncBaseContext(ctx, task, body)
-	if err != nil {
-		return nil, "", err
-	}
-	defer common.CleanupBodyStorage(c)
-	defer service.ReleaseAutoSwitchAttempt(c)
-	middleware.PinTaskPluginEndpoint()(c)
-	if !c.IsAborted() {
-		middleware.PrepareTaskPluginEndpoint()(c)
-	}
-	if c.IsAborted() {
-		return nil, "", fmt.Errorf("queued image plugin request can no longer be decoded")
-	}
-	value, _ := c.Get(pluginruntime.ContextKeyPinnedEndpoint)
-	pinned, ok := value.(pluginruntime.PinnedEndpoint)
-	if !ok || pinned.Plugin == nil || pinned.Protocol != pluginruntime.ProtocolOpenAIImage {
-		return nil, "", fmt.Errorf("queued image plugin is unavailable")
-	}
-	channel, err := model.GetChannelById(task.ChannelId, true)
-	if err != nil {
-		return nil, "", err
-	}
+	body, _, proxy, _, err := runRetryableAsyncImageRelay(ctx, task)
+	return body, proxy, err
+}
+
+// The shared queue selector supplies a compatible plugin channel. Accepted work
+// stays on that channel; only an explicit rejection permits another selection.
+func runQueuedTaskPluginImageAttempt(ctx context.Context, task *model.Task, cycle *service.ChannelRetryCycle, c *gin.Context, channel *model.Channel) ([]byte, string, bool, error) {
+	originalChannel := task.ChannelId
 	proxy := channel.GetSetting().Proxy
 	if channel.Status != common.ChannelStatusEnabled {
-		return nil, proxy, fmt.Errorf("queued image channel is disabled")
+		return nil, proxy, false, fmt.Errorf("queued image channel is disabled")
 	}
-	if apiErr := middleware.SetupContextForSelectedChannel(c, channel, task.Properties.OriginModelName); apiErr != nil {
-		return nil, proxy, apiErr
-	}
-	value, _ = c.Get(pluginruntime.ContextKeyPinnedEndpoint)
-	pinned = value.(pluginruntime.PinnedEndpoint)
-	if execution := task.PrivateData.Execution; execution == nil || execution.TaskPlugin == nil || execution.TaskPlugin.Key != pinned.Plugin.Meta.Key {
-		return nil, proxy, fmt.Errorf("queued image plugin binding changed")
+	value, _ := c.Get(pluginruntime.ContextKeyPinnedEndpoint)
+	pinned := value.(pluginruntime.PinnedEndpoint)
+	replacing := task.PrivateData.PluginImage == nil && (len(task.PrivateData.ChannelRetryPath) > 0 || channel.Id != originalChannel || task.PrivateData.RequestRelayFormat != relay.PluginAsyncImageFormat)
+	if !replacing {
+		if execution := task.PrivateData.Execution; execution == nil || execution.TaskPlugin == nil || execution.TaskPlugin.Key != pinned.Plugin.Meta.Key {
+			return nil, proxy, false, fmt.Errorf("queued image plugin binding changed")
+		}
 	}
 	info, err := relaycommon.GenRelayInfo(c, types.RelayFormatTask, nil, nil)
 	if err != nil {
-		return nil, proxy, err
+		return nil, proxy, false, err
 	}
 	info.PublicTaskID = task.TaskID
 	info.OriginModelName = task.Properties.OriginModelName
 	info.Action = c.GetString("task_action")
 	bc := task.PrivateData.BillingContext
 	if bc == nil {
-		return nil, proxy, fmt.Errorf("queued image billing snapshot is missing")
+		return nil, proxy, false, fmt.Errorf("queued image billing snapshot is missing")
 	}
 	info.PriceData = types.PriceData{ModelPrice: bc.ModelPrice, FixedPriceUnit: bc.FixedPriceUnit,
 		ModelRatio: bc.ModelRatio, UsePrice: bc.PerCallBilling, Quota: task.Quota}
@@ -139,17 +123,70 @@ func runQueuedTaskPluginImage(ctx context.Context, task *model.Task) ([]byte, st
 	info.InitChannelMeta(c)
 	info.UpstreamModelName = task.Properties.UpstreamModelName
 	if task.PrivateData.PluginImage == nil {
-		task.PrivateData.ImageRetry.Submitting = true
-		if err := persistAsyncImageAttempt(task); err != nil {
-			return nil, proxy, err
+		retry := task.PrivateData.ImageRetry
+		if len(task.PrivateData.ChannelRetryPath) > 0 && cycle.Budget.Remaining(1, len(task.PrivateData.ChannelRetryPath), time.Now()) <= 0 {
+			return nil, proxy, false, fmt.Errorf("plugin image retry budget exhausted")
 		}
-		c.Request = c.Request.WithContext(service.BeginUpstreamDelivery(ctx, channel.Id, 1))
-		result, taskErr := relay.RelayQueuedTaskSubmit(c, info)
+		task.ChannelId = channel.Id
+		task.PrivateData.RequestRelayFormat = relay.PluginAsyncImageFormat
+		retry.SettlementQuota = nil
+		retry.SettlementInput = nil
+		task.PrivateData.ChannelRetryPath = append(task.PrivateData.ChannelRetryPath, strconv.Itoa(channel.Id))
+		retry.CycleStart, retry.Submitting = cycle.Start, true
+		task.PrivateData.AutoSwitch = service.AutoSwitchAttempt(c)
+		if err := persistAsyncImageAttempt(task); err != nil {
+			return nil, proxy, false, err
+		}
+		info.RetryIndex = len(task.PrivateData.ChannelRetryPath) - 1
+		info.Billing, err = service.NewImageTaskRetryBilling(ctx, task, info)
+		if err != nil {
+			return nil, proxy, false, err
+		}
+		c.Request = c.Request.WithContext(service.BeginUpstreamDelivery(ctx, channel.Id, len(task.PrivateData.ChannelRetryPath)))
+		var result *relay.TaskSubmitResult
+		var taskErr *dto.TaskError
+		if replacing {
+			// Re-price the replacement provider using its own schema. The task funds
+			// adapter reserves only the difference, atomically, before the new POST.
+			info.PriceData = types.PriceData{}
+			result, taskErr = relay.RelayTaskSubmit(c, info)
+		} else {
+			result, taskErr = relay.RelayQueuedTaskSubmit(c, info)
+		}
 		if taskErr != nil {
-			return nil, proxy, fmt.Errorf("%s", taskSubmissionAPIError(taskErr).MaskSensitiveErrorWithStatusCode())
+			service.RecordAutoSwitchTaskSubmissionFailure(c, taskErr)
+			apiErr := taskSubmissionAPIError(taskErr)
+			retry.Details = append(retry.Details, buildInternalAsyncChannelRetryDetail(len(task.PrivateData.ChannelRetryPath), channel, apiErr))
+			remaining := cycle.Budget.Remaining(common.RetryTimes-len(task.PrivateData.ChannelRetryPath)+1, len(task.PrivateData.ChannelRetryPath), time.Now())
+			confirmed := !taskErr.LocalError && !taskErr.NoRetry && taskErr.Code == "fail_to_fetch_task" && c.GetBool("auto_switch_task_rejected")
+			again := confirmed && !retry.SkipRetry && (task.PrivateData.MediaRetry != nil || operation_setting.ShouldRetryByStatusCode(taskErr.StatusCode)) && decideTaskRetry(c, taskErr, remaining).Action == "retry"
+			if !again {
+				recordInternalAsyncImageFinalErrorLog(c, task, channel, apiErr, task.PrivateData.ChannelRetryPath, retry.Details)
+				return nil, proxy, false, fmt.Errorf("%s", apiErr.MaskSensitiveErrorWithStatusCode())
+			}
+			retry.Submitting = false
+			task.PrivateData.AutoSwitch = nil
+			if err := persistAsyncImageAttempt(task); err != nil {
+				return nil, proxy, false, err
+			}
+			return nil, proxy, true, nil
 		}
 		if result == nil {
-			return nil, proxy, fmt.Errorf("plugin returned no submission result")
+			return nil, proxy, false, fmt.Errorf("plugin returned no submission result")
+		}
+		service.DetachAutoSwitchAttempt(c)
+		execution := service.TaskExecutionSnapshotFromContext(c)
+		if task.PrivateData.Execution != nil {
+			execution.RequestID = task.PrivateData.Execution.RequestID
+		}
+		task.PrivateData.Execution = execution
+		if replacing {
+			bc = &model.TaskBillingContext{ModelPrice: info.PriceData.ModelPrice, FixedPriceUnit: info.PriceData.FixedPriceUnit,
+				GroupRatio: info.PriceData.GroupRatioInfo.GroupRatio, ModelRatio: info.PriceData.ModelRatio,
+				OtherRatios: info.PriceData.OtherRatios(), OriginModelName: info.OriginModelName,
+				PerCallBilling: common.StringsContains(constant.TaskPricePatches, info.OriginModelName) || info.PriceData.UsePrice,
+				TieredSnapshot: info.TieredBillingSnapshot}
+			task.PrivateData.BillingContext = bc
 		}
 		task.PrivateData.ImageRetry.Submitting = false
 		task.Properties.UpstreamModelName = info.UpstreamModelName
@@ -158,12 +195,36 @@ func runQueuedTaskPluginImage(ctx context.Context, task *model.Task) ([]byte, st
 		task.PrivateData.PluginImage = &model.AsyncPluginImageState{Platform: result.Platform, Status: model.TaskStatusSubmitted}
 		task.PrivateData.ActualQuota = result.Quota
 		task.Data = result.TaskData
+		if len(result.TaskData) > 1<<20 && result.Immediate != nil && result.Immediate.Status == model.TaskStatusSuccess {
+			// Keep Base64 results recoverable without growing database rows or
+			// rejecting an image the provider already generated and charged.
+			dir := filepath.Clean(common.GetAsyncImageRequestStoragePath())
+			if err := os.MkdirAll(dir, 0755); err != nil {
+				return nil, proxy, false, err
+			}
+			file, err := os.CreateTemp(dir, task.TaskID+"-result-*.json")
+			if err != nil {
+				return nil, proxy, false, err
+			}
+			_, writeErr := file.Write(result.TaskData)
+			if writeErr == nil {
+				writeErr = file.Sync()
+			}
+			closeErr := file.Close()
+			if writeErr != nil || closeErr != nil {
+				_ = os.Remove(file.Name())
+				return nil, proxy, false, errors.Join(writeErr, closeErr)
+			}
+			task.PrivateData.PluginImage.ResponseBodyPath = file.Name()
+			task.Data = nil
+		}
 		bc.TieredSnapshot, bc.OtherRatios = info.TieredBillingSnapshot, info.PriceData.OtherRatios()
 		if result.Immediate != nil {
 			applyQueuedPluginImageResult(task, result.Immediate)
+			service.RecordAutoSwitchTaskResult(ctx, task, result.Immediate)
 		}
 		if err := persistAsyncImageAttempt(task); err != nil {
-			return nil, proxy, err
+			return nil, proxy, false, err
 		}
 	}
 	adaptor := taskjs.New(pinned.Plugin)
@@ -171,36 +232,37 @@ func runQueuedTaskPluginImage(ctx context.Context, task *model.Task) ([]byte, st
 	for task.PrivateData.PluginImage.Status != model.TaskStatusSuccess && task.PrivateData.PluginImage.Status != model.TaskStatusFailure {
 		select {
 		case <-ctx.Done():
-			return nil, proxy, ctx.Err()
+			return nil, proxy, false, ctx.Err()
 		case <-time.After(taskPluginImagePollInterval):
 		}
 		providerTask := *task
 		providerTask.Platform = task.PrivateData.PluginImage.Platform
 		response, err := adaptor.FetchTask(channel.GetBaseURL(), info.ApiKey, &providerTask, proxy)
 		if err != nil {
-			return nil, proxy, err
+			return nil, proxy, false, err
 		}
 		responseBody, readErr := io.ReadAll(io.LimitReader(response.Body, (1<<20)+1))
 		response.Body.Close()
 		if readErr != nil {
-			return nil, proxy, readErr
+			return nil, proxy, false, readErr
 		}
 		if response.StatusCode/100 != 2 || len(responseBody) > 1<<20 {
-			return nil, proxy, fmt.Errorf("plugin image polling returned an invalid response")
+			return nil, proxy, false, fmt.Errorf("plugin image polling returned an invalid response")
 		}
 		result, err := adaptor.ParseTaskResult(&providerTask, response, responseBody)
 		if err != nil {
-			return nil, proxy, err
+			return nil, proxy, false, err
 		}
 		if result == nil {
-			return nil, proxy, fmt.Errorf("plugin image polling returned no task")
+			return nil, proxy, false, fmt.Errorf("plugin image polling returned no task")
 		}
 		task.Data = responseBody
 		applyQueuedPluginImageResult(task, result)
+		service.RecordAutoSwitchTaskResult(ctx, task, result)
 		if result.Status == model.TaskStatusSuccess && bc.TieredSnapshot != nil && len(result.UsageFacts) > 0 {
 			settlement, facts, err := service.EvaluateTaskCompletionUsage(bc.TieredSnapshot, result.UsageFacts)
 			if err != nil {
-				return nil, proxy, err
+				return nil, proxy, false, err
 			}
 			task.PrivateData.ActualQuota = settlement.ActualQuotaAfterGroup
 			bc.TieredSnapshot.UsageFacts = facts
@@ -210,34 +272,59 @@ func runQueuedTaskPluginImage(ctx context.Context, task *model.Task) ([]byte, st
 			}
 		}
 		if err := persistAsyncImageAttempt(task); err != nil {
-			return nil, proxy, err
+			return nil, proxy, false, err
 		}
 	}
 	if task.PrivateData.PluginImage.Status == model.TaskStatusFailure {
-		return nil, proxy, fmt.Errorf("image generation failed: %s", task.FailReason)
+		state := task.PrivateData.MediaRetry
+		if state != nil && !task.PrivateData.ImageRetry.SkipRetry {
+			decision := service.DecideMediaRetry(c, channel.Id, "", task.FailReason)
+			task.PrivateData.ImageRetry.Details = append(task.PrivateData.ImageRetry.Details, model.AsyncImageRetryDetail{
+				Attempt: state.Attempts, ChannelID: channel.Id, ChannelName: channel.Name, Status: model.TaskStatusFailure,
+				Error: task.FailReason, ErrorType: decision.Reason, AttemptedAt: time.Now().Unix(),
+			})
+			if decision.Action == "retry" {
+				task.PrivateData.PluginImage, task.PrivateData.AutoSwitch = nil, nil
+				task.PrivateData.PluginState, task.Data = nil, nil
+				task.PrivateData.UpstreamTaskID, task.FailReason = "", ""
+				task.PrivateData.PromptTokens, task.PrivateData.CompletionTokens, task.PrivateData.TotalTokens = 0, 0, 0
+				task.PrivateData.UsageDetails = nil
+				if err := persistAsyncImageAttempt(task); err != nil {
+					return nil, proxy, false, err
+				}
+				return nil, proxy, true, nil
+			}
+		}
+		return nil, proxy, false, fmt.Errorf("image generation failed: %s", task.FailReason)
 	}
 	providerTask := *task
 	providerTask.Platform, providerTask.Status = task.PrivateData.PluginImage.Platform, model.TaskStatusSuccess
 	providerTask.PrivateData.ResultURL = task.PrivateData.PluginImage.ResultURL
+	if path := task.PrivateData.PluginImage.ResponseBodyPath; path != "" {
+		providerTask.Data, err = os.ReadFile(path)
+		if err != nil {
+			return nil, proxy, false, fmt.Errorf("read accepted image result: %w", err)
+		}
+	}
 	view, err := service.BuildTaskPluginView(&providerTask)
 	if err != nil {
-		return nil, proxy, err
+		return nil, proxy, false, err
 	}
 	viewValue, err := taskPluginProtocolJSONValue(view)
 	if err != nil {
-		return nil, proxy, err
+		return nil, proxy, false, err
 	}
 	requestValue, _ := c.Get(pluginruntime.ContextKeyProtocolRequest)
 	request := requestValue.(pluginruntime.ProtocolRequestContext)
 	payload, err := pinned.Plugin.Engine.CallPathWithAdmissionTimeout(ctx, pluginruntime.DefaultCallTimeout,
 		"protocols", []string{pinned.Protocol, "render"}, request.JSValue(), viewValue)
 	if err != nil {
-		return nil, proxy, err
+		return nil, proxy, false, err
 	}
 	// Preserve provider URLs. The queue's result handling owns retention;
 	// image protocol response_format must not force a base64 download here.
 	encoded, err := common.Marshal(payload)
-	return encoded, proxy, err
+	return encoded, proxy, false, err
 }
 
 func applyQueuedPluginImageResult(task *model.Task, result *relaycommon.TaskInfo) {

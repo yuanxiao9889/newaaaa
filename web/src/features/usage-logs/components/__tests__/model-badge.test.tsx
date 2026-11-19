@@ -317,7 +317,7 @@ it('makes the Wan icon available to model icon selectors', () => {
   expect(getLobeIconNames()).toContain('Wan')
 })
 
-it('opens the mismatch evidence with the keyboard and shows all three models', async () => {
+it('hides the response model in the list and opens its evidence with the keyboard', async () => {
   const user = userEvent.setup()
   const returned =
     'unexpected-provider-model-with-a-long-dated-version-2026-09-17'
@@ -331,11 +331,11 @@ it('opens the mismatch evidence with the keyboard and shows all three models', a
       }}
     />
   )
-  expect(screen.getByText(`Response model: ${returned}`)).toBeVisible()
+  expect(screen.queryByText(/^Response model:/)).not.toBeInTheDocument()
   await user.tab()
   expect(
     screen.getByRole('button', {
-      name: `Model: requested-model, Response model: ${returned}`,
+      name: 'Model: requested-model',
     })
   ).toHaveFocus()
   await user.keyboard('{Enter}')

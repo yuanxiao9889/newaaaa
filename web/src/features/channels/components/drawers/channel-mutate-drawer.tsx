@@ -82,6 +82,11 @@ import {
 } from '@/components/ui/form'
 import { IconBadge, type IconBadgeTone } from '@/components/ui/icon-badge'
 import { Input } from '@/components/ui/input'
+import {
+  InputGroup,
+  InputGroupAddon,
+  InputGroupInput,
+} from '@/components/ui/input-group'
 import { PopoverDescription, PopoverTitle } from '@/components/ui/popover'
 import {
   Select,
@@ -152,6 +157,7 @@ import {
   FIELD_DESCRIPTIONS,
   FIELD_PLACEHOLDERS,
   MODEL_FETCHABLE_TYPES,
+  MODEL_DISCOVERABLE_TYPES,
   MULTI_IMAGE_REFERENCE_SUPPORTED_TYPES,
   OPENAI_FIELD_PASSTHROUGH_TYPES,
 } from '../../constants'
@@ -1244,7 +1250,7 @@ export function ChannelMutateDrawer({
     enabled:
       open &&
       canDiscoverModels &&
-      MODEL_FETCHABLE_TYPES.has(currentType) &&
+      MODEL_DISCOVERABLE_TYPES.has(currentType) &&
       (!isEditing || Boolean(channelData?.data)),
     request: previewModels ? previewRequest : savedRequest,
   })
@@ -1257,7 +1263,7 @@ export function ChannelMutateDrawer({
   const fetchDiscoveredModels = discovery.fetch
   const handleFetchModels = useCallback(async () => {
     const type = form.getValues('type')
-    if (!MODEL_FETCHABLE_TYPES.has(type)) {
+    if (!MODEL_DISCOVERABLE_TYPES.has(type)) {
       toast.error(t('This channel type does not support fetching models'))
       return
     }
@@ -3350,7 +3356,7 @@ export function ChannelMutateDrawer({
               )}
             />
 
-            {MODEL_FETCHABLE_TYPES.has(currentType) && (
+            {MODEL_DISCOVERABLE_TYPES.has(currentType) && (
               <div aria-live='polite' className='mt-4 space-y-3'>
                 {discovery.status === 'loading' && (
                   <LoadingState
@@ -3506,7 +3512,7 @@ export function ChannelMutateDrawer({
                   <FileText className='mr-2 h-4 w-4' aria-hidden='true' />
                   {t('Fill Related Models')}
                 </Button>
-                {MODEL_FETCHABLE_TYPES.has(currentType) && (
+                {MODEL_DISCOVERABLE_TYPES.has(currentType) && (
                   <>
                     <Button
                       type='button'
@@ -4591,12 +4597,26 @@ export function ChannelMutateDrawer({
                               </Button>
                             </div>
                           </div>
-                          <Input
-                            readOnly
-                            value={channelKey ?? ''}
-                            placeholder={t('Hidden — verify to reveal')}
-                            className='font-mono'
-                          />
+                          <InputGroup>
+                            <InputGroupInput
+                              readOnly
+                              aria-label={t('Current key')}
+                              value={channelKey ?? ''}
+                              placeholder={t('Hidden — verify to reveal')}
+                              className='min-w-0 font-mono'
+                            />
+                            {!channelKey && channelData?.data?.key_suffix && (
+                              <InputGroupAddon
+                                align='inline-end'
+                                className='text-foreground shrink-0 font-mono whitespace-nowrap'
+                                aria-label={t('Key ending in {{suffix}}', {
+                                  suffix: channelData.data.key_suffix,
+                                })}
+                              >
+                                •••• {channelData.data.key_suffix}
+                              </InputGroupAddon>
+                            )}
+                          </InputGroup>
                         </div>
                       )}
                       <FormMessage />

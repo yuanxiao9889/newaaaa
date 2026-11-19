@@ -71,17 +71,23 @@ func DomesticReferenceFiles(body []byte) []string {
 		pending = pending[:len(pending)-1]
 		switch v := current.(type) {
 		case map[string]any:
-			for _, item := range v {
+			for key, item := range v {
+				if key == "prompt" || key == "negative_prompt" || key == "text" {
+					continue
+				}
 				pending = append(pending, item)
 			}
 		case []any:
 			pending = append(pending, v...)
 		case string:
 			u, err := url.Parse(v)
-			if err != nil || u.Scheme != "https" || !slices.Contains([]string{"www.oopii.cn", "oopii.cn"}, u.Host) || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
+			if err != nil || !slices.Contains([]string{"www.oopii.cn", "oopii.cn"}, u.Hostname()) {
 				continue
 			}
 			name, ok := strings.CutPrefix(u.Path, "/seedance-reference/")
+			if ok && (u.Scheme != "https" || u.Host != u.Hostname() || u.User != nil || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" || u.RawPath != "") {
+				return []string{"invalid-managed-reference"}
+			}
 			if ok && domesticFilename.MatchString(name) && !slices.Contains(files, name) {
 				files = append(files, name)
 			}

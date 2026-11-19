@@ -215,7 +215,7 @@ func TestNativeAsyncImageErrorsIncludeSafeCodesAndGuidance(t *testing.T) {
 		{"failed unknown detail", false, 200, `{"status":"failed","error":{"code":"private-model","message":"channel=163 https://provider.invalid token=secret"}}`, "generation_failed", 200},
 		{"HTTP error body", true, 400, `{"error":{"code":"invalid_image_input","message":"channel=163"}}`, "invalid_image_input", 400},
 		{"HTTP rate limit", false, 429, `{"error":{"message":"secret"}}`, "rate_limit_exceeded", 429},
-		{"HTTP provider auth", true, 401, `{"error":{"code":"invalid_token","message":"secret"}}`, "service_auth_error", 502},
+		{"HTTP provider auth", true, 401, `{"error":{"code":"invalid_token","message":"Credential secret has expired; contact administrator"}}`, "service_auth_error", 502},
 		{"HTTP provider access", false, 403, `{"error":{"message":"secret"}}`, "service_access_error", 502},
 		{"non JSON error", false, 503, `<html>https://provider.invalid channel=163 secret</html>`, "service_unavailable", 503},
 		{"malformed status", false, 200, `<html>https://provider.invalid channel=163 secret</html>`, "generation_failed", 200},
@@ -230,7 +230,7 @@ func TestNativeAsyncImageErrorsIncludeSafeCodesAndGuidance(t *testing.T) {
 			}))
 			t.Cleanup(upstream.Close)
 			RegisterNativeAsyncImagePoll("task_error", upstream.URL+"/status", upstream.URL+"/content", &relaycommon.RelayInfo{
-				UserId: 7, OriginModelName: "public-model", ChannelMeta: &relaycommon.ChannelMeta{ChannelBaseUrl: upstream.URL},
+				UserId: 7, OriginModelName: "public-model", ChannelMeta: &relaycommon.ChannelMeta{ChannelBaseUrl: upstream.URL, ApiKey: "secret"},
 			})
 			t.Cleanup(func() { nativeAsyncImagePolls.Delete("task_error") })
 			recorder := httptest.NewRecorder()
@@ -255,6 +255,9 @@ func TestNativeAsyncImageErrorsIncludeSafeCodesAndGuidance(t *testing.T) {
 			assert.Equal(t, tc.code, body.Error.Code)
 			assert.Contains(t, body.Error.Message, "["+tc.code+"]")
 			assert.NotEmpty(t, body.Error.Hint)
+			if tc.name == "HTTP provider auth" {
+				assert.Contains(t, body.Error.Message, "has expired; contact administrator")
+			}
 			for _, secret := range []string{"provider.invalid", "channel=163", "private-model", "secret"} {
 				assert.NotContains(t, recorder.Body.String(), secret)
 			}

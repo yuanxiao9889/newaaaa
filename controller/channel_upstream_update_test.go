@@ -197,6 +197,80 @@ func TestFetchOrdinaryOpenAIModelsKeepsExistingEmptyDataBehavior(t *testing.T) {
 	require.Empty(t, models)
 }
 
+func TestFetchTaskPluginModelsFromUpstream(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		status int
+		body   string
+		want   []string
+		err    string
+	}{
+		{"model list", http.StatusOK, `{"data":[{"id":" upstream-video "},{"id":"upstream-video"},{"id":"new-video"}]}`, []string{"upstream-video", "new-video"}, ""},
+		{"unsupported endpoint", http.StatusNotFound, `{"error":"not found"}`, nil, "status code: 404"},
+		{"upstream failure", http.StatusBadGateway, `{"data":[{"id":"must-not-be-used"}]}`, nil, "status code: 502"},
+		{"invalid response", http.StatusOK, `{"error":"unsupported"}`, nil, "data is required"},
+		{"empty response", http.StatusOK, `{"data":[]}`, nil, "no valid model IDs"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				assert.Equal(t, http.MethodGet, r.Method)
+				assert.Equal(t, "/v1/models", r.URL.Path)
+				assert.Equal(t, "Bearer enabled-key", r.Header.Get("Authorization"))
+				assert.Equal(t, "enabled-key", r.Header.Get("X-Provider-Key"))
+				w.WriteHeader(tc.status)
+				_, _ = w.Write([]byte(tc.body))
+			}))
+			defer server.Close()
+			headerOverride := `{"X-Provider-Key":"{api_key}"}`
+			channel := &model.Channel{
+				Type: constant.ChannelTypeTaskPlugin, BaseURL: &server.URL,
+				Key: "disabled-key\nenabled-key", HeaderOverride: &headerOverride,
+				ChannelInfo: model.ChannelInfo{
+					IsMultiKey:         true,
+					MultiKeyStatusList: map[int]int{0: common.ChannelStatusManuallyDisabled, 1: common.ChannelStatusEnabled},
+				},
+			}
+			models, err := fetchChannelUpstreamModelIDs(channel)
+			if tc.err != "" {
+				require.ErrorContains(t, err, tc.err)
+				assert.Nil(t, models)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, models)
+		})
+	}
+}
+
+func TestFetchModelsTaskPluginCreatePreview(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "/v1/models", r.URL.Path)
+		assert.Equal(t, "Bearer preview-key", r.Header.Get("Authorization"))
+		_, _ = w.Write([]byte(`{"data":[{"id":"upstream-video"}]}`))
+	}))
+	defer server.Close()
+
+	body, err := common.Marshal(fetchModelsRequest{
+		Type: constant.ChannelTypeTaskPlugin, BaseURL: &server.URL,
+		Key: "preview-key\nsecond-key",
+	})
+	require.NoError(t, err)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/api/channel/fetch_models", bytes.NewReader(body))
+	ctx.Request.Header.Set("Content-Type", "application/json")
+	FetchModels(ctx)
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	var response struct {
+		Success bool     `json:"success"`
+		Data    []string `json:"data"`
+	}
+	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &response))
+	assert.True(t, response.Success)
+	assert.Equal(t, []string{"upstream-video"}, response.Data)
+}
+
 func TestFetchModelsAdvancedCustomCreatePreview(t *testing.T) {
 	receivedAuthorization := make(chan string, 1)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

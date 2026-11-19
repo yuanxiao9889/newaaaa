@@ -40,6 +40,7 @@ import {
 import { CHANNEL_TYPE_ADVANCED_CUSTOM } from '../../lib/advanced-custom'
 import {
   CHANNEL_FORM_DEFAULT_VALUES,
+  channelFormSchema,
   transformChannelToFormDefaults,
   transformFormDataToCreatePayload,
   transformFormDataToUpdatePayload,
@@ -415,6 +416,94 @@ describe('responses websocket quick option', () => {
       expect(
         screen.queryByRole('switch', WEBSOCKET_SWITCH)
       ).not.toBeInTheDocument()
+    }
+  )
+})
+
+describe('automatic switching retry limits', () => {
+  test.each(['inline', 'stacked'] as const)(
+    '%s edits and preserves retry limits while toggling',
+    async (layout) => {
+      const saved: ChannelFormValues[] = []
+      const user = userEvent.setup()
+      render(
+        <QuickOptionsHarness
+          layout={layout}
+          confirm={() => Promise.resolve(true)}
+          onSave={(value) => saved.push(value)}
+        />
+      )
+      expect(
+        screen.queryByRole('spinbutton', { name: 'Total attempts' })
+      ).not.toBeInTheDocument()
+      const toggle = screen.getByRole('switch', { name: 'Automatic switching' })
+      await user.click(toggle)
+      const minutes = screen.getByRole('spinbutton', {
+        name: 'Retry window (minutes)',
+      })
+      const attempts = screen.getByRole('spinbutton', {
+        name: 'Total attempts',
+      })
+      expect(minutes).toHaveValue(10)
+      expect(attempts).toHaveValue(3)
+      await user.clear(minutes)
+      await user.type(minutes, '120')
+      await user.clear(attempts)
+      await user.type(attempts, '10')
+      await user.click(toggle)
+      await user.click(toggle)
+      expect(
+        screen.getByRole('spinbutton', { name: 'Total attempts' })
+      ).toHaveValue(10)
+      await user.click(screen.getByRole('button', { name: 'Save' }))
+      await waitFor(() => expect(saved).toHaveLength(1))
+      expect(saved[0]).toMatchObject({
+        auto_switch_retry_window_minutes: 120,
+        auto_switch_max_attempts: 10,
+      })
+      const payload = transformFormDataToCreatePayload(saved[0])
+      expect(JSON.parse(payload.channel.settings ?? '{}')).toMatchObject({
+        auto_switch_retry_window_minutes: 120,
+        auto_switch_max_attempts: 10,
+      })
+    }
+  )
+  test.each([0, -1, 1.5, 11, Number.NaN])(
+    'rejects invalid attempt value %s',
+    (attempts) => {
+      const result = channelFormSchema.safeParse({
+        ...CHANNEL_FORM_DEFAULT_VALUES,
+        name: 'test',
+        models: 'image',
+        auto_switch_max_attempts: attempts,
+      })
+      expect(result.success).toBe(false)
+      if (!result.success) {
+        expect(
+          result.error.issues.some((issue) =>
+            issue.path.includes('auto_switch_max_attempts')
+          )
+        ).toBe(true)
+      }
+    }
+  )
+  test.each([0, -1, 1.5, 121, Number.NaN])(
+    'rejects invalid minute value %s',
+    (minutes) => {
+      const result = channelFormSchema.safeParse({
+        ...CHANNEL_FORM_DEFAULT_VALUES,
+        name: 'test',
+        models: 'image',
+        auto_switch_retry_window_minutes: minutes,
+      })
+      expect(result.success).toBe(false)
+      if (!result.success) {
+        expect(
+          result.error.issues.some((issue) =>
+            issue.path.includes('auto_switch_retry_window_minutes')
+          )
+        ).toBe(true)
+      }
     }
   )
 })

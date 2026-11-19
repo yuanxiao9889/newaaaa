@@ -103,7 +103,7 @@ func TestTaskErrorResponsesDoNotExposeProviderBodies(t *testing.T) {
 		c, _ := gin.CreateTestContext(recorder)
 		c.Request = httptest.NewRequest(http.MethodPost, "/v1/images/generations", nil)
 		taskErr := &dto.TaskError{
-			StatusCode: 400, Code: "private-provider-code", Message: "private-model at upstream.invalid",
+			StatusCode: 400, Code: "private-provider-code", Message: "model=private-model host=upstream.invalid",
 			Data: map[string]any{"channel": 141, "plugin": "private-plugin"},
 		}
 		write(c, taskErr)
@@ -112,7 +112,7 @@ func TestTaskErrorResponsesDoNotExposeProviderBodies(t *testing.T) {
 		for _, private := range []string{"private-", "upstream.invalid", "141"} {
 			assert.NotContains(t, recorder.Body.String(), private)
 		}
-		assert.Equal(t, "private-model at upstream.invalid", taskErr.Message)
+		assert.Equal(t, "model=private-model host=upstream.invalid", taskErr.Message)
 		assert.NotNil(t, taskErr.Data)
 	}
 }
@@ -124,7 +124,7 @@ func TestTaskErrorProjectionProvidesChineseDiagnostics(t *testing.T) {
 		apiError                    *types.NewAPIError
 	}{
 		{"missing prompt", "missing_prompt", "缺少提示词（prompt）", http.StatusBadRequest, types.NewErrorWithStatusCode(errors.New("field prompt is required"), types.ErrorCodeInvalidRequest, 400)},
-		{"invalid size", "invalid_size", "图片或视频尺寸参数无效", http.StatusBadRequest, types.NewOpenAIError(errors.New("invalid image size for private storage model"), types.ErrorCode("invalid_value"), 400)},
+		{"invalid size", "invalid_size", "图片或视频尺寸参数无效", http.StatusBadRequest, types.NewOpenAIError(errors.New(`invalid image size; model="private storage model"`), types.ErrorCode("invalid_value"), 400)},
 		{"safety rejection", "content_policy_violation", "输入内容或生成结果未通过安全审核", http.StatusBadRequest, types.NewOpenAIError(errors.New("unsafe image"), types.ErrorCode("content_policy_violation"), 403)},
 		{"no generated result", "generation_result_empty", "生成服务未返回有效结果", http.StatusBadGateway, types.NewOpenAIError(errors.New("no images generated"), types.ErrorCodeBadResponseBody, 502)},
 		{"wallet", "insufficient_user_quota", "账户余额不足", http.StatusPaymentRequired, types.NewErrorWithStatusCode(errors.New("余额不足"), types.ErrorCodeInsufficientUserQuota, 403)},

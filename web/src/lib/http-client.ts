@@ -62,8 +62,15 @@ api.get = ((url: string, config: ApiRequestConfig = {}) => {
   if (config.disableDuplicate) return originalGet(url, config)
 
   const params = config.params ? JSON.stringify(config.params) : '{}'
-  const sessionSID = useAuthStore.getState().auth.session?.sid || 'anonymous'
-  const key = `${sessionSID}:${url}?${params}`
+  const auth = useAuthStore.getState().auth
+  // A role/group change can narrow data access without rotating the session.
+  const viewer = JSON.stringify([
+    auth.session?.sid ?? null,
+    auth.user?.id ?? null,
+    auth.user?.role ?? 0,
+    auth.user?.group ?? '',
+  ])
+  const key = `${viewer}:${url}?${params}`
   const existingRequest = inFlightGet.get(key)
   if (existingRequest) return existingRequest
 

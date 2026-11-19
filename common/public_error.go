@@ -8,8 +8,8 @@ import (
 	"strings"
 )
 
-// PublicError contains only allowlisted diagnostics that are safe for API users.
-// Provider details remain in administrator logs, never in these fields.
+// PublicError combines stable guidance with redacted diagnostic details.
+// Credentials and internal routing details remain in administrator logs.
 type PublicError struct {
 	Code       string `json:"code"`
 	Message    string `json:"message"`
@@ -51,6 +51,7 @@ var publicErrorCatalog = map[string]PublicError{
 	"unsupported_background_mode":   {"unsupported_background_mode", "当前模型不支持后台请求", "请移除 background=true，并使用模型支持的其他模式", false, http.StatusBadRequest},
 	"invalid_stream_parameter":      {"invalid_stream_parameter", "stream 参数必须为布尔值", "请传入 true 或 false，不要传入字符串", false, http.StatusBadRequest},
 	"content_policy_violation":      {"content_policy_violation", "输入内容或生成结果未通过安全审核", "安全审核提示：请调整提示词或参考图片后重试；如确认内容合规仍失败，请联系管理员并提供请求 ID 或任务 ID", false, http.StatusBadRequest},
+	"copyright_violation":           {"copyright_violation", "生成失败：素材版权违规，参考素材或生成内容可能涉及受版权保护的形象（影视动漫角色、明星肖像、品牌标识等）", "请检查更换参考素材后重试；提示词里如果点名了知名角色或 IP，也请一并修改", false, http.StatusBadRequest},
 	"content_safety_unknown":        {"content_safety_unknown", "生成失败，安全检查的具体原因尚未明确", "安全审核提示：报错涉及安全检查，但尚不能确认内容被拦截；请检查提示词或参考图片，如仍失败请联系管理员并提供请求 ID 或任务 ID", false, http.StatusBadGateway},
 	"input_too_large":               {"input_too_large", "输入内容或文件超过大小限制", "请压缩图片、减少文件数量或缩短输入内容后重试", false, http.StatusRequestEntityTooLarge},
 	"rate_limit_exceeded":           {"rate_limit_exceeded", "请求过于频繁或当前并发数已达上限", "请降低并发并稍后重试", true, http.StatusTooManyRequests},
@@ -87,12 +88,32 @@ var publicErrorPolicyRejectionPattern = regexp.MustCompile(`(?:违反|违背)(?:
 var publicErrorSafetyPassedPattern = regexp.MustCompile(`\b(?:no|without)\s+(?:unsafe|nsfw)\s+(?:content|images?|prompts?)\b(?:\s+(?:was\s+)?(?:detected|found))?|\bnot unsafe\b|\b(?:is|was|considered) safe\b|\bno safety violations?\b|\b(?:safety|moderation)(?: check| review)?(?: has| was| is)? (?:passed|approved|successful)\b|(?:已通过|通过了)(?:内容|安全|内容安全)?审核|(?:内容|安全|内容安全)?审核(?:已通过|通过了|通过)`)
 var publicErrorSafetyRejectionPattern = regexp.MustCompile(`\b(?:content[._ ]policy[._ ]violation|(?:unsafe|nsfw)[ _](?:prompts?|images?|content|videos?)|(?:prompts?|images?|content|videos?)[ _](?:unsafe|nsfw))\b|\b(?:prompt|images?|content|videos?|outputs?)\b[^.!?\n]{0,80}\b(?:unsafe|not safe|nsfw)\b|\b(?:blocked|rejected|filtered(?: out)?|flagged|violates?|violated)\b[^.!?\n]{0,120}\b(?:safety|moderation|content policy|prohibited use policy|nsfw)\b|\b(?:safety|moderation|content policy)\b[^.!?\n]{0,60}\b(?:blocked|rejected|violation)\b|(?:未通过|没有通过)(?:内容|安全|内容安全)?审核|(?:内容|安全|内容安全)?审核(?:失败|未通过|不通过)|违规内容|内容违规`)
 var publicErrorSafetyMentionPattern = regexp.MustCompile(`\b(?:safety|moderation|nsfw)\b|(?:^|[\s:])(?:safe|unsafe)(?:$|[.,;](?:\s|$))|安全检查|安全审核|内容审核`)
+var publicErrorCopyrightNegationPattern = regexp.MustCompile(`(?:没有|并未|未|无|不存在)(?:发现|检测到|涉及)?(?:素材)?(?:版权违规|版权侵权|侵犯版权)|\b(?:no|without)\s+copyright\s+(?:violation|infringement)s?\b|\b(?:does|do|did) not (?:infringe|violate) copyright\b`)
+var publicErrorCopyrightRejectionPattern = regexp.MustCompile(`版权违规|版权侵权|侵犯版权|\bcopyright[._ -](?:violation|infringement)\b|\b(?:violates?|infringes?) copyright\b`)
 
 // ClassifyPublicError projects untrusted diagnostics into public wording while
 // retaining the upstream HTTP status for clients that display only a message.
 // local grants trust only to the explicit code argument, never to codes or
 // messages extracted from a provider response wrapped by a local error.
-func ClassifyPublicError(code, message string, status int, local bool) (public PublicError) {
+func ClassifyPublicError(code, message string, status int, local bool, sensitiveValues ...string) (public PublicError) {
+	defer func() {
+		// Local account/storage failures can contain account records or database
+		// diagnostics. Their catalog guidance already names the actionable cause.
+		if local {
+			switch public.Code {
+			case "invalid_token", "token_expired", "access_denied", "task_not_found", "insufficient_token_quota", "insufficient_user_quota", "billing_failed":
+				return
+			}
+		}
+		detail := publicErrorDetail(message, public, sensitiveValues...)
+		if detail == "" {
+			return
+		}
+		if public.Code == "generation_failed" {
+			public.Message = strings.Replace(public.Message, publicErrorCatalog["generation_failed"].Message, "生成失败", 1)
+		}
+		public.Message += "；具体原因：" + detail
+	}()
 	hostCode := strings.ToLower(strings.TrimSpace(code))
 	codes, text, evidenceStatus := publicErrorEvidence(hostCode, message, status)
 	// A projected error may pass through another local response wrapper. Its
@@ -112,6 +133,9 @@ func ClassifyPublicError(code, message string, status int, local bool) (public P
 	if local {
 		// Generic codes may still carry a precise validation or safety reason.
 		if projected, ok := publicErrorCatalog[hostCode]; ok && hostCode != "invalid_parameter" && hostCode != "generation_failed" {
+			if hostCode == "content_policy_violation" && publicErrorCopyrightViolation(codes, text) {
+				return publicErrorCatalog["copyright_violation"]
+			}
 			return projected
 		}
 		switch hostCode {
@@ -173,6 +197,8 @@ func ClassifyPublicError(code, message string, status int, local bool) (public P
 		return publicErrorCatalog["service_auth_error"]
 	case status == http.StatusPaymentRequired, slices.Contains(codes, "insufficient_quota"), slices.Contains(codes, "insufficient_user_quota"), slices.Contains(codes, "insufficient_token_quota"), slices.Contains(codes, "billing_hard_limit_reached"), strings.Contains(text, "insufficient quota"), strings.Contains(text, "insufficient balance"), strings.Contains(text, "余额不足"), strings.Contains(text, "配额不足"):
 		return publicErrorCatalog["service_quota_exceeded"]
+	case publicErrorCopyrightViolation(codes, text):
+		return publicErrorCatalog["copyright_violation"]
 	case status == http.StatusUnavailableForLegalReasons, safetyRejected:
 		return publicErrorCatalog["content_policy_violation"]
 	case status == http.StatusForbidden, slices.Contains(codes, "permission_denied"), slices.Contains(codes, "access_denied"):
@@ -231,6 +257,20 @@ func ClassifyPublicError(code, message string, status int, local bool) (public P
 	default:
 		return publicErrorCatalog["generation_failed"]
 	}
+}
+
+// publicErrorCopyrightViolation retains the actionable copyright explanation
+// without publishing raw provider diagnostics or treating echoed prompts and
+// policy URLs as evidence. A generic safety failure alone is not copyright evidence.
+func publicErrorCopyrightViolation(codes []string, text string) bool {
+	for _, code := range codes {
+		if code == "copyright_violation" || code == "copyright_infringement" {
+			return true
+		}
+	}
+	text = publicErrorSafetyURLPattern.ReplaceAllString(text, " ")
+	text = publicErrorCopyrightNegationPattern.ReplaceAllString(text, " ")
+	return publicErrorCopyrightRejectionPattern.MatchString(text)
 }
 
 // publicErrorContentSafety separates explicit rejection from an ambiguous safety

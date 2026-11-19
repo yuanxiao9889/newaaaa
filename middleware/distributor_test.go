@@ -258,8 +258,14 @@ func TestDistributeHidesTaskPluginDetailsButLogsDiagnostics(t *testing.T) {
 				require.Equal(t, http.StatusServiceUnavailable, recorder.Code)
 				requestID := recorder.Header().Get(common.RequestIdKey)
 				require.NotEmpty(t, requestID)
-				assert.JSONEq(t, fmt.Sprintf(`{"error":{"message":%q,"type":"new_api_error","code":"model_unavailable"}}`,
-					"[model_unavailable] 当前资源紧张，暂时无可用资源；请稍后重试 (request id: "+requestID+")"), recorder.Body.String())
+				var response struct {
+					Error struct{ Message, Type, Code string }
+				}
+				require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &response))
+				assert.Equal(t, "new_api_error", response.Error.Type)
+				assert.Equal(t, "model_unavailable", response.Error.Code)
+				assert.Contains(t, response.Error.Message, "[model_unavailable]")
+				assert.Contains(t, response.Error.Message, requestID)
 				assert.NotContains(t, recorder.Body.String(), group)
 				assert.NotContains(t, recorder.Body.String(), "disable or override")
 				for _, key := range keys {

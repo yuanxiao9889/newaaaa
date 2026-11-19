@@ -83,7 +83,7 @@ func TestBuildImageTaskResponseIncludesSignedURLOnlyForSucceededTasks(t *testing
 	require.Zero(t, queuedResp.URLExpiresAt)
 	failedTask := *successTask
 	failedTask.Status = model.TaskStatusFailure
-	failedTask.FailReason = "provider-private model-private channel=141"
+	failedTask.FailReason = "provider=provider-private model=model-private channel=141"
 	failedResp := buildImageTaskResponse(&failedTask)
 	require.Equal(t, "generation_failed", failedResp.ErrorCode)
 	require.Contains(t, failedResp.Error, "[generation_failed]")
@@ -117,8 +117,8 @@ func TestFailedImageTaskReturnsSafeReasonAndCode(t *testing.T) {
 		{"unsafe_output", `poll failed: 451 {"error_code":"image_unsafe","message":"The generated images appear to be unsafe."}`, "unknown_error", "content_policy_violation", "安全审核提示", 400},
 		{"uncertain_safety", "safety check failed", "unknown_error", "content_safety_unknown", "尚不能确认内容被拦截", 502},
 		{"structured_safety", "safety check failed", "image_unsafe", "content_policy_violation", "安全审核提示", 502},
-		{"review_passed", "safety check passed; Task failed", "unknown_error", "generation_failed", "未提供可公开确认的具体原因", 502},
-		{"authentication", "provider-private authentication failed", "invalid_api_key", "service_auth_error", "无需更换您的令牌", 401},
+		{"review_passed", "safety check passed; Task failed", "unknown_error", "generation_failed", "safety check passed", 502},
+		{"authentication", "authentication failed; provider=provider-private", "invalid_api_key", "service_auth_error", "无需更换您的令牌", 401},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			task := &model.Task{
@@ -128,7 +128,7 @@ func TestFailedImageTaskReturnsSafeReasonAndCode(t *testing.T) {
 					InternalAsync: true,
 					ImageRetry: &model.AsyncImageRetryState{Details: []model.AsyncImageRetryDetail{{
 						ChannelID: 141, ChannelName: "provider-private", ErrorCode: tc.rawCode,
-						StatusCode: tc.status, Error: tc.reason + " model-private https://upstream.invalid sk-secret",
+						StatusCode: tc.status, Error: tc.reason + " model=model-private https://upstream.invalid sk-secret",
 					}}},
 				},
 			}

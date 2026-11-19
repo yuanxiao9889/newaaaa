@@ -53,6 +53,13 @@ func autoSwitchProtocol(c *gin.Context) string {
 // slots. When an opted-in slot wins, its compatible pool supplies a healthy
 // member; the pool therefore retains its manual place while using a backup.
 func selectAutoSwitchChannel(c *gin.Context, group, modelName string, retry int, filters []dto.ChannelFilter) (*model.Channel, error) {
+	// Media failures belong to the current task. New submissions always start
+	// at the administrator's highest eligible priority, including ordinary
+	// channels between two automatic channels. Old global observations must
+	// neither suppress them nor turn a new request into a recovery probe.
+	if IsMediaTaskRequest(c) {
+		return model.GetRandomSatisfiedChannel(group, modelName, retry, filters)
+	}
 	base, err := model.GetRandomSatisfiedChannel(group, modelName, retry, filters)
 	if err != nil || base == nil || !base.GetOtherSettings().AutoSwitchEnabled || base.Type == constant.ChannelTypeMidjourney || base.Type == constant.ChannelTypeMidjourneyPlus {
 		return base, err
@@ -193,6 +200,11 @@ func selectAutoSwitchChannel(c *gin.Context, group, modelName string, retry int,
 	// A depleted automatic pool must not resurrect its cooling members. Other
 	// manually configured channels may still be used by ordinary routing.
 	excluded := append([]int(nil), ids...)
+	if c.GetBool("media_retry_allow_cooling") && MediaRetry(c) != nil {
+		// This is a bounded retry of an existing task, not a health recovery
+		// probe. Preserve global cooling and every caller-supplied filter.
+		return model.GetRandomSatisfiedChannel(group, modelName, 0, filters)
+	}
 	for _, id := range used {
 		if n, err := strconv.Atoi(id); err == nil {
 			excluded = append(excluded, n)
@@ -205,6 +217,12 @@ func selectAutoSwitchChannel(c *gin.Context, group, modelName string, retry int,
 // ShouldDisableChannelForRequest lets the scoped circuit handle transient
 // outages while retaining the administrator's hard-disable authentication rules.
 func ShouldDisableChannelForRequest(c *gin.Context, channelID int, apiErr *types.NewAPIError) bool {
+	if c != nil && apiErr != nil && IsMediaTaskRequest(c) {
+		_, reason := classifyAutoSwitchFailure(apiErr.StatusCode, string(apiErr.GetErrorCode()), apiErr.Error())
+		if reason == "upstream_capacity" || reason == "upstream_unavailable" {
+			return false
+		}
+	}
 	if c != nil && apiErr != nil && c.GetInt("auto_switch_managed_channel") == channelID {
 		_, reason := classifyAutoSwitchFailure(apiErr.StatusCode, string(apiErr.GetErrorCode()), apiErr.Error())
 		if reason == "upstream_capacity" || reason == "upstream_unavailable" {

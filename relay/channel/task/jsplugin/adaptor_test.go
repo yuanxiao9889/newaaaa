@@ -2364,6 +2364,46 @@ func TestTaskSubmitReplyLimitFollowsRetainResult(t *testing.T) {
 	}
 }
 
+func TestImageSubmitCompactsLargeReplyBeforePersistence(t *testing.T) {
+	for _, tc := range []struct {
+		name, protocol string
+		compact        bool
+		wantError      string
+	}{
+		{"image URL with redundant Base64", pluginruntime.ProtocolOpenAIImage, true, ""},
+		{"image task data still bounded", pluginruntime.ProtocolOpenAIImage, false, "task data exceeds size limit"},
+		{"other protocols still bounded", "openai_video", true, "task submit response exceeds size limit"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			source := documentStreamPlugin
+			if tc.compact {
+				source = strings.Replace(source, "taskData:response.body", `taskData:{url:response.body.url}`, 1)
+			}
+			plugin, err := pluginruntime.CompilePlugin(source, pluginruntime.Options{})
+			require.NoError(t, err)
+			info := &relaycommon.RelayInfo{OriginModelName: "alias", ChannelMeta: &relaycommon.ChannelMeta{UpstreamModelName: "document", ChannelBaseUrl: "https://provider.example"}, TaskRelayInfo: &relaycommon.TaskRelayInfo{PublicTaskID: "public-document"}}
+			adaptor := New(plugin)
+			adaptor.Init(info)
+			c, _ := gin.CreateTestContext(httptest.NewRecorder())
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/images/generations", nil)
+			c.Set(pluginruntime.ContextKeyPinnedEndpoint, pluginruntime.PinnedEndpoint{Plugin: plugin, Protocol: tc.protocol})
+			c.Set("task_request", map[string]any{"responseType": "json"})
+			require.Nil(t, adaptor.ValidateRequestAndSetAction(c, info))
+			_, err = adaptor.BuildRequestBody(c, info)
+			require.NoError(t, err)
+			body := `{"url":"https://cdn.example/image.png","document":"` + strings.Repeat("x", maxTaskPluginPersistedJSONBytes+1024) + `"}`
+			parsed, taskErr := adaptor.ParseResponse(c, &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {"application/json"}}, Body: io.NopCloser(strings.NewReader(body))}, info)
+			if tc.wantError != "" {
+				require.NotNil(t, taskErr)
+				assert.Contains(t, taskErr.Error.Error(), tc.wantError)
+				return
+			}
+			require.Nil(t, taskErr)
+			assert.JSONEq(t, `{"url":"https://cdn.example/image.png"}`, string(parsed.TaskData))
+		})
+	}
+}
+
 func TestTaskSubmitStreamCancellationClosesReader(t *testing.T) {
 	plugin, err := pluginruntime.CompilePlugin(documentStreamPlugin, pluginruntime.Options{})
 	require.NoError(t, err)

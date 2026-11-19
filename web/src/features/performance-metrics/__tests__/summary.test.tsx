@@ -17,13 +17,17 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { PerformanceOverview } from '@/features/dashboard/components/models/performance-overview'
 import { PerformanceHealthPanel } from '@/features/dashboard/components/overview/performance-health-panel'
+import { ModelCardGrid } from '@/features/pricing/components/model-card-grid'
+import { ModelDetailsContent } from '@/features/pricing/components/model-details'
 import { ModelDetailsPerformance } from '@/features/pricing/components/model-details-performance'
 import { UptimeSparkline } from '@/features/pricing/components/model-details-uptime-sparkline'
+import { api } from '@/lib/api'
+import { useAuthStore } from '@/stores/auth-store'
 
 const chart = vi.hoisted(() =>
   vi.fn(
@@ -44,7 +48,12 @@ beforeEach(() => {
     defaultOptions: { queries: { retry: false, staleTime: Infinity } },
   })
 })
-afterEach(() => client.clear())
+afterEach(() => {
+  cleanup()
+  client.clear()
+  useAuthStore.getState().auth.reset()
+  vi.restoreAllMocks()
+})
 
 const summary = { success_rate: 99.01, avg_latency_ms: 1009, avg_tps: 5 }
 const windowStart = 1789387200
@@ -85,7 +94,7 @@ const groups = [
 ]
 
 function renderModelDetails() {
-  client.setQueryData(['perf-metrics', 'test-model'], {
+  client.setQueryData(['perf-metrics', 'test-model', null, 0, ''], {
     success: true,
     data: {
       model_name: 'test-model',
@@ -121,10 +130,124 @@ function renderModelDetails() {
 }
 
 describe('server performance summaries', () => {
+  it.each(['overview', 'health', 'details', 'cards', 'model-overview'])(
+    'drops administrator metrics immediately after role changes in %s',
+    async (view) => {
+      const model = {
+        id: 1,
+        model_name: 'test-model',
+        quota_type: 0,
+        model_ratio: 1,
+        completion_ratio: 1,
+        enable_groups: ['default'],
+      }
+      useAuthStore
+        .getState()
+        .auth.setUser({ id: 1, username: 'viewer', role: 10, group: 'default' })
+      vi.spyOn(api, 'get').mockImplementation(async () => {
+        const admin = useAuthStore.getState().auth.user?.role === 10
+        const visibleSummary = { ...summary, success_rate: admin ? 99.01 : 100 }
+        return {
+          data: {
+            success: true,
+            data: {
+              summary: visibleSummary,
+              series: [],
+              window_start: windowStart,
+              window_end: windowEnd,
+              groups: [
+                {
+                  ...groups[0],
+                  ...visibleSummary,
+                  group: admin ? 'private-provider' : 'default',
+                },
+              ],
+              models: [{ ...visibleSummary, model_name: 'test-model' }],
+            },
+          },
+        }
+      })
+      render(
+        <QueryClientProvider client={client}>
+          {view === 'overview' && <PerformanceOverview />}
+          {view === 'health' && <PerformanceHealthPanel />}
+          {view === 'details' && <ModelDetailsPerformance model={model} />}
+          {view === 'cards' && (
+            <ModelCardGrid models={[model]} onModelClick={vi.fn()} />
+          )}
+          {view === 'model-overview' && (
+            <ModelDetailsContent
+              model={model}
+              groupRatio={{ default: 1 }}
+              usableGroup={{}}
+              endpointMap={{}}
+              autoGroups={[]}
+              priceRate={1}
+              usdExchangeRate={1}
+              tokenUnit='M'
+            />
+          )}
+        </QueryClientProvider>
+      )
+      await waitFor(() =>
+        expect(screen.getAllByText('99.01%').length).toBeGreaterThan(0)
+      )
+      act(() =>
+        useAuthStore.getState().auth.setUser({
+          id: 1,
+          username: 'viewer',
+          role: 1,
+          group: 'default',
+        })
+      )
+      expect(screen.queryAllByText('99.01%')).toHaveLength(0)
+      expect(screen.queryAllByText('private-provider')).toHaveLength(0)
+      await waitFor(() =>
+        expect(screen.getAllByText('100.00%').length).toBeGreaterThan(0)
+      )
+    }
+  )
+
+  it('does not deduplicate a public request onto an in-flight administrator response', async () => {
+    let finish!: () => void
+    const gate = new Promise<void>((resolve) => {
+      finish = resolve
+    })
+    const adapter = vi.fn(async (config) => {
+      const role = useAuthStore.getState().auth.user?.role
+      await gate
+      return {
+        data: { role },
+        status: 200,
+        statusText: 'OK',
+        headers: {},
+        config,
+      }
+    })
+    useAuthStore
+      .getState()
+      .auth.setUser({ id: 1, username: 'viewer', role: 10 })
+    const admin = api.get('/api/perf-metrics/summary', { adapter })
+    await waitFor(() => expect(adapter).toHaveBeenCalledTimes(1))
+    const duplicate = api.get('/api/perf-metrics/summary', { adapter })
+    useAuthStore.getState().auth.setUser({ id: 1, username: 'viewer', role: 1 })
+    const user = api.get('/api/perf-metrics/summary', { adapter })
+    finish()
+    const [adminResult, duplicateResult, userResult] = await Promise.all([
+      admin,
+      duplicate,
+      user,
+    ])
+    expect(adminResult.data.role).toBe(10)
+    expect(duplicateResult.data.role).toBe(10)
+    expect(userResult.data.role).toBe(1)
+    expect(adapter).toHaveBeenCalledTimes(2)
+  })
+
   it.each([PerformanceHealthPanel, PerformanceOverview])(
     'uses the weighted server result across models',
     (Component) => {
-      client.setQueryData(['perf-metrics-summary', 24], {
+      client.setQueryData(['perf-metrics-summary', 24, null, 0, ''], {
         success: true,
         data: {
           summary,
@@ -193,7 +316,7 @@ describe('server performance summaries', () => {
   })
 
   it('keeps an empty summary unknown instead of inventing a zero success rate', () => {
-    client.setQueryData(['perf-metrics-summary', 24], {
+    client.setQueryData(['perf-metrics-summary', 24, null, 0, ''], {
       success: true,
       data: { models: [], summary: null },
     })

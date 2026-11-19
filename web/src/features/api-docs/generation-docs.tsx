@@ -38,7 +38,7 @@ export function IntegrationExport({ baseUrl }: { baseUrl: string }) {
       <h2 className='font-semibold'>{t('Integration guide for AI')}</h2>
       <p className='text-muted-foreground text-sm leading-6'>
         {t(
-          'This export covers Seed Audio, the independent Midjourney image model and the video models below.'
+          'This export covers the current text model IDs, image parameters including GIF, Seed Audio, Midjourney and video contracts.'
         )}
       </p>
       <div className='flex flex-wrap items-center gap-4'>

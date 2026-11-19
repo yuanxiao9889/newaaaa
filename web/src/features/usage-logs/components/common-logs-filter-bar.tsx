@@ -502,6 +502,7 @@ export function CommonLogsFilterBar<TData>(
         </>
       }
       advancedFilters={advancedFilters}
+      defaultAdvancedOpen
       mobilePinnedFilters={dateRangeFilter}
       mobileFilters={
         <>

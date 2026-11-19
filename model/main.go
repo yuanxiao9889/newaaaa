@@ -379,6 +379,7 @@ func migrateDB() error {
 		&ProfitCostPriceVersion{},
 		&QuotaData{},
 		&Task{},
+		&TaskRetryBodyChunk{},
 		&TransferPolicyRecord{},
 		&TransferRequest{},
 		&ReferenceAsset{},

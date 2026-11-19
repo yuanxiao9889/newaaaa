@@ -43,6 +43,9 @@ type ImageRequest struct {
 	Background        json.RawMessage `json:"background,omitempty"`
 	Moderation        json.RawMessage `json:"moderation,omitempty"`
 	OutputFormat      json.RawMessage `json:"output_format,omitempty"`
+	// Explicit fields survive JSON cloning and relay serialization; unknown Extra fields do not.
+	FrameCount        *int            `json:"frame_count,omitempty"`
+	FrameDurationMS   *int            `json:"frame_duration_ms,omitempty"`
 	OutputCompression json.RawMessage `json:"output_compression,omitempty"`
 	PartialImages     json.RawMessage `json:"partial_images,omitempty"`
 	Stream            *bool           `json:"stream,omitempty"`
@@ -52,8 +55,6 @@ type ImageRequest struct {
 	Complexity        json.RawMessage `json:"complexity,omitempty"`
 	Markup            json.RawMessage `json:"markup,omitempty"`
 	Svg               json.RawMessage `json:"svg,omitempty"`
-	FrameCount        json.RawMessage `json:"frame_count,omitempty"`
-	FrameDurationMs   json.RawMessage `json:"frame_duration_ms,omitempty"`
 	Watermark         *bool           `json:"watermark,omitempty"`
 	// zhipu 4v
 	WatermarkEnabled json.RawMessage `json:"watermark_enabled,omitempty"`

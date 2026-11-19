@@ -1,4 +1,6 @@
 import { Buffer } from 'node:buffer'
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { runInNewContext } from 'node:vm'
 
 import { describe, expect, it, vi } from 'vitest'
@@ -16,6 +18,80 @@ const examples = [
 ]
 
 describe('Video documentation request recipes', () => {
+  it('Dou 5.5 and Suno examples satisfy their gateway input contracts', () => {
+    const dou = generationContracts.find(
+      (contract) => contract.model === 'dou-5-5'
+    )
+    if (!dou) throw new Error('Missing Dou 5.5 documentation')
+    for (const plugin of ['aicost-seedream55', 'pidoi-seedream55']) {
+      const source = readFileSync(
+        resolve('..', 'plugins', 'tasks', plugin, 'plugin.js'),
+        'utf8'
+      )
+      const decode = runInNewContext(
+        `${source.replaceAll('export ', '')}; protocols.openai_image.decodeRequest`
+      )
+      for (const example of dou.examples) {
+        expect(() =>
+          decode({
+            operation: example.path.includes('/edits') ? 'edit' : 'generate',
+            model: dou.model,
+            body: { kind: 'json', value: example.body },
+          })
+        ).not.toThrow()
+      }
+    }
+    const source = readFileSync(
+      resolve('..', 'plugins', 'tasks', 'jieapi-suno', 'plugin.js'),
+      'utf8'
+    )
+    const submit = runInNewContext(
+      `${source.replaceAll('export ', '')}; native.submit`
+    )
+    for (const contract of generationContracts.filter((contract) =>
+      contract.model.startsWith('suno_')
+    )) {
+      for (const example of contract.examples) {
+        expect(
+          submit({
+            params: { action: example.path.split('/').at(-1) },
+            body: { kind: 'json', value: example.body },
+          }).model
+        ).toBe(contract.model)
+      }
+    }
+  })
+
+  it('new video recipes satisfy the gateway plugin input contracts', () => {
+    const plugins = [
+      ['video-ailxp-seedance-2.5-activity', 'ailxp-seedance25-activity'],
+      ['video-mai-seedance-2.0-fast', 'mai-seedance20-fast'],
+      ['video-xing-2.5-flash', 'xing-seedance25-flash'],
+      ['video-h3-range', 'huiqu-h3-range'],
+    ]
+    for (const [groupId, plugin] of plugins) {
+      const source = readFileSync(
+        resolve('..', 'plugins', 'tasks', plugin, 'plugin.js'),
+        'utf8'
+      )
+      const decode = runInNewContext(
+        `${source.replaceAll('export ', '')}; protocols.openai_video.decodeRequest`
+      )
+      const group = videoGroups.find((item) => item.id === groupId)
+      expect(group).toBeDefined()
+      for (const example of group?.examples ?? []) {
+        expect(() =>
+          decode({
+            operation: 'create',
+            model: example.body.model,
+            body: { kind: 'json', value: example.body },
+            stream: false,
+          })
+        ).not.toThrow()
+      }
+    }
+  })
+
   it.each(examples)(
     '$title sends the documented JSON with real bearer interpolation',
     async (example) => {
@@ -60,8 +136,7 @@ describe('Video documentation request recipes', () => {
     const models = videoGroups.flatMap((group) =>
       group.variants.flatMap((variant) => variant.models)
     )
-    expect(models).toHaveLength(23)
-    expect(new Set(models).size).toBe(23)
+    expect(new Set(models).size).toBe(models.length)
     expect(models).toEqual(
       expect.arrayContaining([
         '全能视频2.5-301010-c',
@@ -77,6 +152,11 @@ describe('Video documentation request recipes', () => {
         '万能视频-3.0-720',
         '全能视频2.5-301010-480',
         '全能视频2.5-301010-720',
+        '全能视频2.5-1055-flash',
+        '全能视频2.5-30-720',
+        '全能视频2.0-fast-720',
+        'Minimax-H3-768p-5-15s',
+        'MiniMax-H3-933-1440p-10-15s',
       ])
     )
     expect(models).not.toContain('seedance-2.0-mini-deal')

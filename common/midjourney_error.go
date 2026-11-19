@@ -2,16 +2,13 @@ package common
 
 import (
 	"net/http"
-	"regexp"
 	"strings"
 )
 
-var midjourneyCredentialPattern = regexp.MustCompile(`(?i)(?:["']?(?:mj-api-secret|api[_-]?key|access[_-]?token|authorization|password)["']?\s*[:=]\s*["']?)(?:Bearer\s+)?[^\s"',;]+|\bBearer\s+[^\s"',;]+|\bsk-[a-z0-9_-]+`)
-
 // MidjourneyPublicError preserves actionable provider diagnostics across MJ
 // responses and user log views. Stored diagnostics are never rewritten.
-func MidjourneyPublicError(code, reason string, status int, local bool) PublicError {
-	public := ClassifyPublicError(code, reason, status, local)
+func MidjourneyPublicError(code, reason string, status int, local bool, sensitiveValues ...string) PublicError {
+	public := ClassifyPublicError(code, reason, status, local, sensitiveValues...)
 	// Keep host failures and resource shortages in the shared public wording.
 	if local || public.Code == "model_unavailable" {
 		return public
@@ -26,15 +23,13 @@ func MidjourneyPublicError(code, reason string, status int, local bool) PublicEr
 		public.StatusCode = http.StatusRequestEntityTooLarge
 		public.Retryable = false
 	}
-	// URLs can include signed credentials. Redact them as a whole before the
-	// existing host/IP masker, retaining the surrounding diagnostic verbatim.
-	reason = publicErrorSafetyURLPattern.ReplaceAllString(reason, "[URL REDACTED]")
-	reason = midjourneyCredentialPattern.ReplaceAllString(reason, "[REDACTED]")
-	reason = MaskSensitiveInfo(reason)
 	if public.Code == "service_auth_error" || public.Code == "service_quota_exceeded" {
 		// Include the diagnostic, but clarify that the administrator must fix
 		// upstream credentials/credit rather than the user's own token/wallet.
-		public.Message += "：" + reason
+		return public
+	}
+	reason = publicErrorDetail(reason, public, sensitiveValues...)
+	if reason == "" {
 		return public
 	}
 	public.Message = reason

@@ -15,8 +15,9 @@ import (
 )
 
 type PricingPluginVariant struct {
-	PluginKey            string                               `json:"plugin_key"`
-	PluginName           string                               `json:"plugin_name"`
+	OptionID             string                               `json:"option_id,omitempty"`
+	PluginKey            string                               `json:"plugin_key,omitempty"`
+	PluginName           string                               `json:"plugin_name,omitempty"`
 	Icon                 string                               `json:"icon,omitempty"`
 	BillingExpr          string                               `json:"billing_expr"`
 	BillingMode          string                               `json:"billing_mode"`

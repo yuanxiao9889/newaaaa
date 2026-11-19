@@ -176,11 +176,32 @@ export function isAsyncTaskBillingLog(
 }
 
 export function getAsyncTaskBillingStateLabel(
-  state: string | undefined,
+  other: LogOtherData | null,
   logType: number
 ): string {
   if (logType === 8) return 'Pre-consume rollback'
-  if (logType === 6 || state === 'refunded') return 'Refunded'
+  const state = other?.billing_state
+  if (logType === 6 || state === 'refunded') {
+    if (state === 'refunded') {
+      return other?.actual_quota === 0 ? 'Failed · fully refunded' : 'Refunded'
+    }
+    // Difference logs can retain the submission's pending state. Use the
+    // recorded settlement amounts, not the refund log type, to identify them.
+    const preConsumed = other?.pre_consumed_quota
+    const actual = other?.actual_quota
+    if (
+      typeof preConsumed === 'number' &&
+      Number.isFinite(preConsumed) &&
+      typeof actual === 'number' &&
+      Number.isFinite(actual) &&
+      actual >= 0 &&
+      preConsumed > actual &&
+      (actual > 0 || state === 'pending' || state === 'settled')
+    ) {
+      return 'Succeeded · difference refunded'
+    }
+    return 'Refunded'
+  }
   if (state === 'settled') return 'Settled'
   if (state === 'pending') return 'Pre-charged'
   return 'Pre-charged'

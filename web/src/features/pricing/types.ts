@@ -46,8 +46,9 @@ export type BillingUsageExample = {
 }
 
 export type BillingPluginVariant = {
-  plugin_key: string
-  plugin_name: string
+  option_id?: string
+  plugin_key?: string
+  plugin_name?: string
   icon?: string
   billing_expr: string
   billing_mode?: 'ratio' | 'tiered_expr'

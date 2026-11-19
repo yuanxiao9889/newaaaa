@@ -8,7 +8,7 @@ const MEDIA = {
 const RATIOS = ["16:9", "9:16", "4:3", "1:1", "3:4"];
 export const meta = {
   apiVersion: 1, key: "huiqu-seedance20", name: "Huiqu Seedance 2.0",
-  version: "1.0.0", author: { name: "OOpii" },
+  version: "1.0.1", author: { name: "OOpii" },
   description: { en: "Video generation via Huiqu Seedance 2.0", zh: "通过汇取云 Seedance 2.0 生成视频" },
   website: "https://huiquyunapi.apifox.cn/531242410e0", baseUrl: "https://api.bjhuiqu.net",
   // Do not claim channelTypes: type 1 is owned by the factory Sora plugin.
@@ -148,8 +148,8 @@ export function buildContentRequest(ctx) {
   const canonical = endpoint(ctx.baseUrl) + "/" + encodeURIComponent(taskId(ctx.upstreamTaskId)) + "/content";
   const url = ((ctx.data || {}).metadata || {}).url;
   const origin = /^https?:\/\/[^/]+/i.exec(canonical)[0].toLowerCase();
-  // The documented metadata.url is public MP4 media. Never send channel keys to it.
-  if (publicUrl(url) && /\.mp4(?:\?|$)/i.test(url) && !url.includes("#")
+  // The documented metadata.url is public media, not necessarily a .mp4 path. Never send channel keys to it.
+  if (publicUrl(url) && !url.includes("#")
       && /^https?:\/\/[^/]+/i.exec(url)[0].toLowerCase() !== origin
       && (!ctx.apiKey || (!url.includes(ctx.apiKey) && !url.includes(encodeURIComponent(ctx.apiKey))))) {
     return { url, method: "GET", credentialless: true };

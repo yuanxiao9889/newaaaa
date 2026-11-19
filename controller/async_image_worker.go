@@ -17,6 +17,7 @@ import (
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/pkg/billingexpr"
 	"github.com/QuantumNous/new-api/relay"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
@@ -93,7 +94,12 @@ func runInternalAsyncImageWorkerOnce(workerID int) {
 		ctx := context.Background()
 		cancel := func() {}
 		if timeoutSeconds := common.GetAsyncImageTaskTimeoutSeconds(); timeoutSeconds > 0 {
-			ctx, cancel = context.WithTimeout(ctx, time.Duration(timeoutSeconds)*time.Second)
+			if state := task.PrivateData.MediaRetry; state != nil {
+				deadline := time.Unix(state.ExecutionTimeoutStart(task.StartTime)+int64(timeoutSeconds), 0)
+				ctx, cancel = context.WithDeadline(ctx, deadline)
+			} else {
+				ctx, cancel = context.WithTimeout(ctx, time.Duration(timeoutSeconds)*time.Second)
+			}
 		}
 		if err := executeInternalAsyncImageTask(ctx, task); err != nil {
 			logger.LogError(context.Background(), fmt.Sprintf("internal async image worker %d task %s failed: %s", workerID, task.TaskID, err.Error()))
@@ -120,11 +126,12 @@ func sweepTimedOutInternalAsyncImageTasks(ctx context.Context) {
 	if len(tasks) == 0 {
 		return
 	}
-	reason := fmt.Sprintf("async image task timed out after %d seconds", timeoutSeconds)
 	for _, task := range tasks {
 		if task == nil || !task.PrivateData.InternalAsync {
 			continue
 		}
+		totalSeconds := int64(timeoutSeconds) + task.PrivateData.MediaRetry.ExecutionTimeoutStart(task.StartTime) - task.StartTime
+		reason := fmt.Sprintf("async image task timed out after %d seconds", totalSeconds)
 		failInternalAsyncImageTask(ctx, task, reason)
 	}
 }
@@ -153,7 +160,8 @@ func executeInternalAsyncImageTask(ctx context.Context, task *model.Task) error 
 	imageResponseBody, channelID, proxy, usage, err := runInternalAsyncImageRelay(ctx, task)
 	if err != nil {
 		if errors.Is(err, context.DeadlineExceeded) {
-			err = fmt.Errorf("async image task timed out after %d seconds", common.GetAsyncImageTaskTimeoutSeconds())
+			totalSeconds := int64(common.GetAsyncImageTaskTimeoutSeconds()) + task.PrivateData.MediaRetry.ExecutionTimeoutStart(task.StartTime) - task.StartTime
+			err = fmt.Errorf("async image task timed out after %d seconds", totalSeconds)
 		}
 		failInternalAsyncImageTask(ctx, task, err.Error())
 		return err
@@ -206,6 +214,13 @@ func executeInternalAsyncImageTask(ctx context.Context, task *model.Task) error 
 			}
 		}
 	}
+	if retry := task.PrivateData.ImageRetry; retry != nil && retry.SettlementQuota != nil && task.PrivateData.RequestRelayFormat != relay.PluginAsyncImageFormat {
+		if bc := task.PrivateData.BillingContext; usage == nil || bc != nil && bc.PerCallBilling {
+			if err := service.AdjustTaskQuotaForFinalSettlement(ctx, task, *retry.SettlementQuota, "ordinary image replacement settlement"); err != nil {
+				return fmt.Errorf("async image replacement settlement failed: %w", err)
+			}
+		}
+	}
 	if usage != nil {
 		task.PrivateData.PromptTokens = usage.PromptTokens
 		task.PrivateData.CompletionTokens = usage.CompletionTokens
@@ -214,11 +229,25 @@ func executeInternalAsyncImageTask(ctx context.Context, task *model.Task) error 
 		// A provider reporting tokens does not change a per-call price.
 		if bc := task.PrivateData.BillingContext; bc == nil || !bc.PerCallBilling {
 			actualQuota, clamp := service.CalculateTaskQuotaByUsageChecked(task, usage)
+			tiered := false
+			if retry := task.PrivateData.ImageRetry; bc != nil && bc.TieredSnapshot != nil && retry != nil && retry.SettlementInput != nil {
+				info := &relaycommon.RelayInfo{}
+				prepareInternalAsyncRelayInfo(task, info)
+				info.BillingRequestInput = retry.SettlementInput
+				snap := bc.TieredSnapshot
+				params := service.BuildTieredTokenParams(usage, usage.UsageSemantic == "anthropic", billingexpr.UsedVarsByHash(snap.ExprString, snap.ExprHash))
+				var result *billingexpr.TieredResult
+				tiered, actualQuota, result = service.TryTieredSettle(info, params)
+				clamp = info.QuotaClamp
+				if result != nil {
+					snap.EstimatedTier = result.MatchedTier
+				}
+			}
 			quotaClamp = clamp
-			if actualQuota <= 0 && bc != nil && bc.ImageTokenFallbackQuota != nil {
+			if !tiered && actualQuota <= 0 && bc != nil && bc.ImageTokenFallbackQuota != nil {
 				actualQuota = *bc.ImageTokenFallbackQuota
 			}
-			if actualQuota > 0 || bc != nil && bc.ImageTokenFallbackQuota != nil {
+			if tiered || actualQuota > 0 || bc != nil && bc.ImageTokenFallbackQuota != nil {
 				if err = service.AdjustTaskQuotaForFinalSettlement(ctx, task, actualQuota, "async image usage settlement"); err != nil {
 					return fmt.Errorf("async image usage settlement failed: %w", err)
 				}
@@ -260,12 +289,12 @@ func executeInternalAsyncImageTask(ctx context.Context, task *model.Task) error 
 }
 
 func runInternalAsyncImageRelay(ctx context.Context, task *model.Task) ([]byte, int, string, *dto.Usage, error) {
+	if task.PrivateData.ImageRetry != nil {
+		return runRetryableAsyncImageRelay(ctx, task)
+	}
 	if task.PrivateData.RequestRelayFormat == relay.PluginAsyncImageFormat {
 		body, proxy, err := runQueuedTaskPluginImage(ctx, task)
 		return body, task.ChannelId, proxy, nil, err
-	}
-	if task.PrivateData.ImageRetry != nil {
-		return runRetryableAsyncImageRelay(ctx, task)
 	}
 	if task.PrivateData.RequestRelayFormat == relay.NativeAsyncImageFormat {
 		body, channelID, proxy, err := relay.ResumeNativeAsyncImageTask(ctx, task)
@@ -439,7 +468,7 @@ func buildInternalAsyncImageContext(ctx context.Context, task *model.Task, body 
 		return nil, nil, nil, nil, err
 	}
 	relayMode := relayconstant.RelayModeImagesGenerations
-	if task.Action == constant.TaskActionImageEdit {
+	if c.Request.URL.Path == "/v1/images/edits" || task.Action == constant.TaskActionImageEdit {
 		relayMode = relayconstant.RelayModeImagesEdits
 	}
 	c.Set("relay_mode", relayMode)
@@ -755,6 +784,10 @@ func clearInternalAsyncImageRequestSnapshotFields(task *model.Task) []string {
 		return nil
 	}
 	snapshotPaths := []string{task.PrivateData.RequestBodyPath}
+	if plugin := task.PrivateData.PluginImage; plugin != nil {
+		snapshotPaths = append(snapshotPaths, plugin.ResponseBodyPath)
+		plugin.ResponseBodyPath = ""
+	}
 	if replay := task.PrivateData.ImageRetry; replay != nil {
 		snapshotPaths = append(snapshotPaths, replay.BodyPath)
 		replay.BodyPath, replay.BodySize, replay.RelayFormat = "", 0, ""

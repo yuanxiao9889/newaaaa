@@ -46,7 +46,7 @@ var accessTokenRouteRules = map[string]accessTokenRouteRule{
 	"POST /api/bridge-management/check":   accessTokenScopeRule("ops:read"),
 	"POST /api/bridge-management/runtime": accessTokenScopeRule("ops:write"),
 	// router/api-router.go: top level
-	"GET /api/models":                     accessTokenScopeRule("profile:read"),
+	"GET /api/models":                     accessTokenScopeRule("model:read"),
 	"GET /api/status/test":                accessTokenScopeRule("log:read"),
 	"GET /api/pricing":                    accessTokenAnyRule,
 	"GET /api/perf-metrics/summary":       accessTokenAnyRule,

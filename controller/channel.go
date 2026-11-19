@@ -61,6 +61,8 @@ func parseStatusFilter(statusParam string) int {
 		return common.ChannelStatusEnabled
 	case "disabled", "0":
 		return 0
+	case "auto_disabled", "3":
+		return common.ChannelStatusAutoDisabled
 	default:
 		return -1
 	}
@@ -139,8 +141,8 @@ func restoreMultiKeyChannelIfAvailable(channel *model.Channel) {
 }
 
 func applyChannelStatusFilter(query *gorm.DB, statusFilter int) *gorm.DB {
-	if statusFilter == common.ChannelStatusEnabled {
-		return query.Where("status = ?", common.ChannelStatusEnabled)
+	if statusFilter == common.ChannelStatusEnabled || statusFilter == common.ChannelStatusAutoDisabled {
+		return query.Where("status = ?", statusFilter)
 	}
 	if statusFilter == 0 {
 		return query.Where("status != ?", common.ChannelStatusEnabled)
@@ -199,7 +201,7 @@ func GetAllChannels(c *gin.Context) {
 	enableTagMode, _ := strconv.ParseBool(c.Query("tag_mode"))
 	groupFilter := model.NormalizeChannelGroupFilter(c.Query("group"))
 	statusParam := c.Query("status")
-	// statusFilter: -1 all, 1 enabled, 0 disabled (include auto & manual)
+	// statusFilter: -1 all, 1 enabled, 0 disabled (include auto & manual), 3 auto disabled
 	statusFilter := parseStatusFilter(statusParam)
 	// type filter
 	typeStr := c.Query("type")
@@ -402,13 +404,13 @@ func SearchChannels(c *gin.Context) {
 	}
 
 	// Match complete model IDs after tag expansion, before counts and pagination.
-	if modelKeyword != "" || statusFilter == common.ChannelStatusEnabled || statusFilter == 0 {
+	if modelKeyword != "" || statusFilter >= 0 {
 		filtered := make([]*model.Channel, 0, len(channelData))
 		for _, ch := range channelData {
 			if modelKeyword != "" && !slices.Contains(ch.GetModels(), modelKeyword) {
 				continue
 			}
-			if statusFilter == common.ChannelStatusEnabled && ch.Status != common.ChannelStatusEnabled {
+			if statusFilter > 0 && ch.Status != statusFilter {
 				continue
 			}
 			if statusFilter == 0 && ch.Status == common.ChannelStatusEnabled {
@@ -480,18 +482,33 @@ func GetChannel(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
-	channel, err := model.GetChannelById(id, false)
+	channel, err := model.GetChannelById(id, true)
 	if err != nil {
 		common.ApiError(c, err)
 		return
 	}
+	keySuffix := ""
 	if channel != nil {
+		// A short credential must never be disclosed in full. Multi-key and
+		// structured credentials have no single meaningful suffix here.
+		key := strings.TrimSpace(channel.Key)
+		if !channel.ChannelInfo.IsMultiKey && !strings.HasPrefix(key, "{") && !strings.HasPrefix(key, "[") {
+			characters := []rune(key)
+			if len(characters) > 4 {
+				keySuffix = string(characters[len(characters)-4:])
+			}
+		}
+		channel.Key = ""
 		clearChannelInfo(channel)
 	}
+	c.Header("Cache-Control", "no-store")
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "",
-		"data":    channel,
+		"data": struct {
+			*model.Channel
+			KeySuffix string `json:"key_suffix,omitempty"`
+		}{Channel: channel, KeySuffix: keySuffix},
 	})
 	return
 }
@@ -536,6 +553,27 @@ const maxTaskExtendPluginKeys = 32
 func validateChannel(channel *model.Channel, isAdd bool) error {
 	if channel == nil {
 		return fmt.Errorf("channel cannot be empty")
+	}
+	if channel.OtherSettings != "" {
+		var settings dto.ChannelOtherSettings
+		if err := common.UnmarshalJsonStr(channel.OtherSettings, &settings); err != nil {
+			return common.NewMessage("Invalid automatic switching settings")
+		}
+		var fields map[string]any
+		if err := common.UnmarshalJsonStr(channel.OtherSettings, &fields); err != nil {
+			return common.NewMessage("Invalid automatic switching settings")
+		}
+		for _, key := range []string{"auto_switch_retry_window_minutes", "auto_switch_max_attempts"} {
+			if value, exists := fields[key]; exists && value == nil {
+				return common.NewMessage("Invalid automatic switching settings")
+			}
+		}
+		if value := settings.AutoSwitchRetryWindowMinutes; value != nil && (*value < 1 || *value > 120) {
+			return common.NewMessage("Retry window must be an integer from 1 to 120 minutes")
+		}
+		if value := settings.AutoSwitchMaxAttempts; value != nil && (*value < 1 || *value > 10) {
+			return common.NewMessage("Total attempts must be an integer from 1 to 10")
+		}
 	}
 
 	// 校验 channel settings

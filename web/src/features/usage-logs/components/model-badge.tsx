@@ -93,13 +93,7 @@ function ModelBadgeContent(props: ModelBadgeProps & { copyable: boolean }) {
 export function ModelBadge(props: ModelBadgeProps) {
   const { t } = useTranslation()
   const mismatch = isResponseModelMismatch(props.responseModel)
-  const responseModelLabel =
-    mismatch && props.responseModel
-      ? t('Response model: {{model}}', {
-          model: props.responseModel.returned_model,
-        })
-      : ''
-  const modelLabel = `${t('Model')}: ${props.modelName}${responseModelLabel ? `, ${responseModelLabel}` : ''}`
+  const modelLabel = `${t('Model')}: ${props.modelName}`
   const hasDetails =
     !!props.actualModel ||
     !!(
@@ -132,14 +126,6 @@ export function ModelBadge(props: ModelBadgeProps) {
   const content = (
     <>
       <ModelBadgeContent {...props} copyable={false} />
-      {mismatch && (
-        <StatusBadge
-          icon={AlertTriangle}
-          label={responseModelLabel}
-          variant='warning'
-          copyable={false}
-        />
-      )}
       {!mismatch && props.actualModel && (
         <Route
           className='text-muted-foreground size-3 shrink-0'

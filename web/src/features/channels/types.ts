@@ -38,6 +38,7 @@ export const channelSchema = z.object({
   id: z.number(),
   type: z.number(),
   key: z.string(),
+  key_suffix: z.string().optional(),
   openai_organization: z.string().nullish(),
   test_model: z.string().nullish(),
   status: z.number(), // 1: enabled, 0: manual disabled, 2: auto disabled
@@ -97,6 +98,8 @@ export interface ChannelSettings {
 
 export interface ChannelOtherSettings {
   auto_switch_enabled?: boolean
+  auto_switch_retry_window_minutes?: number
+  auto_switch_max_attempts?: number
   azure_responses_version?: string
   vertex_key_type?: 'json' | 'api_key'
   vertex_project_id?: string
@@ -307,7 +310,7 @@ export type ChannelSortOrder = 'asc' | 'desc'
 export interface GetChannelsParams {
   p?: number
   page_size?: number
-  status?: string // 'enabled', 'disabled', or empty for all
+  status?: string // 'enabled', 'disabled', 'auto_disabled', or empty for all
   type?: number
   group?: string
   id_sort?: boolean

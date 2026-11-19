@@ -55,6 +55,7 @@ export type ImageModelDoc = {
   supportsEditing: boolean
   responsePath: string
   requestNotes: string[]
+  outputFormats?: string[]
 }
 
 export const gptImageRatios = [
@@ -404,15 +405,163 @@ export const oopiiModelGroups: Record<
   OopiiCatalogModel[]
 > = {
   text: [
-    { id: 'GPT', owner: 'OpenAI', endpoints: ['openai'] },
-    { id: 'Claude', owner: 'Anthropic', endpoints: ['anthropic', 'openai'] },
-    { id: 'Gemini', owner: 'Google', endpoints: ['gemini', 'openai'] },
-    { id: 'Grok', owner: 'xAI', endpoints: ['openai'] },
-    { id: 'GLM', owner: 'Zhipu AI', endpoints: ['openai'] },
-    { id: 'DeepSeek', owner: 'DeepSeek', endpoints: ['openai'] },
-    { id: 'Kimi', owner: 'Moonshot AI', endpoints: ['openai'] },
+    {
+      id: 'claude-fable-5',
+      owner: 'Anthropic',
+      endpoints: ['anthropic', 'openai'],
+    },
+    {
+      id: 'claude-fable-5-1',
+      owner: 'Anthropic',
+      endpoints: ['anthropic', 'openai'],
+    },
+    {
+      id: 'claude-opus-4-6',
+      owner: 'Anthropic',
+      endpoints: ['anthropic', 'openai'],
+    },
+    {
+      id: 'claude-opus-4-7',
+      owner: 'Anthropic',
+      endpoints: ['anthropic', 'openai'],
+    },
+    {
+      id: 'claude-opus-4-8',
+      owner: 'Anthropic',
+      endpoints: ['anthropic', 'openai'],
+    },
+    {
+      id: 'claude-opus-5',
+      owner: 'Anthropic',
+      endpoints: ['anthropic', 'openai'],
+    },
+    {
+      id: 'claude-opus-5-5',
+      owner: 'Anthropic',
+      endpoints: ['anthropic', 'openai'],
+    },
+    {
+      id: 'claude-sonnet-4-6',
+      owner: 'Anthropic',
+      endpoints: ['anthropic', 'openai'],
+    },
+    {
+      id: 'claude-sonnet-5',
+      owner: 'Anthropic',
+      endpoints: ['anthropic', 'openai'],
+    },
+    {
+      id: 'deepseek-v4.1-flash',
+      owner: 'DeepSeek',
+      endpoints: ['openai'],
+    },
+    {
+      id: 'deepseek-v4.1-flash-1017',
+      owner: 'DeepSeek',
+      endpoints: ['openai'],
+    },
+    {
+      id: 'gemini-3.1-pro-preview',
+      owner: 'Google',
+      endpoints: ['gemini', 'openai'],
+    },
+    {
+      id: 'gemini-3.6-flash',
+      owner: 'Google',
+      endpoints: ['gemini', 'openai'],
+    },
+    {
+      id: 'gemini-3.7-flash',
+      owner: 'Google',
+      endpoints: ['gemini', 'openai'],
+    },
+    {
+      id: 'gemini-3.8-flash',
+      owner: 'Google',
+      endpoints: ['gemini', 'openai'],
+    },
+    {
+      id: 'gemini-3.8-flash-high',
+      owner: 'Google',
+      endpoints: ['gemini', 'openai'],
+    },
+    {
+      id: 'gemini-4-argon-Vertex',
+      owner: 'Google',
+      endpoints: ['openai', 'gemini'],
+    },
+    {
+      id: 'gemini-4-argon-ultra',
+      owner: 'Google',
+      endpoints: ['gemini', 'openai'],
+    },
+    {
+      id: 'glm-5.3',
+      owner: 'Zhipu AI',
+      endpoints: ['openai'],
+    },
+    {
+      id: 'glm-5.3-flash',
+      owner: 'Zhipu AI',
+      endpoints: ['openai'],
+    },
+    {
+      id: 'glm-5.3-flashx',
+      owner: 'Zhipu AI',
+      endpoints: ['openai'],
+    },
+    {
+      id: 'gpt-5.6-sol',
+      owner: 'OpenAI',
+      endpoints: ['openai'],
+    },
+    {
+      id: 'gpt-6-astra',
+      owner: 'OpenAI',
+      endpoints: ['openai-response'],
+    },
+    {
+      id: 'gpt-6-sol',
+      owner: 'OpenAI',
+      endpoints: ['openai-response'],
+    },
+    {
+      id: 'gpt-6.1-sol',
+      owner: 'OpenAI',
+      endpoints: ['openai-response'],
+    },
+    {
+      id: 'grok-4.6',
+      owner: 'xAI',
+      endpoints: ['openai'],
+    },
+    {
+      id: 'grok-4.7',
+      owner: 'xAI',
+      endpoints: ['openai'],
+    },
+    {
+      id: 'kimi-k3',
+      owner: 'Moonshot AI',
+      endpoints: ['openai'],
+    },
+    {
+      id: 'kimi-k3.1-pro',
+      owner: 'Moonshot AI',
+      endpoints: ['openai'],
+    },
   ],
   audio: [
+    {
+      id: 'suno_music',
+      owner: 'Suno',
+      endpoints: ['/jieapi-suno/submit/music'],
+    },
+    {
+      id: 'suno_lyrics',
+      owner: 'Suno',
+      endpoints: ['/jieapi-suno/submit/lyrics'],
+    },
     {
       id: 'seed-audio-1.0',
       owner: 'oopii',
@@ -421,12 +570,22 @@ export const oopiiModelGroups: Record<
   ],
   image: [
     {
+      id: 'dou-5-5',
+      owner: 'ByteDance',
+      endpoints: ['/v1/images/generations', '/v1/images/edits'],
+    },
+    { id: 'gpt-image-2-opi', owner: 'openai', endpoints: ['openai'] },
+    {
       id: 'Midjourney v8.2',
       owner: 'midjourney',
       endpoints: ['/v1/images/generations', '/v1/images/edits'],
     },
     { id: 'nano-banana-2.1', owner: 'google', endpoints: ['gemini'] },
-    { id: 'gpt-image-2-opi', owner: 'openai', endpoints: ['image-generation'] },
+    {
+      id: 'flux-3-image',
+      owner: 'Black Forest Labs',
+      endpoints: ['image-generation'],
+    },
     {
       id: 'hy-image-v3.5-preview',
       owner: 'tencent',
@@ -487,11 +646,20 @@ export const oopiiModelGroups: Record<
   ],
   video: videoGroups.flatMap((group) =>
     group.variants.flatMap((variant) =>
-      variant.models.map((id) => ({
-        id,
-        owner: 'oopii',
-        endpoints: ['openai-video'],
-      }))
+      variant.models
+        .map((id) => ({
+          id,
+          owner: 'oopii',
+          endpoints: ['openai-video'],
+        }))
+        .filter(
+          (model) =>
+            ![
+              '万能视频-3.0-720',
+              '全能视频2.5-301010-T',
+              '全能视频2.5-301010-c',
+            ].includes(model.id)
+        )
     )
   ),
   midjourney: [
@@ -569,7 +737,7 @@ export const imageModels: ImageModelDoc[] = [
       parameter.name === 'quality'
         ? {
             ...parameter,
-            values: 'low | medium | high | xhigh | max',
+            values: 'low | medium | high',
             description: 'apiDocs.image25.qualityDescription',
           }
         : parameter

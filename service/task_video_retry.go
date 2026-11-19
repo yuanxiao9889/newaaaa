@@ -45,10 +45,15 @@ func prepareVideoTaskForPolling(ctx context.Context, task *model.Task) (bool, er
 	if !retry.Ready && retry.AcceptedAt > 0 && now-retry.AcceptedAt < VideoTaskRetrySubmitTimeoutSeconds {
 		return false, nil
 	}
-	if len(retry.Body) == 0 || retry.AcceptedAt > 0 && now-retry.AcceptedAt <= VideoTaskRetryWindowSeconds {
+	withinWindow := retry.AcceptedAt > 0 && now-retry.AcceptedAt <= VideoTaskRetryWindowSeconds
+	if state := task.PrivateData.MediaRetry; state != nil {
+		withinWindow = state.Remaining(time.Now()) > 0
+	}
+	if len(retry.Body) == 0 && retry.BodyRef == nil || withinWindow {
 		return true, nil
 	}
 	retry.Body = nil
+	retry.BodyRef = nil
 	return task.UpdateWithStatus(task.Status)
 }
 

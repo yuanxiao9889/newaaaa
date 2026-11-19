@@ -4,6 +4,7 @@ import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 
 import en from '../../../i18n/locales/en.json'
 import zh from '../../../i18n/locales/zh.json'
+import { imageModels } from '../data'
 import { DocsNavigation } from '../docs-navigation'
 import { GenerationDocs, IntegrationExport } from '../generation-docs'
 import { videoGroups } from '../video-data'
@@ -108,6 +109,22 @@ describe('Multimodal documentation', () => {
         .getByRole('link', { name: 'Audio generation' })
         .getAttribute('href')
     ).toBe('#seed-audio')
+    fireEvent.change(search, { target: { value: 'gpt-6.1-sol' } })
+    expect(
+      screen
+        .getByRole('link', { name: 'Text and multimodal API routes' })
+        .getAttribute('href')
+    ).toBe('#text-api')
+    fireEvent.change(search, { target: { value: 'flux-3-image' } })
+    expect(
+      screen.getByRole('link', { name: 'FLUX 3 Image' }).getAttribute('href')
+    ).toBe('#flux3-image')
+    fireEvent.change(search, { target: { value: 'all-image-2.6-flare-DD' } })
+    expect(
+      screen
+        .getByRole('link', { name: 'ALL Image 2.6 · flare-DD / sunburst-DD' })
+        .getAttribute('href')
+    ).toBe('#model-all-image-2.6-dd-1k')
     fireEvent.change(search, { target: { value: 'unavailable-model-example' } })
     expect(screen.getByRole('status').textContent).toBe(
       'No matching documentation'
@@ -142,6 +159,23 @@ describe('Multimodal documentation', () => {
     )
     expect(markdown).toContain('https://relay.test/jieapi/v1/audio/speech')
     expect(markdown).toContain('Midjourney v8.2')
+    expect(markdown).toContain('flux-3-image')
+    for (const model of imageModels) {
+      expect(markdown).toContain(model.model)
+    }
+    expect(markdown).toContain('dou-5-5')
+    expect(markdown).toContain('/jieapi-suno/submit/music')
+    expect(markdown).toContain('/v1/responses')
+    expect(markdown).toContain('全能视频2.5-1055-flash')
+    expect(markdown).toContain('Minimax-H3-768p-5-15s')
+    expect(markdown).toContain('all-image-2.6-flare-DD')
+    expect(markdown).toContain('all-image-2.6-sunburst')
+    expect(markdown).toContain('"output_format": "gif"')
+    expect(markdown).toContain('"frame_count": 9')
+    expect(markdown).toContain('"frame_duration_ms": 200')
+    expect(markdown).toContain('gpt-6.1-sol')
+    expect(markdown).toContain('全能视频2.5-30010-480-T')
+    expect(markdown).toContain('全能视频2.5-301010-token')
     expect(markdown).toContain('/v1/images/edits?async=true')
     expect(markdown).toContain('/v1/images/tasks/{task_id}/content?index=0')
     expect(markdown).toContain('original_duration')

@@ -17,6 +17,29 @@ func SetVideoTaskRetryQuota(ctx context.Context, task *Task, targetQuota int) er
 	if task == nil || task.ID <= 0 || task.PrivateData.VideoRetry == nil {
 		return errors.New("video retry billing task is missing")
 	}
+	return setTaskRetryQuota(ctx, task, targetQuota, false, false)
+}
+
+// SetImageTaskRetryQuota uses the image worker's durable claim and the same
+// atomic reservation as video retries. A stale worker cannot move funds.
+func SetImageTaskRetryQuota(ctx context.Context, task *Task, targetQuota int) error {
+	if task == nil || task.ID <= 0 || task.PrivateData.ImageRetry == nil {
+		return errors.New("image retry billing task is missing")
+	}
+	return setTaskRetryQuota(ctx, task, targetQuota, true, false)
+}
+
+// SetImageTaskFinalQuota fences completion against a replacement worker or a
+// terminal transition. Already delivered usage may exceed the reservation;
+// admission balance checks apply only before submitting new upstream work.
+func SetImageTaskFinalQuota(ctx context.Context, task *Task, targetQuota int) error {
+	if task == nil || task.ID <= 0 || task.PrivateData.ImageRetry == nil {
+		return errors.New("image completion billing task is missing")
+	}
+	return setTaskRetryQuota(ctx, task, targetQuota, true, true)
+}
+
+func setTaskRetryQuota(ctx context.Context, task *Task, targetQuota int, image, completion bool) error {
 	if targetQuota < 0 || targetQuota > common.MaxQuota {
 		return errors.New("video retry quota is outside the supported range")
 	}
@@ -31,15 +54,23 @@ func SetVideoTaskRetryQuota(ctx context.Context, task *Task, targetQuota int) er
 			return err
 		}
 		retry := current.PrivateData.VideoRetry
-		if retry == nil || !retry.Ready || !retry.Submitting || retry.Revision != task.PrivateData.VideoRetry.Revision ||
-			current.Status == TaskStatusSuccess || current.Status == TaskStatusFailure ||
+		if image {
+			if current.PrivateData.ImageRetry == nil || !completion && !current.PrivateData.ImageRetry.Submitting ||
+				!current.PrivateData.InternalAsync || current.Status != TaskStatusInProgress ||
+				current.PrivateData.WorkerAttempts != task.PrivateData.WorkerAttempts || current.Quota != task.Quota {
+				return errors.New("image retry billing claim is no longer current")
+			}
+		} else if retry == nil || !retry.Ready || !retry.Submitting || retry.Revision != task.PrivateData.VideoRetry.Revision {
+			return errors.New("video retry billing claim is no longer current")
+		}
+		if current.Status == TaskStatusSuccess || current.Status == TaskStatusFailure ||
 			current.UserId != task.UserId || current.GetTokenID() != task.GetTokenID() {
 			return errors.New("video retry billing claim is no longer current")
 		}
 		if current.Quota < 0 || current.Quota > common.MaxQuota {
 			return errors.New("video retry has an invalid existing reservation")
 		}
-		if current.PrivateData.BillingSource == "" && targetQuota > 0 {
+		if !completion && current.PrivateData.BillingSource == "" && targetQuota > 0 {
 			// A free initial job has not selected a funding source. Do not
 			// silently turn it into a wallet charge on a different provider.
 			return errors.New("video retry has no paid funding source")
@@ -53,22 +84,21 @@ func SetVideoTaskRetryQuota(ctx context.Context, task *Task, targetQuota int) er
 		if err := userQuery.First(&user, current.UserId).Error; err != nil {
 			return err
 		}
-		if delta >= 0 && user.Status != common.UserStatusEnabled {
+		if !completion && delta >= 0 && user.Status != common.UserStatusEnabled {
 			return errors.New("video retry user is disabled")
 		}
 		if tokenID := current.GetTokenID(); tokenID > 0 {
 			if err := lockForUpdate(tx).First(&token, tokenID).Error; err != nil {
-				if delta >= 0 || !errors.Is(err, gorm.ErrRecordNotFound) {
+				if !completion && delta >= 0 || !errors.Is(err, gorm.ErrRecordNotFound) {
 					return err
 				}
 				token = Token{}
 			}
-			if token.Id > 0 && (token.UserId != current.UserId || delta >= 0 && (token.Key == "" ||
-				(token.Status != common.TokenStatusEnabled && token.Status != common.TokenStatusExhausted) ||
+			if token.Id > 0 && (token.UserId != current.UserId || (completion || delta >= 0) && token.Key == "" || !completion && delta >= 0 && ((token.Status != common.TokenStatusEnabled && token.Status != common.TokenStatusExhausted) ||
 				(token.ExpiredTime != -1 && token.ExpiredTime <= common.GetTimestamp()))) {
 				return errors.New("video retry token is no longer usable")
 			}
-			if delta > 0 && !token.UnlimitedQuota && token.RemainQuota < delta {
+			if !completion && delta > 0 && !token.UnlimitedQuota && token.RemainQuota < delta {
 				return errors.New("video retry token quota insufficient")
 			}
 			if delta > 0 && (token.UsedQuota > math.MaxInt-delta || token.RemainQuota < math.MinInt+delta) ||
@@ -79,10 +109,10 @@ func SetVideoTaskRetryQuota(ctx context.Context, task *Task, targetQuota int) er
 		switch current.PrivateData.BillingSource {
 		case "", "wallet":
 			wallet = true
-			if delta > 0 && user.Quota < delta {
+			if !completion && delta > 0 && user.Quota < delta {
 				return errors.New("video retry wallet quota insufficient")
 			}
-			if delta < 0 && user.Quota > math.MaxInt+delta {
+			if delta > 0 && user.Quota < math.MinInt+delta || delta < 0 && user.Quota > math.MaxInt+delta {
 				return errors.New("video retry wallet refund would overflow")
 			}
 		case "subscription":
@@ -90,7 +120,7 @@ func SetVideoTaskRetryQuota(ctx context.Context, task *Task, targetQuota int) er
 			if err := lockForUpdate(tx).First(&subscription, current.PrivateData.SubscriptionId).Error; err != nil {
 				return err
 			}
-			if subscription.UserId != current.UserId || delta >= 0 &&
+			if subscription.UserId != current.UserId || !completion && delta >= 0 &&
 				(subscription.Status != "active" || subscription.EndTime <= common.GetTimestamp()) {
 				return errors.New("video retry subscription is no longer active")
 			}
@@ -98,7 +128,7 @@ func SetVideoTaskRetryQuota(ctx context.Context, task *Task, targetQuota int) er
 				return errors.New("video retry subscription accounting is invalid")
 			}
 			if delta > 0 && (subscription.AmountUsed > math.MaxInt64-int64(delta) ||
-				(subscription.AmountTotal > 0 && subscription.AmountTotal-subscription.AmountUsed < int64(delta))) {
+				(!completion && subscription.AmountTotal > 0 && subscription.AmountTotal-subscription.AmountUsed < int64(delta))) {
 				return errors.New("video retry subscription quota insufficient")
 			}
 			if delta != 0 {
@@ -109,7 +139,9 @@ func SetVideoTaskRetryQuota(ctx context.Context, task *Task, targetQuota int) er
 		default:
 			return errors.New("video retry funding source is unsupported")
 		}
-		nextRevision = retry.Revision
+		if !image {
+			nextRevision = retry.Revision
+		}
 		if delta == 0 {
 			return nil
 		}
@@ -117,7 +149,13 @@ func SetVideoTaskRetryQuota(ctx context.Context, task *Task, targetQuota int) er
 		// for batch persistence. Reserve there before using the DB balance.
 		if common.RedisEnabled && delta > 0 {
 			if wallet {
-				result, err := cacheTryReserveUserQuota(current.UserId, int64(delta))
+				var result cacheQuotaResult
+				var err error
+				if completion {
+					result, err = cacheApplyUserQuotaDelta(current.UserId, -int64(delta))
+				} else {
+					result, err = cacheTryReserveUserQuota(current.UserId, int64(delta))
+				}
 				if err != nil {
 					return fmt.Errorf("video retry wallet cache reservation failed: %w", err)
 				}
@@ -129,7 +167,7 @@ func SetVideoTaskRetryQuota(ctx context.Context, task *Task, targetQuota int) er
 			if token.Id > 0 {
 				var result cacheQuotaResult
 				var err error
-				if token.UnlimitedQuota {
+				if completion || token.UnlimitedQuota {
 					result, err = cacheApplyTokenQuotaDelta(token.Id, token.Key, -int64(delta))
 				} else {
 					result, err = cacheTryReserveTokenQuota(token.Id, token.Key, int64(delta))
@@ -145,7 +183,7 @@ func SetVideoTaskRetryQuota(ctx context.Context, task *Task, targetQuota int) er
 		}
 		if wallet {
 			query := tx.Model(&User{}).Where("id = ?", current.UserId)
-			if delta > 0 {
+			if !completion && delta > 0 {
 				query = query.Where("quota >= ?", delta)
 			}
 			result := query.Update("quota", gorm.Expr("quota - ?", delta))
@@ -158,7 +196,7 @@ func SetVideoTaskRetryQuota(ctx context.Context, task *Task, targetQuota int) er
 		}
 		if token.Id > 0 {
 			query := tx.Model(&Token{}).Where("id = ?", token.Id)
-			if delta > 0 && !token.UnlimitedQuota {
+			if !completion && delta > 0 && !token.UnlimitedQuota {
 				query = query.Where("remain_quota >= ?", delta)
 			}
 			result := query.Updates(map[string]any{
@@ -173,9 +211,13 @@ func SetVideoTaskRetryQuota(ctx context.Context, task *Task, targetQuota int) er
 				return errors.New("video retry token quota insufficient")
 			}
 		}
-		retry.Revision++
-		nextRevision = retry.Revision
-		current.PrivateData.PreConsumedQuota = targetQuota
+		if !image {
+			retry.Revision++
+			nextRevision = retry.Revision
+		}
+		if !completion {
+			current.PrivateData.PreConsumedQuota = targetQuota
+		}
 		return tx.Model(&current).Updates(map[string]any{"quota": targetQuota, "private_data": current.PrivateData}).Error
 	})
 	if err != nil {
@@ -204,9 +246,13 @@ func SetVideoTaskRetryQuota(ctx context.Context, task *Task, targetQuota int) er
 		}
 	}
 	task.Quota = targetQuota
-	task.PrivateData.PreConsumedQuota = targetQuota
-	retry := *task.PrivateData.VideoRetry
-	retry.Revision = nextRevision
-	task.PrivateData.VideoRetry = &retry
+	if !completion {
+		task.PrivateData.PreConsumedQuota = targetQuota
+	}
+	if !image {
+		retry := *task.PrivateData.VideoRetry
+		retry.Revision = nextRevision
+		task.PrivateData.VideoRetry = &retry
+	}
 	return nil
 }

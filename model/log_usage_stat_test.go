@@ -63,9 +63,57 @@ func TestTopupCredit(t *testing.T) {
 		{"unknown", Log{Content: "old topup"}, "0", "", false},
 		{"malformed", Log{Other: `{`, Content: "使用在线充值成功，充值金额: ¥NaN，支付金额：5"}, "0", "", false},
 		{"incomplete override", Log{Other: `{"op":{"action":"user.quota_override","params":{"quota":100}}}`}, "0", "", false},
+		{"stored quota takes precedence over message", Log{Quota: 250000, Other: `{"content_parts":[{"key":"Online top-up succeeded, amount added: {{quota}}, payment amount: {{amount}}","params":{"quota":"¥10"}}]}`}, "250000", "", true},
+		{"invalid metadata preserves legacy fallback", Log{Other: `{`, Content: "使用在线充值成功，充值金额: ¥2.500000，支付金额：1"}, "2.5", "¥", true},
+		{"partially decoded metadata is not credit", Log{Other: `{"content_parts":[{"key":"Online top-up succeeded, amount added: {{quota}}, payment amount: {{amount}}","params":{"quota":"¥10"}}],"op":{"action":123}}`}, "0", "", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			amount, currency, known := topupCredit(tc.log)
+			assert.Equal(t, tc.amount, amount.String())
+			assert.Equal(t, tc.currency, currency)
+			assert.Equal(t, tc.known, known)
+		})
+	}
+}
+
+func TestTopupCreditMessages(t *testing.T) {
+	const online = "Online top-up succeeded, amount added: {{quota}}, payment amount: {{amount}}"
+	const provider = "{{provider}} top-up succeeded, amount added: {{quota}}, payment amount: {{amount}}"
+	for _, tc := range []struct {
+		name             string
+		key              string
+		quota            any
+		amount, currency string
+		known            bool
+	}{
+		{"online credit not payment", online, "¥12.500000", "12.5", "¥", true},
+		{"stripe dollars", online, "＄0.100000", "0.1", "$", true},
+		{"token display", online, "500000", "500000", "", true},
+		{"custom currency", online, "HK$2.500000", "2.5", "HK$", true},
+		{"zero", online, "¥0.000000", "0", "¥", true},
+		{"admin compensation", "Administrator completed the order, amount added: {{quota}}, payment amount: {{amount}}", "¥70.000000", "70", "¥", true},
+		{"creem numeric quota", provider, 500000, "500000", "", true},
+		{"large numeric quota precision", provider, int64(9007199254740991), "9007199254740991", "", true},
+		{"waffo currency", provider, "€2.500000", "2.5", "€", true},
+		{"redemption", "Topped up {{quota}} with a redemption code, code ID {{id}}", "¥7.000000", "7", "¥", true},
+		{"subscription", "Subscription purchased, plan: {{plan}}, payment amount: {{amount}}, payment method: {{method}}", nil, "0", "", true},
+		{"balance subscription", "Subscription purchased with balance, plan: {{plan}}, payment amount: {{amount}}, quota deducted: {{quota}}", 5000000, "0", "", true},
+		{"unknown message", "Unrecognized {{quota}}", "¥10", "0", "", false},
+		{"missing quota", online, nil, "0", "", false},
+		{"negative quota", online, -1, "0", "", false},
+		{"negative currency amount", online, "¥-1", "0", "", false},
+		{"invalid amount", online, "¥NaN", "0", "", false},
+		{"trailing text", online, "¥10 invalid", "0", "", false},
+		{"wrong quota type", online, true, "0", "", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			params := map[string]any{"amount": "99", "provider": "Creem", "id": 42, "plan": "example", "method": "stripe"}
+			if tc.quota != nil {
+				params["quota"] = tc.quota
+			}
+			other := NewLogOther()
+			content := other.setContent(common.NewMessage(tc.key, params))
+			amount, currency, known := topupCredit(Log{Content: content, Other: other.JSONString()})
 			assert.Equal(t, tc.amount, amount.String())
 			assert.Equal(t, tc.currency, currency)
 			assert.Equal(t, tc.known, known)
@@ -123,6 +171,18 @@ func TestSumTopupLogsDatabase(t *testing.T) {
 		{UserId: 1, Username: "alice", Type: LogTypeConsume, CreatedAt: 150, Quota: 999},
 		{UserId: 1, Username: "alice", Type: LogTypeTopup, CreatedAt: 150, Content: "unrecognized"},
 	}
+	// Use the same content serialization as RecordTopupLog/RecordLog so the
+	// aggregate exercises current writers together with historical rows.
+	for _, message := range []*common.Message{
+		common.NewMessage("Online top-up succeeded, amount added: {{quota}}, payment amount: {{amount}}", map[string]any{"quota": "¥12.500000", "amount": "10"}),
+		common.NewMessage("Online top-up succeeded, amount added: {{quota}}, payment amount: {{amount}}", map[string]any{"quota": "＄0.100000", "amount": "10"}),
+		common.NewMessage("{{provider}} top-up succeeded, amount added: {{quota}}, payment amount: {{amount}}", map[string]any{"provider": "Creem", "quota": 250000, "amount": "1"}),
+		common.NewMessage("Subscription purchased with balance, plan: {{plan}}, payment amount: {{amount}}, quota deducted: {{quota}}", map[string]any{"plan": "example", "amount": "10", "quota": 5000000}),
+	} {
+		other := NewLogOther()
+		content := other.setContent(message)
+		logs = append(logs, Log{UserId: 1, Username: "alice", Type: LogTypeTopup, CreatedAt: 150, Content: content, Other: other.JSONString()})
+	}
 	require.NoError(t, db.Create(&logs).Error)
 	for _, tc := range []struct {
 		name      string
@@ -131,8 +191,8 @@ func TestSumTopupLogsDatabase(t *testing.T) {
 		amounts   map[string]string
 		uncounted int
 	}{
-		{"all matching rows including time boundaries", TopupLogFilter{StartTimestamp: 100, EndTimestamp: 200}, "500000", map[string]string{"¥": "0.3"}, 1},
-		{"self owner scope", TopupLogFilter{UserID: 1, StartTimestamp: 100, EndTimestamp: 200}, "500000", map[string]string{"¥": "0.1"}, 1},
+		{"all matching rows including time boundaries", TopupLogFilter{StartTimestamp: 100, EndTimestamp: 200}, "750000", map[string]string{"¥": "12.8", "$": "0.1"}, 1},
+		{"self owner scope", TopupLogFilter{UserID: 1, StartTimestamp: 100, EndTimestamp: 200}, "750000", map[string]string{"¥": "12.6", "$": "0.1"}, 1},
 		{"admin username", TopupLogFilter{Username: "bob", StartTimestamp: 100, EndTimestamp: 200}, "0", map[string]string{"¥": "0.2"}, 0},
 		{"all list filters", TopupLogFilter{StartTimestamp: 100, EndTimestamp: 200, Group: "default", TokenName: "key", ModelName: "model", Channel: 3, RequestID: "one", UpstreamRequestID: "up-one"}, "500000", map[string]string{}, 0},
 		{"empty", TopupLogFilter{UserID: 99}, "0", map[string]string{}, 0},

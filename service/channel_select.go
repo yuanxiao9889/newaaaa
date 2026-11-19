@@ -425,5 +425,6 @@ func pinnedChannelUnavailable(pin dto.ChannelPin, statusCode int, messageID stri
 // AppendUsedChannel records an attempted channel in the request's channel
 // trail, which the retry log and the consume log's admin_info both read.
 func AppendUsedChannel(c *gin.Context, channelID int) {
+	c.Set("media_retry_dispatched", false)
 	c.Set("use_channel", append(c.GetStringSlice("use_channel"), fmt.Sprintf("%d", channelID)))
 }

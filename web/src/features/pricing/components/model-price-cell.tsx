@@ -19,6 +19,7 @@ For commercial licensing, please contact support@quantumnous.com
 import { useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 
+import { useIsAdmin } from '@/hooks/use-admin'
 import { getCurrencyLabel } from '@/lib/currency'
 import { useSystemConfigStore } from '@/stores/system-config-store'
 
@@ -52,6 +53,7 @@ export function ModelPriceCell(props: {
   showExpression?: boolean
 }) {
   const { t, i18n } = useTranslation()
+  const isAdmin = useIsAdmin()
   const currency = useSystemConfigStore((state) => state.config.currency)
   const currencyLabel =
     currency.quotaDisplayType === 'TOKENS' ? 'USD' : getCurrencyLabel()
@@ -88,10 +90,16 @@ export function ModelPriceCell(props: {
   )
   let metrics: Array<{ label: string; value: string }>
   const providerCaption = dynamic?.providerCount
-    ? t('{{count}} providers', { count: dynamic.providerCount })
+    ? t(isAdmin ? '{{count}} providers' : '{{count}} price options', {
+        count: dynamic.providerCount,
+      })
     : ''
   const unconfiguredCaption = dynamic?.hasUnconfiguredProviders
-    ? t('Not configured for some providers')
+    ? t(
+        isAdmin
+          ? 'Not configured for some providers'
+          : 'Some prices are not configured'
+      )
     : ''
   let caption = t('{{currency}} / {{unit}} tokens', {
     currency: currencyLabel,

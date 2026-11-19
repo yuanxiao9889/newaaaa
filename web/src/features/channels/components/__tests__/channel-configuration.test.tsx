@@ -1508,6 +1508,35 @@ test('automatic switching status offers retry after a failed fetch', async () =>
   expect(screen.getByRole('button', { name: 'Retry' })).toBeEnabled()
 })
 
+test('saved key suffix identifies the hidden key without unlocking or replacing it', async () => {
+  editingChannel = { ...editingChannel, key_suffix: 'A1B2' }
+  const post = vi.spyOn(api, 'post')
+  render(<ConfigurationHarness currentRow={editingChannel} />)
+  expect(await screen.findByLabelText('Key ending in A1B2')).toHaveTextContent(
+    '•••• A1B2'
+  )
+  const currentKey = screen.getByRole('textbox', { name: 'Current key' })
+  expect(currentKey).toHaveValue('')
+  expect(currentKey).toHaveAttribute('readonly')
+  expect(currentKey).toHaveAttribute('placeholder', 'Hidden — verify to reveal')
+  expect(screen.getByRole('button', { name: 'Copy' })).toBeDisabled()
+  expect(post).not.toHaveBeenCalled()
+  fireEvent.change(screen.getByLabelText('API Key *'), {
+    target: { value: 'unsaved-replacement-C3D4' },
+  })
+  expect(screen.getByLabelText('Key ending in A1B2')).toBeVisible()
+  expect(screen.queryByLabelText('Key ending in C3D4')).not.toBeInTheDocument()
+})
+
+test('missing saved key suffix keeps the verification placeholder without a fake identifier', async () => {
+  render(<ConfigurationHarness currentRow={editingChannel} />)
+  expect(
+    await screen.findByRole('textbox', { name: 'Current key' })
+  ).toHaveValue('')
+  expect(screen.queryByLabelText(/Key ending in/)).not.toBeInTheDocument()
+  expect(screen.getByRole('button', { name: 'Copy' })).toBeDisabled()
+})
+
 test('editing opens the shared configuration and omits an unchanged key on update', async () => {
   const channel = channelSchema.parse({
     id: 42,
@@ -2160,24 +2189,74 @@ test('model configuration keeps unchecked candidates searchable and supports cat
   expect(trigger).toBeDisabled()
 })
 
-test('model configuration is available for a plugin channel without upstream discovery and is disabled when its model list is empty', async () => {
+test('a new plugin channel discovers upstream models while keeping its presets', async () => {
+  const post = vi.spyOn(api, 'post').mockResolvedValue({
+    data: { success: true, data: ['upstream-video'] },
+  })
   const user = userEvent.setup()
   render(<ConfigurationHarness />)
   await user.click(await screen.findByRole('option', { name: /Video A/ }))
   const trigger = screen.getByRole('button', { name: 'Configure Models' })
   expect(trigger).toBeEnabled()
-  expect(
-    screen.queryByRole('button', { name: 'Fetch from Upstream' })
-  ).not.toBeInTheDocument()
+  const fetchButton = screen.getByRole('button', {
+    name: 'Fetch from Upstream',
+  })
+  expect(fetchButton).toBeEnabled()
   await user.click(trigger)
   const dialog = within(
     screen.getByRole('dialog', { name: 'Configure Models' })
   )
   expect(dialog.getByRole('checkbox', { name: 'video-a-1' })).toBeChecked()
   await user.click(dialog.getByRole('button', { name: 'Cancel' }))
+  fireEvent.change(screen.getByLabelText('API Key *'), {
+    target: { value: 'preview-key' },
+  })
+  await user.click(fetchButton)
+  await user.click(
+    await screen.findByRole('checkbox', { name: 'upstream-video' })
+  )
+  expect(post).toHaveBeenCalledWith(
+    '/api/channel/fetch_models',
+    expect.objectContaining({
+      type: 62,
+      base_url: 'https://a.example',
+      key: 'preview-key',
+    }),
+    expect.anything()
+  )
+  expect(screen.getByRole('button', { name: 'video-a-1' })).toBeVisible()
+  expect(screen.getByRole('button', { name: 'upstream-video' })).toBeVisible()
   await user.click(screen.getByRole('button', { name: 'Clear All' }))
 
   expect(trigger).toBeDisabled()
+})
+
+test('saved plugin discovery reports upstream failures without removing configured models and can retry', async () => {
+  editingChannel = {
+    ...editingChannel,
+    type: 62,
+    setting: JSON.stringify({ task_plugin_key: 'video-a' }),
+  }
+  const originalGet = vi.mocked(api.get).getMockImplementation()
+  if (!originalGet) throw new Error('API mock is required')
+  vi.mocked(api.get).mockImplementation(async (url, config) => {
+    if (url === '/api/channel/fetch_models/42') {
+      return { data: { success: false, message: 'Upstream unavailable' } }
+    }
+    return originalGet(url, config)
+  })
+  const user = userEvent.setup()
+  render(<ConfigurationHarness currentRow={editingChannel} />)
+  await screen.findByDisplayValue('Existing channel')
+  await user.click(screen.getByRole('button', { name: 'Fetch from Upstream' }))
+  expect(await screen.findByText('Upstream unavailable')).toBeVisible()
+  expect(screen.getByRole('button', { name: 'custom-model' })).toBeVisible()
+  vi.mocked(api.get).mockImplementation(originalGet)
+  await user.click(screen.getByRole('button', { name: 'Retry' }))
+  expect(
+    await screen.findByRole('checkbox', { name: 'upstream-model' })
+  ).toBeVisible()
+  expect(screen.getByRole('button', { name: 'custom-model' })).toBeVisible()
 })
 
 test('advanced custom edits preview draft connection settings with the saved key', async () => {

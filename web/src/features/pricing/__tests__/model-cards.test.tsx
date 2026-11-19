@@ -610,6 +610,9 @@ describe('model cards', () => {
           'perf-metrics-summary',
           24,
           ['example-model'],
+          null,
+          0,
+          '',
         ])?.status
       ).toBe('error')
     )
@@ -662,10 +665,13 @@ describe('model cards', () => {
   })
 
   it('switches the card grid to three columns at the xl breakpoint instead of 2xl', () => {
-    queryClient.setQueryData(['perf-metrics-summary', 24, ['example-model']], {
-      success: true,
-      data: { models: [] },
-    })
+    queryClient.setQueryData(
+      ['perf-metrics-summary', 24, ['example-model'], null, 0, ''],
+      {
+        success: true,
+        data: { models: [] },
+      }
+    )
     render(
       <QueryClientProvider client={queryClient}>
         <ModelCardGrid models={[pricingModel()]} onModelClick={vi.fn()} />

@@ -23,17 +23,24 @@ type TaskStatus string
 // UserError derives a public diagnostic without changing the stored failure.
 // Retry details can retain a structured code after FailReason lost its envelope.
 func (t *Task) UserError() common.PublicError {
-	if t.Platform == constant.TaskPlatformMidjourney {
-		return common.MidjourneyPublicError("", t.FailReason, 0, false)
+	sensitiveValues := []string{t.PrivateData.Key, t.PrivateData.UpstreamTaskID, t.Properties.UpstreamModelName, string(t.Platform)}
+	if execution := t.PrivateData.Execution; execution != nil && execution.TaskPlugin != nil {
+		sensitiveValues = append(sensitiveValues, execution.TaskPlugin.Key, execution.TaskPlugin.Name)
 	}
-	reason, _, _ := strings.Cut(t.FailReason, "\nAsync Channel Retry Path:")
-	publicError := common.ClassifyPublicError("", reason, 0, false)
 	var details []AsyncImageRetryDetail
 	if retry := t.PrivateData.ImageRetry; retry != nil {
 		details = retry.Details
 	} else if retry := t.PrivateData.VideoRetry; retry != nil {
 		details = retry.Details
 	}
+	for _, detail := range details {
+		sensitiveValues = append(sensitiveValues, detail.ChannelName)
+	}
+	if t.Platform == constant.TaskPlatformMidjourney {
+		return common.MidjourneyPublicError("", t.FailReason, 0, false, sensitiveValues...)
+	}
+	reason, _, _ := strings.Cut(t.FailReason, "\nAsync Channel Retry Path:")
+	publicError := common.ClassifyPublicError("", reason, 0, false, sensitiveValues...)
 	for i := len(details) - 1; i >= 0; i-- {
 		detail := details[i]
 		if t.ChannelId > 0 && detail.ChannelID != t.ChannelId {
@@ -45,7 +52,7 @@ func (t *Task) UserError() common.PublicError {
 		// An earlier attempt's failure is not evidence for a later accepted
 		// job. Only enrich the final diagnostic with its matching retry record.
 		if reason == "" || (detail.Error != "" && (strings.Contains(detail.Error, reason) || strings.Contains(reason, detail.Error))) {
-			diagnostic := common.ClassifyPublicError(detail.ErrorCode, detail.Error, detail.StatusCode, false)
+			diagnostic := common.ClassifyPublicError(detail.ErrorCode, detail.Error, detail.StatusCode, false, sensitiveValues...)
 			if !strings.HasPrefix(publicError.Message, "status_code=") && strings.HasPrefix(diagnostic.Message, "status_code=") {
 				status, _, _ := strings.Cut(diagnostic.Message, ", ")
 				publicError.Message = status + ", " + publicError.Message
@@ -120,10 +127,11 @@ type AsyncImageAsset struct {
 }
 
 type TaskPrivateData struct {
-	ReferenceAssetIDs []string `json:"reference_asset_ids,omitempty"`
-	Key               string   `json:"key,omitempty"`
-	UpstreamTaskID    string   `json:"upstream_task_id,omitempty"` // 上游真实 task ID
-	ResultURL         string   `json:"result_url,omitempty"`       // 任务成功后的结果 URL（视频地址等）
+	MediaRetry        *MediaRetryState `json:"media_retry,omitempty"`
+	ReferenceAssetIDs []string         `json:"reference_asset_ids,omitempty"`
+	Key               string           `json:"key,omitempty"`
+	UpstreamTaskID    string           `json:"upstream_task_id,omitempty"` // 上游真实 task ID
+	ResultURL         string           `json:"result_url,omitempty"`       // 任务成功后的结果 URL（视频地址等）
 	// A guarded generation may dispatch only once, including after worker
 	// reconstruction or restart. Empty preserves the policy for older tasks.
 	TransferExecutionID string `json:"transfer_execution_id,omitempty"`
@@ -206,9 +214,10 @@ type TaskUsageLog struct {
 // AsyncPluginImageState preserves the provider outcome while the host owns
 // queue status, result storage and final settlement.
 type AsyncPluginImageState struct {
-	Platform  constant.TaskPlatform `json:"platform"`
-	Status    TaskStatus            `json:"status"`
-	ResultURL string                `json:"result_url,omitempty"`
+	Platform         constant.TaskPlatform `json:"platform"`
+	Status           TaskStatus            `json:"status"`
+	ResultURL        string                `json:"result_url,omitempty"`
+	ResponseBodyPath string                `json:"response_body_path,omitempty"`
 }
 
 // AsyncImageRetryState keeps the original client request separate from the
@@ -222,7 +231,12 @@ type AsyncImageRetryState struct {
 	RelayFormat string                     `json:"relay_format,omitempty"`
 	Constraints rootdto.ChannelConstraints `json:"constraints"`
 	Submitting  bool                       `json:"submitting,omitempty"`
-	Details     []AsyncImageRetryDetail    `json:"details,omitempty"`
+	SkipRetry   bool                       `json:"skip_retry,omitempty"`
+	UserGroup   string                     `json:"user_group,omitempty"`
+	// Ordinary pricing after leaving a plugin can be below the retained reserve.
+	SettlementQuota *int                      `json:"settlement_quota,omitempty"`
+	SettlementInput *billingexpr.RequestInput `json:"settlement_input,omitempty"`
+	Details         []AsyncImageRetryDetail   `json:"details,omitempty"`
 }
 
 type AsyncImageRetryDetail struct {
@@ -494,17 +508,43 @@ func TaskGetAllTasks(startIdx int, num int, queryParams SyncTaskQueryParams) []*
 }
 
 func GetTimedOutUnfinishedTasks(cutoffUnix int64, limit int) []*Task {
-	var tasks []*Task
-	err := DB.Where("progress != ?", "100%").
+	query := DB.Where("progress != ?", "100%").
 		Where("status NOT IN ?", []string{TaskStatusFailure, TaskStatusSuccess}).
-		Where("submit_time < ?", cutoffUnix).
-		Order("submit_time").
-		Limit(limit).
-		Find(&tasks).Error
-	if err != nil {
-		return nil
+		Where("submit_time < ?", cutoffUnix)
+	return getTasksPastExecutionTimeout(query, cutoffUnix, limit, false)
+}
+
+// Filter persisted retry windows in Go to keep JSON handling portable across
+// all databases. Keyset scanning lets expired tasks behind protected tasks be
+// processed in the same sweep instead of starving behind the first page.
+func getTasksPastExecutionTimeout(query *gorm.DB, cutoff int64, limit int, internalImage bool) []*Task {
+	if limit <= 0 {
+		limit = 100
 	}
-	return tasks
+	var tasks []*Task
+	var lastID int64
+	for {
+		var candidates []*Task
+		if err := query.Session(&gorm.Session{}).Where("id > ?", lastID).Order("id asc").Limit(limit).Find(&candidates).Error; err != nil {
+			return nil
+		}
+		for _, task := range candidates {
+			lastID = task.ID
+			start := task.SubmitTime
+			if internalImage {
+				start = task.StartTime
+			}
+			if task.PrivateData.MediaRetry.ExecutionTimeoutStart(start) < cutoff {
+				tasks = append(tasks, task)
+				if len(tasks) == limit {
+					return tasks
+				}
+			}
+		}
+		if len(candidates) < limit {
+			return tasks
+		}
+	}
 }
 
 func GetAllUnFinishSyncTasks(limit int) []*Task {
@@ -712,6 +752,9 @@ func (t *Task) UpdateWithStatus(fromStatus TaskStatus) (bool, error) {
 	if t.PrivateData.VideoRetry != nil {
 		return t.updateVideoTaskWithStatus(fromStatus)
 	}
+	if t.PrivateData.InternalAsync && t.PrivateData.ImageRetry != nil {
+		return t.UpdateInternalAsyncImageTask(fromStatus, t.PrivateData.WorkerAttempts)
+	}
 	result := DB.Model(t).Where("status = ?", fromStatus).Select("*").Updates(t)
 	if result.Error != nil {
 		return false, result.Error
@@ -731,7 +774,7 @@ func (t *Task) UpdateInternalAsyncImageTask(fromStatus TaskStatus, workerAttempt
 		if err := lockForUpdate(tx).First(&current, t.ID).Error; err != nil {
 			return err
 		}
-		if current.Status != fromStatus || current.PrivateData.WorkerAttempts != workerAttempts {
+		if current.Status != fromStatus || current.PrivateData.WorkerAttempts != workerAttempts || current.Quota != t.Quota {
 			return nil
 		}
 		if t.PrivateData.WorkerAttempts != workerAttempts && fromStatus == TaskStatusInProgress &&
@@ -1013,22 +1056,12 @@ func getUnfinishedImageTasksForInternalAsync(limit int) []*Task {
 }
 
 func GetTimedOutInternalAsyncImageTasks(cutoff int64, limit int) []*Task {
-	var tasks []*Task
-	if limit <= 0 {
-		limit = 100
-	}
-	err := DB.Where("action IN ?", internalAsyncImageTaskActions()).
+	query := DB.Where("action IN ?", internalAsyncImageTaskActions()).
 		Where("platform = ?", constant.TaskPlatformInternalImage).
 		Where("status = ?", TaskStatusInProgress).
 		Where("start_time > 0").
-		Where("start_time < ?", cutoff).
-		Order("id asc").
-		Limit(limit).
-		Find(&tasks).Error
-	if err != nil {
-		return nil
-	}
-	return tasks
+		Where("start_time < ?", cutoff)
+	return getTasksPastExecutionTimeout(query, cutoff, limit, true)
 }
 
 func GetSuccessfulImageTasksForCleanup(startIdx int, num int) []*Task {

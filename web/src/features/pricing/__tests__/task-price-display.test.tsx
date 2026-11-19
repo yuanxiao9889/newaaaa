@@ -17,12 +17,22 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { act, render, screen, cleanup, within } from '@testing-library/react'
+import {
+  act,
+  render,
+  renderHook,
+  waitFor,
+  screen,
+  cleanup,
+  within,
+} from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import i18next from 'i18next'
 import { afterEach, expect, it, vi } from 'vitest'
 
+import zh from '@/i18n/locales/zh.json'
 import { api } from '@/lib/api'
+import { useAuthStore } from '@/stores/auth-store'
 import {
   DEFAULT_CURRENCY_CONFIG,
   useSystemConfigStore,
@@ -32,6 +42,7 @@ import { DynamicPricingBreakdown } from '../components/dynamic-pricing-breakdown
 import { ModelCard } from '../components/model-card'
 import { ModelDetailsContent } from '../components/model-details'
 import { ModelPriceCell } from '../components/model-price-cell'
+import { usePricingData } from '../hooks/use-pricing-data'
 import { getTaskPricingDisplayTiers } from '../lib/task-matrix-display'
 import {
   hasSimpleTaskPricing,
@@ -258,10 +269,12 @@ it('updates count unit labels across cards, table cells and breakdowns with loca
 
 afterEach(async () => {
   cleanup()
+  useAuthStore.getState().auth.reset()
   clients.forEach((client) => client.clear())
   clients.length = 0
   vi.restoreAllMocks()
   await i18next.changeLanguage('en')
+  i18next.removeResourceBundle('zhCN', 'translation')
 })
 
 it('refreshes memoized provider prices when the group or display currency changes', () => {
@@ -508,6 +521,7 @@ it('uses the same recharge conversion and token unit in task condition prices', 
 })
 
 it('switches provider group prices, localized conditions and examples, and shows unconfigured providers', async () => {
+  useAuthStore.getState().auth.setUser({ id: 1, username: 'admin', role: 10 })
   vi.spyOn(api, 'get').mockResolvedValue({ data: { data: { groups: [] } } })
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
@@ -621,7 +635,202 @@ it('switches provider group prices, localized conditions and examples, and shows
   expect(within(panel).getByText('$0.5')).toBeVisible()
 })
 
+it.each([null, 1, 0])(
+  'hides provider identities for role %s while preserving every price option',
+  async (role) => {
+    useAuthStore
+      .getState()
+      .auth.setUser(role === null ? null : { id: 2, username: 'user', role })
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    })
+    clients.push(client)
+    const shared: PricingModel = {
+      ...model,
+      billing_plugin_variants: [
+        {
+          plugin_key: 'private-alpha',
+          plugin_name: 'Private Alpha',
+          icon: 'https://private-alpha.example/icon.svg',
+          billing_expr: 'tier("standard", u("seconds") * 0.4)',
+          billing_usage_schema: { seconds: { type: 'number', unit: 'second' } },
+        },
+        {
+          plugin_key: 'private-beta',
+          plugin_name: 'Private Beta',
+          billing_expr: 'tier("standard", u("seconds") * 0.8)',
+          billing_usage_schema: { seconds: { type: 'number', unit: 'second' } },
+        },
+      ],
+    }
+    if (role === 0) {
+      shared.billing_plugin_variants = shared.billing_plugin_variants?.map(
+        (variant, index) => ({
+          ...variant,
+          option_id: String(index + 1),
+          plugin_key: undefined,
+          plugin_name: undefined,
+          icon: undefined,
+        })
+      )
+    }
+    const view = render(
+      <QueryClientProvider client={client}>
+        <ModelDetailsContent
+          model={shared}
+          groupRatio={{ default: 2 }}
+          usableGroup={{ default: { desc: '', ratio: 2 } }}
+          endpointMap={{}}
+          autoGroups={[]}
+          priceRate={1}
+          usdExchangeRate={1}
+          tokenUnit='M'
+        />
+      </QueryClientProvider>
+    )
+    expect(view.container.innerHTML).not.toMatch(
+      /private-alpha|private-beta|Private Alpha|Private Beta/
+    )
+    expect(
+      within(
+        screen.getByRole('tabpanel', { name: 'Price option 1' })
+      ).getByText('$0.8')
+    ).toBeVisible()
+    await userEvent
+      .setup()
+      .click(screen.getByRole('tab', { name: 'Price option 2' }))
+    expect(
+      within(
+        screen.getByRole('tabpanel', { name: 'Price option 2' })
+      ).getByText('$1.6')
+    ).toBeVisible()
+    i18next.addResourceBundle('zhCN', 'translation', {
+      'Price option {{number}}': zh.translation['Price option {{number}}'],
+    })
+    await act(() => i18next.changeLanguage('zhCN'))
+    expect(screen.getByRole('tab', { name: '价格方案 2' })).toHaveAttribute(
+      'aria-selected',
+      'true'
+    )
+    if (role !== 0) {
+      act(() =>
+        useAuthStore
+          .getState()
+          .auth.setUser({ id: 1, username: 'admin', role: 10 })
+      )
+      expect(screen.getByRole('tab', { name: 'Private Beta' })).toHaveAttribute(
+        'aria-selected',
+        'true'
+      )
+      act(() => useAuthStore.getState().auth.reset())
+      expect(view.container.innerHTML).not.toMatch(
+        /private-alpha|private-beta|Private Alpha|Private Beta/
+      )
+      expect(screen.getByRole('tab', { name: '价格方案 2' })).toHaveAttribute(
+        'aria-selected',
+        'true'
+      )
+    }
+  }
+)
+
+it('fetches public pricing after logout without reusing cached admin identities', async () => {
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  })
+  clients.push(client)
+  useAuthStore.getState().auth.setUser({ id: 1, username: 'admin', role: 10 })
+  vi.spyOn(api, 'get').mockImplementation(async (url) => {
+    if (url !== '/api/pricing') return { data: { success: true, data: {} } }
+    const admin = (useAuthStore.getState().auth.user?.role ?? 0) >= 10
+    return {
+      data: {
+        success: true,
+        vendors: [],
+        data: [
+          {
+            ...model,
+            billing_plugin_variants: [
+              {
+                option_id: '1',
+                ...(admin
+                  ? {
+                      plugin_key: 'private-alpha',
+                      plugin_name: 'Private Alpha',
+                    }
+                  : {}),
+                billing_expr: model.billing_expr,
+                billing_usage_schema: model.billing_usage_schema,
+              },
+            ],
+          },
+        ],
+      },
+    }
+  })
+  const hook = renderHook(() => usePricingData(), {
+    wrapper: ({ children }) => (
+      <QueryClientProvider client={client}>{children}</QueryClientProvider>
+    ),
+  })
+  await waitFor(() =>
+    expect(
+      hook.result.current.models[0]?.billing_plugin_variants?.[0]?.plugin_name
+    ).toBe('Private Alpha')
+  )
+  act(() => useAuthStore.getState().auth.reset())
+  expect(hook.result.current.models).toEqual([])
+  await waitFor(() => expect(hook.result.current.models).toHaveLength(1))
+  expect(
+    hook.result.current.models[0].billing_plugin_variants?.[0]
+  ).not.toHaveProperty('plugin_name')
+  expect(
+    hook.result.current.models[0].billing_plugin_variants?.[0]?.billing_expr
+  ).toBe(model.billing_expr)
+})
+
+it('refreshes prices when the current account changes groups', async () => {
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  })
+  clients.push(client)
+  useAuthStore
+    .getState()
+    .auth.setUser({ id: 1, username: 'user', role: 1, group: 'member' })
+  vi.spyOn(api, 'get').mockImplementation(async (url) => {
+    if (url !== '/api/pricing') return { data: { success: true, data: {} } }
+    const group = useAuthStore.getState().auth.user?.group ?? 'default'
+    return {
+      data: {
+        success: true,
+        vendors: [],
+        data: [model],
+        group_ratio: { [group]: group === 'member' ? 0.5 : 1 },
+      },
+    }
+  })
+  const hook = renderHook(() => usePricingData(), {
+    wrapper: ({ children }) => (
+      <QueryClientProvider client={client}>{children}</QueryClientProvider>
+    ),
+  })
+  await waitFor(() =>
+    expect(hook.result.current.groupRatio).toEqual({ member: 0.5 })
+  )
+  act(() =>
+    useAuthStore
+      .getState()
+      .auth.setUser({ id: 1, username: 'user', role: 1, group: 'default' })
+  )
+  expect(hook.result.current.groupRatio).toEqual({})
+  await waitFor(() =>
+    expect(hook.result.current.groupRatio).toEqual({ default: 1 })
+  )
+  expect(hook.result.current.models[0].billing_expr).toBe(model.billing_expr)
+})
+
 it('shows provider count, price range and missing-price status in both list and card views', () => {
+  useAuthStore.getState().auth.setUser({ id: 1, username: 'admin', role: 10 })
   const shared: PricingModel = {
     ...model,
     billing_mode: undefined,

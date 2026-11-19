@@ -18,7 +18,7 @@ func abortWithOpenAiMessage(c *gin.Context, statusCode int, message string, code
 	}
 	userId := c.GetInt("id")
 	_, preparedPluginRoute := c.Get(pluginruntime.ContextKeyRouteRequest)
-	publicError := sanitizedTaskPluginError(statusCode, message, codeStr)
+	publicError := sanitizedTaskPluginError(c, statusCode, message, codeStr)
 	c.Header("X-Error-Code", publicError.Code)
 	nativeError := &dto.TaskError{Code: publicError.Code, Message: publicError.Message, StatusCode: publicError.HTTPStatus, LocalError: true}
 	if !preparedPluginRoute || !RespondTaskPluginError(c, nativeError) {

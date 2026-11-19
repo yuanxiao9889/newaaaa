@@ -85,7 +85,10 @@ afterEach(() => {
   vi.restoreAllMocks()
 })
 
-async function renderChannelsPage(searchGate: () => Promise<void>) {
+async function renderChannelsPage(
+  searchGate: () => Promise<void>,
+  initialEntry = '/channels/?filter=prod&group=%5B%22vip%22%5D&status=%5B%22enabled%22%5D&model=gpt-4o'
+) {
   const get = vi.spyOn(api, 'get').mockImplementation(async (url) => {
     if (url === '/api/channel/search') {
       await searchGate()
@@ -113,8 +116,6 @@ async function renderChannelsPage(searchGate: () => Promise<void>) {
       </ChannelsProvider>
     ),
   })
-  const initialEntry =
-    '/channels/?filter=prod&group=%5B%22vip%22%5D&status=%5B%22enabled%22%5D&model=gpt-4o'
   const router = createRouter({
     routeTree: root.addChildren([auth.addChildren([channelsRoute])]),
     history: createMemoryHistory({ initialEntries: [initialEntry] }),
@@ -130,6 +131,35 @@ async function renderChannelsPage(searchGate: () => Promise<void>) {
   expect((await screen.findAllByText('prod')).length).toBeGreaterThan(0)
   return get
 }
+
+it('filters auto-disabled channels and restores the saved filter on reopening', async () => {
+  const get = await renderChannelsPage(() => Promise.resolve())
+  const user = userEvent.setup()
+  await user.click(screen.getByRole('button', { name: /^Status/ }))
+  await user.click(screen.getByRole('option', { name: 'Auto Disabled' }))
+  await waitFor(() => {
+    expect(get).toHaveBeenCalledWith(
+      '/api/channel/search',
+      expect.objectContaining({
+        params: expect.objectContaining({ status: 'auto_disabled' }),
+      })
+    )
+  })
+  expect(localStorage.getItem('channel-status-filter')).toBe('auto_disabled')
+  cleanup()
+  get.mockRestore()
+
+  const reopened = await renderChannelsPage(
+    () => Promise.resolve(),
+    '/channels/?filter=prod'
+  )
+  expect(reopened).toHaveBeenCalledWith(
+    '/api/channel/search',
+    expect.objectContaining({
+      params: expect.objectContaining({ status: 'auto_disabled' }),
+    })
+  )
+})
 
 it('refetches the channel list with the current filters and marks Refresh busy while it runs', async () => {
   let gate = Promise.resolve()

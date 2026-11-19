@@ -69,11 +69,11 @@ func TestTencentHyImageSubmission(t *testing.T) {
 	require.NoError(t, err)
 	intent := alibabaObject(t, value)
 	assert.Equal(t, "hy-alias", intent["model"])
-	assert.Equal(t, "text_to_image", intent["action"])
+	assert.Equal(t, "image_generate", intent["action"])
 	request := intent["requestBody"].(map[string]any)
 	info := &relaycommon.RelayInfo{
 		ChannelMeta:     &relaycommon.ChannelMeta{ChannelBaseUrl: plugin.Meta.BaseURL, UpstreamModelName: hyModel, ApiKey: "fixture-provider-key"},
-		OriginModelName: "hy-alias", TaskRelayInfo: &relaycommon.TaskRelayInfo{PublicTaskID: "task_public", Action: "text_to_image"},
+		OriginModelName: "hy-alias", TaskRelayInfo: &relaycommon.TaskRelayInfo{PublicTaskID: "task_public", Action: "image_generate"},
 	}
 	adaptor := taskplugin.New(plugin)
 	adaptor.Init(info)
@@ -171,7 +171,7 @@ func TestTencentHyImageNativeHistoryAndUploads(t *testing.T) {
 			value, err := plugin.Engine.CallPath(t.Context(), "protocols", []string{"openai_image", "decodeRequest"}, map[string]any{"model": hyModel, "operation": "edit", "body": tc.body})
 			require.NoError(t, err)
 			intent := alibabaObject(t, value)
-			assert.Equal(t, "image_to_image", intent["action"])
+			assert.Equal(t, "image_edit", intent["action"])
 			request := intent["requestBody"].(map[string]any)
 			content := request["messages"].([]any)[0].(map[string]any)["content"].([]any)
 			require.Len(t, content, 3)

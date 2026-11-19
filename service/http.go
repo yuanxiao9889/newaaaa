@@ -23,22 +23,39 @@ func CloseResponseBodyGracefully(httpResponse *http.Response) {
 	}
 }
 
-// ShouldCopyUpstreamHeader checks whether a given upstream response header
-// should be copied to the client response. It returns false for Content-Length
-// (managed separately) and X-Oneapi-Request-Id (to preserve the local instance
-// ID). When the upstream header is X-Oneapi-Request-Id, the value is captured
-// into the Gin context for later logging.
+// ShouldCopyUpstreamHeader keeps protocol headers public, while upstream
+// diagnostics require a dashboard-authenticated administrator. API tokens do
+// not inherit their owner's dashboard privileges.
 func ShouldCopyUpstreamHeader(c *gin.Context, k string, v []string) bool {
-	if strings.EqualFold(k, "Content-Length") {
+	if len(v) == 0 {
 		return false
 	}
 	if strings.EqualFold(k, common.RequestIdKey) {
-		if c != nil && len(v) > 0 {
+		if c != nil {
 			c.Set(common.UpstreamRequestIdKey, v[0])
 		}
 		return false
 	}
-	return true
+	switch strings.ToLower(k) {
+	case "content-length", "connection", "keep-alive", "proxy-authenticate", "proxy-authorization",
+		"te", "trailer", "transfer-encoding", "upgrade", "set-cookie", "set-cookie2",
+		"authorization", "cookie", "auth-version", "cache-control", "expires", "pragma":
+		return false
+	case "content-type", "content-disposition", "content-encoding", "content-range", "accept-ranges",
+		"retry-after", "x-should-retry", "ratelimit", "ratelimit-policy",
+		"ratelimit-limit", "ratelimit-remaining", "ratelimit-reset",
+		"x-ratelimit-limit", "x-ratelimit-remaining", "x-ratelimit-reset",
+		"x-ratelimit-limit-requests", "x-ratelimit-remaining-requests", "x-ratelimit-reset-requests",
+		"x-ratelimit-limit-tokens", "x-ratelimit-remaining-tokens", "x-ratelimit-reset-tokens",
+		"x-reasoning-included", "x-codex-turn-state":
+		return true
+	default:
+		if c != nil && c.GetInt("token_id") == 0 && c.GetInt("role") >= common.RoleAdminUser {
+			c.Header("Cache-Control", "private, no-store")
+			return true
+		}
+		return false
+	}
 }
 
 func IOCopyBytesGracefully(c *gin.Context, src *http.Response, data []byte) {

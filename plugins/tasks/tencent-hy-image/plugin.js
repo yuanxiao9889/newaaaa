@@ -14,7 +14,7 @@ export const meta = {
   key: "tencent-hy-image",
   name: "Tencent TokenHub Hy Image",
   icon: "text:HY",
-  version: "1.0.0",
+  version: "1.0.1",
   author: { name: "OOpii" },
   description: {
     en: "Hy-Image-3.5-preview generation and multi-turn editing through Tencent TokenHub",
@@ -253,7 +253,7 @@ export const protocols = {
       if (requestBody.size === "auto") delete requestBody.size;
       const action = validateRequest(requestBody);
       if (ctx.operation === "edit" && action !== "image_to_image") throw new Error("image is required for edits");
-      return { kind: "submit", model: ctx.model, action, requestBody };
+      return { kind: "submit", model: ctx.model, action: action === "image_to_image" ? "image_edit" : "image_generate", requestBody };
     },
     render: function (ctx, task) {
       const result = parseTaskResult(ctx, task.data);

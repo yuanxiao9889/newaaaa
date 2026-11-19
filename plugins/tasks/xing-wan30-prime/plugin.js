@@ -5,7 +5,7 @@ const RATIOS = ["16:9", "9:16"];
 
 export const meta = {
   apiVersion: 1, key: "xing-wan30-prime", name: "XingAPI Wan 3.0 Prime",
-  version: "1.0.0", author: { name: "OOpii" },
+  version: "1.0.1", author: { name: "OOpii" },
   description: { en: "Wan 3.0 video generation through XingAPI", zh: "通过星光 API 生成 Wan 3.0 视频" },
   website: "https://xingapi.top", baseUrl: "https://xingapi.top",
   auth: "api_key", models: [MODEL], protocols: ["openai_video"], fetchMode: "per_task",
@@ -145,7 +145,7 @@ export function buildContentRequest(ctx) {
   const body = ctx.data || {};
   const origin = /^https?:\/\/[^/]+/i.exec(canonical)[0].toLowerCase();
   const result = [body.video_url, body.result_url, body.url, (body.metadata || {}).url].find(function (url) {
-    return publicUrl(url) && /\.mp4(?:\?|$)/i.test(url) && !url.includes("#")
+    return publicUrl(url) && !url.includes("#")
       && /^https?:\/\/[^/]+/i.exec(url)[0].toLowerCase() !== origin
       && (!ctx.apiKey || (!url.includes(ctx.apiKey) && !url.includes(encodeURIComponent(ctx.apiKey))));
   });

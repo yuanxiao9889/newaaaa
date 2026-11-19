@@ -21,14 +21,18 @@ import { useMemo } from 'react'
 
 import { useStatus } from '@/hooks/use-status'
 import { requireServerSuccess } from '@/lib/server-error-message'
+import { useAuthStore } from '@/stores/auth-store'
 
 import { getPricing } from '../api'
 
 export function usePricingData(enabled = true) {
   const { status } = useStatus()
+  const userId = useAuthStore((state) => state.auth.user?.id)
+  const group = useAuthStore((state) => state.auth.user?.group)
+  const role = useAuthStore((state) => state.auth.user?.role)
 
   const { data, isLoading, error, refetch } = useQuery({
-    queryKey: ['pricing'],
+    queryKey: ['pricing', userId ?? null, role ?? 0, group ?? ''],
     queryFn: async () => requireServerSuccess(await getPricing()),
     staleTime: 5 * 60 * 1000,
     enabled,

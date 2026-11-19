@@ -13,10 +13,11 @@ func TestFormatUserLogsForResponseHidesChannelInfo(t *testing.T) {
 		{
 			Id:          99,
 			ChannelId:   12,
-			ChannelName: "upstream-a",
+			ChannelName: "provider-private",
 			Other: common.MapToJsonStr(map[string]any{
 				"future_diagnostic":        map[string]any{"model": "private-model"},
 				"model_price":              "private-model",
+				"upstream_model_name":      "model-private",
 				"actual_quota":             123,
 				"admin_info":               map[string]interface{}{"use_channel": []int{12}},
 				"audit_info":               map[string]interface{}{"path": "/api/channel"},
@@ -98,7 +99,12 @@ func TestUserLogTranslationsPreserveAccountHistoryPrivacy(t *testing.T) {
 			assert.Equal(t, "Credited 10", logs[0].Content)
 		} else {
 			assert.NotContains(t, public, "content_parts")
-			assert.NotContains(t, logs[0].Content, "Credited")
+			if logType == LogTypeError {
+				// Safe error content is now retained even without a catalog entry.
+				assert.Contains(t, logs[0].Content, "Credited 10")
+			} else {
+				assert.NotContains(t, logs[0].Content, "Credited")
+			}
 		}
 	}
 }

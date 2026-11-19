@@ -16,11 +16,17 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { type ReactNode, useId } from 'react'
-import { type UseFormReturn, useFormContext, useWatch } from 'react-hook-form'
+import { Fragment, type ReactNode, useId } from 'react'
+import {
+  Controller,
+  type UseFormReturn,
+  useFormContext,
+  useWatch,
+} from 'react-hook-form'
 import { useTranslation } from 'react-i18next'
 
 import { FieldGroup } from '@/components/ui/field'
+import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import { SettingsSwitchField } from '@/features/system-settings/components/settings-form-layout'
@@ -166,7 +172,7 @@ export function ChannelQuickOptions(props: ChannelQuickOptionsProps) {
       key: 'auto-switch',
       label: t('Automatic switching'),
       description: t(
-        'Enable on at least two compatible channels in the same group and model. Repeated failures temporarily lower priority; successful recovery probes restore administrator priority.'
+        'Retry failed images and videos across compatible channels, or on the same channel when no alternative is available. Repeated failures affect channel health.'
       ),
       checked: autoSwitch === true,
       onCheckedChange: (value) => setOption('auto_switch_enabled', value),
@@ -211,7 +217,7 @@ export function ChannelQuickOptions(props: ChannelQuickOptionsProps) {
                 ? option.description
                 : undefined
             }
-            className='border-border/60 bg-muted/30 flex items-center gap-2 rounded-md border px-2.5 py-1.5'
+            className='border-border/60 bg-muted/30 flex flex-wrap items-center gap-2 rounded-md border px-2.5 py-1.5'
           >
             <Switch
               id={`${id}-${option.key}`}
@@ -226,6 +232,9 @@ export function ChannelQuickOptions(props: ChannelQuickOptionsProps) {
             >
               {option.label}
             </Label>
+            {option.key === 'auto-switch' && option.checked && (
+              <MediaRetryFields form={form} disabled={props.disabled} inline />
+            )}
           </div>
         ))}
       </div>
@@ -246,17 +255,114 @@ export function ChannelQuickOptions(props: ChannelQuickOptionsProps) {
       </h3>
       <FieldGroup className='grid gap-x-6 gap-y-0 @sm:grid-cols-2'>
         {options.map((option) => (
-          <SettingsSwitchField
-            key={option.key}
-            controlId={`${id}-${option.key}`}
-            checked={option.checked}
-            onCheckedChange={option.onCheckedChange}
-            label={option.label}
-            description={option.description}
-            disabled={option.disabled}
-          />
+          <Fragment key={option.key}>
+            <SettingsSwitchField
+              controlId={`${id}-${option.key}`}
+              checked={option.checked}
+              onCheckedChange={option.onCheckedChange}
+              label={option.label}
+              description={option.description}
+              disabled={option.disabled}
+            />
+            {option.key === 'auto-switch' && option.checked && (
+              <MediaRetryFields form={form} disabled={props.disabled} />
+            )}
+          </Fragment>
         ))}
       </FieldGroup>
     </section>
+  )
+}
+
+function MediaRetryFields(props: {
+  form: UseFormReturn<ChannelFormValues>
+  disabled: boolean
+  inline?: boolean
+}) {
+  const { t } = useTranslation()
+  const id = useId()
+  const helpText = `${t('Includes the first submission. All channels and rounds share the time window and attempt limit; channel settings override global retry limits.')} ${t('The window starts with the first upstream submission and does not restart when switching channels.')}`
+  const fields = [
+    {
+      name: 'auto_switch_retry_window_minutes' as const,
+      label: t('Retry window (minutes)'),
+      max: 120,
+      fallback: 10,
+    },
+    {
+      name: 'auto_switch_max_attempts' as const,
+      label: t('Total attempts'),
+      max: 10,
+      fallback: 3,
+    },
+  ]
+  return (
+    <div
+      className='flex min-w-0 flex-wrap items-start gap-2'
+      role='group'
+      aria-label={t('Automatic switching retry limits')}
+      title={props.inline ? helpText : undefined}
+    >
+      {fields.map((config) => (
+        <Controller
+          key={config.name}
+          control={props.form.control}
+          name={config.name}
+          render={({ field, fieldState }) => (
+            <div className='flex flex-col gap-1'>
+              <div className='flex items-center gap-2'>
+                <Label htmlFor={`${id}-${config.name}`} className='text-xs'>
+                  {config.label}
+                </Label>
+                <Input
+                  {...field}
+                  id={`${id}-${config.name}`}
+                  type='number'
+                  min={1}
+                  max={config.max}
+                  step={1}
+                  className='w-16'
+                  disabled={props.disabled}
+                  value={
+                    Number.isNaN(field.value)
+                      ? ''
+                      : (field.value ?? config.fallback)
+                  }
+                  onChange={(event) =>
+                    field.onChange(
+                      event.target.value === ''
+                        ? Number.NaN
+                        : Number(event.target.value)
+                    )
+                  }
+                  aria-invalid={!!fieldState.error}
+                  aria-describedby={`${id}-help${fieldState.error ? ` ${id}-${config.name}-error` : ''}`}
+                />
+              </div>
+              {fieldState.error && (
+                <p
+                  id={`${id}-${config.name}-error`}
+                  role='alert'
+                  className='text-destructive text-xs'
+                >
+                  {t(
+                    fieldState.error.message ??
+                      'Invalid automatic switching settings'
+                  )}
+                </p>
+              )}
+            </div>
+          )}
+        />
+      ))}
+      <p
+        id={`${id}-help`}
+        className={
+          props.inline ? 'sr-only' : 'text-muted-foreground w-full text-xs'
+        }
+      >
+        {helpText}
+      </p>
+    </div>
   )
 }

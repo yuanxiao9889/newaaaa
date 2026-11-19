@@ -975,6 +975,9 @@ func AdjustTaskQuotaForFinalSettlement(ctx context.Context, task *model.Task, ac
 	if task == nil || actualQuota < 0 {
 		return nil
 	}
+	if task.PrivateData.InternalAsync && task.PrivateData.ImageRetry != nil {
+		return model.SetImageTaskFinalQuota(ctx, task, actualQuota)
+	}
 	preConsumedQuota := task.Quota
 	quotaDelta := actualQuota - preConsumedQuota
 	if quotaDelta == 0 {

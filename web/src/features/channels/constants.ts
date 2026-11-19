@@ -253,6 +253,7 @@ export const CHANNEL_STATUS_OPTIONS = [
   { value: 'all', label: 'All Status' },
   { value: 'enabled', label: 'Enabled' },
   { value: 'disabled', label: 'Disabled' },
+  { value: 'auto_disabled', label: 'Auto Disabled' },
 ] as const
 
 export const CHANNEL_STATUS_CONFIG = {
@@ -535,6 +536,13 @@ export const MODEL_FETCHABLE_TYPES = new Set([
   60,
   CHANNEL_TYPE_VLLM,
   CHANNEL_TYPE_SGLANG,
+])
+
+// Plugin channels can discover upstream names for manual selection/mapping.
+// Discovery alone does not establish plugin support for automatic model sync.
+export const MODEL_DISCOVERABLE_TYPES = new Set([
+  ...MODEL_FETCHABLE_TYPES,
+  CHANNEL_TYPE_TASK_PLUGIN,
 ])
 
 export const FIELD_PASSTHROUGH_TYPES = new Set([

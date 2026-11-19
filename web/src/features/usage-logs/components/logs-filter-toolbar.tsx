@@ -44,6 +44,7 @@ interface LogsFilterToolbarProps<TData> {
   table: Table<TData>
   primaryFilters: ReactNode
   advancedFilters?: ReactNode
+  defaultAdvancedOpen?: boolean
   compactMobile?: boolean
   mobilePinnedFilters?: ReactNode
   mobileFilters?: ReactNode
@@ -92,7 +93,9 @@ export function LogsFilterInput(props: ComponentProps<typeof Input>) {
 
 export function LogsFilterToolbar<TData>(props: LogsFilterToolbarProps<TData>) {
   const { t } = useTranslation()
-  const [advancedOpen, setAdvancedOpen] = useState(false)
+  const [advancedOpen, setAdvancedOpen] = useState(
+    props.defaultAdvancedOpen ?? false
+  )
   const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false)
   const isMobile = useMediaQuery('(max-width: 640px)')
 

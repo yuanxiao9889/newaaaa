@@ -56,9 +56,11 @@ import {
   getSuccessRateTextClass,
 } from '@/features/performance-metrics/lib/format'
 import { PluginIcon } from '@/features/task-plugins/components/plugin-icon'
+import { useIsAdmin } from '@/hooks/use-admin'
 import { getLobeIcon } from '@/lib/lobe-icon'
 import { requireServerSuccess } from '@/lib/server-error-message'
 import { cn } from '@/lib/utils'
+import { useAuthStore } from '@/stores/auth-store'
 import { useSystemConfigStore } from '@/stores/system-config-store'
 
 import { DEFAULT_TOKEN_UNIT } from '../constants'
@@ -271,8 +273,15 @@ function OverviewMetric(props: {
 
 function OverviewSummaryGrid(props: { model: PricingModel }) {
   const { t } = useTranslation()
+  const user = useAuthStore((state) => state.auth.user)
   const metricsQuery = useQuery({
-    queryKey: ['perf-metrics', props.model.model_name],
+    queryKey: [
+      'perf-metrics',
+      props.model.model_name,
+      user?.id ?? null,
+      user?.role ?? 0,
+      user?.group ?? '',
+    ],
     queryFn: async () =>
       requireServerSuccess(await getPerfMetrics(props.model.model_name, 24)),
     staleTime: 60 * 1000,
@@ -649,6 +658,7 @@ function PriceSection(props: {
   showRechargePrice: boolean
 }) {
   const { t, i18n } = useTranslation()
+  const isAdmin = useIsAdmin()
   const isTokenBased = isTokenBasedModel(props.model)
   const tokenUnitLabel = props.tokenUnit === 'K' ? '1K' : '1M'
   const baseGroupKey = '_base'
@@ -751,9 +761,11 @@ function PriceSection(props: {
         <SectionTitle>{t('Base Price')}</SectionTitle>
         {dynamicSummary.providerCount && (
           <p className='text-muted-foreground mb-2 text-xs'>
-            {t('{{count}} providers', { count: dynamicSummary.providerCount })}
+            {t(isAdmin ? '{{count}} providers' : '{{count}} price options', {
+              count: dynamicSummary.providerCount,
+            })}
             {dynamicSummary.hasUnconfiguredProviders &&
-              ` · ${t('Not configured for some providers')}`}
+              ` · ${t(isAdmin ? 'Not configured for some providers' : 'Some prices are not configured')}`}
           </p>
         )}
         {dynamicSummary.isMixedBilling && (
@@ -1007,6 +1019,7 @@ type GroupPricingSectionProps = {
 
 function GroupPricingSection(props: GroupPricingSectionProps) {
   const { t } = useTranslation()
+  const isAdmin = useIsAdmin()
   const variants = props.model.billing_plugin_variants
   if (!variants?.length) {
     return <ProviderGroupPricingSection {...props} />
@@ -1014,33 +1027,47 @@ function GroupPricingSection(props: GroupPricingSectionProps) {
   return (
     <section>
       <SectionTitle>{t('Pricing by Group')}</SectionTitle>
-      <Tabs key={props.model.model_name} defaultValue={variants[0].plugin_key}>
+      <Tabs key={props.model.model_name} defaultValue={0}>
         <TabsList
-          aria-label={t('Provider')}
+          aria-label={t('Pricing by Group')}
           className='max-w-full flex-wrap justify-start group-data-horizontal/tabs:h-auto'
         >
-          {variants.map((variant) => (
+          {variants.map((variant, index) => (
             <TabsTrigger
-              key={variant.plugin_key}
-              value={variant.plugin_key}
+              key={
+                variant.option_id ?? variant.plugin_key ?? variant.billing_expr
+              }
+              value={index}
               className='max-w-full min-w-0'
             >
-              <PluginIcon
-                plugin={{
-                  key: variant.plugin_key,
-                  name: variant.plugin_name,
-                  icon: variant.icon,
-                }}
-                size={16}
-              />
-              <span className='truncate' title={variant.plugin_name}>
-                {variant.plugin_name}
+              {isAdmin && variant.plugin_key && variant.plugin_name && (
+                <PluginIcon
+                  plugin={{
+                    key: variant.plugin_key,
+                    name: variant.plugin_name,
+                    icon: variant.icon,
+                  }}
+                  size={16}
+                />
+              )}
+              <span
+                className='truncate'
+                title={isAdmin ? variant.plugin_name : undefined}
+              >
+                {isAdmin && variant.plugin_name
+                  ? variant.plugin_name
+                  : t('Price option {{number}}', { number: index + 1 })}
               </span>
             </TabsTrigger>
           ))}
         </TabsList>
-        {variants.map((variant) => (
-          <TabsContent key={variant.plugin_key} value={variant.plugin_key}>
+        {variants.map((variant, index) => (
+          <TabsContent
+            key={
+              variant.option_id ?? variant.plugin_key ?? variant.billing_expr
+            }
+            value={index}
+          >
             {variant.billing_expr || variant.billing_mode === 'ratio' ? (
               <ProviderGroupPricingSection
                 {...props}

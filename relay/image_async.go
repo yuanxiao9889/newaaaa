@@ -124,7 +124,9 @@ func SubmitInternalAsyncImageTask(c *gin.Context, info *relaycommon.RelayInfo, r
 	if info.TaskRelayInfo.PublicTaskID == "" {
 		info.TaskRelayInfo.PublicTaskID = model.GenerateTaskID()
 	}
+	service.InitializeMediaRetry(c, info)
 	task := model.InitTask(constant.TaskPlatformInternalImage, info)
+	task.PrivateData.MediaRetry = service.MediaRetry(c)
 	task.PrivateData.TransferExecutionID = c.GetString("transfer_execution_id")
 	task.PrivateData.AutoSwitch = autoSwitch
 	task.Action = asyncImageTaskAction(info.RelayMode)
@@ -249,7 +251,9 @@ func submitInternalAsyncProtocolImageTask(c *gin.Context, info *relaycommon.Rela
 		info.TaskRelayInfo = &relaycommon.TaskRelayInfo{}
 	}
 	info.TaskRelayInfo.PublicTaskID = model.GenerateTaskID()
+	service.InitializeMediaRetry(c, info)
 	task := model.InitTask(constant.TaskPlatformInternalImage, info)
+	task.PrivateData.MediaRetry = service.MediaRetry(c)
 	task.PrivateData.TransferExecutionID = c.GetString("transfer_execution_id")
 	task.Action = action
 	task.Status = model.TaskStatusSubmitted
@@ -321,6 +325,8 @@ func saveInternalAsyncImageReplay(c *gin.Context, task *model.Task) error {
 		task.PrivateData.ImageRetry = &model.AsyncImageRetryState{
 			BodyPath: path, BodySize: size, RelayFormat: task.PrivateData.RequestRelayFormat,
 			Constraints: *service.GetChannelConstraints(c),
+			SkipRetry:   service.ShouldSkipRetryAfterChannelAffinityFailure(c),
+			UserGroup:   common.GetContextKeyString(c, constant.ContextKeyUserGroup),
 		}
 	} else {
 		_ = os.Remove(path)

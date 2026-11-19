@@ -384,8 +384,8 @@ func TestPluginResponsesMachineNonStreamShapes(t *testing.T) {
 
 	t.Run("failed preserves the classified public error", func(t *testing.T) {
 		machine := NewPluginResponsesMachine("task_failed", "model", 99, PluginProtocolLimits{})
-		machine.SetPublicError(common.ClassifyPublicError("content_policy_violation", "secret provider", 400, false))
-		response, err := machine.FinalResponse(map[string]any{"secret": "ignored"}, "FAILURE")
+		machine.SetPublicError(common.ClassifyPublicError("content_policy_violation", "input image rejected; provider=private-vendor; api_key=sk-private-fixture", 400, false))
+		response, err := machine.FinalResponse(map[string]any{"secret_payload": "raw-payload-must-not-leak"}, "FAILURE")
 		require.NoError(t, err)
 		assert.Equal(t, "failed", response["status"])
 		assert.Empty(t, response["output"])
@@ -393,9 +393,12 @@ func TestPluginResponsesMachineNonStreamShapes(t *testing.T) {
 		require.True(t, ok)
 		assert.Equal(t, "content_policy_violation", responseError["code"])
 		assert.Contains(t, responseError["message"], "[content_policy_violation]")
+		assert.Contains(t, responseError["message"], "input image rejected")
 		encoded, marshalErr := common.Marshal(response)
 		require.NoError(t, marshalErr)
-		assert.NotContains(t, string(encoded), "secret")
+		for _, private := range []string{"private-vendor", "sk-private-fixture", "secret_payload", "raw-payload-must-not-leak"} {
+			assert.NotContains(t, string(encoded), private)
+		}
 	})
 
 	t.Run("invalid output union is rejected", func(t *testing.T) {

@@ -29,6 +29,7 @@ import { afterAll, afterEach, beforeEach, expect, test, vi } from 'vitest'
 
 import en from '@/i18n/locales/en.json'
 import zh from '@/i18n/locales/zh.json'
+import { useAuthStore } from '@/stores/auth-store'
 import {
   DEFAULT_CURRENCY_CONFIG,
   useSystemConfigStore,
@@ -98,9 +99,11 @@ const plugin = {
   author: { name: 'Plugin maintainer' },
 }
 const previousConfig = useSystemConfigStore.getState().config
+const previousAuth = useAuthStore.getState().auth
 let client: QueryClient
 const i18n = createInstance()
 beforeEach(async () => {
+  useAuthStore.setState({ auth: { ...previousAuth, user: null } })
   await i18n.init({
     lng: 'en',
     resources: { en },
@@ -112,13 +115,14 @@ beforeEach(async () => {
   client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   client.setQueryData(['status'], {}, { updatedAt: Date.now() + 60_000 })
   client.setQueryData(
-    ['pricing'],
+    ['pricing', null, 0, ''],
     { data: [], vendors: [] },
     { updatedAt: Date.now() + 60_000 }
   )
 })
 afterEach(() => {
   client.clear()
+  useAuthStore.setState({ auth: previousAuth })
   useSystemConfigStore.getState().setConfig(previousConfig)
 })
 function renderPreview(other: LogOtherData, isAdmin = true, type?: number) {
@@ -379,7 +383,7 @@ test.each([
 ])(
   'task expression $tier shows its recorded unit price',
   ({ expression, tier, expected }) => {
-    client.setQueryData(['pricing'], {
+    client.setQueryData(['pricing', null, 0, ''], {
       data: [
         {
           model_name: 'wan2.5-i2v-preview',
@@ -408,7 +412,7 @@ test.each([
 )
 
 test('task log prices use localized unit labels from pricing metadata', async () => {
-  client.setQueryData(['pricing'], {
+  client.setQueryData(['pricing', null, 0, ''], {
     data: [
       {
         model_name: 'wan2.5-i2v-preview',
@@ -437,7 +441,7 @@ test('task log prices use localized unit labels from pricing metadata', async ()
 })
 
 test('task log prices select the executing provider’s schema', () => {
-  client.setQueryData(['pricing'], {
+  client.setQueryData(['pricing', null, 0, ''], {
     data: [
       {
         model_name: 'wan2.5-i2v-preview',
@@ -476,7 +480,7 @@ test.each(['missing schema', 'unsupported expression', 'unknown tier'])(
   'task pricing with %s preserves the saved tier without guessing prices',
   (scenario) => {
     if (scenario !== 'missing schema') {
-      client.setQueryData(['pricing'], {
+      client.setQueryData(['pricing', null, 0, ''], {
         data: [
           {
             model_name: 'wan2.5-i2v-preview',

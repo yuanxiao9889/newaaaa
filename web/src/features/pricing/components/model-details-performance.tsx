@@ -39,6 +39,7 @@ import type {
 } from '@/features/performance-metrics/types'
 import { requireServerSuccess } from '@/lib/server-error-message'
 import { cn } from '@/lib/utils'
+import { useAuthStore } from '@/stores/auth-store'
 
 import type { UptimeDayPoint } from '../lib/mock-stats'
 import type { PricingModel } from '../types'
@@ -123,8 +124,15 @@ function toGroupUptimeSeries(group: PerformanceGroup): UptimeDayPoint[] {
 
 export function ModelDetailsPerformance(props: { model: PricingModel }) {
   const { t } = useTranslation()
+  const user = useAuthStore((state) => state.auth.user)
   const metricsQuery = useQuery({
-    queryKey: ['perf-metrics', props.model.model_name],
+    queryKey: [
+      'perf-metrics',
+      props.model.model_name,
+      user?.id ?? null,
+      user?.role ?? 0,
+      user?.group ?? '',
+    ],
     queryFn: async () =>
       requireServerSuccess(await getPerfMetrics(props.model.model_name, 24)),
     staleTime: 60 * 1000,

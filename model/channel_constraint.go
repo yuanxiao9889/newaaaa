@@ -187,7 +187,7 @@ func channelMatchesImageRequestFilter(ch *Channel, modelName string, filter dto.
 			if !slices.Contains(rule.Models, candidate) && !slices.Contains(rule.Models, base) {
 				continue
 			}
-			if !filter.ImageRequestValid || !slices.Contains(rule.Qualities, filter.ImageQuality) || !slices.Contains(rule.Sizes, filter.ImageSize) {
+			if !filter.ImageRequestValid || !slices.Contains(rule.Qualities, filter.ImageQuality) || !rule.AllowsSize(filter.ImageSize) {
 				return false
 			}
 		}

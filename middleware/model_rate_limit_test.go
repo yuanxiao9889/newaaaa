@@ -128,13 +128,14 @@ func TestModelMemoryRateLimitRejectionsReturnOpenAIError(t *testing.T) {
 
 			resp := performRateLimitRequest(router, "/", "127.0.0.1:1000")
 			assert.Equal(t, http.StatusTooManyRequests, resp.Code)
-			want, err := common.Marshal(gin.H{"error": gin.H{
-				"message": common.MessageWithRequestId("[rate_limit_exceeded] status_code=429, 请求过于频繁或当前并发数已达上限；请降低并发并稍后重试", "req-limited"),
-				"type":    "new_api_error",
-				"code":    "rate_limit_exceeded",
-			}})
-			require.NoError(t, err)
-			assert.JSONEq(t, string(want), resp.Body.String())
+			var response struct {
+				Error struct{ Message, Type, Code string }
+			}
+			require.NoError(t, common.Unmarshal(resp.Body.Bytes(), &response))
+			assert.Equal(t, "new_api_error", response.Error.Type)
+			assert.Equal(t, "rate_limit_exceeded", response.Error.Code)
+			assert.Contains(t, response.Error.Message, "maximum 1 requests in 1 minutes")
+			assert.Contains(t, response.Error.Message, "request id: req-limited")
 		})
 	}
 }

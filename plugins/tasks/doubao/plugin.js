@@ -116,7 +116,7 @@ const DEFAULT_IMAGE_PROFILE = {
   fastPromptMode: true,
 };
 const LAYER_SIZE_PRESETS = ["1K", "1.5K", "2K"];
-const IMAGE_ACTIONS = ["text_to_image", "image_to_image"];
+const IMAGE_ACTIONS = ["text_to_image", "image_to_image", "image_generate", "image_edit"];
 // Official Seedream pricing boundary: every output image at or below 2.61
 // megapixels (1.5K and below) is priced separately from images above it.
 const IMAGE_TIER_MAX_PIXELS = 2610000;
@@ -303,7 +303,7 @@ export const meta = {
     en: "Volcengine Doubao Seedance video generation and Seedream image generation",
     zh: "火山引擎豆包 Seedance 视频生成与 Seedream 图片生成",
   },
-  version: "1.4.0",
+  version: "1.4.1",
   author: { name: "QuantumNous" },
   channelTypes: [54, 45], // VolcEngine-type channels serve Ark video models with the same wire format
   models: Object.keys(VIDEO_MODELS).concat(Object.keys(IMAGE_MODELS)),
@@ -1194,7 +1194,7 @@ export const protocols = {
       if (uploads.length) requestBody.image = [].concat(requestBody.image === undefined ? [] : requestBody.image, uploads);
       const converted = convertImage({ model: model, requestBody: requestBody });
       if (ctx.operation === "edit" && converted.action !== "image_to_image") throw new Error("image is required");
-      return { kind: "submit", model: model, action: converted.action, requestBody: requestBody };
+      return { kind: "submit", model: model, action: converted.action === "image_to_image" ? "image_edit" : "image_generate", requestBody: requestBody };
     },
     render: function (ctx, task) {
       return {

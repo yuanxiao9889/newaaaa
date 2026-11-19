@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"path/filepath"
 	"strconv"
 	"testing"
@@ -24,7 +25,7 @@ func TestSearchChannelsExactModelFilter(t *testing.T) {
 		common.SetDatabaseTypes(previousType, previousLogType)
 		common.IsMasterNode, common.SQLitePath = previousMaster, previousSQLite
 	})
-	t.Setenv("SQL_DSN", "")
+	t.Setenv("SQL_DSN", os.Getenv("TEST_CHANNEL_SQL_DSN"))
 	t.Setenv("LOG_SQL_DSN", "")
 	common.IsMasterNode = false
 	common.SQLitePath = filepath.Join(t.TempDir(), "channel-search.db")
@@ -34,6 +35,14 @@ func TestSearchChannelsExactModelFilter(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, sqlDB.Close()) })
 	require.NoError(t, db.AutoMigrate(&model.Channel{}))
+	t.Cleanup(func() { require.NoError(t, db.Migrator().DropTable(&model.Channel{})) })
+	var version string
+	versionQuery := "SELECT version()"
+	if common.UsingMainDatabase(common.DatabaseTypeSQLite) {
+		versionQuery = "SELECT sqlite_version()"
+	}
+	require.NoError(t, db.Raw(versionQuery).Scan(&version).Error)
+	t.Logf("database: %s %s", common.MainDatabaseType(), version)
 
 	tag := "image-channels"
 	channels := []model.Channel{
@@ -45,7 +54,7 @@ func TestSearchChannelsExactModelFilter(t *testing.T) {
 		{Id: 6, Models: "all-image-2.5-sunburst--H"},
 		{Id: 7, Models: "prefix-all-image-2"},
 		{Id: 8, Models: "other"},
-		{Id: 9, Models: "ALL-IMAGE-2"},
+		{Id: 9, Models: "ALL-IMAGE-2", Status: common.ChannelStatusAutoDisabled},
 		{Id: 10, Models: "image_%"},
 		{Id: 11, Models: "image_X"},
 	}
@@ -82,6 +91,9 @@ func TestSearchChannelsExactModelFilter(t *testing.T) {
 				{name: "SQL wildcards match literally", model: "image_%", wantIDs: []int{10}, wantTotal: 1, wantCounts: map[int]int{1: 1}},
 				{name: "pagination follows exact matching", model: "all-image-2", page: "2", pageSize: "2", wantIDs: []int{2, 1}, wantTotal: 4, wantCounts: map[int]int{1: 3, 2: 1}},
 				{name: "enabled status combines with exact matching", model: "all-image-2", status: "enabled", wantIDs: []int{3, 2, 1}, wantTotal: 3, wantCounts: map[int]int{1: 3}},
+				{name: "auto disabled excludes manual disabled", status: "auto_disabled", wantIDs: []int{9}, wantTotal: 1, wantCounts: map[int]int{1: 1}},
+				{name: "numeric auto disabled status", status: "3", wantIDs: []int{9}, wantTotal: 1, wantCounts: map[int]int{1: 1}},
+				{name: "disabled still includes manual and automatic", status: "disabled", wantIDs: []int{9, 4}, wantTotal: 2, wantCounts: map[int]int{1: 1, 2: 1}},
 				{name: "type filter preserves exact type counts", model: "all-image-2", channelType: "2", wantIDs: []int{4}, wantTotal: 1, wantCounts: map[int]int{1: 3, 2: 1}},
 				{name: "empty model leaves filtering disabled", wantIDs: []int{11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1}, wantTotal: 11, wantCounts: map[int]int{1: 10, 2: 1}},
 			} {
@@ -119,5 +131,48 @@ func TestSearchChannelsExactModelFilter(t *testing.T) {
 				})
 			}
 		})
+	}
+	for _, tagMode := range []bool{false, true} {
+		for _, status := range []string{"auto_disabled", "disabled", "enabled", "all"} {
+			t.Run("list/tag_mode="+strconv.FormatBool(tagMode)+"/"+status, func(t *testing.T) {
+				query := url.Values{"status": {status}, "tag_mode": {strconv.FormatBool(tagMode)}, "id_sort": {"true"}, "page_size": {"100"}}
+				recorder := httptest.NewRecorder()
+				ctx, _ := gin.CreateTestContext(recorder)
+				ctx.Request = httptest.NewRequest(http.MethodGet, "/api/channel/?"+query.Encode(), nil)
+				GetAllChannels(ctx)
+				require.Equal(t, http.StatusOK, recorder.Code)
+				var response struct {
+					Success bool
+					Data    struct {
+						Items      []model.Channel
+						Total      int
+						TypeCounts map[int]int `json:"type_counts"`
+					}
+				}
+				require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &response))
+				require.True(t, response.Success, recorder.Body.String())
+				wantIDs := []int{11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1}
+				wantCounts := map[int]int{1: 10, 2: 1}
+				switch status {
+				case "auto_disabled":
+					wantIDs, wantCounts = []int{9}, map[int]int{1: 1}
+				case "disabled":
+					wantIDs, wantCounts = []int{9, 4}, map[int]int{1: 1, 2: 1}
+				case "enabled":
+					wantIDs, wantCounts = []int{11, 10, 8, 7, 6, 5, 3, 2, 1}, map[int]int{1: 9}
+				}
+				ids := make([]int, 0, len(response.Data.Items))
+				for _, channel := range response.Data.Items {
+					ids = append(ids, channel.Id)
+				}
+				assert.Equal(t, wantIDs, ids)
+				assert.Equal(t, wantCounts, response.Data.TypeCounts)
+				wantTotal := len(wantIDs)
+				if tagMode {
+					wantTotal = 1
+				}
+				assert.Equal(t, wantTotal, response.Data.Total)
+			})
+		}
 	}
 }

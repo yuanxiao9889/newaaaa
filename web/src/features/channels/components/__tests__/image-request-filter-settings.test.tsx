@@ -67,6 +67,84 @@ function TestForm(props: {
 }
 
 describe('image request filter settings', () => {
+  test('custom size bounds can be saved and reopened without losing presets', async () => {
+    const rules = [
+      {
+        models: ['gpt-image-2'],
+        qualities: ['low', 'medium', 'high'],
+        sizes: ['1024x1024'],
+        custom_size: {
+          min_pixels: 655360,
+          max_pixels: 4194304,
+          max_edge: 3072,
+        },
+      },
+    ]
+    const submit = vi.fn()
+    render(
+      <TestForm
+        onSubmit={submit}
+        values={{
+          image_request_filter_enabled: true,
+          image_request_filter: JSON.stringify({ rules }),
+        }}
+      />
+    )
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(submit).toHaveBeenCalled())
+    const setting = buildSettingJSON(
+      submit.mock.calls[0][0] as ChannelFormValues
+    )
+    expect(JSON.parse(setting).image_request_filter).toEqual({
+      enabled: true,
+      rules,
+    })
+    const reopened = transformChannelToFormDefaults(
+      channelSchema.parse({
+        id: 249,
+        name: 'Custom',
+        key: '',
+        created_time: 0,
+        test_time: 0,
+        response_time: 0,
+        balance_updated_time: 0,
+        type: 1,
+        status: 1,
+        models: 'gpt-image-2',
+        group: 'default',
+        setting,
+      })
+    )
+    expect(JSON.parse(buildSettingJSON(reopened)).image_request_filter).toEqual(
+      { enabled: true, rules }
+    )
+  })
+
+  test.each([
+    { min_pixels: 0, max_pixels: 4194304, max_edge: 3072 },
+    { min_pixels: 655360, max_pixels: 8294401, max_edge: 3072 },
+    { min_pixels: 4194304, max_pixels: 655360, max_edge: 3072 },
+    { min_pixels: 655360, max_pixels: 4194304, max_edge: 4096 },
+    { min_pixels: 655360, max_pixels: 4194304, max_edge: 3071 },
+  ])('invalid custom bounds block saving: %j', (custom_size) => {
+    expect(
+      channelFormSchema.safeParse({
+        ...defaultValues,
+        image_request_filter_enabled: true,
+        image_request_filter: JSON.stringify({
+          rules: [
+            {
+              models: ['gpt-image-2'],
+              qualities: ['high'],
+              sizes: [],
+              custom_size,
+            },
+          ],
+        }),
+      }).success
+    ).toBe(false)
+  })
+
   test('loading the preset enables only the exact quality and 4K size rules without changing parameter overrides', async () => {
     const submit = vi.fn()
     const user = userEvent.setup()

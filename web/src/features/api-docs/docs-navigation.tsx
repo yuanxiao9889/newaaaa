@@ -31,7 +31,7 @@ import { useTranslation } from 'react-i18next'
 import { Input } from '@/components/ui/input'
 import { cn } from '@/lib/utils'
 
-import { imageModels } from './data'
+import { imageModels, oopiiModelGroups } from './data'
 import { generationContracts } from './generation-data'
 import { midjourneyNavItems } from './midjourney-data'
 import { videoGroups } from './video-data'
@@ -132,10 +132,14 @@ export function DocsNavigation({ onNavigate }: { onNavigate?: () => void }) {
         const endpoints =
           generation?.endpoints.map((endpoint) => endpoint.path).join(' ') ?? ''
         const videoEndpoint = id.startsWith('video-') ? '/v1/videos' : ''
+        const textModels =
+          id === 'text-api'
+            ? oopiiModelGroups.text.map((model) => model.id).join(' ')
+            : ''
         const imageKeywords = image
           ? `${image.model} ${image.modelIds?.join(' ') ?? ''} ${image.endpoints.map((endpoint) => endpoint.path).join(' ')}`
           : ''
-        return `${t(group.label)} ${t(label)} ${videoModels} ${generation?.model ?? ''} ${endpoints} ${videoEndpoint} ${imageKeywords}`
+        return `${t(group.label)} ${t(label)} ${textModels} ${videoModels} ${generation?.model ?? ''} ${endpoints} ${videoEndpoint} ${imageKeywords}`
           .toLowerCase()
           .includes(search)
       }),

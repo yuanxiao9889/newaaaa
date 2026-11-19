@@ -156,9 +156,14 @@ function buildTypeDetailSegments(
   }
 
   if (log.type === LOG_TYPE_ENUM.REFUND) {
-    const segments: DetailSegment[] = []
-    if (log.content) segments.push({ text: log.content, danger: true })
-    segments.push({ text: t('Async task refund') })
+    const failed = other?.billing_state === 'refunded'
+    const segments: DetailSegment[] = [
+      {
+        text: t(getAsyncTaskBillingStateLabel(other, log.type)),
+        danger: failed,
+      },
+    ]
+    if (log.content) segments.push({ text: log.content, danger: failed })
     return segments
   }
 
@@ -186,10 +191,7 @@ function buildTypeDetailSegments(
   const segments: DetailSegment[] = []
 
   if (isAsyncTaskBillingLog(log, other)) {
-    const stateLabel = getAsyncTaskBillingStateLabel(
-      other.billing_state,
-      log.type
-    )
+    const stateLabel = getAsyncTaskBillingStateLabel(other, log.type)
     segments.push({
       text: `${t('Async task billing')} 路 ${t(stateLabel)}`,
     })

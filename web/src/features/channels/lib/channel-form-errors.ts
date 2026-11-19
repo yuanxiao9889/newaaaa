@@ -30,6 +30,8 @@ const ADVANCED_SETTINGS_FIELDS = new Set<FieldPath<ChannelFormValues>>([
   'test_model',
   'auto_ban',
   'auto_switch_enabled',
+  'auto_switch_retry_window_minutes',
+  'auto_switch_max_attempts',
   'tag',
   'remark',
   'param_override',

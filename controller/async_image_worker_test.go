@@ -547,7 +547,7 @@ func TestRecordInternalAsyncImageFinalErrorLogStoresRetryPathAndIdentity(t *test
 	require.NoError(t, db.Create(&model.Token{Id: 370, UserId: 397, Name: "lf", Status: common.TokenStatusEnabled}).Error)
 
 	task := &model.Task{
-		TaskID:    "task_synS8LUXsVjHDlf48DzIvDijhZZlUshG",
+		TaskID:    model.GenerateTaskID(),
 		UserId:    397,
 		Group:     "default",
 		StartTime: time.Now().Add(-45 * time.Second).Unix(),
@@ -599,7 +599,7 @@ func TestRecordInternalAsyncImageFinalErrorLogStoresRetryPathAndIdentity(t *test
 	})
 
 	var logs []model.Log
-	require.NoError(t, db.Find(&logs).Error)
+	require.NoError(t, model.LOG_DB.Where("request_id = ?", task.TaskID).Find(&logs).Error)
 	require.Len(t, logs, 1)
 
 	log := logs[0]
@@ -1580,6 +1580,23 @@ func TestImageRequestChannelFilterRequests(t *testing.T) {
 }
 
 func TestImageRequestChannelFilterSettingsAndMapping(t *testing.T) {
+	for _, bounds := range []kitdto.ImageRequestCustomSize{
+		{MinPixels: 0, MaxPixels: 4194304, MaxEdge: 3072},
+		{MinPixels: 655360, MaxPixels: 8294401, MaxEdge: 3072},
+		{MinPixels: 4194304, MaxPixels: 655360, MaxEdge: 3072},
+		{MinPixels: 655360, MaxPixels: 4194304, MaxEdge: 4096},
+		{MinPixels: 655360, MaxPixels: 4194304, MaxEdge: 3071},
+		{MinPixels: 655360, MaxPixels: 4194304, MaxEdge: 16},
+	} {
+		channel := imageRequestFilterTestChannel(t)
+		settings := channel.GetSetting()
+		settings.ImageRequestFilter.Rules[0].CustomSize = &bounds
+		encoded, err := common.Marshal(settings)
+		require.NoError(t, err)
+		channel.Setting = common.GetPointer(string(encoded))
+		assert.Error(t, validateChannel(channel, true), "%+v", bounds)
+		assert.Error(t, validateChannel(channel, false), "%+v", bounds)
+	}
 	for _, tc := range []struct {
 		name, config string
 	}{
@@ -1678,6 +1695,15 @@ func TestImageRequestChannelRouting(t *testing.T) {
 			}
 			database := setupImageRequestFilterTestDB(t, dsn)
 			restricted := imageRequestFilterTestChannel(t)
+			settingsWithCustomSize := restricted.GetSetting()
+			settingsWithCustomSize.ImageRequestFilter.Rules = append(settingsWithCustomSize.ImageRequestFilter.Rules, kitdto.ImageRequestRule{
+				Models: []string{"gpt-image-2.6-flare"}, Qualities: []string{"low", "medium", "high"}, Sizes: []string{"1024x1024"},
+				CustomSize: &kitdto.ImageRequestCustomSize{MinPixels: 655360, MaxPixels: 4194304, MaxEdge: 3072},
+			})
+			encodedSettings, err := common.Marshal(settingsWithCustomSize)
+			require.NoError(t, err)
+			restricted.Setting = common.GetPointer(string(encodedSettings))
+			restricted.Models += ",gpt-image-2.6-flare"
 			restricted.ModelMapping = common.GetPointer(`{"image-alias":"internal-image","internal-image":"gpt-image-2.5-flare"}`)
 			require.NoError(t, validateChannel(restricted, true))
 			require.NoError(t, restricted.Insert())
@@ -1706,6 +1732,24 @@ func TestImageRequestChannelRouting(t *testing.T) {
 						{"flare max 4K", "gpt-image-2.5-flare", "max", "1280x3840", 136},
 						{"alias medium 4K", "image-alias", "medium", "2880x2880", 137},
 						{"unrelated model", "other-image", "low", "1024x1024", 136},
+						{"custom landscape", "gpt-image-2.6-flare", "high", "2048x880", 136},
+						{"custom portrait", "gpt-image-2.6-flare", "medium", "880x2048", 136},
+						{"custom maximum pixels", "gpt-image-2.6-flare", "low", "2048x2048", 136},
+						{"custom minimum pixels", "gpt-image-2.6-flare", "high", "1024x640", 136},
+						{"custom maximum edge and ratio", "gpt-image-2.6-flare", "high", "3072x1024", 136},
+						{"custom preset preserved", "gpt-image-2.6-flare", "high", "1024x1024", 136},
+						{"custom xhigh excluded", "gpt-image-2.6-flare", "xhigh", "2048x880", 137},
+						{"custom max excluded", "gpt-image-2.6-flare", "max", "2048x880", 137},
+						{"custom automatic quality", "gpt-image-2.6-flare", "auto", "2048x880", 137},
+						{"custom automatic size", "gpt-image-2.6-flare", "high", "auto", 137},
+						{"custom 4K", "gpt-image-2.6-flare", "high", "3840x2160", 137},
+						{"custom excess pixels", "gpt-image-2.6-flare", "high", "2064x2048", 137},
+						{"custom excess edge", "gpt-image-2.6-flare", "high", "3088x1040", 137},
+						{"custom excess ratio", "gpt-image-2.6-flare", "high", "3072x1008", 137},
+						{"custom insufficient pixels", "gpt-image-2.6-flare", "high", "1024x624", 137},
+						{"custom alignment", "gpt-image-2.6-flare", "high", "2048x881", 137},
+						{"custom zero", "gpt-image-2.6-flare", "high", "0x2048", 137},
+						{"custom overflow", "gpt-image-2.6-flare", "high", "18446744073709551616x2048", 137},
 					} {
 						t.Run(tc.name, func(t *testing.T) {
 							body, err := common.Marshal(map[string]any{"model": tc.modelName, "quality": tc.quality, "size": tc.size, "prompt": "routing fixture"})
@@ -1782,8 +1826,13 @@ func TestAsyncImageRetry(t *testing.T) {
 		resume, invalidResult, multipart                         bool
 		autoSwitch, missingResult                                bool
 		guarded                                                  bool
+		channelPolicy                                            bool
 		pollStatus                                               int
 	}{
+		{name: "channel native failure overrides global zero", channelPolicy: true, failure: `{"code":"invalid_parameter","message":"size rejected"}`, wantPosts: 1, success: true},
+		{name: "channel queued safety failure stops despite budget", channelPolicy: true, queued: true, failure: `{"code":"content_policy","message":"prompt rejected"}`, wantPosts: 1},
+		{name: "bridge native failure uses channel budget", guarded: true, channelPolicy: true, failure: `{"code":"invalid_parameter","message":"size rejected"}`, wantPosts: 1, success: true},
+		{name: "bridge queued safety failure stops despite budget", guarded: true, channelPolicy: true, queued: true, failure: `{"code":"content_policy","message":"prompt rejected"}`, wantPosts: 1},
 		{name: "mapped native failover", failure: `{"code":"server_error","type":"provider_error","message":"temporary failure"}`, retries: 3, wantPosts: 1, success: true},
 		{name: "queued request maps each attempt", failure: `"generation failed: generate error: An error occurred."`, retries: 3, wantPosts: 2, success: true, queued: true, cache: true},
 		{name: "message only rate limit", failure: `"请求过于频繁,请稍后重试"`, retries: 3, wantPosts: 1, success: true},
@@ -1975,10 +2024,21 @@ func TestAsyncImageRetry(t *testing.T) {
 				selected, _, err := service.CacheGetRandomSatisfiedChannel(&service.RetryParam{Ctx: c, TokenGroup: "default", ModelName: "custom-image-alias", RequestPath: c.Request.URL.Path})
 				require.NoError(t, err)
 				require.Equal(t, 701, selected.Id)
-				initialTicket = service.AutoSwitchAttempt(c)
+				assert.Nil(t, service.AutoSwitchAttempt(c), "new media requests do not acquire global health tickets")
+				// Simulate an already accepted task from the previous policy.
+				initialTicket, err = model.BeginChannelAutoSwitchAttempt(701, "default", "custom-image-alias", "/v1/images/generations", time.Now())
+				require.NoError(t, err)
+				c.Set("channel_auto_switch_attempt", initialTicket)
 				require.NotNil(t, initialTicket)
 			}
 			info := &relaycommon.RelayInfo{UserId: 61, TokenId: 62, UsingGroup: "default", OriginModelName: "custom-image-alias", FinalPreConsumedQuota: 150000, ChannelMeta: &relaycommon.ChannelMeta{ChannelId: 701, UpstreamModelName: "upstream-first"}}
+			if tc.channelPolicy {
+				common.SetContextKey(c, constant.ContextKeyChannelOtherSetting, dto.ChannelOtherSettings{AutoSwitchEnabled: true})
+				service.InitializeMediaRetry(c, info)
+				if !tc.queued {
+					require.True(t, service.MediaRetry(c).BeginAttempt(time.Now()))
+				}
+			}
 			if tc.multipart {
 				info.RelayMode = relayconstant.RelayModeImagesEdits
 			}
@@ -2039,9 +2099,12 @@ func TestAsyncImageRetry(t *testing.T) {
 				states, err := model.GetChannelAutoSwitchStates([]int{701, 809}, "default", "custom-image-alias", "/v1/images/generations")
 				require.NoError(t, err)
 				if tc.success {
-					assert.EqualValues(t, 1, states[701].WindowFailures)
-					assert.EqualValues(t, 1, states[809].WindowTotal)
-					assert.Zero(t, states[809].WindowFailures)
+					if tc.queued {
+						assert.Zero(t, states[701].WindowFailures)
+					} else {
+						assert.EqualValues(t, 1, states[701].WindowFailures)
+					}
+					assert.NotContains(t, states, 809, "replacement media attempts do not create global observations")
 				} else {
 					assert.Zero(t, states[701].WindowFailures)
 					assert.Zero(t, states[701].WindowTotal)
@@ -2060,10 +2123,14 @@ func TestAsyncImageRetry(t *testing.T) {
 			}
 			if tc.wantPosts > 0 {
 				expected := "upstream-backup"
+				if tc.queued && tc.wantPosts == 1 {
+					expected = "upstream-first"
+				}
 				assert.Equal(t, expected, postedModels[len(postedModels)-1])
 			}
 			if tc.queued && !tc.interrupted {
-				assert.Equal(t, []string{"upstream-first", "upstream-backup"}, postedModels)
+				expected := []string{"upstream-first", "upstream-backup"}
+				assert.Equal(t, expected[:tc.wantPosts], postedModels)
 			}
 			assert.Equal(t, "custom-image-alias", stored.Properties.OriginModelName)
 			var user model.User
@@ -2156,7 +2223,11 @@ func TestAsyncImageAcceptedProbeSurvivesSnapshotFailure(t *testing.T) {
 	channel, _, err := service.CacheGetRandomSatisfiedChannel(&service.RetryParam{Ctx: c, TokenGroup: "default", ModelName: "probe-image"})
 	require.NoError(t, err)
 	require.Equal(t, 163, channel.Id)
-	ticket := service.AutoSwitchAttempt(c)
+	assert.Nil(t, service.AutoSwitchAttempt(c))
+	// An already accepted legacy probe still must survive persistence failure.
+	ticket, err := model.BeginChannelAutoSwitchAttempt(163, "default", "probe-image", "/v1/images/generations", time.Now())
+	require.NoError(t, err)
+	c.Set("channel_auto_switch_attempt", ticket)
 	require.NotNil(t, ticket)
 	require.True(t, ticket.Probe)
 	blockedDirectory := filepath.Join(t.TempDir(), "file-blocks-request-directory")
@@ -2198,6 +2269,16 @@ func TestAsyncImageRetryWorkerOwnership(t *testing.T) {
 	assert.False(t, won, "a stale worker cannot refund a newer attempt")
 	require.NoError(t, db.First(&current, task.ID).Error)
 	assert.Equal(t, model.TaskStatus(model.TaskStatusInProgress), current.Status)
+	// A timeout scan can hold the same worker epoch but an older reservation.
+	// It must not overwrite an atomic price adjustment and refund the old sum.
+	require.NoError(t, db.Model(task).Update("quota", 100).Error)
+	current.Status = model.TaskStatusFailure
+	won, err = current.UpdateWithStatus(model.TaskStatusInProgress)
+	require.NoError(t, err)
+	assert.False(t, won, "generic timeout CAS also fences stale image accounting")
+	require.NoError(t, db.First(&current, task.ID).Error)
+	assert.Equal(t, 100, current.Quota)
+	assert.Equal(t, model.TaskStatus(model.TaskStatusInProgress), current.Status)
 }
 
 func TestAsyncImageRetryCycleBudget(t *testing.T) {
@@ -2212,10 +2293,14 @@ func TestAsyncImageRetryCycleBudget(t *testing.T) {
 		contentRejected, direct              bool
 		safetyKeyword                        bool
 		alwaysFail, resumeAtLimit            bool
+		channelPolicy                        bool
 		limit                                string
 		status, retries, wantPosts           int
 		success                              bool
 	}{
+		{name: "channel overrides global zero", channelPolicy: true, direct: true, alwaysFail: true, status: 503, wantPosts: 3},
+		{name: "channel caps larger global budget", channelPolicy: true, direct: true, timed: true, cycle: true, retries: 99, alwaysFail: true, status: 503, wantPosts: 3},
+		{name: "channel local failure consumes no attempt", channelPolicy: true, direct: true, localConfig: true, status: 503},
 		{name: "task submission cycles within time budget", cycle: true, timed: true, submission: true, status: 503, wantPosts: 4, success: true},
 		{name: "timed bridge stops after fifteen retries", cycle: true, timed: true, alwaysFail: true, status: 503, wantPosts: 16},
 		{name: "timed direct caps larger configured count", cycle: true, timed: true, alwaysFail: true, direct: true, retries: 99, status: 502, wantPosts: 16},
@@ -2328,6 +2413,9 @@ func TestAsyncImageRetryCycleBudget(t *testing.T) {
 				service.GetChannelConstraints(c).AddPin(dto.ChannelPin{ChannelId: 701, Source: dto.PinSourceToken, Rank: dto.PinRankToken, RetryMode: dto.PinRetrySingleAttempt})
 			}
 			info := &relaycommon.RelayInfo{UserId: 61, TokenId: 62, UsingGroup: "default", OriginModelName: "gpt-image-1", FinalPreConsumedQuota: 150000, ChannelMeta: &relaycommon.ChannelMeta{ChannelId: 701, UpstreamModelName: "gpt-image-1"}}
+			if tc.channelPolicy {
+				common.SetContextKey(c, constant.ContextKeyChannelOtherSetting, dto.ChannelOtherSettings{AutoSwitchEnabled: true})
+			}
 			if tc.submission {
 				events := []string{}
 				billing := &taskSubmissionTestBilling{events: &events}
@@ -2413,6 +2501,10 @@ func TestAsyncImageRetryCycleBudget(t *testing.T) {
 			assert.EqualValues(t, tc.wantPosts, posts.Load())
 			var stored model.Task
 			require.NoError(t, db.First(&stored, task.ID).Error)
+			if tc.channelPolicy {
+				require.NotNil(t, stored.PrivateData.MediaRetry)
+				assert.EqualValues(t, posts.Load(), stored.PrivateData.MediaRetry.Attempts)
+			}
 			assert.NotContains(t, stored.PrivateData.ChannelRetryPath, "810", "disabled channel must stay excluded in every round")
 			if tc.alwaysFail {
 				assert.Len(t, stored.PrivateData.ChannelRetryPath, tc.wantPosts)
@@ -2457,4 +2549,122 @@ func TestRetryBudgetDeadline(t *testing.T) {
 	assert.Zero(t, budget.Remaining(99, 1, start.Add(61*time.Second)))
 	assert.Equal(t, -1, (service.RetryBudget{}).Remaining(-1, 16, start))
 	assert.Equal(t, 3, (service.RetryBudget{}).Remaining(3, 16, start))
+}
+
+func TestMediaRetryExecutionTimeout(t *testing.T) {
+	start := time.Unix(2000000000, 123000000)
+	for _, tc := range []struct {
+		name  string
+		state *model.MediaRetryState
+		want  int64
+	}{
+		{"legacy", nil, start.Unix()},
+		{"unknown version", &model.MediaRetryState{Version: 2, WindowMinutes: 120, MaxAttempts: 3}, start.Unix()},
+		{"invalid window", &model.MediaRetryState{Version: 1, WindowMinutes: 121, MaxAttempts: 3}, start.Unix()},
+		{"one attempt", &model.MediaRetryState{Version: 1, WindowMinutes: 120, MaxAttempts: 1}, start.Unix()},
+		{"queued", &model.MediaRetryState{Version: 1, WindowMinutes: 120, MaxAttempts: 10}, start.Unix() + 7200},
+		{"accepted", &model.MediaRetryState{Version: 1, WindowMinutes: 120, MaxAttempts: 10, StartedAtMS: start.UnixMilli(), DeadlineMS: start.Add(2 * time.Hour).UnixMilli()}, start.Unix() + 7201},
+		{"exhausted attempts still finish", &model.MediaRetryState{Version: 1, WindowMinutes: 120, MaxAttempts: 10, Attempts: 10, StartedAtMS: start.UnixMilli(), DeadlineMS: start.Add(2 * time.Hour).UnixMilli()}, start.Unix() + 7201},
+		{"shorter saved deadline", &model.MediaRetryState{Version: 1, WindowMinutes: 120, MaxAttempts: 3, StartedAtMS: start.UnixMilli(), DeadlineMS: start.Add(time.Minute).UnixMilli()}, start.Unix() + 61},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, tc.state.ExecutionTimeoutStart(start.Unix()))
+		})
+	}
+}
+
+func TestMediaRetryTimeoutScanDatabase(t *testing.T) {
+	db := setupAsyncImageWorkerTestDB(t)
+	t.Setenv("ASYNC_IMAGE_TASK_TIMEOUT_SECONDS", "1600")
+	now := time.Now().Truncate(time.Second)
+	// These tasks are older than the legacy timeout but still have either a
+	// retry window or an accepted execution to finish. Limit=1 exercises paging.
+	var protectedIDs []int64
+	for _, age := range []time.Duration{time.Hour, 130 * time.Minute} {
+		state := &model.MediaRetryState{Version: 1, WindowMinutes: 120, MaxAttempts: 3}
+		require.True(t, state.BeginAttempt(now.Add(-age)))
+		task := &model.Task{TaskID: fmt.Sprintf("timeout-protected-%d", age), Platform: constant.TaskPlatformInternalImage,
+			Action: constant.TaskActionImageGenerate, Status: model.TaskStatusInProgress, Progress: "50%",
+			SubmitTime: now.Add(-age).Unix(), StartTime: now.Add(-age).Unix(),
+			PrivateData: model.TaskPrivateData{InternalAsync: true, MediaRetry: state, WorkerAttempts: 1, WorkerHeartbeatAt: now.Unix()},
+		}
+		require.NoError(t, db.Create(task).Error)
+		protectedIDs = append(protectedIDs, task.ID)
+		var restored model.Task
+		require.NoError(t, db.First(&restored, task.ID).Error)
+		assert.Equal(t, state.ExecutionTimeoutStart(task.StartTime), restored.PrivateData.MediaRetry.ExecutionTimeoutStart(restored.StartTime), "restart must retain the absolute execution deadline")
+		assert.Equal(t, state.DeadlineMS, restored.PrivateData.MediaRetry.DeadlineMS)
+		if age > 2*time.Hour {
+			assert.Zero(t, restored.PrivateData.MediaRetry.Remaining(now), "no new POST after the retry window")
+		}
+	}
+	var expiredIDs []int64
+	for _, legacy := range []bool{false, true} {
+		state := &model.MediaRetryState{Version: 1, WindowMinutes: 120, MaxAttempts: 3}
+		require.True(t, state.BeginAttempt(now.Add(-3*time.Hour)))
+		if legacy {
+			state = nil
+		}
+		task := &model.Task{TaskID: fmt.Sprintf("timeout-expired-%t", legacy), Platform: constant.TaskPlatformInternalImage,
+			Action: constant.TaskActionImageGenerate, Status: model.TaskStatusInProgress, Progress: "50%",
+			SubmitTime: now.Add(-3 * time.Hour).Unix(), StartTime: now.Add(-3 * time.Hour).Unix(),
+			PrivateData: model.TaskPrivateData{InternalAsync: true, MediaRetry: state, WorkerAttempts: 1},
+		}
+		require.NoError(t, db.Create(task).Error)
+		expiredIDs = append(expiredIDs, task.ID)
+	}
+	cutoff := now.Unix() - 1600
+	for _, query := range []func(int64, int) []*model.Task{model.GetTimedOutInternalAsyncImageTasks, model.GetTimedOutUnfinishedTasks} {
+		selected := query(cutoff, 1)
+		require.Len(t, selected, 1)
+		assert.Equal(t, expiredIDs[0], selected[0].ID, "protected first pages cannot starve expired tasks")
+		selected = query(cutoff, 10)
+		require.Len(t, selected, 2)
+		assert.Equal(t, expiredIDs[0], selected[0].ID)
+		assert.Equal(t, expiredIDs[1], selected[1].ID)
+	}
+	previousSweep := internalAsyncImageTimeoutSweepAt.Swap(0)
+	t.Cleanup(func() { internalAsyncImageTimeoutSweepAt.Store(previousSweep) })
+	sweepTimedOutInternalAsyncImageTasks(t.Context())
+	for _, id := range protectedIDs {
+		var task model.Task
+		require.NoError(t, db.First(&task, id).Error)
+		assert.EqualValues(t, model.TaskStatusInProgress, task.Status)
+		assert.Equal(t, 1, task.PrivateData.MediaRetry.Attempts)
+	}
+	for _, id := range expiredIDs {
+		var task model.Task
+		require.NoError(t, db.First(&task, id).Error)
+		assert.EqualValues(t, model.TaskStatusFailure, task.Status)
+	}
+}
+
+func TestMediaRetryStopReasons(t *testing.T) {
+	for _, reason := range []string{"request_cancelled", "pinned_channel", "strict_session", "retry_window_expired", "attempt_budget_exhausted"} {
+		t.Run(reason, func(t *testing.T) {
+			c, _ := gin.CreateTestContext(httptest.NewRecorder())
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/images/generations", nil)
+			state := &model.MediaRetryState{Version: 1, WindowMinutes: 10, MaxAttempts: 3}
+			require.True(t, state.BeginAttempt(time.Now()))
+			service.BindMediaRetry(c, state)
+			switch reason {
+			case "request_cancelled":
+				ctx, cancel := context.WithCancel(c.Request.Context())
+				cancel()
+				c.Request = c.Request.WithContext(ctx)
+			case "pinned_channel":
+				service.GetChannelConstraints(c).AddPin(dto.ChannelPin{ChannelId: 7, Source: dto.PinSourceToken, Rank: dto.PinRankToken, RetryMode: dto.PinRetrySingleAttempt})
+			case "strict_session":
+				c.Set("channel_affinity_skip_retry_on_failure", true)
+			case "retry_window_expired":
+				state.DeadlineMS = time.Now().Add(-time.Second).UnixMilli()
+			case "attempt_budget_exhausted":
+				state.Attempts = state.MaxAttempts
+			}
+			decision := service.DecideMediaRetry(c, 7, "provider_error", "failed")
+			assert.Equal(t, "stop", decision.Action)
+			assert.Equal(t, reason, decision.Reason)
+			assert.Equal(t, reason, state.StopReason)
+		})
+	}
 }

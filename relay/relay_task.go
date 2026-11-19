@@ -411,6 +411,9 @@ func (p *PreparedTaskSubmission) submit(c *gin.Context, info *relaycommon.RelayI
 	}
 
 	// 9. 发送请求
+	if apiErr := service.BeginMediaRetryDispatch(c); apiErr != nil {
+		return nil, service.TaskErrorFromAPIError(apiErr)
+	}
 	c.Set("auto_switch_task_dispatched", true)
 	resp, err := adaptor.DoRequest(c, info, requestBody)
 	if err != nil {

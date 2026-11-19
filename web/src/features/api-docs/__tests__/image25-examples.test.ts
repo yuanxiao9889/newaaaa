@@ -24,9 +24,65 @@ import en from '../../../i18n/locales/en.json'
 import zh from '../../../i18n/locales/zh.json'
 import { imageModels } from '../data'
 import { buildHyImageSamples } from '../hy-image-samples'
-import { buildOpenAISamples } from '../openai-samples'
+import { buildImage26GifBody, buildOpenAISamples } from '../openai-samples'
+import { buildJsonRequestSamples } from '../request-samples'
 
 const groups = imageModels.filter((model) => model.modelIds)
+
+describe('Image 2.6 GIF documentation', () => {
+  it.each(groups.filter((model) => model.outputFormats?.includes('gif')))(
+    '$id sends executable GIF requests with canvas frame defaults and valid size',
+    async (model) => {
+      const body = buildImage26GifBody(model)
+      const samples = buildJsonRequestSamples(
+        'https://relay.test',
+        body,
+        '/v1/images/generations?async=true'
+      )
+      let sent: Record<string, unknown> = {}
+      await runInNewContext(`(async () => { ${samples.javascript} })()`, {
+        fetch: async (url: string, options: { body: string }) => {
+          expect(url).toBe(
+            'https://relay.test/v1/images/generations?async=true'
+          )
+          sent = JSON.parse(options.body)
+          return {
+            ok: true,
+            json: async () => ({ task_id: 'image_task_example' }),
+          }
+        },
+        process: { env: { NEW_API_KEY: 'fixture-key' } },
+        AbortSignal,
+        console: { log: () => undefined },
+      })
+      expect(sent).toMatchObject({
+        model: model.model,
+        n: 1,
+        output_format: 'gif',
+        frame_count: 9,
+        frame_duration_ms: 200,
+      })
+      expect(sent.size).toBe('auto')
+      expect(sent).not.toHaveProperty('background')
+      expect(model.outputFormats).toEqual(
+        /-(DD|H)$/.test(model.model) ? ['png', 'gif', 'svg'] : ['png', 'gif']
+      )
+      if (model.model === 'all-image-2.6-sunburst-H') {
+        expect(sent).not.toHaveProperty('quality')
+        expect(buildImage26GifBody(model, 'edit')).toMatchObject({
+          images: [
+            { image_url: 'data:image/png;base64,BASE64_REFERENCE_IMAGE' },
+          ],
+        })
+      } else {
+        expect(sent.quality).toBe('medium')
+      }
+      expect(
+        JSON.parse(samples.curl.split("<<'JSON'\n")[1].split('\nJSON')[0])
+      ).toEqual(sent)
+    }
+  )
+})
 
 describe('Hunyuan documentation examples', () => {
   it.each(['generate', 'edit'] as const)(
@@ -200,7 +256,12 @@ describe('Image 2.5 documentation examples', () => {
       expect(zh.translation).toHaveProperty([key])
     }
     const ids = groups.flatMap((model) => model.modelIds ?? [])
-    expect(ids).toHaveLength(12)
-    expect(new Set(ids).size).toBe(12)
+    expect(ids).toEqual(
+      expect.arrayContaining([
+        'all-image-2.6-sunburst-H',
+        'all-image-2.6-flare-H',
+      ])
+    )
+    expect(new Set(ids).size).toBe(ids.length)
   })
 })

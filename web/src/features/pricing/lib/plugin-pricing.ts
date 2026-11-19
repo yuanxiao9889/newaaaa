@@ -90,7 +90,7 @@ export function pluginUsageSchema(
   pluginKey: string | undefined
 ): BillingUsageSchema | undefined {
   const variant = model?.billing_plugin_variants?.find(
-    (item) => item.plugin_key === pluginKey
+    (item) => pluginKey !== undefined && item.plugin_key === pluginKey
   )
   return variant?.billing_usage_schema ?? model?.billing_usage_schema
 }

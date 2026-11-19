@@ -12,20 +12,32 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// videoTaskRetryBilling reuses the original reservation while its durable
+// taskRetryBilling reuses the original reservation while its durable
 // submitting claim owns the task. Only the final polling result refunds it.
-type videoTaskRetryBilling struct {
-	ctx  context.Context
-	task *model.Task
-	info *relaycommon.RelayInfo
-	mu   sync.Mutex
+type taskRetryBilling struct {
+	ctx   context.Context
+	task  *model.Task
+	info  *relaycommon.RelayInfo
+	mu    sync.Mutex
+	image bool
+}
+
+// NewImageTaskRetryBilling keeps all replacement submissions on the queue's
+// existing reservation. The image worker alone owns final settlement/refund.
+func NewImageTaskRetryBilling(ctx context.Context, task *model.Task, info *relaycommon.RelayInfo) (relaycommon.BillingSettler, error) {
+	if task == nil || task.ID <= 0 || info == nil || task.PrivateData.ImageRetry == nil {
+		return nil, errors.New("image retry billing context is missing")
+	}
+	info.BillingSource, info.SubscriptionId = task.PrivateData.BillingSource, task.PrivateData.SubscriptionId
+	info.FinalPreConsumedQuota = task.Quota
+	return &taskRetryBilling{ctx: ctx, task: task, info: info, image: true}, nil
 }
 
 func NewVideoTaskRetryBilling(ctx context.Context, task *model.Task, info *relaycommon.RelayInfo) (relaycommon.BillingSettler, error) {
 	if task == nil || task.ID <= 0 || info == nil || task.PrivateData.VideoRetry == nil {
 		return nil, errors.New("video retry billing context is missing")
 	}
-	session := &videoTaskRetryBilling{ctx: ctx, task: task, info: info}
+	session := &taskRetryBilling{ctx: ctx, task: task, info: info}
 	info.BillingSource = task.PrivateData.BillingSource
 	if info.BillingSource == "" {
 		info.BillingSource = BillingSourceWallet
@@ -38,13 +50,17 @@ func NewVideoTaskRetryBilling(ctx context.Context, task *model.Task, info *relay
 	return session, nil
 }
 
-func (s *videoTaskRetryBilling) Reserve(targetQuota int) error {
+func (s *taskRetryBilling) Reserve(targetQuota int) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if targetQuota < 0 {
 		return errors.New("video retry quota cannot be negative")
 	}
-	if err := model.SetVideoTaskRetryQuota(s.ctx, s.task, max(targetQuota, s.task.Quota)); err != nil {
+	setQuota := model.SetVideoTaskRetryQuota
+	if s.image {
+		setQuota = model.SetImageTaskRetryQuota
+	}
+	if err := setQuota(s.ctx, s.task, max(targetQuota, s.task.Quota)); err != nil {
 		switch err.Error() {
 		case "video retry token quota insufficient":
 			return types.NewErrorWithStatusCode(err, types.ErrorCodePreConsumeTokenQuotaFailed, http.StatusPaymentRequired, types.ErrOptionWithSkipRetry())
@@ -61,13 +77,16 @@ func (s *videoTaskRetryBilling) Reserve(targetQuota int) error {
 }
 
 // ReserveBeforeSubmit keeps retries covered by the existing durable reservation.
-func (s *videoTaskRetryBilling) ReserveBeforeSubmit(targetQuota int) error {
+func (s *taskRetryBilling) ReserveBeforeSubmit(targetQuota int) error {
 	return s.Reserve(targetQuota)
 }
 
-func (s *videoTaskRetryBilling) Settle(actualQuota int) error {
+func (s *taskRetryBilling) Settle(actualQuota int) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.image {
+		return errors.New("image retry settlement belongs to the queue worker")
+	}
 	previous := s.task.Quota
 	if err := model.SetVideoTaskRetryQuota(s.ctx, s.task, actualQuota); err != nil {
 		return err
@@ -79,12 +98,12 @@ func (s *videoTaskRetryBilling) Settle(actualQuota int) error {
 	return nil
 }
 
-func (s *videoTaskRetryBilling) GetPreConsumedQuota() int {
+func (s *taskRetryBilling) GetPreConsumedQuota() int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.task.Quota
 }
 
-func (*videoTaskRetryBilling) Refund(*gin.Context) {}
+func (*taskRetryBilling) Refund(*gin.Context) {}
 
-func (*videoTaskRetryBilling) NeedsRefund() bool { return false }
+func (*taskRetryBilling) NeedsRefund() bool { return false }

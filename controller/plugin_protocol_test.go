@@ -850,7 +850,7 @@ func TestServeTaskPluginProtocolNonStreamTaskFailureSkipsFinalHook(t *testing.T)
 			Platform:   constant.TaskPlatform(pinned.Plugin.Meta.Key),
 			UserId:     71,
 			Status:     model.TaskStatusFailure,
-			FailReason: `{"error":{"code":"invalid_image_input","message":"upstream credential at https://secret.invalid/"}}`,
+			FailReason: `{"error":{"code":"invalid_image_input","message":"invalid image; credential=private-credential; endpoint=https://secret.invalid/"}}`,
 		}
 		task.SetData(map[string]any{"secret": "database-secret"})
 		return task, true, nil
@@ -870,6 +870,7 @@ func TestServeTaskPluginProtocolNonStreamTaskFailureSkipsFinalHook(t *testing.T)
 	assert.Empty(t, response.Output)
 	assert.NotContains(t, recorder.Body.String(), "secret")
 	assert.NotContains(t, recorder.Body.String(), "credential")
+	assert.Contains(t, response.Error.Message, "invalid image")
 	assert.Empty(t, logs)
 }
 
@@ -900,7 +901,7 @@ func TestServeTaskPluginProtocolStreamTaskFailureSuppressesPluginAndDatabaseDeta
 			Platform:   constant.TaskPlatform(pinned.Plugin.Meta.Key),
 			UserId:     71,
 			Status:     model.TaskStatusFailure,
-			FailReason: "content_policy_violation: database-secret https://database.invalid/?token=hidden",
+			FailReason: "content_policy_violation: credential=database-secret https://database.invalid/?token=hidden",
 		}
 		task.SetData(map[string]any{"secret": "private-result"})
 		return task, true, nil
@@ -1047,7 +1048,7 @@ func TestServeTaskPluginProtocolImmediateFailureReturnsClassifiedErrorWithoutObs
 			deps.submit = func(_ *gin.Context, info *relaycommon.RelayInfo) (*taskSubmissionOutcome, *dto.TaskError) {
 				outcome := pluginProtocolTestOutcome(info, pinned.Plugin.Meta.Key, "task_immediate_failure")
 				outcome.Task.Status = model.TaskStatusFailure
-				outcome.Task.FailReason = "content_policy_violation: private-model at upstream.invalid"
+				outcome.Task.FailReason = "content_policy_violation: model=private-model host=upstream.invalid"
 				return outcome, nil
 			}
 			deps.loadTask = func(context.Context, int, constant.TaskPlatform, string) (*model.Task, bool, error) {
@@ -1377,7 +1378,7 @@ func TestRetrieveTaskPluginResponseFailureUsesFailedEnvelope(t *testing.T) {
 		Platform:   constant.TaskPlatform(pinned.Plugin.Meta.Key),
 		UserId:     71,
 		Status:     model.TaskStatusFailure,
-		FailReason: "status_code=429, private-provider at https://secret.invalid/",
+		FailReason: "status_code=429, provider=private-provider at https://secret.invalid/",
 		Properties: model.Properties{OriginModelName: "video-model"},
 	}, true, nil)
 
@@ -1884,9 +1885,9 @@ func TestServeTaskPluginImageProtocolWaitsForAsynchronousTask(t *testing.T) {
 		wantCode   string
 	}{
 		{"success", model.TaskStatusSuccess, "", http.StatusOK, ""},
-		{"unknown failure", model.TaskStatusFailure, "private-provider at upstream.invalid", http.StatusBadRequest, "generation_failed"},
-		{"invalid image", model.TaskStatusFailure, `{"error":{"code":"invalid_image_input","message":"private-provider at upstream.invalid"}}`, http.StatusBadRequest, "invalid_image_input"},
-		{"moderation", model.TaskStatusFailure, `{"code":"DataInspectionFailed","message":"private-provider at upstream.invalid"}`, http.StatusBadRequest, "content_policy_violation"},
+		{"unknown failure", model.TaskStatusFailure, "provider=private-provider host=upstream.invalid", http.StatusBadRequest, "generation_failed"},
+		{"invalid image", model.TaskStatusFailure, `{"error":{"code":"invalid_image_input","message":"provider=private-provider host=upstream.invalid"}}`, http.StatusBadRequest, "invalid_image_input"},
+		{"moderation", model.TaskStatusFailure, `{"code":"DataInspectionFailed","message":"provider=private-provider host=upstream.invalid"}`, http.StatusBadRequest, "content_policy_violation"},
 		{"timeout", "", "", http.StatusGatewayTimeout, "task_timeout"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -1948,7 +1949,7 @@ func TestServeTaskPluginImageProtocolSubmissionErrorUsesOpenAIEnvelope(t *testin
 	assert.Equal(t, "invalid_request_error", errorBody["type"])
 	assert.Contains(t, errorBody["message"], "[invalid_parameter]")
 	assert.NotContains(t, recorder.Body.String(), "InvalidParameter")
-	assert.NotContains(t, recorder.Body.String(), "n must be 1")
+	assert.Contains(t, errorBody["message"], "n must be 1", "safe parameter diagnostics stay actionable")
 	assert.NotContains(t, errorBody["message"], "request_id")
 }
 

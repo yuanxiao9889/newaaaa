@@ -61,6 +61,7 @@ func (f *domesticHoldTransport) RoundTrip(r *http.Request) (*http.Response, erro
 }
 
 func TestDomesticTaskRetentionAndRecovery(t *testing.T) {
+	t.Setenv("DOMESTIC_REFERENCE_PREPARE_ENABLED", "false")
 	setupBridgeSecurityDB(t)
 	var version string
 	queryVersion := "SELECT version()"
@@ -1192,4 +1193,191 @@ func TestReferenceUploadProtocol(t *testing.T) {
 		_, err = quotaStore.Complete(context.Background(), 8, other.Ticket)
 		require.NoError(t, err)
 	})
+}
+
+type domesticPrepareTransport struct {
+	ready   atomic.Bool
+	calls   atomic.Int32
+	invalid atomic.Bool
+}
+
+func (f *domesticPrepareTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		return nil, err
+	}
+	if r.URL.Host != "www.oopii.cn" || !service.VerifyDomesticTaskRequest(r, body) || r.URL.Path != "/api/seedance/reference-media/resumable/task-prepare" {
+		return nil, fmt.Errorf("invalid preparation authentication")
+	}
+	if r.Header.Get("Authorization") != "" || r.Header.Get("Cookie") != "" {
+		return nil, fmt.Errorf("leaked gateway credentials")
+	}
+	f.calls.Add(1)
+	code, response := 425, []byte(`{"error":"reference_preparing"}`)
+	if f.ready.Load() {
+		var input struct {
+			Files []string `json:"files"`
+			User  int      `json:"user_id"`
+		}
+		if err := common.Unmarshal(body, &input); err != nil {
+			return nil, err
+		}
+		if input.User <= 0 {
+			return nil, fmt.Errorf("missing owner")
+		}
+		references := map[string]any{}
+		for i, name := range input.Files {
+			origin := "https://refs.oopii.cn"
+			if f.invalid.Load() {
+				origin = "https://evil.test"
+			}
+			expiry := time.Now().Add(7 * 24 * time.Hour).Unix()
+			references[name] = map[string]any{"url": fmt.Sprintf("%s/video-reference/%d.png?e=%d&token=fixture", origin, i, expiry), "size": 12 << 20, "sha256": strings.Repeat("ab", 32), "mime": "image/png", "ready_at": time.Now().Unix(), "expires_at": expiry}
+		}
+		response, err = common.Marshal(map[string]any{"ready": true, "references": references})
+		if err != nil {
+			return nil, err
+		}
+		code = 200
+	}
+	return &http.Response{StatusCode: code, Body: io.NopCloser(bytes.NewReader(response)), Header: make(http.Header)}, nil
+}
+
+func TestDomesticPreparationBeforeGenerationAndStableReplay(t *testing.T) {
+	setupBridgeSecurityDB(t)
+	require.NoError(t, model.DB.AutoMigrate(&model.TransferRequest{}))
+	t.Cleanup(func() { require.NoError(t, model.DB.Migrator().DropTable(&model.TransferRequest{})) })
+	t.Setenv("DOMESTIC_TASK_SECRET", strings.Repeat("ab", 32))
+	t.Setenv("DOMESTIC_REFERENCE_PREPARE_ENABLED", "true")
+	transport := &domesticPrepareTransport{}
+	previous := http.DefaultTransport
+	http.DefaultTransport = transport
+	t.Cleanup(func() { http.DefaultTransport = previous })
+	var posts, charges atomic.Int32
+	var received []byte
+	engine := gin.New()
+	engine.POST("/v1/videos", func(c *gin.Context) { c.Set("id", 7); c.Next() }, middleware.TransferRequestGuard, func(c *gin.Context) {
+		// This is the original downstream billing/submit boundary. The preparation
+		// middleware must never enter it on any preprocessing rejection.
+		charges.Add(1)
+		posts.Add(1)
+		received, _ = io.ReadAll(c.Request.Body)
+		c.JSON(200, gin.H{"id": "one-task"})
+	})
+	first := "https://www.oopii.cn/seedance-reference/storyboard-resumable-11111111111111111111111111111111.png"
+	second := strings.Replace(first, "11111111111111111111111111111111", "22222222222222222222222222222222", 1)
+	body, err := common.Marshal(map[string]any{"model": "fixture", "references": []string{second, first, second}, "prompt": first, "seed": 0, "audio": false, "large": uint64(18446744073709551615)})
+	require.NoError(t, err)
+	key := uuid.NewString()
+	send := func(input []byte) *httptest.ResponseRecorder {
+		request := httptest.NewRequest("POST", "/v1/videos", bytes.NewReader(input))
+		request.Header.Set("Content-Type", "application/json")
+		request.Header.Set("Idempotency-Key", key)
+		request.Header.Set("Authorization", "Bearer do-not-forward")
+		out := httptest.NewRecorder()
+		engine.ServeHTTP(out, request)
+		return out
+	}
+	cold := send(body)
+	require.Equal(t, 425, cold.Code)
+	assert.Contains(t, cold.Body.String(), "reference_preparing")
+	assert.NotContains(t, cold.Body.String(), "one-task")
+	assert.Zero(t, posts.Load())
+	assert.Zero(t, charges.Load())
+	record, err := model.FindTransferRequest(7, key)
+	require.NoError(t, err)
+	require.NotNil(t, record)
+	assert.Equal(t, "input_required", record.State)
+	transport.ready.Store(true)
+	transport.invalid.Store(true)
+	invalid := send(body)
+	require.Equal(t, 425, invalid.Code)
+	assert.Contains(t, invalid.Body.String(), "reference_integrity")
+	assert.Zero(t, charges.Load())
+	transport.invalid.Store(false)
+	hot := send(body)
+	require.Equal(t, 200, hot.Code)
+	assert.Equal(t, cold.Header().Get("X-Transfer-Execution-Id"), hot.Header().Get("X-Transfer-Execution-Id"))
+	assert.Contains(t, string(received), `"seed":0`)
+	assert.Contains(t, string(received), `"audio":false`)
+	assert.Contains(t, string(received), `18446744073709551615`)
+	var decoded struct {
+		References []string `json:"references"`
+		Prompt     string   `json:"prompt"`
+	}
+	require.NoError(t, common.Unmarshal(received, &decoded))
+	require.Len(t, decoded.References, 3)
+	assert.Equal(t, decoded.References[0], decoded.References[2])
+	assert.NotEqual(t, decoded.References[0], decoded.References[1])
+	assert.Equal(t, first, decoded.Prompt)
+	calls := transport.calls.Load()
+	transport.ready.Store(false)
+	replay := send(body)
+	require.Equal(t, 200, replay.Code)
+	assert.Equal(t, "true", replay.Header().Get("X-Transfer-Replayed"))
+	assert.Equal(t, calls, transport.calls.Load())
+	assert.EqualValues(t, 1, posts.Load())
+	assert.EqualValues(t, 1, charges.Load())
+	changed := bytes.Replace(body, []byte("fixture"), []byte("different"), 1)
+	assert.Equal(t, 409, send(changed).Code)
+	// An unknown result is never reopened as a preparation retry.
+	require.NoError(t, model.DB.Model(&model.TransferRequest{}).Where("id = ?", record.ID).Update("state", "unknown").Error)
+	assert.Equal(t, 409, send(body).Code)
+	assert.EqualValues(t, 1, posts.Load())
+}
+
+func TestDomesticPreparationMultipartAndNamespace(t *testing.T) {
+	t.Setenv("DOMESTIC_TASK_SECRET", strings.Repeat("ab", 32))
+	t.Setenv("DOMESTIC_REFERENCE_PREPARE_ENABLED", "true")
+	transport := &domesticPrepareTransport{}
+	transport.ready.Store(true)
+	previous := http.DefaultTransport
+	http.DefaultTransport = transport
+	t.Cleanup(func() { http.DefaultTransport = previous })
+	address := "https://www.oopii.cn/seedance-reference/storyboard-resumable-11111111111111111111111111111111.png"
+	for _, bad := range []string{address + "?e=1", strings.Replace(address, "https:", "http:", 1), strings.Replace(address, "www.oopii.cn", "www.oopii.cn:443", 1)} {
+		body, _ := common.Marshal(map[string]string{"url": bad})
+		files := service.DomesticReferenceFiles(body)
+		require.NotEmpty(t, files)
+		_, err := service.PrepareDomesticReferenceBody(context.Background(), 7, uuid.NewString(), body, files, "application/json")
+		require.Error(t, err)
+	}
+	for _, external := range []string{strings.Replace(address, "www.oopii.cn", "www.oopii.cn.evil.test", 1), "http://127.0.0.1/a.png"} {
+		body, _ := common.Marshal(map[string]string{"url": external})
+		assert.Empty(t, service.DomesticReferenceFiles(body))
+	}
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	require.NoError(t, writer.WriteField("reference_images", `["`+address+`","`+address+`"]`))
+	require.NoError(t, writer.WriteField("prompt", address))
+	file, err := writer.CreateFormFile("input_reference", "fixture.png")
+	require.NoError(t, err)
+	_, err = file.Write([]byte("unchanged-file-bytes"))
+	require.NoError(t, err)
+	require.NoError(t, writer.Close())
+	files := service.DomesticReferenceFilesContent(body.Bytes(), writer.FormDataContentType())
+	require.Len(t, files, 1)
+	prepared, err := service.PrepareDomesticReferenceBody(context.Background(), 7, uuid.NewString(), body.Bytes(), files, writer.FormDataContentType())
+	require.NoError(t, err)
+	reader := multipart.NewReader(bytes.NewReader(prepared), writer.Boundary())
+	part, err := reader.NextPart()
+	require.NoError(t, err)
+	refs, err := io.ReadAll(part)
+	require.NoError(t, err)
+	var urls []string
+	require.NoError(t, common.Unmarshal(refs, &urls))
+	require.Len(t, urls, 2)
+	assert.Equal(t, urls[0], urls[1])
+	assert.Contains(t, urls[0], "https://refs.oopii.cn/")
+	part, err = reader.NextPart()
+	require.NoError(t, err)
+	prompt, err := io.ReadAll(part)
+	require.NoError(t, err)
+	assert.Equal(t, address, string(prompt))
+	part, err = reader.NextPart()
+	require.NoError(t, err)
+	binary, err := io.ReadAll(part)
+	require.NoError(t, err)
+	assert.Equal(t, "fixture.png", part.FileName())
+	assert.Equal(t, "unchanged-file-bytes", string(binary))
 }

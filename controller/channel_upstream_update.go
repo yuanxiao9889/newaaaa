@@ -17,7 +17,6 @@ import (
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/i18n"
 	"github.com/QuantumNous/new-api/model"
-	"github.com/QuantumNous/new-api/pkg/jsplugin"
 	"github.com/QuantumNous/new-api/relay/channel/advancedcustom"
 	"github.com/QuantumNous/new-api/relay/channel/gemini"
 	"github.com/QuantumNous/new-api/relay/channel/ollama"
@@ -372,13 +371,6 @@ func getFetchModelsResponseBody(method string, requestURL string, channel *model
 }
 
 func fetchChannelUpstreamModelIDs(channel *model.Channel) ([]string, error) {
-	if channel.Type == constant.ChannelTypeTaskPlugin {
-		plugin, ok := jsplugin.DefaultRegistry.Get(channel.GetSetting().TaskPluginKey)
-		if !ok {
-			return nil, fmt.Errorf("task plugin %q is not registered", channel.GetSetting().TaskPluginKey)
-		}
-		return normalizeModelNames(plugin.Meta.Models), nil
-	}
 	baseURL := constant.GetChannelBaseURL(channel.Type)
 	if channel.GetBaseURL() != "" {
 		baseURL = channel.GetBaseURL()
@@ -432,6 +424,11 @@ func fetchChannelUpstreamModelIDs(channel *model.Channel) ([]string, error) {
 	body, err := getFetchModelsResponseBody(http.MethodGet, url, channel, headers)
 	if err != nil {
 		return nil, sanitizeAdvancedCustomRequestError(err, key, url)
+	}
+	if channel.Type == constant.ChannelTypeTaskPlugin {
+		// Plugin presets are exposed separately by task_plugin_options. Discovery
+		// must reflect the upstream response, including unsupported endpoints.
+		return parseOpenAIModelIDs(body)
 	}
 
 	var result OpenAIModelsResponse

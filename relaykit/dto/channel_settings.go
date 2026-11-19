@@ -114,6 +114,8 @@ const (
 )
 
 type ChannelOtherSettings struct {
+	AutoSwitchRetryWindowMinutes          *int                  `json:"auto_switch_retry_window_minutes,omitempty"`
+	AutoSwitchMaxAttempts                 *int                  `json:"auto_switch_max_attempts,omitempty"`
 	AutoSwitchEnabled                     bool                  `json:"auto_switch_enabled,omitempty"`
 	AzureResponsesVersion                 string                `json:"azure_responses_version,omitempty"`
 	VertexKeyType                         VertexKeyType         `json:"vertex_key_type,omitempty"`    // "json" or "api_key"

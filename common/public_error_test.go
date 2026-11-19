@@ -5,6 +5,8 @@ import (
 	"testing"
 	"unicode"
 
+	"github.com/QuantumNous/new-api/constant"
+	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -150,6 +152,7 @@ func TestClassifyPublicError(t *testing.T) {
 				if !strings.HasPrefix(tt.wantMessage, "status_code=") && strings.HasPrefix(message, "status_code=") {
 					_, message, _ = strings.Cut(message, ", ")
 				}
+				message, _, _ = strings.Cut(message, "；具体原因：")
 				assert.Equal(t, tt.wantMessage, message)
 			}
 			assert.Contains(t, got.Hint, tt.wantHint)
@@ -168,7 +171,7 @@ func TestPublicErrorProjectionIsIdempotent(t *testing.T) {
 			assert.True(t, strings.ContainsFunc(got.Message, func(r rune) bool { return unicode.Is(unicode.Han, r) }))
 		})
 	}
-	for _, code := range []string{"generation_failed", "model_unavailable", "invalid_image_input"} {
+	for _, code := range []string{"generation_failed", "model_unavailable", "invalid_image_input", "copyright_violation"} {
 		t.Run("upstream status "+code, func(t *testing.T) {
 			original := ClassifyPublicError(code, "", 500, false)
 			got := ClassifyPublicError(original.Code, original.Summary(), original.StatusCode, true)
@@ -178,15 +181,62 @@ func TestPublicErrorProjectionIsIdempotent(t *testing.T) {
 	}
 }
 
+func TestPublicErrorCopyrightDetails(t *testing.T) {
+	const reason = "生成失败：素材版权违规，参考素材或生成内容可能涉及受版权保护的形象（影视动漫角色、明星肖像、品牌标识等），请检查更换参考素材后重试；提示词里如果点名了知名角色或 IP，也请一并修改"
+	const secret = "channel=137 (dream5-maitoken) sk-private-key https://private.example/error"
+	for _, tt := range []struct {
+		name, code, message string
+		local               bool
+	}{
+		{name: "reported failure", code: "generation_failed", message: "status_code=502, " + reason},
+		{name: "admin retry diagnostics", code: "generation_failed", message: "#1, " + secret + ", status_code=502, error_code=generation_failed, error_type=openai_error\n" + reason},
+		{name: "provider envelope", message: `{"error":{"code":"generation_failed","message":"` + reason + `"},"channel":"dream5-maitoken"}`},
+		{name: "local generic wrapper", code: "generation_failed", message: reason, local: true},
+		{name: "generic safety code", code: "content_policy_violation", message: reason, local: true},
+		{name: "explicit copyright code", code: "copyright_violation", message: secret},
+		{name: "English copyright reason", message: "Generation rejected due to copyright infringement. " + secret},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			got := ClassifyPublicError(tt.code, tt.message, 502, tt.local)
+			require.Equal(t, "copyright_violation", got.Code)
+			assert.Equal(t, 400, got.StatusCode)
+			assert.False(t, got.Retryable)
+			assert.Contains(t, got.Message, "素材版权违规")
+			assert.Contains(t, got.Message, "影视动漫角色、明星肖像、品牌标识")
+			assert.Equal(t, "请检查更换参考素材后重试；提示词里如果点名了知名角色或 IP，也请一并修改", got.Hint)
+			if !tt.local {
+				assert.True(t, strings.HasPrefix(got.Message, "status_code=502, "))
+			}
+			for _, forbidden := range []string{"137", "dream5-maitoken", "sk-private-key", "private.example"} {
+				assert.NotContains(t, got.Summary(), forbidden)
+			}
+			assert.Equal(t, got, ClassifyPublicError(got.Code, got.Summary(), got.StatusCode, true))
+		})
+	}
+	for _, message := range []string{
+		`{"error":{"message":"Task failed"},"prompt":"素材版权违规","metadata":{"code":"copyright_violation"}}`,
+		"Task failed https://private.example/copyright_violation",
+		"Task failed; no copyright infringement detected",
+		"Task failed; content does not violate copyright",
+		"未检测到素材版权违规，任务失败",
+		"任务失败；请遵守版权政策",
+	} {
+		t.Run(message, func(t *testing.T) {
+			got := ClassifyPublicError("generation_failed", message, 502, false)
+			assert.Equal(t, "generation_failed", got.Code)
+		})
+	}
+}
+
 func TestMidjourneyResourceUnavailableUsesSharedMessage(t *testing.T) {
 	public := MidjourneyPublicError("", "No available channel for private-model", 500, false)
 	assert.Equal(t, "model_unavailable", public.Code)
-	assert.Equal(t, "status_code=500, 当前资源紧张，暂时无可用资源", public.Message)
+	assert.Contains(t, public.Message, "status_code=500, 当前资源紧张，暂时无可用资源")
 	assert.Equal(t, "请稍后重试", public.Hint)
 	assert.NotContains(t, public.Summary(), "private-model")
 }
 
-func TestPublicErrorNeverReturnsProviderDiagnostics(t *testing.T) {
+func TestPublicErrorRedactsInternalDiagnostics(t *testing.T) {
 	const secret = "sk-private-key host=secret.example IP=192.0.2.87 channel=153 plugin=secret-plugin model=internal-real-model"
 	for _, raw := range []string{
 		secret,
@@ -212,4 +262,166 @@ func TestPublicErrorNeverReturnsProviderDiagnostics(t *testing.T) {
 		assert.NotContains(t, string(encoded), "StatusCode")
 		assert.Contains(t, got.Summary(), "status_code=500")
 	}
+}
+
+func TestPublicErrorPreservesActionableDetails(t *testing.T) {
+	for _, tt := range []struct {
+		name, code, message, wantCode string
+		status                        int
+		want, hidden                  []string
+	}{
+		{
+			name: "duration bounds", code: "invalid_duration", status: 400,
+			message:  "duration must be between 4 and 15 seconds; received 20. Set duration to 15 or less.",
+			wantCode: "invalid_duration", want: []string{"between 4 and 15 seconds", "received 20", "Set duration to 15 or less"},
+		},
+		{
+			name: "parameter paths are not hosts", code: "invalid_parameter", status: 400,
+			message:  "parameters.duration must be <= 15; generationConfig.maxOutputTokens must be <= 8192",
+			wantCode: "invalid_parameter", want: []string{"parameters.duration must be <= 15", "generationConfig.maxOutputTokens must be <= 8192"},
+		},
+		{
+			name: "unknown reason and suggestion", code: "generation_failed", status: 502,
+			message:  "参考图片中的人脸太小，无法提取特征；请上传清晰的正面半身照片",
+			wantCode: "generation_failed", want: []string{"人脸太小", "请上传清晰的正面半身照片"},
+			hidden: []string{"未提供可公开确认"},
+		},
+		{
+			name: "structured error with advice", status: 400,
+			message:  `{"error":{"code":"invalid_parameter","message":"Unsupported aspect_ratio 7:3","hint":"Use 16:9 or 9:16"},"prompt":"private prompt","headers":{"Authorization":"Bearer hidden"},"debug":"internal dump"}`,
+			wantCode: "invalid_parameter", want: []string{"Unsupported aspect_ratio 7:3", "Use 16:9 or 9:16"},
+			hidden: []string{"private prompt", "Bearer", "internal dump", "headers"},
+		},
+		{
+			name: "validation list", status: 422,
+			message:  `{"detail":[{"msg":"image width must be at least 512 pixels","input":"private image data"},{"msg":"reference count must be <= 3"}]}`,
+			wantCode: "generation_failed", want: []string{"at least 512 pixels", "reference count must be <= 3"}, hidden: []string{"private image data"},
+		},
+		{
+			name: "bracketed plain text", status: 502,
+			message:  "[DecodeError] Unsupported image format TIFF; upload PNG or JPEG",
+			wantCode: "invalid_image_input", want: []string{"TIFF", "upload PNG or JPEG"},
+		},
+		{
+			name: "rate limit timing", status: 429,
+			message:  "Too many requests: maximum 3 concurrent requests; retry after 30 seconds",
+			wantCode: "rate_limit_exceeded", want: []string{"maximum 3 concurrent requests", "retry after 30 seconds"},
+		},
+		{
+			name: "transport address", code: "do_request_failed", status: 502,
+			message:  "dial tcp [2001:db8::1]:443: connection refused; retry after 10 seconds",
+			wantCode: "generation_failed", want: []string{"connection refused", "retry after 10 seconds"}, hidden: []string{"2001:db8", ":443"},
+		},
+		{
+			name: "provider credentials are not user credentials", status: 401,
+			message:  `API key expired; contact administrator. Authorization: Bearer upstream-credential`,
+			wantCode: "service_auth_error", want: []string{"API key expired", "contact administrator"}, hidden: []string{"upstream-credential"},
+		},
+		{
+			name: "provider quota context", status: 402,
+			message:  "Daily generation limit reached; resets at 00:00 UTC",
+			wantCode: "service_quota_exceeded", want: []string{"Daily generation limit reached", "00:00 UTC"},
+		},
+		{
+			name: "known provider name in diagnostic", status: 502,
+			message:  `{"metadata":{"channel_name":"dream5-maitoken"},"error":{"message":"dream5-maitoken: face detector found multiple faces; use a single-person photo"}}`,
+			wantCode: "generation_failed", want: []string{"found multiple faces", "use a single-person photo"}, hidden: []string{"dream5-maitoken"},
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			got := ClassifyPublicError(tt.code, tt.message, tt.status, false)
+			require.Equal(t, tt.wantCode, got.Code)
+			for _, want := range tt.want {
+				assert.Contains(t, got.Message, want)
+			}
+			for _, hidden := range tt.hidden {
+				assert.NotContains(t, got.Summary(), hidden)
+			}
+			assert.NotEmpty(t, got.Hint)
+			assert.Equal(t, got, ClassifyPublicError(got.Code, got.Summary(), got.StatusCode, true))
+		})
+	}
+}
+
+func TestPublicErrorDetailRedactionBoundaries(t *testing.T) {
+	for _, internal := range []string{
+		`channel=137 (dream5-maitoken)`,
+		`channel_name="private channel with spaces"`,
+		`渠道：137（私有供应商）`,
+		`plugin=private-plugin model=internal-real-model group=private-group`,
+		`https://secret.example/result?token=private-secret`,
+		`host=secret.example IP=192.0.2.87`,
+		`api_key="private key with spaces"`,
+		`password='private password with spaces'`,
+		`Authorization: Basic cHJpdmF0ZTpwYXNzd29yZA==`,
+		`Cookie: session=private-session; token=private-token`,
+		`sk-private-key`,
+		"-----BEGIN PRIVATE KEY-----\nprivate-key-content\n-----END PRIVATE KEY-----",
+		`C:\private\server\key.txt`,
+	} {
+		t.Run(internal, func(t *testing.T) {
+			got := ClassifyPublicError("generation_failed", "Reference image is blurry; upload a sharper image.\n"+internal, 502, false)
+			require.Contains(t, got.Message, "Reference image is blurry; upload a sharper image.")
+			for _, hidden := range []string{"137", "dream5-maitoken", "private", "私有供应商", "internal-real-model", "secret.example", "192.0.2.87", "cHJpdmF0ZTpwYXNzd29yZA"} {
+				assert.NotContains(t, got.Summary(), hidden)
+			}
+			assert.Equal(t, got, ClassifyPublicError(got.Code, got.Summary(), got.StatusCode, true))
+		})
+	}
+	for _, message := range []string{
+		`{"error":{"message":"truncated response", "key":"private-secret"`,
+		`<html><body>private server debug page</body></html>`,
+		`{"prompt":"private prompt","headers":{"Authorization":"private-secret"}}`,
+	} {
+		got := ClassifyPublicError("generation_failed", message, 502, false)
+		assert.NotContains(t, got.Summary(), "private")
+		assert.NotContains(t, got.Message, "；具体原因：")
+	}
+	got := ClassifyPublicError("generation_failed", "known-provider: invalid pose; change the reference", 502, false, "known-provider")
+	assert.NotContains(t, got.Summary(), "known-provider")
+	assert.Contains(t, got.Summary(), "invalid pose; change the reference")
+}
+
+func TestPublicErrorDetailReviewRegressions(t *testing.T) {
+	for _, tt := range []struct {
+		name, message string
+		want, hidden  []string
+	}{
+		{"structured status", `{"status_code":502,"error":{"message":"人脸太小，请换正面照片"}}`, []string{"人脸太小，请换正面照片"}, nil},
+		{"JSON example in advice", `Invalid size; use {"size":"1024x1024"} and retry`, []string{`use {"size":"1024x1024"} and retry`}, nil},
+		{"short cause", "Timeout", []string{"Timeout"}, nil},
+		{"localized short advice", "リトライしてください", []string{"リトライしてください"}, nil},
+		{"retry delay", "Rate limited; retry: 30 seconds", []string{"retry: 30 seconds"}, nil},
+		{"time and parameter names", "input.image_url is required; resets at 00:00:30; monkey=banana is invalid", []string{"input.image_url", "00:00:30", "monkey=banana"}, nil},
+		{"Token authorization", "Image is blurry; Authorization: Token private-token; upload a sharper image", []string{"Image is blurry", "upload a sharper image"}, []string{"private-token"}},
+		{"provider key wording", "Incorrect API key provided: private-value; contact administrator", []string{"contact administrator"}, []string{"private-value"}},
+		{"escaped quoted secret", `Image is blurry; password="private\"tail value"; use PNG`, []string{"Image is blurry", "use PNG"}, []string{"private", "tail value"}},
+		{"unlabelled channel", "channel 137 (dream5-maitoken): width must be at least 512 pixels", []string{"width must be at least 512 pixels"}, []string{"137", "dream5-maitoken"}},
+		{"Chinese channel", "渠道 137（dream5-maitoken）：图片宽度至少 512 像素", []string{"图片宽度至少 512 像素"}, []string{"137", "dream5-maitoken"}},
+		{"control characters in labels", "Image is blurry; api_\x00key=private-value; upload PNG", []string{"Image is blurry", "upload PNG"}, []string{"private-value"}},
+		{"detail marker inside JSON", `{"error":{"message":"输入图片不符合要求；具体原因：人脸太小，请换正面照片"},"prompt":"private prompt","debug":"private dump"}`, []string{"人脸太小，请换正面照片"}, []string{"private prompt", "private dump"}},
+		{"Digest authorization", `Invalid image; Authorization: Digest username="private-user", response="private-response"; use PNG`, []string{"Invalid image", "use PNG"}, []string{"private-user", "private-response"}},
+		{"credential aliases", "Invalid image; client_secret=private-client; session_token=private-session; upstream_api_key=private-upstream; use PNG", []string{"Invalid image", "use PNG"}, []string{"private-client", "private-session", "private-upstream"}},
+		{"credential echoed from metadata", `{"error":{"message":"Credential private-client expired; contact administrator"},"metadata":{"client_secret":"private-client"}}`, []string{"expired; contact administrator"}, []string{"private-client"}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			got := ClassifyPublicError("generation_failed", tt.message, 502, false)
+			for _, want := range tt.want {
+				assert.Contains(t, got.Message, want)
+			}
+			for _, hidden := range tt.hidden {
+				assert.NotContains(t, got.Summary(), hidden)
+			}
+			assert.Equal(t, got, ClassifyPublicError(got.Code, got.Summary(), got.StatusCode, true))
+		})
+	}
+	c, _ := gin.CreateTestContext(nil)
+	SetContextKey(c, constant.ContextKeyChannelKey, "opaqueCredentialValue")
+	SetContextKey(c, constant.ContextKeyChannelName, "dream5-maitoken")
+	SetContextKey(c, constant.ContextKeyChannelBaseUrl, "http://private-gateway")
+	got := ClassifyPublicError("generation_failed", "dream5-maitoken at private-gateway rejected opaqueCredentialValue; contact administrator", 502, false, PublicErrorSensitiveValues(c)...)
+	require.Contains(t, got.Message, "contact administrator")
+	assert.NotContains(t, got.Summary(), "opaqueCredentialValue")
+	assert.NotContains(t, got.Summary(), "dream5-maitoken")
+	assert.NotContains(t, got.Summary(), "private-gateway")
 }

@@ -908,7 +908,7 @@ func TestDoubaoOpenAIImageProtocol(t *testing.T) {
 			resolved, err := decodeDoubaoOpenAIImage(t, plugin, tc.operation, tc.model, map[string]any{"kind": "json", "value": openaiBody})
 			require.NoError(t, err)
 			assert.Equal(t, tc.model, resolved["model"])
-			assert.Equal(t, native["action"], resolved["action"])
+			assert.Equal(t, map[string]string{"text_to_image": "image_generate", "image_to_image": "image_edit"}[native["action"].(string)], resolved["action"])
 			assert.Equal(t, native["requestBody"], resolved["requestBody"])
 			body, facts, url := submitDoubaoImage(t, plugin, resolved["action"].(string), resolved["requestBody"].(map[string]any))
 			assert.Equal(t, doubaoBaseURL+"/api/v3/images/generations", url)
@@ -931,7 +931,7 @@ func TestDoubaoOpenAIImageProtocol(t *testing.T) {
 			},
 		})
 		require.NoError(t, err)
-		assert.Equal(t, "image_to_image", resolved["action"])
+		assert.Equal(t, "image_edit", resolved["action"])
 		images := []any{
 			reference,
 			map[string]any{"__fileRef": "request_file:image[]", "encoding": "dataUrl", "mimeType": "image/png", "maxBytes": float64(31457280)},
@@ -941,7 +941,7 @@ func TestDoubaoOpenAIImageProtocol(t *testing.T) {
 			"model": lite, "prompt": "merge the two", "image": images, "size": "2K", "watermark": false, "seed": float64(7),
 			"sequential_image_generation": "auto", "sequential_image_generation_options": map[string]any{"max_images": float64(2)},
 		}, resolved["requestBody"])
-		driver := map[string]any{"upstreamModel": lite, "model": lite, "action": "image_to_image", "requestBody": resolved["requestBody"], "baseUrl": doubaoBaseURL, "apiKey": "k", "usagePurpose": "facts"}
+		driver := map[string]any{"upstreamModel": lite, "model": lite, "action": "image_edit", "requestBody": resolved["requestBody"], "baseUrl": doubaoBaseURL, "apiKey": "k", "usagePurpose": "facts"}
 		value, err := plugin.Engine.Call(t.Context(), "buildSubmitRequest", driver)
 		require.NoError(t, err)
 		assert.Equal(t, images, alibabaObject(t, value)["body"].(map[string]any)["image"], "placeholders reach the upstream body for the host to inline")

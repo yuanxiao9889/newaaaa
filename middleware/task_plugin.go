@@ -568,6 +568,38 @@ func RouteTaskPluginEndpoint() gin.HandlerFunc {
 	}
 }
 
+// PrepareImageRetryEndpoint rebuilds execution-only constraints for a public
+// Images request. A saved plugin identity or relay-only decision describes the
+// previous executor, not the client's allowed providers. Explicit pins, image
+// capabilities, group/model admission and caller exclusions remain intact.
+func PrepareImageRetryEndpoint(c *gin.Context, modelName string) *pluginruntime.PinnedEndpoint {
+	if c.Request == nil || (c.Request.URL.Path != "/v1/images/generations" && c.Request.URL.Path != "/v1/images/edits") {
+		return nil
+	}
+	constraints := service.GetChannelConstraints(c)
+	constraints.Filters = slices.DeleteFunc(slices.Clone(constraints.Filters), func(filter dto.ChannelFilter) bool {
+		return filter.Kind == dto.FilterTaskPluginIdentity || filter.Kind == dto.FilterTaskPluginEndpoint
+	})
+	filter := dto.ChannelFilter{Kind: dto.FilterTaskPluginEndpoint}
+	generation := pluginruntime.DefaultRegistry.Generation()
+	var endpoint pluginruntime.PinnedEndpoint
+	var found bool
+	if generation != nil {
+		endpoint, found = lookupTaskPluginEndpoint(generation, c.Request.Method, c.Request.URL.Path, modelName)
+	}
+	if found {
+		for _, candidate := range endpoint.Candidates {
+			filter.TaskPluginKeys = append(filter.TaskPluginKeys, candidate.Plugin.Meta.Key)
+			filter.TaskPluginChannelTypes = append(filter.TaskPluginChannelTypes, candidate.Plugin.Meta.ChannelTypes...)
+		}
+	}
+	constraints.AddFilter(filter)
+	if !found {
+		return nil
+	}
+	return &endpoint
+}
+
 func lookupTaskPluginEndpoint(generation *pluginruntime.RoutingGeneration, method, path, modelName string) (pluginruntime.PinnedEndpoint, bool) {
 	lookupModel, pinModel, mappedModel := modelName, modelName, ""
 	if declared, ok := generation.CanonicalModel(modelName); ok {
@@ -1582,7 +1614,7 @@ func RespondTaskPluginError(c *gin.Context, taskErr *dto.TaskError) bool {
 	if !exists || !ok || pinned.Plugin == nil {
 		return false
 	}
-	publicError := common.ClassifyPublicError(taskErr.Code, taskErr.Message, taskErr.StatusCode, taskErr.LocalError)
+	publicError := common.ClassifyPublicError(taskErr.Code, taskErr.Message, taskErr.StatusCode, taskErr.LocalError, taskPluginErrorSensitiveValues(c)...)
 	// Host rejections keep their routing semantics except billing errors:
 	// legacy quota 403s must not look like credential or permission failures.
 	if taskErr.LocalError && taskErr.StatusCode >= 400 && taskErr.StatusCode <= 599 {
@@ -1653,7 +1685,7 @@ func abortTaskPluginRouteError(c *gin.Context, status int) {
 }
 
 func abortTaskPluginRouteErrorDetail(c *gin.Context, status int, detail string, code ...string) {
-	taskErr := sanitizedTaskPluginError(status, detail, code...)
+	taskErr := sanitizedTaskPluginError(c, status, detail, code...)
 	c.Header("X-Error-Code", taskErr.Code)
 	c.Abort()
 	if RespondTaskPluginError(c, &dto.TaskError{Code: taskErr.Code, Message: taskErr.Message, StatusCode: taskErr.HTTPStatus, LocalError: true}) {
@@ -1670,8 +1702,36 @@ func abortTaskPluginRouteErrorDetail(c *gin.Context, status int, detail string, 
 	})
 }
 
-func sanitizedTaskPluginError(status int, detail string, localCode ...string) dto.TaskPluginError {
-	publicError := common.ClassifyPublicError("", detail, status, false)
+func taskPluginErrorSensitiveValues(c *gin.Context) []string {
+	values := common.PublicErrorSensitiveValues(c)
+	if c == nil {
+		return values
+	}
+	for _, key := range []string{pluginruntime.ContextKeyPinnedRoute, pluginruntime.ContextKeyPinnedEndpoint} {
+		value, _ := c.Get(key)
+		switch pinned := value.(type) {
+		case pluginruntime.PinnedRoute:
+			if pinned.Plugin != nil {
+				values = append(values, pinned.Plugin.Meta.Key)
+			}
+			for _, candidate := range pinned.Candidates {
+				values = append(values, candidate.Plugin.Meta.Key)
+			}
+		case pluginruntime.PinnedEndpoint:
+			if pinned.Plugin != nil {
+				values = append(values, pinned.Plugin.Meta.Key)
+			}
+			for _, candidate := range pinned.Candidates {
+				values = append(values, candidate.Plugin.Meta.Key)
+			}
+		}
+	}
+	return values
+}
+
+func sanitizedTaskPluginError(c *gin.Context, status int, detail string, localCode ...string) dto.TaskPluginError {
+	sensitive := taskPluginErrorSensitiveValues(c)
+	publicError := common.ClassifyPublicError("", detail, status, false, sensitive...)
 	code := ""
 	switch status {
 	case http.StatusBadRequest:
@@ -1690,10 +1750,14 @@ func sanitizedTaskPluginError(status int, detail string, localCode ...string) dt
 		code = "unsupported_parameter"
 	}
 	if code != "" {
-		publicError = common.ClassifyPublicError(code, "", status, true)
+		validationDetail := ""
+		if code == "invalid_parameter" || code == "unsupported_parameter" {
+			validationDetail = detail
+		}
+		publicError = common.ClassifyPublicError(code, validationDetail, status, true, sensitive...)
 	}
 	if len(localCode) > 0 && localCode[0] != "" {
-		publicError = common.ClassifyPublicError(localCode[0], detail, status, true)
+		publicError = common.ClassifyPublicError(localCode[0], detail, status, true, sensitive...)
 	}
 	if status < 400 || status > 599 {
 		status = http.StatusInternalServerError
@@ -1706,7 +1770,7 @@ func sanitizedTaskPluginError(status int, detail string, localCode ...string) dt
 }
 
 func abortTaskPluginProtocolError(c *gin.Context, status int, detail string, code ...string) {
-	publicError := sanitizedTaskPluginError(status, detail, code...)
+	publicError := sanitizedTaskPluginError(c, status, detail, code...)
 	c.Header("X-Error-Code", publicError.Code)
 	abortWithOpenAiMessage(c, publicError.HTTPStatus, publicError.Message, types.ErrorCode(publicError.Code))
 }

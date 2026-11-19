@@ -16,8 +16,12 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import { imageModels, oopiiModelGroups } from './data'
 import { generationContracts } from './generation-data'
+import { buildImageSamples } from './image-samples'
+import { buildImage26GifBody } from './openai-samples'
 import { buildJsonRequestSamples } from './request-samples'
+import { textExamples } from './text-data'
 import { buildVideoMarkdown } from './video-guide'
 
 export function buildGenerationMarkdown(
@@ -32,12 +36,77 @@ export function buildGenerationMarkdown(
     'Content-Type: application/json',
     '',
     t(
-      'This export covers Seed Audio, the independent Midjourney image model and the video models below.'
+      'This export covers the current text model IDs, image parameters including GIF, Seed Audio, Midjourney and video contracts.'
     ),
     t(
-      'Contracts checked on 2026-10-22. Confirm availability with GET /v1/models using your own API key.'
+      'Documentation updated on 2026-11-18 from the software catalog and gateway request contracts. Confirm availability with GET /v1/models using your own API key.'
     ),
   ]
+  lines.push('', `## ${t('Text and multimodal API routes')}`, '')
+  for (const model of oopiiModelGroups.text) {
+    lines.push(`- ${model.id}: ${model.endpoints.join(', ')}`)
+  }
+  for (const example of textExamples) {
+    lines.push(
+      '',
+      `### ${t(example.title)}`,
+      `${baseUrl}${example.path}`,
+      '```bash',
+      buildJsonRequestSamples(baseUrl, example.body, example.path).curl,
+      '```'
+    )
+  }
+  for (const model of imageModels) {
+    lines.push(
+      '',
+      `## ${model.title ?? model.model}`,
+      (model.modelIds ?? [model.model]).join(' / ')
+    )
+    for (const endpoint of model.endpoints) {
+      lines.push(
+        `- ${endpoint.method} ${endpoint.path} (${endpoint.contentType})`
+      )
+    }
+    lines.push(`- ${t('Response format')}: ${model.responsePath}`)
+    for (const field of model.parameters) {
+      lines.push(`- ${field.name}: ${field.values}; ${t(field.description)}`)
+    }
+    for (const note of model.requestNotes) lines.push('', t(note))
+    for (const operation of ['generate', 'edit'] as const) {
+      lines.push(
+        '',
+        '```bash',
+        buildImageSamples(model, baseUrl, operation).curl,
+        '```'
+      )
+    }
+    if (model.outputFormats?.includes('gif')) {
+      lines.push(
+        '',
+        `### ${t('GIF generation example')}`,
+        '```bash',
+        buildJsonRequestSamples(
+          baseUrl,
+          buildImage26GifBody(model),
+          '/v1/images/generations?async=true'
+        ).curl,
+        '```'
+      )
+      if (model.model === 'all-image-2.6-sunburst-H') {
+        lines.push(
+          '',
+          `### GIF · ${t('Reference image editing')}`,
+          '```bash',
+          buildJsonRequestSamples(
+            baseUrl,
+            buildImage26GifBody(model, 'edit'),
+            '/v1/images/edits?async=true'
+          ).curl,
+          '```'
+        )
+      }
+    }
+  }
   for (const contract of generationContracts) {
     lines.push(
       '',

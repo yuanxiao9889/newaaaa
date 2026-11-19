@@ -24,24 +24,26 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// Keep replay data bounded and in the private task row so another polling node
-// can resume without the submitting node's temporary multipart files.
-const maxVideoTaskRetryBodyBytes = 8 << 20
+// Small bodies retain the legacy inline representation. Larger bodies use
+// shared database chunks, within the gateway's existing request body limit.
+const inlineVideoTaskRetryBodyBytes = 8 << 20
 
 func init() {
 	service.RetryVideoTaskFunc = retryVideoTask
 }
 
-func captureVideoTaskRetry(c *gin.Context, info *relaycommon.RelayInfo) *model.VideoTaskRetryState {
-	if c.GetString("transfer_execution_id") != "" {
-		return nil
+func captureVideoTaskRetry(c *gin.Context, info *relaycommon.RelayInfo) (*model.VideoTaskRetryState, error) {
+	// Legacy guarded requests remain single-dispatch. New channel policies own
+	// a bounded retry budget without changing the client's idempotent receipt.
+	if c.GetString("transfer_execution_id") != "" && service.MediaRetry(c) == nil {
+		return nil, nil
 	}
-	if common.RetryTimes <= 0 || info.TaskRelayInfo == nil || info.LockedChannel != nil || info.OriginTaskID != "" || len(info.OriginTasks) > 0 || service.ShouldSkipRetryAfterChannelAffinityFailure(c) {
-		return nil
+	if common.RetryTimes <= 0 && service.MediaRetry(c) == nil || info.TaskRelayInfo == nil || info.LockedChannel != nil || info.OriginTaskID != "" || len(info.OriginTasks) > 0 || service.ShouldSkipRetryAfterChannelAffinityFailure(c) {
+		return nil, nil
 	}
 	constraints := service.GetChannelConstraints(c)
 	if _, pinned, _ := constraints.ResolvedPin(); pinned {
-		return nil
+		return nil, nil
 	}
 	state := &model.VideoTaskRetryState{
 		Method: c.Request.Method, Path: c.Request.URL.Path, Query: c.Request.URL.RawQuery,
@@ -49,7 +51,7 @@ func captureVideoTaskRetry(c *gin.Context, info *relaycommon.RelayInfo) *model.V
 		Accept: c.Request.Header.Get("Accept"),
 		Action: info.Action,
 	}
-	isVideo := state.Path == "/v1/videos" || state.Path == "/v1/video/generations"
+	isVideo := state.Path == "/v1/videos" || state.Path == "/v1/video/generations" || service.MediaRetry(c) != nil
 	switch constant.NormalizeTaskAction(info.Action) {
 	case constant.TaskActionTextToVideo, constant.TaskActionImageToVideo, constant.TaskActionFirstTailToVideo, constant.TaskActionReferenceToVideo:
 		isVideo = true
@@ -57,18 +59,18 @@ func captureVideoTaskRetry(c *gin.Context, info *relaycommon.RelayInfo) *model.V
 	if pinnedValue, exists := c.Get(pluginruntime.ContextKeyPinnedEndpoint); exists {
 		pinned, ok := pinnedValue.(pluginruntime.PinnedEndpoint)
 		// Responses and Images have distinct rendering/lifecycle contracts.
-		if !ok || pinned.Protocol != "openai_video" {
-			return nil
+		if !ok || pinned.Protocol != "openai_video" && (pinned.Protocol != "openai_image" || service.MediaRetry(c) == nil) {
+			return nil, nil
 		}
 		isVideo = true
 	}
 	if !isVideo {
-		return nil
+		return nil, nil
 	}
 	if pinnedValue, exists := c.Get(pluginruntime.ContextKeyPinnedRoute); exists {
 		pinned, ok := pinnedValue.(pluginruntime.PinnedRoute)
 		if !ok || pinned.Plugin == nil {
-			return nil
+			return nil, nil
 		}
 		state.NativePluginKey, state.NativeRoutePath = pinned.Plugin.Meta.Key, pinned.Route.Path
 	} else if key := c.Param("key"); key != "" {
@@ -80,40 +82,55 @@ func captureVideoTaskRetry(c *gin.Context, info *relaycommon.RelayInfo) *model.V
 	}
 	// Deep-copy nested constraint slices; distribution mutates its own copy.
 	encoded, err := common.Marshal(constraints)
-	if err != nil || common.Unmarshal(encoded, &state.Constraints) != nil {
-		return nil
+	if err != nil {
+		return nil, err
+	}
+	if err := common.Unmarshal(encoded, &state.Constraints); err != nil {
+		return nil, err
 	}
 	body, err := common.GetBodyStorage(c)
-	if err != nil || body.Size() > maxVideoTaskRetryBodyBytes {
-		logger.LogWarn(c, "video early-failure retry unavailable: original request is unreadable or exceeds 8 MiB")
-		return nil
+	if err != nil {
+		return nil, err
+	}
+	if body.Size() > inlineVideoTaskRetryBodyBytes {
+		state.BodyRef, err = model.SaveTaskRetryBody(c.Request.Context(), body)
+		return state, err
 	}
 	data, err := body.Bytes()
-	if err != nil || len(data) == 0 {
-		return nil
+	if err != nil {
+		return nil, err
 	}
 	state.Body = bytes.Clone(data)
-	return state
+	return state, nil
 }
 
 func buildVideoTaskRetryContext(ctx context.Context, task *model.Task) (*gin.Context, *relaycommon.RelayInfo, error) {
 	retry := task.PrivateData.VideoRetry
+	body := retry.Body
+	if retry.BodyRef != nil {
+		var err error
+		body, err = retry.BodyRef.Read(ctx)
+		if err != nil {
+			return nil, nil, err
+		}
+	}
 	target := retry.Path
 	if retry.Query != "" {
 		target += "?" + retry.Query
 	}
-	req, err := http.NewRequestWithContext(ctx, retry.Method, target, bytes.NewReader(retry.Body))
+	req, err := http.NewRequestWithContext(ctx, retry.Method, target, bytes.NewReader(body))
 	if err != nil {
 		return nil, nil, err
 	}
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
 	c.Request = req
+	service.BindMediaRetry(c, task.PrivateData.MediaRetry)
 	if task.PrivateData.TransferExecutionID != "" {
 		c.Set("transfer_execution_id", task.PrivateData.TransferExecutionID)
 	}
 	c.Request.Header.Set("Content-Type", retry.ContentType)
 	c.Request.Header.Set("Accept", retry.Accept)
-	c.Set(common.KeyRequestBody, retry.Body)
+	c.Set(common.KeyRequestBody, body)
 	c.Set("id", task.UserId)
 	c.Set("token_id", task.PrivateData.TokenId)
 	c.Set("token_name", task.TokenName)
@@ -142,13 +159,18 @@ func buildVideoTaskRetryContext(ctx context.Context, task *model.Task) (*gin.Con
 	}
 	identity := dto.ChannelFilter{Kind: dto.FilterChannelIdentity}
 	for _, used := range task.PrivateData.ChannelRetryPath {
+		if task.PrivateData.MediaRetry != nil {
+			break
+		}
 		id, err := strconv.Atoi(used)
 		if err != nil {
 			return c, nil, fmt.Errorf("invalid video retry channel history")
 		}
 		identity.ExcludedChannelIDs = append(identity.ExcludedChannelIDs, id)
 	}
-	identity.ExcludedChannelIDs = append(identity.ExcludedChannelIDs, task.ChannelId)
+	if task.PrivateData.MediaRetry == nil {
+		identity.ExcludedChannelIDs = append(identity.ExcludedChannelIDs, task.ChannelId)
+	}
 	constraints.AddFilter(identity)
 	constraints.AddFilter(dto.ChannelFilter{Kind: dto.FilterRequestPath, RequestPath: retry.Path})
 	switch {
@@ -197,13 +219,23 @@ func buildVideoTaskRetryContext(ctx context.Context, task *model.Task) (*gin.Con
 }
 
 func canRetryVideoTask(task *model.Task, failure *relaycommon.TaskInfo, now int64) bool {
-	if task == nil || task.PrivateData.TransferExecutionID != "" {
+	if task == nil || task.PrivateData.TransferExecutionID != "" && task.PrivateData.MediaRetry == nil {
 		return false
 	}
 	retry := task.PrivateData.VideoRetry
-	if retry == nil || !retry.Ready || retry.Submitting || len(retry.Body) == 0 || failure == nil || failure.Status != model.TaskStatusFailure ||
-		retry.AcceptedAt <= 0 || now < retry.AcceptedAt || now-retry.AcceptedAt > service.VideoTaskRetryWindowSeconds || common.RetryTimes <= 0 || len(task.PrivateData.ChannelRetryPath) > common.RetryTimes ||
+	if retry == nil || !retry.Ready || retry.Submitting || len(retry.Body) == 0 && retry.BodyRef == nil || failure == nil || failure.Status != model.TaskStatusFailure ||
+		retry.AcceptedAt <= 0 || now < retry.AcceptedAt ||
 		task.Status == model.TaskStatusSuccess || task.Status == model.TaskStatusFailure {
+		return false
+	}
+	if common.ShouldStopRetryForSafety("", failure.Reason) {
+		return false
+	}
+	if state := task.PrivateData.MediaRetry; state != nil {
+		if state.Remaining(time.Unix(now, 0)) == 0 {
+			return false
+		}
+	} else if now-retry.AcceptedAt > service.VideoTaskRetryWindowSeconds || common.RetryTimes <= 0 || len(task.PrivateData.ChannelRetryPath) > common.RetryTimes {
 		return false
 	}
 	_, pinned, _ := retry.Constraints.ResolvedPin()
@@ -213,6 +245,14 @@ func canRetryVideoTask(task *model.Task, failure *relaycommon.TaskInfo, now int6
 func retryVideoTask(ctx context.Context, task *model.Task, failure *relaycommon.TaskInfo) (bool, error) {
 	service.RecordAutoSwitchTaskResult(ctx, task, failure)
 	now := time.Now().Unix()
+	if state := task.PrivateData.MediaRetry; state != nil && failure != nil && failure.Status == model.TaskStatusFailure {
+		state.RecordFailure(task.ChannelId, "", failure.Reason)
+		if common.ShouldStopRetryForSafety("", failure.Reason) {
+			state.StopReason = "safety_related_error"
+		} else if state.Remaining(time.Now()) == 0 {
+			state.StopReason = "retry_budget_exhausted"
+		}
+	}
 	if !canRetryVideoTask(task, failure, now) {
 		return false, nil
 	}
@@ -229,7 +269,12 @@ func retryVideoTask(ctx context.Context, task *model.Task, failure *relaycommon.
 	if err != nil || !won {
 		return true, err
 	}
-	for len(task.PrivateData.ChannelRetryPath) <= common.RetryTimes {
+	budget := service.RetryBudget{Media: task.PrivateData.MediaRetry}
+	cycle := &service.ChannelRetryCycle{Enabled: task.PrivateData.MediaRetry != nil, Budget: budget}
+	if task.PrivateData.MediaRetry != nil {
+		cycle.Start = task.PrivateData.MediaRetry.CycleStart
+	}
+	for budget.Remaining(common.RetryTimes-len(task.PrivateData.ChannelRetryPath)+1, len(task.PrivateData.ChannelRetryPath), time.Now()) > 0 {
 		c, info, buildErr := buildVideoTaskRetryContext(ctx, task)
 		if c != nil {
 			defer common.CleanupBodyStorage(c)
@@ -239,9 +284,13 @@ func retryVideoTask(ctx context.Context, task *model.Task, failure *relaycommon.
 			failure.Reason += "; video channel retry stopped: " + buildErr.Error()
 			break
 		}
-		channel, channelErr := getChannel(c, info, &service.RetryParam{Ctx: c, TokenGroup: task.Group, ModelName: task.Properties.OriginModelName, RequestPath: c.Request.URL.Path})
+		cycle.History = task.PrivateData.ChannelRetryPath
+		channel, channelErr := getChannel(c, info, &service.RetryParam{Cycle: cycle, Ctx: c, TokenGroup: task.Group, ModelName: task.Properties.OriginModelName, RequestPath: c.Request.URL.Path})
 		if channelErr != nil {
-			logger.LogInfo(ctx, fmt.Sprintf("video task %s has no unused eligible retry channel", task.TaskID))
+			if state := task.PrivateData.MediaRetry; state != nil {
+				state.StopReason = "no_eligible_channel"
+			}
+			logger.LogInfo(ctx, fmt.Sprintf("video task %s has no eligible retry channel", task.TaskID))
 			break
 		}
 		task.ChannelId = channel.Id
@@ -258,6 +307,16 @@ func retryVideoTask(ctx context.Context, task *model.Task, failure *relaycommon.
 			failure.Reason = "video channel retry billing unavailable: " + err.Error()
 			break
 		}
+		service.PersistMediaRetryBeforeDispatch(c, func() error {
+			won, err := task.UpdateWithStatus(fromStatus)
+			if err != nil {
+				return err
+			}
+			if !won {
+				return fmt.Errorf("media retry owner changed before dispatch")
+			}
+			return nil
+		})
 		result, taskErr := relay.RelayTaskSubmit(c, info)
 		if info.QuotaClamp != nil {
 			task.PrivateData.VideoRetry.RecordQuotaClamp(info.QuotaClamp)
@@ -273,7 +332,7 @@ func retryVideoTask(ctx context.Context, task *model.Task, failure *relaycommon.
 			failure.Reason = taskErr.Message
 			// Only a definite non-2xx response permits another POST. Transport
 			// and parse errors may hide an accepted (and billable) upstream job.
-			if taskErr.LocalError || taskErr.Code != "fail_to_fetch_task" || taskErr.NoRetry || decideTaskRetry(c, taskErr, common.RetryTimes-len(task.PrivateData.ChannelRetryPath)+1).Action != "retry" {
+			if taskErr.LocalError || taskErr.Code != "fail_to_fetch_task" || taskErr.NoRetry || decideTaskRetry(c, taskErr, budget.Remaining(common.RetryTimes-len(task.PrivateData.ChannelRetryPath)+1, len(task.PrivateData.ChannelRetryPath), time.Now())).Action != "retry" {
 				break
 			}
 			continue
@@ -313,6 +372,9 @@ func retryVideoTask(ctx context.Context, task *model.Task, failure *relaycommon.
 			task.PrivateData.Key = info.ApiKey
 		}
 		task.PrivateData.PluginState = result.PluginState
+		task.PrivateData.PromptTokens, task.PrivateData.CompletionTokens, task.PrivateData.TotalTokens = 0, 0, 0
+		task.PrivateData.UsageDetails, task.PrivateData.PendingUsageLog = nil, nil
+		task.PrivateData.TokenUsageLogged = false
 		task.PrivateData.PollFailures = 0
 		task.PrivateData.ActualQuota = result.Quota
 		task.PrivateData.BillingContext = &model.TaskBillingContext{
@@ -327,12 +389,16 @@ func retryVideoTask(ctx context.Context, task *model.Task, failure *relaycommon.
 		task.Data = result.TaskData
 		task.PrivateData.VideoRetry.AcceptedAt = time.Now().Unix()
 		task.PrivateData.VideoRetry.Submitting = false
+		retryImmediate := false
 		if immediate := result.Immediate; immediate != nil {
 			task.Status, task.Progress = model.TaskStatus(immediate.Status), immediate.Progress
 			if task.Status == model.TaskStatusSuccess || task.Status == model.TaskStatusFailure {
 				task.FinishTime, task.Progress = time.Now().Unix(), taskcommon.ProgressComplete
 				if task.Status == model.TaskStatusFailure {
 					task.FailReason = immediate.Reason
+					if task.PrivateData.MediaRetry != nil {
+						retryImmediate = service.DecideMediaRetry(c, channel.Id, "", immediate.Reason).Action == "retry"
+					}
 				}
 				task.PrivateData.ResultURL = immediate.Url
 				if task.Status == model.TaskStatusSuccess && immediate.Url == "" {
@@ -340,9 +406,17 @@ func retryVideoTask(ctx context.Context, task *model.Task, failure *relaycommon.
 				}
 			}
 		}
+		if retryImmediate {
+			task.Status, task.Progress, task.FailReason, task.FinishTime = fromStatus, taskcommon.ProgressSubmitted, "", 0
+			task.PrivateData.VideoRetry.Submitting = true
+		}
 		won, err = task.UpdateWithStatus(fromStatus)
 		if err != nil || !won {
 			return true, err
+		}
+		if retryImmediate {
+			fromStatus = task.Status
+			continue
 		}
 		logger.LogInfo(ctx, fmt.Sprintf("video task %s resubmitted to channel %d (attempt %d)", task.TaskID, channel.Id, len(task.PrivateData.ChannelRetryPath)))
 		if task.Status == model.TaskStatusSuccess || task.Status == model.TaskStatusFailure {

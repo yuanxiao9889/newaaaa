@@ -284,8 +284,8 @@ func TestMidjourneyFailureDiagnostics(t *testing.T) {
 		{"prompt limit", "提示词过长,目前支持1024以下字符", "[input_too_large] 提示词过长,目前支持1024以下字符", 200, false, false},
 		{"parameter", "Invalid parameter: --ar must be 16:9 or 1:1", "[invalid_parameter] Invalid parameter: --ar must be 16:9 or 1:1", 400, false, false},
 		{"execution", "执行报错\n图片格式不支持，请使用 PNG", "[invalid_image_input] 执行报错\n图片格式不支持，请使用 PNG", 200, true, false},
-		{"redaction", "图片下载失败 https://private.invalid/image?token=secret mj-api-secret=hidden", "[image_download_failed] 图片下载失败 [URL REDACTED] [REDACTED]", 200, false, false},
-		{"provider quota", "insufficient quota (remaining 0)", "[service_quota_exceeded] 生成服务可用额度不足：insufficient quota (remaining 0)；请联系管理员处理服务额度；无需为此调整您的账户或令牌额度", 200, false, false},
+		{"redaction", "图片下载失败 https://private.invalid/image?token=secret mj-api-secret=hidden", "[image_download_failed] 图片下载失败 [地址已隐藏] [已隐藏]", 200, false, false},
+		{"provider quota", "insufficient quota (remaining 0)", "[service_quota_exceeded] 生成服务可用额度不足；具体原因：insufficient quota (remaining 0)；请联系管理员处理服务额度；无需为此调整您的账户或令牌额度", 200, false, false},
 		{"async failure", "提示词过长,目前支持1024以下字符", "[input_too_large] 提示词过长,目前支持1024以下字符", 200, false, true},
 		{"empty failure", "", "[generation_failed] 生成失败，服务未提供可公开确认的具体原因；请联系管理员并提供请求 ID 或任务 ID，以查询详细错误", 200, false, false},
 	} {

@@ -25,6 +25,16 @@ func DecideRelayRetry(c *gin.Context, err *types.NewAPIError, retryTimes int) Po
 	}
 	var rejection *upstreamFailure
 	confirmed := errors.As(err, &rejection)
+	if MediaRetry(c) != nil {
+		if !confirmed || c.Writer.Written() || !rejection.terminalTask && (rejection.statusCode == http.StatusRequestTimeout || operation_setting.IsAlwaysSkipRetryStatusCode(rejection.statusCode)) {
+			return PolicyDecision{Action: "stop", Reason: "submission_unconfirmed", Source: "channel"}
+		}
+		code := string(err.GetErrorCode())
+		if model.MediaRetryFailureCategory(code) == "" {
+			code = err.ToOpenAIError().Type
+		}
+		return DecideMediaRetry(c, c.GetInt("channel_id"), code, err.Error())
+	}
 	if confirmed && rejection.terminalTask && (rejection.statusCode == http.StatusForbidden || err.StatusCode == http.StatusForbidden) {
 		return PolicyDecision{Action: "stop", Reason: "system_retry_exclusion", Source: "system"}
 	}

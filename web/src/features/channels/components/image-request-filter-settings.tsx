@@ -123,6 +123,9 @@ export function ImageRequestFilterSettings(props: {
               <FormDescription>
                 {t(
                   'Use client model names before model mapping. Each model can appear in only one rule. Filtering preserves the original request parameters'
+                )}{' '}
+                {t(
+                  'For custom dimensions, add custom_size with min_pixels, max_pixels, and max_edge. Width and height must be multiples of 16 with an aspect ratio from 1:3 to 3:1'
                 )}
               </FormDescription>
               <FormMessage />

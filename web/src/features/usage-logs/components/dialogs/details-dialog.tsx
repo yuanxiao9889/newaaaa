@@ -1533,10 +1533,7 @@ function AsyncTaskBillingSection(props: {
 
   if (!isAsyncTaskBillingLog(log, other)) return null
 
-  const stateLabel = getAsyncTaskBillingStateLabel(
-    other.billing_state,
-    log.type
-  )
+  const stateLabel = getAsyncTaskBillingStateLabel(other, log.type)
   const rows: Array<{ label: string; value: React.ReactNode; mono?: boolean }> =
     [
       { label: t('State'), value: t(stateLabel) },
@@ -1555,6 +1552,11 @@ function AsyncTaskBillingSection(props: {
       other.actual_quota != null && {
         label: t('Actual Cost'),
         value: formatLogQuota(other.actual_quota),
+        mono: true,
+      },
+      log.type === LOG_TYPE_ENUM.REFUND && {
+        label: t('Refund amount'),
+        value: formatLogQuota(log.quota),
         mono: true,
       },
     ].filter(Boolean) as Array<{

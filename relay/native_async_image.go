@@ -54,7 +54,13 @@ func nativeAsyncImageErrorDetails(public common.PublicError, local bool) gin.H {
 }
 
 func writeNativeAsyncImageError(c *gin.Context, status int, code, message string, local bool) {
-	public := common.ClassifyPublicError(code, message, status, local)
+	sensitiveValues := common.PublicErrorSensitiveValues(c)
+	if value, ok := nativeAsyncImagePolls.Load(strings.TrimSpace(c.Param("task_id"))); ok {
+		if entry, ok := value.(nativeAsyncImagePollEntry); ok && entry.userID == c.GetInt("id") {
+			sensitiveValues = append(sensitiveValues, entry.apiKey, entry.authValue, entry.baseHost, entry.provider)
+		}
+	}
+	public := common.ClassifyPublicError(code, message, status, local, sensitiveValues...)
 	if !local && (status == http.StatusUnauthorized || status == http.StatusForbidden) {
 		status = public.StatusCode
 	}
@@ -280,13 +286,15 @@ func rewriteNativeAsyncImageTaskEnvelope(body []byte, taskID string) []byte {
 		status = "failed"
 	}
 	public := map[string]any{"id": taskID, "status": status}
+	var sensitiveValues []string
 	if value, ok := nativeAsyncImagePolls.Load(taskID); ok {
 		if entry, ok := value.(nativeAsyncImagePollEntry); ok {
 			public["model"] = entry.modelName
+			sensitiveValues = []string{entry.apiKey, entry.authValue, entry.baseHost, entry.provider}
 		}
 	}
 	if status == "failed" {
-		public["error"] = nativeAsyncImageErrorDetails(common.ClassifyPublicError("", string(body), 0, false), false)
+		public["error"] = nativeAsyncImageErrorDetails(common.ClassifyPublicError("", string(body), 0, false, sensitiveValues...), false)
 	}
 	pollPath := "/v1/images/generations/" + url.PathEscape(taskID)
 	contentPath := pollPath + "/content"

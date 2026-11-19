@@ -33,14 +33,22 @@ import {
 } from '@/features/performance-metrics/lib/format'
 import { requireServerSuccess } from '@/lib/server-error-message'
 import { cn } from '@/lib/utils'
+import { useAuthStore } from '@/stores/auth-store'
 
 const PERFORMANCE_WINDOW_HOURS = 24
 const TOP_MODEL_LIMIT = 6
 
 export function PerformanceHealthPanel() {
   const { t } = useTranslation()
+  const user = useAuthStore((state) => state.auth.user)
   const metricsQuery = useQuery({
-    queryKey: ['perf-metrics-summary', PERFORMANCE_WINDOW_HOURS],
+    queryKey: [
+      'perf-metrics-summary',
+      PERFORMANCE_WINDOW_HOURS,
+      user?.id ?? null,
+      user?.role ?? 0,
+      user?.group ?? '',
+    ],
     queryFn: async () =>
       requireServerSuccess(
         await getPerfMetricsSummary(PERFORMANCE_WINDOW_HOURS)

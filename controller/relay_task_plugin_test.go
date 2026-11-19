@@ -3,6 +3,7 @@ package controller
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"io"
@@ -19,6 +20,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
+	"github.com/QuantumNous/new-api/i18n"
 	"github.com/QuantumNous/new-api/middleware"
 	"github.com/QuantumNous/new-api/model"
 	pluginruntime "github.com/QuantumNous/new-api/pkg/jsplugin"
@@ -1141,13 +1143,14 @@ type videoRetryTestFixture struct {
 	received      [2]map[string]any
 	submitStarted chan struct{}
 	releaseSubmit chan struct{}
+	largeBody     []byte
 }
 
 func newVideoRetryTestFixture(t *testing.T, autoSwitch ...bool) *videoRetryTestFixture {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
 	service.InitHttpClient()
-	db, dialect := openTaskDialectDatabase(t, &model.User{}, &model.Channel{}, &model.Ability{}, &model.Task{}, &model.Log{}, &model.ChannelAutoSwitchState{}, &model.ChannelAutoSwitchAttempt{})
+	db, dialect := openTaskDialectDatabase(t, &model.User{}, &model.Channel{}, &model.Ability{}, &model.Task{}, &model.Log{}, &model.ChannelAutoSwitchState{}, &model.ChannelAutoSwitchAttempt{}, &model.TaskRetryBodyChunk{})
 	f := &videoRetryTestFixture{db: db, pollStatus: [2]string{"FAILURE", "SUCCESS"}}
 	f.autoSwitch = len(autoSwitch) > 0 && autoSwitch[0]
 	oldDB, oldLogDB := model.DB, model.LOG_DB
@@ -1236,6 +1239,11 @@ export function buildContentRequest(){return {};}
 func (f *videoRetryTestFixture) submit(t *testing.T, multipartBody bool, executionID ...string) *model.Task {
 	t.Helper()
 	body := []byte(`{"model":"retry-video","prompt":"a lighthouse","seconds":4}`)
+	if len(f.largeBody) > 0 && !multipartBody {
+		var err error
+		body, err = common.Marshal(map[string]any{"model": "retry-video", "prompt": string(f.largeBody), "seconds": 4})
+		require.NoError(t, err)
+	}
 	contentType := "application/json"
 	if multipartBody {
 		var buffer bytes.Buffer
@@ -1245,7 +1253,11 @@ func (f *videoRetryTestFixture) submit(t *testing.T, multipartBody bool, executi
 		require.NoError(t, writer.WriteField("seconds", "4"))
 		file, err := writer.CreateFormFile("input_reference", "reference.png")
 		require.NoError(t, err)
-		_, err = file.Write([]byte{0, 1, 2, 3, 255})
+		fileBytes := f.largeBody
+		if len(fileBytes) == 0 {
+			fileBytes = []byte{0, 1, 2, 3, 255}
+		}
+		_, err = file.Write(fileBytes)
 		require.NoError(t, err)
 		require.NoError(t, writer.Close())
 		body, contentType = buffer.Bytes(), writer.FormDataContentType()
@@ -1281,9 +1293,16 @@ func (f *videoRetryTestFixture) submit(t *testing.T, multipartBody bool, executi
 	require.NotNil(t, outcome)
 	common.CleanupBodyStorage(c)
 	stored := f.load(t, outcome.Task.TaskID)
-	if c.GetString("transfer_execution_id") == "" {
+	if c.GetString("transfer_execution_id") == "" || stored.PrivateData.MediaRetry != nil {
 		require.NotNil(t, stored.PrivateData.VideoRetry)
-		assert.Equal(t, body, stored.PrivateData.VideoRetry.Body, "persist the original body before any provider mapping")
+		if stored.PrivateData.VideoRetry.BodyRef != nil {
+			snapshot, err := stored.PrivateData.VideoRetry.BodyRef.Read(context.Background())
+			require.NoError(t, err)
+			assert.Equal(t, body, snapshot, "persist the original body before any provider mapping")
+			assert.Empty(t, stored.PrivateData.VideoRetry.Body)
+		} else {
+			assert.Equal(t, body, stored.PrivateData.VideoRetry.Body, "persist the original body before any provider mapping")
+		}
 		assert.True(t, stored.PrivateData.VideoRetry.Ready)
 	} else {
 		assert.Nil(t, stored.PrivateData.VideoRetry, "guarded tasks never retain a replacement POST")
@@ -1362,60 +1381,32 @@ func TestVideoTaskRetryAcrossChannelsAndFinalSettlement(t *testing.T) {
 func TestChannelAutoSwitchVideoLifecycle(t *testing.T) {
 	f := newVideoRetryTestFixture(t, true)
 	f.pollReason[0] = "service unavailable"
-	// Failures arrive after the safe resubmission window. They must still
-	// protect future requests without duplicating these accepted jobs.
+	// A task's failures and accepted jobs never change the next request's
+	// initial priority. Each task independently falls back after confirmed failure.
 	for range 3 {
 		task := f.submit(t, false)
 		require.Equal(t, 163, task.ChannelId)
-		require.NotNil(t, task.PrivateData.AutoSwitch)
-		task.PrivateData.VideoRetry.AcceptedAt = time.Now().Unix() - service.VideoTaskRetryWindowSeconds - 1
-		won, err := task.UpdateWithStatus(task.Status)
-		require.NoError(t, err)
-		require.True(t, won)
+		assert.Nil(t, task.PrivateData.AutoSwitch)
 		task = f.poll(t, task)
-		require.Equal(t, model.TaskStatus(model.TaskStatusFailure), task.Status)
+		require.Equal(t, 174, task.ChannelId)
+		task = f.poll(t, task)
+		require.Equal(t, model.TaskStatus(model.TaskStatusSuccess), task.Status)
 	}
-	assert.Equal(t, int32(3), f.submitCalls[0].Load())
-	assert.Zero(t, f.submitCalls[1].Load(), "late failures cannot submit a replacement")
+	assert.EqualValues(t, 3, f.submitCalls[0].Load())
+	assert.EqualValues(t, 3, f.submitCalls[1].Load())
 	states, err := model.ListChannelAutoSwitchStates(163)
 	require.NoError(t, err)
-	require.Len(t, states, 1)
-	assert.Equal(t, model.ChannelAutoSwitchCooling, states[0].Status)
-	backup := f.submit(t, false)
-	require.Equal(t, 174, backup.ChannelId)
-	backup = f.poll(t, backup)
-	require.Equal(t, model.TaskStatus(model.TaskStatusSuccess), backup.Status)
-	// Advance the eligibility time, without sleeping or bypassing the atomic
-	// probe claim. Only one accepted probe may be outstanding across requests.
-	require.NoError(t, f.db.Model(&model.ChannelAutoSwitchState{}).Where("channel_id = ?", 163).Update("cooldown_until", time.Now().Unix()-1).Error)
-	f.pollStatus[0] = "SUCCESS"
-	for i := range 3 {
-		probe := f.submit(t, false)
-		require.Equal(t, 163, probe.ChannelId)
-		require.True(t, probe.PrivateData.AutoSwitch.Probe)
-		states, err = model.ListChannelAutoSwitchStates(163)
-		require.NoError(t, err)
-		assert.Equal(t, i, states[0].ProbeSuccesses, "an accepted task ID is not success")
-		concurrent := f.submit(t, false)
-		require.Equal(t, 174, concurrent.ChannelId, "backup handles traffic while probe is in flight")
-		f.poll(t, concurrent)
-		probe = f.poll(t, probe)
-		require.Equal(t, model.TaskStatus(model.TaskStatusSuccess), probe.Status)
-	}
-	restored := f.submit(t, false)
-	require.Equal(t, 163, restored.ChannelId, "three final successes restore administrator priority")
-	assert.False(t, restored.PrivateData.AutoSwitch.Probe)
-	f.poll(t, restored)
+	assert.Empty(t, states)
 	for i, ch := range f.channels {
 		var stored model.Channel
 		require.NoError(t, f.db.First(&stored, ch.Id).Error)
-		assert.Equal(t, int64(1-i), *stored.Priority, "manual priority is never rewritten")
+		assert.Equal(t, int64(1-i), *stored.Priority)
 		assert.Equal(t, common.ChannelStatusEnabled, stored.Status)
 	}
 	var user model.User
 	require.NoError(t, f.db.First(&user, f.user.Id).Error)
-	wantCharge := common.QuotaRound(8 * 3 * 0.01 * common.QuotaPerUnit)
-	assert.Equal(t, f.user.Quota-wantCharge, user.Quota, "three failed jobs refunded; eight successes charged once")
+	wantCharge := common.QuotaRound(3 * 3 * 0.01 * common.QuotaPerUnit)
+	assert.Equal(t, f.user.Quota-wantCharge, user.Quota)
 	assert.Equal(t, wantCharge, user.UsedQuota)
 }
 
@@ -1441,6 +1432,9 @@ func TestChannelAutoSwitchAdmissionAndFailureClasses(t *testing.T) {
 					assert.Nil(t, task.PrivateData.AutoSwitch)
 				}
 				task.PrivateData.VideoRetry.AcceptedAt = time.Now().Unix() - service.VideoTaskRetryWindowSeconds - 1
+				if task.PrivateData.MediaRetry != nil {
+					task.PrivateData.MediaRetry.DeadlineMS = time.Now().Add(-time.Second).UnixMilli()
+				}
 				won, err := task.UpdateWithStatus(task.Status)
 				require.NoError(t, err)
 				require.True(t, won)
@@ -1448,13 +1442,7 @@ func TestChannelAutoSwitchAdmissionAndFailureClasses(t *testing.T) {
 			}
 			states, err := model.ListChannelAutoSwitchStates(163)
 			require.NoError(t, err)
-			if tc.onlyOne {
-				assert.Empty(t, states)
-			} else {
-				require.Len(t, states, 1)
-				assert.Equal(t, model.ChannelAutoSwitchHealthy, states[0].Status)
-				assert.Zero(t, states[0].ConsecutiveFailures)
-			}
+			assert.Empty(t, states, "media failures are isolated to each task")
 		})
 	}
 }
@@ -1480,10 +1468,10 @@ func TestChannelAutoSwitchRoutingConstraints(t *testing.T) {
 				path                       string
 				want                       int
 			}{
-				{name: "ordinary fallback", path: "/v1/videos", want: 174},
+				{name: "new request ignores old cooling", path: "/v1/videos", want: 163},
 				{name: "explicit pin", pin: true, path: "/v1/videos", want: 163},
 				{name: "strict session", strict: true, path: "/v1/videos", want: 163},
-				{name: "request excludes backup", excludeBackup: true, path: "/v1/videos", want: 0},
+				{name: "request excludes backup", excludeBackup: true, path: "/v1/videos", want: 163},
 				{name: "other protocol isolated", path: "/v1/images/generations", want: 163},
 			} {
 				t.Run(tc.name, func(t *testing.T) {
@@ -1525,7 +1513,7 @@ func TestChannelAutoSwitchRoutingConstraints(t *testing.T) {
 			require.Nil(t, selectErr)
 			require.NotNil(t, ch)
 			assert.Equal(t, 174, ch.Id)
-			require.NotNil(t, service.AutoSwitchAttempt(c), "a disabled peer still participates in configured automatic mode")
+			assert.Nil(t, service.AutoSwitchAttempt(c), "media tasks do not acquire global health leases")
 			service.ReleaseAutoSwitchAttempt(c)
 			// Turning the peer's switch off explicitly returns the remaining
 			// channel to ordinary routing, even after it has health history.
@@ -1554,6 +1542,11 @@ func TestChannelAutoSwitchTimedOutProbe(t *testing.T) {
 		require.NoError(t, model.RecordChannelAutoSwitchResult(*ticket, model.ChannelAutoSwitchFailure, "upstream_unavailable", now))
 	}
 	task := f.submit(t, false)
+	// Preserve recovery coverage for tasks accepted by the former global policy.
+	legacyTicket, legacyErr := model.BeginChannelAutoSwitchAttempt(163, "default", "retry-video", "/v1/videos", time.Now())
+	require.NoError(t, legacyErr)
+	require.NotNil(t, legacyTicket)
+	task.PrivateData.AutoSwitch = legacyTicket
 	require.True(t, task.PrivateData.AutoSwitch.Probe)
 	task.SubmitTime = time.Now().Add(-2 * time.Minute).Unix()
 	won, err := task.UpdateWithStatus(task.Status)
@@ -1564,8 +1557,25 @@ func TestChannelAutoSwitchTimedOutProbe(t *testing.T) {
 	t.Cleanup(func() { constant.TaskTimeoutMinutes = previousTimeout })
 	service.RunTaskPollingOnce(context.Background(), nil)
 	stored := f.load(t, task.TaskID)
-	assert.Equal(t, model.TaskStatus(model.TaskStatusFailure), stored.Status)
+	assert.NotEqual(t, model.TaskStatus(model.TaskStatusFailure), stored.Status, "the channel window must outlive a shorter global task timeout")
 	states, err := model.ListChannelAutoSwitchStates(163)
+	require.NoError(t, err)
+	require.Len(t, states, 1)
+	assert.Equal(t, model.ChannelAutoSwitchProbing, states[0].Status)
+	// Move the persisted policy past both its retry window and execution
+	// allowance. Aging SubmitTime alone must not expire a current attempt.
+	require.NotNil(t, stored.PrivateData.MediaRetry)
+	stored.SubmitTime = time.Now().Add(-12 * time.Minute).Unix()
+	stored.PrivateData.MediaRetry.StartedAtMS = stored.SubmitTime * 1000
+	stored.PrivateData.MediaRetry.DeadlineMS = time.Unix(stored.SubmitTime, 0).Add(10 * time.Minute).UnixMilli()
+	won, err = stored.UpdateWithStatus(stored.Status)
+	require.NoError(t, err)
+	require.True(t, won)
+	service.RunTaskPollingOnce(context.Background(), nil)
+	service.RunTaskPollingOnce(context.Background(), nil)
+	stored = f.load(t, task.TaskID)
+	assert.Equal(t, model.TaskStatus(model.TaskStatusFailure), stored.Status)
+	states, err = model.ListChannelAutoSwitchStates(163)
 	require.NoError(t, err)
 	require.Len(t, states, 1)
 	assert.Equal(t, model.ChannelAutoSwitchCooling, states[0].Status)
@@ -1631,16 +1641,7 @@ func TestChannelAutoSwitchMalformedAcceptedProbe(t *testing.T) {
 	ch, _, selectErr := service.SelectChannelForRequest(c, "retry-video", &service.RetryParam{Ctx: c, TokenGroup: "default", ModelName: "retry-video"})
 	require.Nil(t, selectErr)
 	require.Equal(t, 163, ch.Id)
-	require.True(t, service.AutoSwitchAttempt(c).Probe)
-	assert.False(t, c.GetBool("auto_switch_task_dispatched"), "a new selection clears dispatch evidence from the previous attempt")
-	service.ReleaseAutoSwitchAttempt(c)
-	statesBefore, err := model.ListChannelAutoSwitchStates(163)
-	require.NoError(t, err)
-	require.Len(t, statesBefore, 1)
-	assert.Empty(t, statesBefore[0].ProbeAttemptID, "local rejection before dispatch releases the unsent probe")
-	ch, _, selectErr = service.SelectChannelForRequest(c, "retry-video", &service.RetryParam{Ctx: c, TokenGroup: "default", ModelName: "retry-video"})
-	require.Nil(t, selectErr)
-	require.True(t, service.AutoSwitchAttempt(c).Probe)
+	assert.Nil(t, service.AutoSwitchAttempt(c))
 	require.Nil(t, middleware.SetupContextForSelectedChannel(c, ch, "retry-video"))
 	info := &relaycommon.RelayInfo{UserId: f.user.Id, UserGroup: "default", UsingGroup: "default", TokenGroup: "default", UserQuota: f.user.Quota, OriginModelName: "retry-video", IsPlayground: true, TaskRelayInfo: &relaycommon.TaskRelayInfo{PublicTaskID: model.GenerateTaskID(), Action: c.GetString("task_action")}}
 	info.UserSetting.BillingPreference = "wallet_only"
@@ -1653,11 +1654,12 @@ func TestChannelAutoSwitchMalformedAcceptedProbe(t *testing.T) {
 	states, err := model.ListChannelAutoSwitchStates(163)
 	require.NoError(t, err)
 	require.Len(t, states, 1)
-	assert.Equal(t, model.ChannelAutoSwitchProbing, states[0].Status)
-	assert.NotEmpty(t, states[0].ProbeAttemptID, "parsing failure cannot release a possibly running probe")
-	backup := f.submit(t, false)
-	assert.Equal(t, 174, backup.ChannelId, "other requests continue on backup while outcome is unknown")
-	f.poll(t, backup)
+	assert.Equal(t, model.ChannelAutoSwitchCooling, states[0].Status, "old health observations are not consumed by new tasks")
+	f.malformed[0] = false
+	f.pollStatus[0] = "SUCCESS"
+	fresh := f.submit(t, false)
+	assert.Equal(t, 163, fresh.ChannelId, "another request starts at the configured highest priority")
+	f.poll(t, fresh)
 }
 
 func TestVideoTaskRetryFailureBoundaries(t *testing.T) {
@@ -1762,8 +1764,15 @@ func TestVideoTaskRetryImmediateReplacementSettlesOnce(t *testing.T) {
 }
 
 func TestVideoTaskRetryClaimsOneReplacementUnderCompetingPolls(t *testing.T) {
-	f := newVideoRetryTestFixture(t)
-	task := f.submit(t, false)
+	for _, executionID := range []string{"", "bridge-video-retry-0001"} {
+		t.Run(fmt.Sprintf("guarded=%t", executionID != ""), func(t *testing.T) { testVideoTaskRetryClaimsOneReplacementUnderCompetingPolls(t, executionID) })
+	}
+}
+
+func testVideoTaskRetryClaimsOneReplacementUnderCompetingPolls(t *testing.T, executionID string) {
+	f := newVideoRetryTestFixture(t, true)
+	f.largeBody = bytes.Repeat([]byte("large reference request "), (9<<20)/24+1)
+	task := f.submit(t, false, executionID)
 	stale := f.load(t, task.TaskID)
 	f.submitStarted, f.releaseSubmit = make(chan struct{}), make(chan struct{})
 	defer close(f.releaseSubmit)
@@ -1799,6 +1808,152 @@ func TestVideoTaskRetryClaimsOneReplacementUnderCompetingPolls(t *testing.T) {
 	assert.Equal(t, int32(1), f.submitCalls[1].Load())
 }
 
+func TestVideoTaskRetryLargeBody(t *testing.T) {
+	for _, executionID := range []string{"", "bridge-video-retry-0001"} {
+		t.Run(fmt.Sprintf("guarded=%t", executionID != ""), func(t *testing.T) { testVideoTaskRetryLargeBody(t, executionID) })
+	}
+}
+
+func testVideoTaskRetryLargeBody(t *testing.T, executionID string) {
+	for _, scenario := range []string{"json", "multipart", "missing chunk", "corrupt chunk", "expired window", "unknown submit"} {
+		t.Run(scenario, func(t *testing.T) {
+			f := newVideoRetryTestFixture(t, true)
+			f.largeBody = bytes.Repeat([]byte("reference"), (9<<20)/9+1)
+			task := f.submit(t, scenario == "multipart", executionID)
+			require.NotNil(t, task.PrivateData.VideoRetry.BodyRef)
+			ref := task.PrivateData.VideoRetry.BodyRef
+			deadline := task.PrivateData.MediaRetry.DeadlineMS
+			stale := f.load(t, task.TaskID)
+			switch scenario {
+			case "missing chunk":
+				require.NoError(t, f.db.Where("snapshot_id = ? AND part_index = ?", ref.ID, 1).Delete(&model.TaskRetryBodyChunk{}).Error)
+			case "corrupt chunk":
+				require.NoError(t, f.db.Model(&model.TaskRetryBodyChunk{}).Where("snapshot_id = ? AND part_index = ?", ref.ID, 0).Update("payload", base64.StdEncoding.EncodeToString(bytes.Repeat([]byte("z"), 32<<10))).Error)
+			case "expired window":
+				task.PrivateData.MediaRetry.DeadlineMS = time.Now().Add(-time.Second).UnixMilli()
+			case "unknown submit":
+				task.PrivateData.VideoRetry.Submitting = true
+				task.PrivateData.VideoRetry.SubmitStartedAt = time.Now().Unix() - service.VideoTaskRetrySubmitTimeoutSeconds - 1
+			}
+			if scenario == "expired window" || scenario == "unknown submit" {
+				won, err := task.UpdateWithStatus(task.Status)
+				require.NoError(t, err)
+				require.True(t, won)
+			}
+			task = f.poll(t, f.load(t, task.TaskID))
+			if scenario == "json" || scenario == "multipart" {
+				assert.EqualValues(t, 1, f.submitCalls[1].Load())
+				assert.Equal(t, deadline, task.PrivateData.MediaRetry.DeadlineMS)
+				assert.Equal(t, ref.ID, task.PrivateData.VideoRetry.BodyRef.ID)
+				if scenario == "multipart" {
+					decoded, err := base64.StdEncoding.DecodeString(f.received[1]["reference"].(string))
+					require.NoError(t, err)
+					assert.Equal(t, f.largeBody, decoded)
+				} else {
+					assert.Equal(t, string(f.largeBody), f.received[1]["prompt"])
+				}
+				stale.Status = model.TaskStatusFailure
+				won, err := stale.UpdateWithStatus(model.TaskStatusNotStart)
+				require.NoError(t, err)
+				assert.False(t, won)
+				_, err = ref.Read(context.Background())
+				require.NoError(t, err, "stale worker must not delete the active snapshot")
+				task = f.poll(t, f.load(t, task.TaskID))
+				assert.Equal(t, model.TaskStatus(model.TaskStatusSuccess), task.Status)
+				assert.Equal(t, service.TaskBillingStateSettled, task.PrivateData.BillingState)
+			} else {
+				assert.Zero(t, f.submitCalls[1].Load(), "missing/uncertain/expired data must never cause another POST")
+				assert.Equal(t, model.TaskStatus(model.TaskStatusFailure), task.Status)
+				assert.Equal(t, service.TaskBillingStateRefunded, task.PrivateData.BillingState)
+			}
+			assert.Nil(t, task.PrivateData.VideoRetry.BodyRef)
+			var chunks int64
+			require.NoError(t, f.db.Model(&model.TaskRetryBodyChunk{}).Where("snapshot_id = ?", ref.ID).Count(&chunks).Error)
+			assert.Zero(t, chunks, "terminal CAS releases snapshot")
+			var user model.User
+			require.NoError(t, f.db.First(&user, f.user.Id).Error)
+			assert.Equal(t, f.user.Quota-task.Quota, user.Quota)
+		})
+	}
+}
+
+func TestVideoTaskRetryBodyStorage(t *testing.T) {
+	db, dialect := openTaskDialectDatabase(t, &model.Task{})
+	previous := model.DB
+	previousMain, previousLog := common.MainDatabaseType(), common.LogDatabaseType()
+	model.DB = db
+	common.SetDatabaseTypes(dialect, previousLog)
+	t.Cleanup(func() { model.DB = previous; common.SetDatabaseTypes(previousMain, previousLog) })
+	legacy := model.Task{TaskID: model.GenerateTaskID(), Status: model.TaskStatusSubmitted, PrivateData: model.TaskPrivateData{VideoRetry: &model.VideoTaskRetryState{Body: []byte("legacy body"), Ready: true}}}
+	require.NoError(t, db.Create(&legacy).Error)
+	for range 2 {
+		require.NoError(t, db.AutoMigrate(&model.TaskRetryBodyChunk{}))
+	}
+	t.Cleanup(func() { require.NoError(t, db.Migrator().DropTable(&model.TaskRetryBodyChunk{})) })
+	var restored model.Task
+	require.NoError(t, db.First(&restored, legacy.ID).Error)
+	assert.Equal(t, []byte("legacy body"), restored.PrivateData.VideoRetry.Body)
+	assert.Nil(t, restored.PrivateData.VideoRetry.BodyRef)
+	// More than two batches prove an error rolls back earlier INSERTs too.
+	storage, err := common.CreateBodyStorage(bytes.Repeat([]byte("original"), (96<<15)/8+1))
+	require.NoError(t, err)
+	defer storage.Close()
+	created := 0
+	require.NoError(t, db.Callback().Create().Before("gorm:create").Register("retry_chunk_failure", func(tx *gorm.DB) {
+		if tx.Statement.Schema.Name == "TaskRetryBodyChunk" {
+			created++
+			if created == 3 {
+				tx.AddError(errors.New("injected snapshot failure"))
+			}
+		}
+	}))
+	_, err = model.SaveTaskRetryBody(context.Background(), storage)
+	require.ErrorContains(t, err, "injected snapshot failure")
+	created = 0
+	c := taskSubmissionTestContext()
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/videos", bytes.NewReader(bytes.Repeat([]byte("x"), (8<<20)+1)))
+	defer common.CleanupBodyStorage(c)
+	service.BindMediaRetry(c, &model.MediaRetryState{Version: 1, WindowMinutes: 10, MaxAttempts: 3})
+	posts := 0
+	_, taskErr := executeTaskSubmissionWith(c, &relaycommon.RelayInfo{TaskRelayInfo: &relaycommon.TaskRelayInfo{}, ChannelMeta: &relaycommon.ChannelMeta{}}, func(*gin.Context, *relaycommon.RelayInfo) (*relay.TaskSubmitResult, *dto.TaskError) {
+		posts++
+		return nil, nil
+	})
+	require.NotNil(t, taskErr)
+	assert.True(t, taskErr.LocalError)
+	assert.Equal(t, "retry_snapshot_failed", taskErr.Code)
+	assert.Zero(t, posts, "snapshot persistence must succeed before any upstream dispatch")
+	require.NoError(t, db.Callback().Create().Remove("retry_chunk_failure"))
+	var chunks int64
+	require.NoError(t, db.Model(&model.TaskRetryBodyChunk{}).Count(&chunks).Error)
+	assert.Zero(t, chunks, "failed snapshot insert rolls back every chunk")
+	ref, err := model.SaveTaskRetryBody(context.Background(), storage)
+	require.NoError(t, err)
+	legacy.PrivateData.VideoRetry.Body, legacy.PrivateData.VideoRetry.BodyRef = nil, ref
+	require.NoError(t, db.Save(&legacy).Error)
+	legacy.Status = model.TaskStatusFailure
+	require.NoError(t, db.Callback().Update().Before("gorm:update").Register("retry_terminal_failure", func(tx *gorm.DB) { tx.AddError(errors.New("injected terminal failure")) }))
+	won, err := legacy.UpdateWithStatus(model.TaskStatusSubmitted)
+	require.ErrorContains(t, err, "injected terminal failure")
+	assert.False(t, won)
+	require.NoError(t, db.Callback().Update().Remove("retry_terminal_failure"))
+	_, err = ref.Read(context.Background())
+	require.NoError(t, err, "failed terminal write rolls back chunk deletion")
+	won, err = legacy.UpdateWithStatus(model.TaskStatusSubmitted)
+	require.NoError(t, err)
+	require.True(t, won)
+	_, err = ref.Read(context.Background())
+	require.Error(t, err)
+	orphan, err := model.SaveTaskRetryBody(context.Background(), storage)
+	require.NoError(t, err)
+	require.NoError(t, model.PruneTaskRetryBodies(context.Background(), time.Now().Unix()))
+	_, err = orphan.Read(context.Background())
+	require.NoError(t, err, "unexpired snapshot survives cleanup")
+	require.NoError(t, model.PruneTaskRetryBodies(context.Background(), time.Now().Add(25*time.Hour).Unix()))
+	_, err = orphan.Read(context.Background())
+	require.Error(t, err, "abandoned snapshot expires")
+}
+
 func TestVideoTaskRetryCaptureExcludesBoundAndNonVideoRequests(t *testing.T) {
 	oldRetry := common.RetryTimes
 	common.RetryTimes = 3
@@ -1808,7 +1963,9 @@ func TestVideoTaskRetryCaptureExcludesBoundAndNonVideoRequests(t *testing.T) {
 			c := taskSubmissionTestContext()
 			c.Request.URL.Path = path
 			defer common.CleanupBodyStorage(c)
-			assert.NotNil(t, captureVideoTaskRetry(c, &relaycommon.RelayInfo{TaskRelayInfo: &relaycommon.TaskRelayInfo{}}))
+			retry, err := captureVideoTaskRetry(c, &relaycommon.RelayInfo{TaskRelayInfo: &relaycommon.TaskRelayInfo{}})
+			require.NoError(t, err)
+			assert.NotNil(t, retry)
 		})
 	}
 	for _, tc := range []struct {
@@ -1831,7 +1988,9 @@ func TestVideoTaskRetryCaptureExcludesBoundAndNonVideoRequests(t *testing.T) {
 			c.Request.URL.Path = "/v1/videos"
 			info := &relaycommon.RelayInfo{TaskRelayInfo: &relaycommon.TaskRelayInfo{}}
 			tc.edit(c, info)
-			assert.Nil(t, captureVideoTaskRetry(c, info))
+			retry, err := captureVideoTaskRetry(c, info)
+			require.NoError(t, err)
+			assert.Nil(t, retry)
 		})
 	}
 }
@@ -1867,6 +2026,7 @@ func TestVideoTaskRetryEligibilityWindowAndBudget(t *testing.T) {
 }
 
 func TestVideoTaskRetryCaptureBoundedRequest(t *testing.T) {
+	f := newVideoRetryTestFixture(t)
 	previousRetry := common.RetryTimes
 	common.RetryTimes = 3
 	t.Cleanup(func() { common.RetryTimes = previousRetry })
@@ -1876,18 +2036,45 @@ func TestVideoTaskRetryCaptureBoundedRequest(t *testing.T) {
 			body := bytes.Repeat([]byte("x"), size)
 			c.Request = httptest.NewRequest(http.MethodPost, "/v1/videos", bytes.NewReader(body))
 			defer common.CleanupBodyStorage(c)
-			retry := captureVideoTaskRetry(c, &relaycommon.RelayInfo{TaskRelayInfo: &relaycommon.TaskRelayInfo{}})
-			if size > 8<<20 {
-				assert.Nil(t, retry)
-				return
-			}
+			retry, err := captureVideoTaskRetry(c, &relaycommon.RelayInfo{TaskRelayInfo: &relaycommon.TaskRelayInfo{}})
+			require.NoError(t, err)
 			require.NotNil(t, retry)
-			assert.Equal(t, body, retry.Body)
+			if size > 8<<20 {
+				require.NotNil(t, retry.BodyRef)
+				stored, err := retry.BodyRef.Read(context.Background())
+				require.NoError(t, err)
+				assert.Equal(t, body, stored)
+				require.NoError(t, model.DeleteTaskRetryBody(context.Background(), retry.BodyRef))
+			} else {
+				assert.Equal(t, body, retry.Body)
+			}
 			common.RetryTimes = 0
-			assert.Nil(t, captureVideoTaskRetry(c, &relaycommon.RelayInfo{TaskRelayInfo: &relaycommon.TaskRelayInfo{}}))
+			retry, err = captureVideoTaskRetry(c, &relaycommon.RelayInfo{TaskRelayInfo: &relaycommon.TaskRelayInfo{}})
+			require.NoError(t, err)
+			assert.Nil(t, retry)
 			common.RetryTimes = 3
 		})
 	}
+	var count int64
+	require.NoError(t, f.db.Model(&model.TaskRetryBodyChunk{}).Count(&count).Error)
+	assert.Zero(t, count)
+	t.Run("gateway body limit still applies", func(t *testing.T) {
+		previous := constant.MaxRequestBodyMB
+		constant.MaxRequestBodyMB = 1
+		t.Cleanup(func() { constant.MaxRequestBodyMB = previous })
+		c := taskSubmissionTestContext()
+		c.Request = httptest.NewRequest(http.MethodPost, "/v1/videos", bytes.NewReader(bytes.Repeat([]byte("x"), (1<<20)+1)))
+		defer common.CleanupBodyStorage(c)
+		info := &relaycommon.RelayInfo{TaskRelayInfo: &relaycommon.TaskRelayInfo{}, ChannelMeta: &relaycommon.ChannelMeta{}}
+		posts := 0
+		_, taskErr := executeTaskSubmissionWith(c, info, func(*gin.Context, *relaycommon.RelayInfo) (*relay.TaskSubmitResult, *dto.TaskError) {
+			posts++
+			return nil, nil
+		})
+		require.NotNil(t, taskErr)
+		assert.Equal(t, http.StatusRequestEntityTooLarge, taskErr.StatusCode)
+		assert.Zero(t, posts)
+	})
 }
 
 func TestVideoTaskRetryQuotaDatabase(t *testing.T) {
@@ -1929,6 +2116,7 @@ func TestVideoTaskRetryQuotaDatabase(t *testing.T) {
 		redisToken     bool
 		persistFailure bool
 		freeSource     bool
+		imageFinal     bool
 		wantError      string
 	}{
 		{name: "wallet difference", target: 150},
@@ -1947,6 +2135,17 @@ func TestVideoTaskRetryQuotaDatabase(t *testing.T) {
 		{name: "unflushed wallet usage", target: 150, redisWallet: true, wantError: "wallet quota insufficient"},
 		{name: "unflushed token usage compensates wallet", target: 150, redisToken: true, wantError: "token quota insufficient"},
 		{name: "persistence failure rolls back all balances", target: 150, persistFailure: true, wantError: "injected task persistence failure"},
+		{name: "stale image completion cannot charge", imageFinal: true, target: 150, stale: true, wantError: "claim is no longer current"},
+		{name: "stale image completion cannot refund", imageFinal: true, target: 50, stale: true, wantError: "claim is no longer current"},
+		{name: "image final difference", imageFinal: true, target: 150},
+		{name: "image final cheaper", imageFinal: true, target: 50},
+		{name: "image final usage exceeds wallet reservation", imageFinal: true, target: 150, walletShort: true},
+		{name: "image final usage exceeds token reservation", imageFinal: true, target: 150, tokenShort: true},
+		{name: "image final subscription difference", imageFinal: true, target: 150, subscription: true},
+		{name: "image final usage with zero initial estimate", imageFinal: true, target: 150, freeSource: true},
+		{name: "image final usage with unflushed wallet usage", imageFinal: true, target: 150, redisWallet: true},
+		{name: "image final usage with unflushed token usage", imageFinal: true, target: 150, redisToken: true},
+		{name: "image final failure rolls back balances", imageFinal: true, target: 150, persistFailure: true, wantError: "injected task persistence failure"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			user := model.User{Username: fmt.Sprintf("vretryquota_%d", index), AffCode: fmt.Sprintf("vretryquota_%d", index), Status: common.UserStatusEnabled, Quota: 200, AuthVersion: 1}
@@ -1978,6 +2177,13 @@ func TestVideoTaskRetryQuotaDatabase(t *testing.T) {
 				task.Quota, task.PrivateData.BillingSource = 0, ""
 			}
 			initialQuota := task.Quota
+			if tc.imageFinal {
+				task.PrivateData.VideoRetry = nil
+				task.PrivateData.PreConsumedQuota = initialQuota
+				task.PrivateData.InternalAsync = true
+				task.PrivateData.ImageRetry = &model.AsyncImageRetryState{}
+				task.PrivateData.WorkerAttempts = 2
+			}
 			subscription := model.UserSubscription{UserId: user.Id, AmountTotal: 300, AmountUsed: 100, Status: "active", EndTime: time.Now().Add(time.Hour).Unix()}
 			if tc.subscription {
 				if tc.subShort {
@@ -1991,7 +2197,11 @@ func TestVideoTaskRetryQuotaDatabase(t *testing.T) {
 			}
 			require.NoError(t, db.Create(&task).Error)
 			if tc.stale {
-				task.PrivateData.VideoRetry.Revision--
+				if tc.imageFinal {
+					task.PrivateData.WorkerAttempts--
+				} else {
+					task.PrivateData.VideoRetry.Revision--
+				}
 			}
 			useRedis := tc.redisWallet || tc.redisToken || tc.persistFailure
 			if useRedis {
@@ -2018,7 +2228,12 @@ func TestVideoTaskRetryQuotaDatabase(t *testing.T) {
 				}))
 				t.Cleanup(func() { require.NoError(t, db.Callback().Update().Remove("video_retry_quota_failure")) })
 			}
-			err := model.SetVideoTaskRetryQuota(context.Background(), &task, tc.target)
+			var err error
+			if tc.imageFinal {
+				err = service.AdjustTaskQuotaForFinalSettlement(context.Background(), &task, tc.target, "image retry completion")
+			} else {
+				err = model.SetVideoTaskRetryQuota(context.Background(), &task, tc.target)
+			}
 			wantQuota := tc.target
 			if tc.wantError != "" {
 				require.ErrorContains(t, err, tc.wantError)
@@ -2035,6 +2250,10 @@ func TestVideoTaskRetryQuotaDatabase(t *testing.T) {
 			require.NoError(t, db.First(&savedToken, token.Id).Error)
 			assert.Equal(t, wantQuota, savedTask.Quota)
 			assert.Equal(t, wantQuota, task.Quota)
+			if tc.imageFinal {
+				assert.Equal(t, initialQuota, savedTask.PrivateData.PreConsumedQuota, "completion keeps the reservation audit amount")
+				assert.Equal(t, initialQuota, task.PrivateData.PreConsumedQuota)
+			}
 			assert.Equal(t, token.RemainQuota-delta, savedToken.RemainQuota)
 			assert.Equal(t, token.UsedQuota+delta, savedToken.UsedQuota)
 			assert.Zero(t, savedUser.UsedQuota, "retry reservation is not a second consumption")
@@ -2063,6 +2282,164 @@ func TestVideoTaskRetryQuotaDatabase(t *testing.T) {
 				assert.Equal(t, wantTokenCache, cachedToken.RemainQuota)
 				assert.Equal(t, token.UsedQuota+delta, cachedToken.UsedQuota)
 			}
+		})
+	}
+}
+
+func TestMediaRetryPolicyAndValidation(t *testing.T) {
+	for _, tc := range []struct {
+		settings string
+		valid    bool
+	}{
+		{`{}`, true}, {`{"auto_switch_retry_window_minutes":1,"auto_switch_max_attempts":1}`, true},
+		{`{"auto_switch_retry_window_minutes":120,"auto_switch_max_attempts":10}`, true},
+		{`{"auto_switch_max_attempts":0}`, false}, {`{"auto_switch_max_attempts":11}`, false},
+		{`{"auto_switch_max_attempts":1.5}`, false}, {`{"auto_switch_retry_window_minutes":121}`, false},
+		{`{"auto_switch_retry_window_minutes":-1}`, false}, {`{"auto_switch_retry_window_minutes":""}`, false},
+		{`{"auto_switch_max_attempts":null}`, false}, {`{"auto_switch_retry_window_minutes":null}`, false},
+	} {
+		t.Run(tc.settings, func(t *testing.T) {
+			err := validateChannel(&model.Channel{Type: 1, OtherSettings: tc.settings}, false)
+			if tc.valid {
+				require.NoError(t, err)
+			} else {
+				require.Error(t, err)
+			}
+		})
+	}
+	now := time.Unix(1700000000, 0)
+	state := &model.MediaRetryState{Version: 1, WindowMinutes: 10, MaxAttempts: 3}
+	require.True(t, state.BeginAttempt(now))
+	assert.Equal(t, 2, (service.RetryBudget{Media: state}).Remaining(0, 1, now), "channel budget overrides global zero")
+	state.RecordFailure(7, "content_policy", "first wording")
+	state.RecordFailure(7, "invalid_request", "different category")
+	assert.Empty(t, state.Excluded)
+	state.RecordFailure(7, "content_policy", "different moderation wording")
+	assert.Equal(t, []int{7}, state.Excluded)
+	data, err := common.Marshal(state)
+	require.NoError(t, err)
+	var resumed model.MediaRetryState
+	require.NoError(t, common.Unmarshal(data, &resumed))
+	require.True(t, resumed.BeginAttempt(now.Add(time.Minute)))
+	assert.Equal(t, state.DeadlineMS, resumed.DeadlineMS)
+	assert.Equal(t, []int{7}, resumed.Excluded)
+	assert.Equal(t, 0, resumed.Remaining(now.Add(10*time.Minute)))
+	require.True(t, resumed.BeginAttempt(now.Add(2*time.Minute)))
+	assert.False(t, resumed.BeginAttempt(now.Add(3*time.Minute)))
+	assert.Equal(t, "quota", resumed.RecordFailure(8, "", `{"error":{"code":"insufficient_quota","message":"moderation service"}}`), "structured code takes precedence over message")
+	for _, path := range []string{"/v1/images/generations", "/v1/chat/completions"} {
+		c, _ := gin.CreateTestContext(httptest.NewRecorder())
+		c.Request = httptest.NewRequest(http.MethodPost, path, nil)
+		common.SetContextKey(c, constant.ContextKeyChannelOtherSetting, kitdto.ChannelOtherSettings{AutoSwitchEnabled: true})
+		service.InitializeMediaRetry(c, &relaycommon.RelayInfo{})
+		if path == "/v1/images/generations" {
+			require.NotNil(t, service.MediaRetry(c))
+			assert.Equal(t, 3, service.MediaRetry(c).MaxAttempts)
+		} else {
+			assert.Nil(t, service.MediaRetry(c))
+		}
+	}
+}
+
+func TestMediaRetryVideoLifecycle(t *testing.T) {
+	for _, executionID := range []string{"", "bridge-video-retry-0001"} {
+		t.Run(fmt.Sprintf("guarded=%t", executionID != ""), func(t *testing.T) { testMediaRetryVideoLifecycle(t, executionID) })
+	}
+}
+
+func testMediaRetryVideoLifecycle(t *testing.T, executionID string) {
+	require.NoError(t, i18n.Init())
+	t.Run("accepted success survives expired window", func(t *testing.T) {
+		f := newVideoRetryTestFixture(t, true)
+		task := f.submit(t, false, executionID)
+		f.pollStatus[0] = model.TaskStatusSuccess
+		task.PrivateData.MediaRetry.DeadlineMS = time.Now().Add(-time.Second).UnixMilli()
+		won, err := task.UpdateWithStatus(task.Status)
+		require.NoError(t, err)
+		require.True(t, won)
+		task = f.poll(t, f.load(t, task.TaskID))
+		assert.Equal(t, model.TaskStatus(model.TaskStatusSuccess), task.Status)
+		assert.Equal(t, service.TaskBillingStateSettled, task.PrivateData.BillingState)
+		assert.EqualValues(t, 1, f.submitCalls[0].Load())
+		assert.Zero(t, f.submitCalls[1].Load())
+	})
+	t.Run("immediate replacement failure preserves polling claim", func(t *testing.T) {
+		f := newVideoRetryTestFixture(t, true)
+		task := f.submit(t, false, executionID)
+		from := task.Status
+		task.Status = model.TaskStatusInProgress
+		won, err := task.UpdateWithStatus(from)
+		require.NoError(t, err)
+		require.True(t, won)
+		f.submitStatus = [2]string{model.TaskStatusFailure, model.TaskStatusFailure}
+		task = f.poll(t, f.load(t, task.TaskID))
+		assert.Equal(t, model.TaskStatus(model.TaskStatusFailure), task.Status)
+		assert.Equal(t, service.TaskBillingStateRefunded, task.PrivateData.BillingState)
+		assert.Equal(t, 3, task.PrivateData.MediaRetry.Attempts)
+		assert.Len(t, task.PrivateData.MediaRetry.History, 3)
+	})
+	for _, tc := range []struct {
+		name                       string
+		limit, want                int
+		single, moderation, expire bool
+	}{
+		{"single channel", 3, 3, true, false, false},
+		{"two rounds", 4, 4, false, false, false},
+		{"hard maximum and cooling fallback", 10, 10, false, false, false},
+		{"one attempt", 1, 1, false, false, false},
+		{"safety rejection stops before another channel", 10, 1, false, true, false},
+		{"whole task deadline", 10, 1, false, false, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newVideoRetryTestFixture(t, true)
+			common.RetryTimes = 0
+			settings := kitdto.ChannelOtherSettings{AutoSwitchEnabled: true, AutoSwitchMaxAttempts: &tc.limit}
+			f.channels[0].SetOtherSettings(settings)
+			require.NoError(t, f.db.Model(&f.channels[0]).Update("settings", f.channels[0].OtherSettings).Error)
+			if tc.single {
+				require.NoError(t, f.db.Model(&model.Channel{}).Where("id = ?", f.channels[1].Id).Update("status", common.ChannelStatusManuallyDisabled).Error)
+				require.NoError(t, f.db.Model(&model.Ability{}).Where("channel_id = ?", f.channels[1].Id).Update("enabled", false).Error)
+			}
+			f.pollStatus = [2]string{"FAILURE", "FAILURE"}
+			f.pollReason = [2]string{"service_unavailable", "service_unavailable"}
+			if tc.moderation {
+				f.pollReason = [2]string{"content_policy rejected", "content_policy rejected"}
+			}
+			task := f.submit(t, false, executionID)
+			require.NotNil(t, task.PrivateData.MediaRetry)
+			assert.Equal(t, tc.limit, task.PrivateData.MediaRetry.MaxAttempts)
+			deadline := task.PrivateData.MediaRetry.DeadlineMS
+			if tc.expire {
+				task.PrivateData.MediaRetry.DeadlineMS = time.Now().Add(-time.Second).UnixMilli()
+				won, err := task.UpdateWithStatus(task.Status)
+				require.NoError(t, err)
+				require.True(t, won)
+			}
+			// Editing the channel cannot reset or shrink an accepted task's snapshot.
+			f.channels[0].SetOtherSettings(kitdto.ChannelOtherSettings{AutoSwitchEnabled: true, AutoSwitchMaxAttempts: common.GetPointer(1)})
+			require.NoError(t, f.db.Model(&f.channels[0]).Update("settings", f.channels[0].OtherSettings).Error)
+			for range 11 {
+				task = f.poll(t, f.load(t, task.TaskID))
+				if task.Status == model.TaskStatusFailure {
+					break
+				}
+			}
+			assert.Equal(t, model.TaskStatus(model.TaskStatusFailure), task.Status)
+			assert.EqualValues(t, tc.want, f.submitCalls[0].Load()+f.submitCalls[1].Load())
+			assert.Equal(t, tc.want, task.PrivateData.MediaRetry.Attempts)
+			if !tc.expire {
+				assert.Equal(t, deadline, task.PrivateData.MediaRetry.DeadlineMS)
+			}
+			if tc.single {
+				assert.Zero(t, f.submitCalls[1].Load())
+			}
+			if tc.moderation {
+				assert.Zero(t, f.submitCalls[1].Load())
+				assert.Equal(t, "safety_related_error", task.PrivateData.MediaRetry.StopReason)
+			}
+			var user model.User
+			require.NoError(t, f.db.First(&user, f.user.Id).Error)
+			assert.Equal(t, f.user.Quota, user.Quota, "exhausted task refunded exactly once")
 		})
 	}
 }

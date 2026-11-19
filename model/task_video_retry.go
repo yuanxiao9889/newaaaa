@@ -15,6 +15,7 @@ import (
 // when a replacement task has the same status as its predecessor.
 type VideoTaskRetryState struct {
 	Body            []byte                  `json:"body,omitempty"`
+	BodyRef         *TaskRetryBodyRef       `json:"body_ref,omitempty"`
 	ContentType     string                  `json:"content_type,omitempty"`
 	Accept          string                  `json:"accept,omitempty"`
 	Method          string                  `json:"method,omitempty"`
@@ -66,7 +67,13 @@ func (t *Task) updateVideoTaskWithStatus(fromStatus TaskStatus) (bool, error) {
 		next.Revision++
 		if t.Status == TaskStatusSuccess || t.Status == TaskStatusFailure {
 			next.Body = nil
+			next.BodyRef = nil
 			next.Submitting = false
+		}
+		if currentRetry.BodyRef != nil && next.BodyRef == nil {
+			if err := tx.Where("snapshot_id = ?", currentRetry.BodyRef.ID).Delete(&TaskRetryBodyChunk{}).Error; err != nil {
+				return err
+			}
 		}
 		t.PrivateData.VideoRetry = &next
 		if err := tx.Model(t).Select("*").Updates(t).Error; err != nil {

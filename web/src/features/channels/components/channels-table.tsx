@@ -144,7 +144,11 @@ export function ChannelsTable() {
           const stored = localStorage.getItem(
             CHANNELS_STATUS_FILTER_STORAGE_KEY
           )
-          return stored === 'enabled' || stored === 'disabled' ? [stored] : []
+          return stored === 'enabled' ||
+            stored === 'disabled' ||
+            stored === 'auto_disabled'
+            ? [stored]
+            : []
         },
       },
       { columnId: 'type', searchKey: 'type', type: 'array' },

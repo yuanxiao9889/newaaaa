@@ -24,6 +24,7 @@ import { useTranslation } from 'react-i18next'
 import { Button } from '@/components/ui/button'
 import { getPerfMetricsSummary } from '@/features/performance-metrics/api'
 import { requireServerSuccess } from '@/lib/server-error-message'
+import { useAuthStore } from '@/stores/auth-store'
 
 import { DEFAULT_PRICING_PAGE_SIZE, DEFAULT_TOKEN_UNIT } from '../constants'
 import type { PricingModel, TokenUnit } from '../types'
@@ -55,8 +56,16 @@ export const ModelCardGrid = memo(function ModelCardGrid(
     return props.models.slice(start, start + pageSize)
   }, [currentPage, pageSize, props.models])
   const recentModels = pagedModels.map((model) => model.model_name || '')
+  const user = useAuthStore((state) => state.auth.user)
   const perfQuery = useQuery({
-    queryKey: ['perf-metrics-summary', 24, recentModels],
+    queryKey: [
+      'perf-metrics-summary',
+      24,
+      recentModels,
+      user?.id ?? null,
+      user?.role ?? 0,
+      user?.group ?? '',
+    ],
     queryFn: async () =>
       requireServerSuccess(await getPerfMetricsSummary(24, recentModels)),
     enabled: recentModels.length > 0,

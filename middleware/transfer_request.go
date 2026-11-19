@@ -16,6 +16,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/pkg/jsplugin"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -25,12 +26,14 @@ import (
 // or channel selection. It also surrounds asynchronous-task acceptance.
 func TransferRequestGuard(c *gin.Context) {
 	key := c.GetHeader("Idempotency-Key")
-	if !isTransferGeneration(c.Request) {
+	native, _ := c.Get(jsplugin.ContextKeyPinnedRoute)
+	pinned, _ := native.(jsplugin.PinnedRoute)
+	isNativeSubmit := c.Request.Method == http.MethodPost && pinned.Route.Type == "submit"
+	if !isTransferGeneration(c.Request) && !isNativeSubmit {
 		c.Next()
 		return
 	}
-	if key == "" && (!strings.HasPrefix(c.GetHeader("Content-Type"), "application/json") ||
-		(c.Request.URL.Path != "/v1/videos" && c.Request.URL.Path != "/v1/video/generations" && !strings.HasPrefix(c.Request.URL.Path, "/v1/tasks/"))) {
+	if key == "" && !strings.HasPrefix(c.GetHeader("Content-Type"), "application/json") && !strings.HasPrefix(c.GetHeader("Content-Type"), "multipart/form-data") {
 		c.Next()
 		return
 	}
@@ -45,7 +48,7 @@ func TransferRequestGuard(c *gin.Context) {
 		return
 	}
 	c.Request.Body = io.NopCloser(bytes.NewReader(body))
-	domestic := service.DomesticReferenceFiles(body)
+	domestic := service.DomesticReferenceFilesContent(body, c.GetHeader("Content-Type"))
 	if key == "" {
 		if len(domestic) == 0 {
 			c.Next()
@@ -69,7 +72,7 @@ func TransferRequestGuard(c *gin.Context) {
 	}
 	c.Header("X-Transfer-Execution-Id", record.ExecutionID)
 	c.Header("Cache-Control", "no-store")
-	if !owner && record.State == "input_required" && c.GetHeader("X-New-Api-Reference-Recovery") == "1" {
+	if !owner && record.State == "input_required" && (c.GetHeader("X-New-Api-Reference-Recovery") == "1" || record.ResponseStatus == http.StatusTooEarly) {
 		owner, err = model.ResumeReferenceSubmission(record)
 		if err != nil || !owner {
 			transferRequestError(c, 409, "transfer_submission_unknown", "Reference recovery is already in progress; query the original request")
@@ -114,6 +117,9 @@ func TransferRequestGuard(c *gin.Context) {
 		if completed && status == http.StatusGone && c.GetBool("reference_recovery_required") {
 			state = "input_required"
 		}
+		if completed && c.GetBool("domestic_preparation_rejected") {
+			state = "input_required"
+		}
 		headers, _ := common.Marshal(map[string]string{"Content-Type": writer.Header().Get("Content-Type")})
 		response := writer.body.Bytes()
 		if state == "unknown" || writer.streamed || writer.overflow {
@@ -123,15 +129,38 @@ func TransferRequestGuard(c *gin.Context) {
 			common.SysError("transfer request completion could not be persisted: " + record.ExecutionID)
 		}
 	}()
-	if err := service.HoldDomesticReferences(c.Request.Context(), record.ExecutionID, domestic); err != nil {
+	prepared, err := service.PrepareDomesticReferenceBody(c.Request.Context(), c.GetInt("id"), record.ExecutionID, body, domestic, c.GetHeader("Content-Type"))
+	if err != nil {
 		completed = true
 		if errors.Is(err, service.ErrDomesticReferenceMissing) {
 			c.Set("reference_recovery_required", true)
 			c.AbortWithStatusJSON(410, gin.H{"error": gin.H{"code": "reference_expired", "message": "Domestic reference material must be restored before generation", "reference_recovery": true, "reference_service": "domestic"}})
 		} else {
-			transferRequestError(c, 503, "domestic_retention_unavailable", "Domestic reference validation is unavailable; query the original request")
+			// This branch is before c.Next: no reservation or provider POST has run.
+			// Only this authoritative preprocessing rejection may resume automatically.
+			c.Set("domestic_preparation_rejected", true)
+			c.Header("Retry-After", "5")
+			code := "reference_preparing"
+			var preparation *service.DomesticPreparationError
+			if errors.As(err, &preparation) {
+				code = preparation.Code
+			}
+			transferRequestError(c, http.StatusTooEarly, code, "Reference preparation did not complete; generation has not been submitted or charged")
 		}
 		return
+	}
+	if c.Request.Context().Err() != nil {
+		completed = true
+		c.Set("domestic_preparation_rejected", true)
+		transferRequestError(c, http.StatusTooEarly, "reference_preparing", "Request canceled before generation submission")
+		return
+	}
+	if len(domestic) > 0 {
+		common.CleanupBodyStorage(c)
+		c.Set(common.KeyRequestBody, prepared)
+		c.Request.Body = io.NopCloser(bytes.NewReader(prepared))
+		c.Request.ContentLength = int64(len(prepared))
+		c.Request.Header.Del("Content-Length")
 	}
 	c.Next()
 	completed = true

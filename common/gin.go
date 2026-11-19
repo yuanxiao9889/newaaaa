@@ -235,6 +235,31 @@ func UpstreamAddresses(c *gin.Context) []string {
 	return addresses
 }
 
+// PublicErrorSensitiveValues supplies known channel identities and credentials
+// for error redaction, including secrets echoed without a recognizable label.
+func PublicErrorSensitiveValues(c *gin.Context) []string {
+	if c == nil {
+		return nil
+	}
+	values := []string{
+		GetContextKeyString(c, constant.ContextKeyChannelKey),
+		GetContextKeyString(c, constant.ContextKeyChannelName),
+		GetContextKeyString(c, constant.ContextKeyChannelBaseUrl),
+		GetContextKeyString(c, constant.ContextKeyUpstreamRequestOrigin),
+	}
+	for _, address := range values[2:] {
+		if parsed, err := url.Parse(address); err == nil && parsed.Hostname() != "" {
+			values = append(values, parsed.Hostname())
+			if parsed.User != nil {
+				if password, ok := parsed.User.Password(); ok {
+					values = append(values, password)
+				}
+			}
+		}
+	}
+	return values
+}
+
 func GetContextKeyInt(c *gin.Context, key constant.ContextKey) int {
 	return c.GetInt(string(key))
 }

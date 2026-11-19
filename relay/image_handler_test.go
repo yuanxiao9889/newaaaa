@@ -16,6 +16,7 @@ import (
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/pkg/billingexpr"
+	"github.com/QuantumNous/new-api/relay/channel/openai"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
 	"github.com/QuantumNous/new-api/relay/helper"
@@ -28,6 +29,60 @@ import (
 )
 
 type imageBillingTransport func(*http.Request) (*http.Response, error)
+
+func TestImageAnimationParametersSurviveJSONRelay(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	for _, name := range []string{"all-image-2.6-sunburst-H", "all-image-2.6-flare-H", "gpt-image-2.6-sunburst"} {
+		for _, mode := range []int{relayconstant.RelayModeImagesGenerations, relayconstant.RelayModeImagesEdits} {
+			for _, tc := range []struct{ name, fields string }{
+				{"animation", `,"frame_count":12,"frame_duration_ms":150`},
+				{"explicit zero", `,"frame_count":0,"frame_duration_ms":0`},
+				{"count only", `,"frame_count":9`},
+				{"duration only", `,"frame_duration_ms":200`},
+				{"omitted", ``},
+				{"null", `,"frame_count":null,"frame_duration_ms":null`},
+			} {
+				t.Run(fmt.Sprintf("%s/%d/%s", name, mode, tc.name), func(t *testing.T) {
+					body := fmt.Sprintf(`{"model":%q,"prompt":"animate","quality":"max","output_format":"gif","size":"512x512","unknown_extension":"must not leak"%s}`, name, tc.fields)
+					c, _ := gin.CreateTestContext(httptest.NewRecorder())
+					c.Request = httptest.NewRequest(http.MethodPost, "/v1/images/generations", strings.NewReader(body))
+					c.Request.Header.Set("Content-Type", "application/json")
+					parsed, err := helper.GetAndValidOpenAIImageRequest(c, mode)
+					require.NoError(t, err)
+					request, err := common.DeepCopy(parsed)
+					require.NoError(t, err)
+					info := &relaycommon.RelayInfo{ChannelMeta: &relaycommon.ChannelMeta{}, OriginModelName: name, RelayMode: mode}
+					info.UpstreamModelName = name
+					c.Set("model_mapping", `{"all-image-2.6-sunburst-H":"gpt-image-2.6-sunburst","all-image-2.6-flare-H":"gpt-image-2.6-flare"}`)
+					require.NoError(t, helper.ModelMappedHelper(c, info, request))
+					converted, err := (&openai.Adaptor{}).ConvertImageRequest(c, info, *request)
+					require.NoError(t, err)
+					out, err := common.Marshal(converted)
+					require.NoError(t, err)
+					var input, actual map[string]any
+					require.NoError(t, common.UnmarshalJsonStr(body, &input))
+					require.NoError(t, common.Unmarshal(out, &actual))
+					for _, field := range []string{"frame_count", "frame_duration_ms"} {
+						if value, exists := input[field]; exists && value != nil {
+							assert.Equal(t, value, actual[field], field)
+						} else {
+							assert.NotContains(t, actual, field)
+						}
+					}
+					assert.Equal(t, info.UpstreamModelName, actual["model"])
+					assert.Equal(t, name, parsed.Model, "mapping must not mutate the retry source")
+					assert.Equal(t, "max", actual["quality"])
+					assert.Equal(t, "gif", actual["output_format"])
+					assert.NotContains(t, actual, "unknown_extension")
+				})
+			}
+		}
+	}
+	for _, invalid := range []string{`{"frame_count":1.5}`, `{"frame_duration_ms":"150"}`, `{"frame_count":18446744073709551615}`} {
+		var request dto.ImageRequest
+		require.Error(t, common.UnmarshalJsonStr(invalid, &request), "invalid integer controls must not be silently discarded")
+	}
+}
 
 func (f imageBillingTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	return f(req)

@@ -614,13 +614,25 @@ func relaysSubmitEvents(c *gin.Context) bool {
 // native route that declares retainResult: false delivers the reply once and
 // never persists it, so it may be as large as a downloaded file, which lets a
 // vendor return Base64 images.
-func submitReplyLimit(c *gin.Context) int64 {
+func unretainedReplyLimit(c *gin.Context) int64 {
 	if value, exists := c.Get(pluginruntime.ContextKeyPinnedRoute); exists {
 		if pinned, ok := value.(pluginruntime.PinnedRoute); ok && pinned.Route.RetainResult != nil && !*pinned.Route.RetainResult {
 			return max(maxInlineFileBytes(), maxTaskPluginPersistedJSONBytes)
 		}
 	}
 	return maxTaskPluginPersistedJSONBytes
+}
+
+// Image providers can include Base64 alongside an image URL even when URL
+// output was requested. Let the plugin reduce that reply to durable task data;
+// the persisted task data and state limits remain independent of this read.
+func submitReplyLimit(c *gin.Context) int64 {
+	if value, exists := c.Get(pluginruntime.ContextKeyPinnedEndpoint); exists {
+		if pinned, ok := value.(pluginruntime.PinnedEndpoint); ok && pinned.Protocol == pluginruntime.ProtocolOpenAIImage {
+			return max(maxInlineFileBytes(), maxTaskPluginPersistedJSONBytes)
+		}
+	}
+	return unretainedReplyLimit(c)
 }
 
 func (a *TaskAdaptor) ParseResponse(c *gin.Context, resp *http.Response, info *relaycommon.RelayInfo) (submitted *channel.TaskSubmitResponse, taskErr *dto.TaskError) {
@@ -719,7 +731,12 @@ func (a *TaskAdaptor) ParseResponse(c *gin.Context, resp *http.Response, info *r
 	// is stored and keeps the persisted limit.
 	dataLimit := int64(maxTaskPluginPersistedJSONBytes)
 	if parsed.Immediate != nil && (parsed.Immediate.Status == "SUCCESS" || parsed.Immediate.Status == "FAILURE") {
-		dataLimit = replyLimit
+		dataLimit = unretainedReplyLimit(c)
+		if c.GetBool("async_image_worker") && parsed.Immediate.Status == "SUCCESS" {
+			// The image queue checkpoints large completed replies to a file,
+			// not the task JSON column. Pending tasks retain the persisted cap.
+			dataLimit = submitReplyLimit(c)
+		}
 	}
 	var taskData []byte
 	if parsed.TaskData != nil {
