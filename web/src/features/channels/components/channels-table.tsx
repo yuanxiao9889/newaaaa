@@ -644,6 +644,7 @@ export function ChannelsTable() {
             }
             return DISABLED_ROW_DESKTOP
           }}
+          showMobileBulkActions={batchMode}
           bulkActions={
             batchMode ? <DataTableBulkActions table={table} /> : null
           }

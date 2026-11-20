@@ -816,6 +816,9 @@ func executeTaskSubmissionWith(
 
 		stage = "submit"
 		relayInfo.RetryIndex = retryParam.GetRetry()
+		if videoRetry != nil {
+			videoRetry.AttemptStartedAtMS = time.Now().UnixMilli()
+		}
 		result, taskErr = submit(c, relayInfo)
 		if taskErr == nil && result != nil {
 			acceptedHealth = service.AutoSwitchAttempt(c)

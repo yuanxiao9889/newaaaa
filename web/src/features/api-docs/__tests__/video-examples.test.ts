@@ -64,6 +64,7 @@ describe('Video documentation request recipes', () => {
 
   it('new video recipes satisfy the gateway plugin input contracts', () => {
     const plugins = [
+      ['video-301010-sss', 'tokenmei-video'],
       ['video-ailxp-seedance-2.5-activity', 'ailxp-seedance25-activity'],
       ['video-mai-seedance-2.0-fast', 'mai-seedance20-fast'],
       ['video-xing-2.5-flash', 'xing-seedance25-flash'],

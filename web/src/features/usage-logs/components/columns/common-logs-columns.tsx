@@ -56,7 +56,6 @@ import { useSystemConfigStore } from '@/stores/system-config-store'
 import { LOG_TYPE_ALL_VALUE, LOG_TYPE_ENUM } from '../../constants'
 import type { UsageLog } from '../../data/schema'
 import {
-  formatModelName,
   decodeBillingExprB64,
   getTieredBillingSummary,
   hasAnyCacheTokens,
@@ -739,15 +738,9 @@ export function useCommonLogsColumns(
           const log = row.original
           if (!isDisplayableLogType(log.type)) return null
 
-          const modelInfo = formatModelName(log, isAdmin)
-
           return (
             <div className='flex w-fit flex-col gap-0.5'>
-              <ModelBadge
-                modelName={modelInfo.name}
-                actualModel={modelInfo.actualModel}
-                responseModel={modelInfo.responseModel}
-              />
+              <ModelBadge modelName={log.model_name} />
             </div>
           )
         },

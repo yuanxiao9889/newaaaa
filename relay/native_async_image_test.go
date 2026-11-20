@@ -45,6 +45,44 @@ func TestResolveNativeAsyncImagePollURLKeepsPollOnChannelOrigin(t *testing.T) {
 	}
 }
 
+func TestNativeImageReceiptAndSingleResult(t *testing.T) {
+	const completed = `{"status":"completed","data":{"url":"https://cdn.example/original.png"},"usage":{"output_tokens":0,"completion_tokens":1001}}`
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		assert.Equal(t, http.MethodGet, r.Method)
+		assert.Equal(t, "/tasks/accepted", r.URL.Path)
+		_, err := io.WriteString(w, completed)
+		assert.NoError(t, err)
+	}))
+	defer server.Close()
+	info := &relaycommon.RelayInfo{ChannelMeta: &relaycommon.ChannelMeta{ChannelBaseUrl: server.URL}}
+	for _, tc := range []struct {
+		body string
+		ok   bool
+	}{
+		{`{"task_id":"accepted","status_url":"/tasks/accepted"}`, true},
+		{`{"id":"accepted","poll_url":"/tasks/accepted","task_id":"unused","status_url":"/unused"}`, true},
+		{`{"task_id":"accepted","status_url":"https://elsewhere.example/task"}`, false},
+		{`{"task_id":"accepted"}`, false},
+	} {
+		resp := &http.Response{Body: io.NopCloser(strings.NewReader(tc.body))}
+		job, err := parseNativeAsyncImageSnapshot(resp, info)
+		if !tc.ok {
+			require.Error(t, err)
+			continue
+		}
+		require.NoError(t, err)
+		assert.Equal(t, "accepted", job.ID)
+		result, err := pollNativeAsyncImageResult(context.Background(), server.Client(), nativeAsyncImagePollEntry{
+			statusURL: job.PollURL, contentURL: job.ContentURL,
+		})
+		require.NoError(t, err)
+		assert.JSONEq(t, completed, string(result))
+	}
+	assert.Equal(t, 2, requests)
+}
+
 func TestLegacyAliNativeImageTaskConfiguration(t *testing.T) {
 	defaults := (&ali.Adaptor{LegacyAsyncImage: true}).ImageTaskConfig()
 	t.Run("Wan edit task can return image content after text", func(t *testing.T) {

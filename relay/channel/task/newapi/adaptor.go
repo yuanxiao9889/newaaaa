@@ -2,6 +2,7 @@ package newapi
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -980,18 +981,20 @@ func (a *TaskAdaptor) ParseResponse(c *gin.Context, response *http.Response, inf
 	return &channel.TaskSubmitResponse{UpstreamTaskID: upstreamTaskID, TaskData: body, ClientResponse: clientResponse}, nil
 }
 
-func (a *TaskAdaptor) FetchTask(baseURL, key string, task *model.Task, proxy string) (*http.Response, error) {
+func (a *TaskAdaptor) FetchTask(ctx context.Context, baseURL, key string, task *model.Task, proxy string) (*http.Response, error) {
 	taskID := task.GetUpstreamTaskID()
 	if strings.TrimSpace(taskID) == "" {
 		return nil, fmt.Errorf("invalid task_id")
 	}
 	modelName := task.Properties.OriginModelName
-	if task.PrivateData.BillingContext != nil { modelName = task.PrivateData.BillingContext.OriginModelName }
+	if task.PrivateData.BillingContext != nil {
+		modelName = task.PrivateData.BillingContext.OriginModelName
+	}
 	path := "/v1/video/generations/"
 	if isOopiiVideosModel(modelName) {
 		path = "/v1/videos/"
 	}
-	request, err := http.NewRequest(http.MethodGet, strings.TrimRight(baseURL, "/")+path+url.PathEscape(taskID), nil)
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(baseURL, "/")+path+url.PathEscape(taskID), nil)
 	if err != nil {
 		return nil, err
 	}

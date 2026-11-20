@@ -48,6 +48,7 @@ import {
 } from '../../lib/channel-form'
 import { channelSchema } from '../../types'
 import { ChannelQuickOptions } from '../channel-quick-options'
+import { BatchAutoSwitchDialog } from '../dialogs/batch-auto-switch-dialog'
 import type { PassthroughKind } from '../dialogs/passthrough-warning-dialog'
 
 type HarnessProps = {
@@ -506,4 +507,104 @@ describe('automatic switching retry limits', () => {
       }
     }
   )
+})
+
+test('bulk automatic switching displays stored limits, saves one uniform update and preserves limits on disable', async () => {
+  const user = userEvent.setup()
+  const rows = [297, 296].map((id, index) =>
+    channelSchema.parse({
+      id,
+      name: `video-${id}`,
+      type: 1,
+      key: '',
+      status: 1,
+      created_time: 0,
+      test_time: 0,
+      response_time: 0,
+      balance_updated_time: 0,
+      settings: JSON.stringify({
+        auto_switch_enabled: index === 0,
+        auto_switch_retry_window_minutes: 20,
+        auto_switch_max_attempts: index === 0 ? 5 : 8,
+      }),
+    })
+  )
+  const post = vi.spyOn(api, 'post').mockImplementation(async (_url, data) => {
+    const { ids, ...settings } = data as {
+      ids: number[]
+      auto_switch_enabled: boolean
+    }
+    for (const row of rows.filter((ch) => ids.includes(ch.id))) {
+      row.settings = JSON.stringify({
+        ...JSON.parse(row.settings),
+        ...settings,
+      })
+    }
+    return { data: { success: true, data: 2 } }
+  })
+  const client = new QueryClient({
+    defaultOptions: { mutations: { retry: false } },
+  })
+  const saved = vi.fn()
+  const open = () =>
+    render(
+      <QueryClientProvider client={client}>
+        <BatchAutoSwitchDialog
+          channels={rows}
+          onClose={() => {}}
+          onSaved={saved}
+        />
+      </QueryClientProvider>
+    )
+  let dialog = open()
+  const minutes = () =>
+    screen.getByRole('spinbutton', { name: 'Retry window (minutes)' })
+  const attempts = () =>
+    screen.getByRole('spinbutton', { name: 'Total attempts' })
+  const apply = () =>
+    user.click(
+      screen.getByRole('button', { name: /Apply to selected channels/ })
+    )
+  expect(minutes()).toHaveValue(10)
+  expect(attempts()).toHaveValue(3)
+  await user.clear(minutes())
+  await user.type(minutes(), '121')
+  await apply()
+  expect(post).not.toHaveBeenCalled()
+  expect(await screen.findByRole('alert')).toHaveTextContent('Retry window')
+  await user.clear(minutes())
+  await user.type(minutes(), '30')
+  await user.clear(attempts())
+  await user.type(attempts(), '5')
+  await apply()
+  await waitFor(() => expect(saved).toHaveBeenCalledTimes(1))
+  expect(post).toHaveBeenCalledWith(
+    '/api/channel/batch/auto-switch',
+    {
+      ids: [297, 296],
+      auto_switch_enabled: true,
+      auto_switch_retry_window_minutes: 30,
+      auto_switch_max_attempts: 5,
+    },
+    expect.anything()
+  )
+  dialog.unmount()
+  dialog = open()
+  expect(minutes()).toHaveValue(30)
+  expect(attempts()).toHaveValue(5)
+  await user.click(screen.getByRole('switch'))
+  expect(screen.queryByRole('spinbutton')).toBeNull()
+  await apply()
+  await waitFor(() => expect(saved).toHaveBeenCalledTimes(2))
+  expect(post).toHaveBeenLastCalledWith(
+    '/api/channel/batch/auto-switch',
+    { ids: [297, 296], auto_switch_enabled: false },
+    expect.anything()
+  )
+  dialog.unmount()
+  open()
+  expect(screen.getByRole('switch')).not.toBeChecked()
+  await user.click(screen.getByRole('switch'))
+  expect(minutes()).toHaveValue(30)
+  expect(attempts()).toHaveValue(5)
 })

@@ -18,7 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { useQueryClient } from '@tanstack/react-query'
 import type { Table } from '@tanstack/react-table'
-import { Power, PowerOff, Tag, Trash2 } from 'lucide-react'
+import { ArrowLeftRight, Power, PowerOff, Tag, Trash2 } from 'lucide-react'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
@@ -47,6 +47,7 @@ import {
   handleBatchSetTag,
 } from '../lib'
 import type { Channel } from '../types'
+import { BatchAutoSwitchDialog } from './dialogs/batch-auto-switch-dialog'
 
 interface DataTableBulkActionsProps<TData> {
   table: Table<TData>
@@ -58,6 +59,7 @@ export function DataTableBulkActions<TData>({
   const { t } = useTranslation()
   const queryClient = useQueryClient()
   const [showTagDialog, setShowTagDialog] = useState(false)
+  const [switchChannels, setSwitchChannels] = useState<Channel[]>([])
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
   const [tagValue, setTagValue] = useState('')
   const currentUser = useAuthStore((s) => s.auth.user)
@@ -156,6 +158,31 @@ export function DataTableBulkActions<TData>({
             render={
               <Button
                 variant='outline'
+                size='sm'
+                className='h-8 px-2'
+                aria-label={t('Set automatic switching for selected channels')}
+                disabled={!canEditSensitive}
+                onClick={() =>
+                  setSwitchChannels(
+                    selectedRows.map((row) => row.original as Channel)
+                  )
+                }
+              />
+            }
+          >
+            <ArrowLeftRight />
+            <span className='hidden sm:inline'>{t('Automatic switching')}</span>
+          </TooltipTrigger>
+          <TooltipContent>
+            {t('Set automatic switching for selected channels')}
+          </TooltipContent>
+        </Tooltip>
+
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Button
+                variant='outline'
                 size='icon'
                 onClick={() => setShowTagDialog(true)}
                 className='size-8'
@@ -210,6 +237,14 @@ export function DataTableBulkActions<TData>({
           </TooltipContent>
         </Tooltip>
       </BulkActionsToolbar>
+
+      {switchChannels.length > 0 && (
+        <BatchAutoSwitchDialog
+          channels={switchChannels}
+          onClose={() => setSwitchChannels([])}
+          onSaved={handleClearSelection}
+        />
+      )}
 
       {/* Set Tag Dialog */}
       <Dialog

@@ -295,6 +295,7 @@ export interface LogOtherData {
     error_code?: string
     error?: string
     attempted_at?: number
+    elapsed_ms?: number
   }>
   billing_state?: string
   pre_consumed_quota?: number

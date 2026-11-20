@@ -287,6 +287,26 @@ export async function batchSetChannelTag(
   return res.data
 }
 
+export type BatchAutoSwitchSettings =
+  | { auto_switch_enabled: false }
+  | {
+      auto_switch_enabled: true
+      auto_switch_retry_window_minutes: number
+      auto_switch_max_attempts: number
+    }
+
+export async function batchSetChannelAutoSwitch(
+  ids: number[],
+  settings: BatchAutoSwitchSettings
+) {
+  const res = await api.post(
+    '/api/channel/batch/auto-switch',
+    { ids, ...settings },
+    channelActionConfig()
+  )
+  requireServerSuccess(res.data)
+}
+
 // ============================================================================
 // Channel Operations
 // ============================================================================

@@ -712,20 +712,11 @@ func shouldRetryAsyncImageDownload(err error) bool {
 }
 
 func downloadAsyncImageBytes(assetURL string, proxy string) (string, []byte, error) {
-	fetchSetting := system_setting.GetFetchSetting()
-	if err := common.ValidateURLWithFetchSetting(assetURL, fetchSetting.EnableSSRFProtection, fetchSetting.AllowPrivateIp, fetchSetting.DomainFilterMode, fetchSetting.IpFilterMode, fetchSetting.DomainList, fetchSetting.IpList, fetchSetting.AllowedPorts, fetchSetting.ApplyIPFilterForDomain); err != nil {
-		return "", nil, fmt.Errorf("request blocked: %w", err)
-	}
-
 	client, err := GetHttpClientWithProxy(proxy)
 	if err != nil {
 		return "", nil, err
 	}
-	req, err := http.NewRequest(http.MethodGet, assetURL, nil)
-	if err != nil {
-		return "", nil, err
-	}
-	resp, err := client.Do(req)
+	resp, err := getImageResult(assetURL, proxy, client)
 	if err != nil {
 		return "", nil, err
 	}

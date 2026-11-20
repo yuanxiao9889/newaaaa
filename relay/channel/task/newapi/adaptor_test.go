@@ -2,6 +2,7 @@ package newapi
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"net/http"
@@ -375,7 +376,7 @@ func TestFetchTaskSelectsEndpointByModel(t *testing.T) {
 		{model: "minimax-h3", path: "/v1/videos/task_3"},
 		{model: "ok-imagine-video", path: "/v1/videos/task_4"},
 	} {
-		response, err := adaptor.FetchTask(server.URL, "secret", &model.Task{PrivateData: model.TaskPrivateData{UpstreamTaskID: strings.TrimPrefix(test.path[strings.LastIndex(test.path, "/"):], "/"), BillingContext: &model.TaskBillingContext{OriginModelName: test.model}}}, "")
+		response, err := adaptor.FetchTask(context.Background(), server.URL, "secret", &model.Task{PrivateData: model.TaskPrivateData{UpstreamTaskID: strings.TrimPrefix(test.path[strings.LastIndex(test.path, "/"):], "/"), BillingContext: &model.TaskBillingContext{OriginModelName: test.model}}}, "")
 		require.NoError(t, err)
 		_ = response.Body.Close()
 	}

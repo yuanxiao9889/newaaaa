@@ -4,7 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net"
+	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"os"
 	"strings"
@@ -52,6 +55,60 @@ func TestAsyncImageDownloadRetriesTransientDNSFailures(t *testing.T) {
 	_, _, err = downloadAsyncImageBytes("https://127.0.0.1/image.png", "")
 	require.ErrorContains(t, err, "private IP address not allowed")
 	assert.False(t, shouldRetryAsyncImageDownload(err))
+}
+
+type missingImageHostTransport struct{}
+
+func (missingImageHostTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	return nil, &net.DNSError{Name: req.URL.Hostname(), Err: "no such host", IsNotFound: true}
+}
+
+func TestImageResultSecondaryDNS(t *testing.T) {
+	configureSSRFTestFetchSetting(t)
+	// Trigger the NXDOMAIN during the primary HTTP dial without network DNS.
+	system_setting.GetFetchSetting().ApplyIPFilterForDomain = false
+	const host = "assets.example.com"
+	calls := make(chan string, 4)
+	forwardProxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls <- r.Method + " " + r.RequestURI
+		if r.Method == "CONNECT" {
+			w.WriteHeader(http.StatusBadGateway)
+			return
+		}
+		if r.URL.Path == "/first" {
+			w.Header().Set("Location", "/image%2F1?sig=a%2Bb")
+			w.WriteHeader(http.StatusFound)
+			return
+		}
+		_, _ = io.WriteString(w, "image bytes")
+	}))
+	defer forwardProxy.Close()
+	transport := &imageResultTransport{primary: missingImageHostTransport{}, proxy: forwardProxy.URL, secondary: staticSSRFResolver{host + ".": {{IP: net.ParseIP("8.8.4.4")}}}}
+	client := &http.Client{Transport: transport}
+	resp, err := client.Get("http://" + host + "/first")
+	require.NoError(t, err)
+	data, err := io.ReadAll(resp.Body)
+	require.NoError(t, resp.Body.Close())
+	require.NoError(t, err)
+	assert.Equal(t, "image bytes", string(data))
+	require.Len(t, calls, 2)
+	assert.Equal(t, "GET http://8.8.4.4:80/first", <-calls)
+	assert.Equal(t, "GET http://8.8.4.4:80/image%2F1?sig=a%2Bb", <-calls)
+
+	_, err = client.Get("https://" + host + "/signed")
+	require.Error(t, err)
+	require.Len(t, calls, 1)
+	assert.Equal(t, "CONNECT 8.8.4.4:443", <-calls)
+	transport.secondary = staticSSRFResolver{host + ".": {{IP: net.ParseIP("8.8.4.4")}, {IP: net.ParseIP("127.0.0.1")}}}
+	_, err = client.Get("http://" + host + "/signed")
+	require.ErrorContains(t, err, "private IP address not allowed")
+	assert.Empty(t, calls)
+	transport.secondary = staticSSRFResolver{}
+	_, err = client.Get("http://download.internal/file")
+	var dnsErr *net.DNSError
+	require.ErrorAs(t, err, &dnsErr)
+	assert.True(t, dnsErr.IsNotFound)
+	assert.Empty(t, calls)
 }
 
 func TestAsyncImageDownloadRetryPolicy(t *testing.T) {

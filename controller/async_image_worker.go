@@ -326,7 +326,9 @@ func runInternalAsyncImageRelay(ctx context.Context, task *model.Task) ([]byte, 
 	}
 
 	for ; retryParam.GetRetry() <= common.RetryTimes; retryParam.IncreaseRetry() {
+		attemptStartedAtMS := time.Now().UnixMilli()
 		c, recorder, channel, newAPIError, err := runInternalAsyncImageRelayOnce(ctx, task, body, retryParam)
+		finishedAt := time.Now()
 		if err != nil {
 			return nil, 0, "", nil, err
 		}
@@ -378,7 +380,7 @@ func runInternalAsyncImageRelay(ctx context.Context, task *model.Task) ([]byte, 
 		}
 		lastErr = service.NormalizeViolationFeeError(newAPIError)
 		service.RecordAutoSwitchRequestResult(c, false, lastErr)
-		retryDetails = append(retryDetails, buildInternalAsyncChannelRetryDetail(retryParam.GetRetry()+1, channel, lastErr))
+		retryDetails = append(retryDetails, buildInternalAsyncChannelRetryDetail(retryParam.GetRetry()+1, channel, lastErr, attemptStartedAtMS, finishedAt))
 		if channel != nil {
 			c.Set(suppressRelayErrorLogContextKey, true)
 			c.Set("async_channel_retry_path", append([]string(nil), retryPath...))
@@ -442,13 +444,21 @@ func runInternalAsyncGeminiImageRelayOnce(ctx context.Context, task *model.Task,
 	return c, recorder, channel, geminiRelayHandler(c, relayInfo), nil
 }
 
-func buildInternalAsyncChannelRetryDetail(attempt int, channel *model.Channel, err *types.NewAPIError) internalAsyncChannelRetryDetail {
+func channelAttemptElapsedMS(startedAtMS int64, finishedAt time.Time) *int64 {
+	if startedAtMS <= 0 || startedAtMS > finishedAt.UnixMilli() {
+		return nil
+	}
+	return common.GetPointer(finishedAt.UnixMilli() - startedAtMS)
+}
+
+func buildInternalAsyncChannelRetryDetail(attempt int, channel *model.Channel, err *types.NewAPIError, startedAtMS int64, finishedAt time.Time) internalAsyncChannelRetryDetail {
 	detail := internalAsyncChannelRetryDetail{
 		Attempt:     attempt,
 		Status:      "error",
-		AttemptedAt: common.GetTimestamp(),
+		AttemptedAt: finishedAt.Unix(),
 	}
 	if channel != nil {
+		detail.ElapsedMS = channelAttemptElapsedMS(startedAtMS, finishedAt)
 		detail.ChannelID = channel.Id
 		detail.ChannelName = channel.Name
 		detail.ChannelType = channel.Type

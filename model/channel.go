@@ -1171,6 +1171,45 @@ func GetChannelsByIds(ids []int) ([]*Channel, error) {
 	return channels, err
 }
 
+// BatchSetChannelAutoSwitch preserves unrelated settings, including fields
+// introduced by newer clients. Callers pass sorted, distinct channel IDs.
+func BatchSetChannelAutoSwitch(ids []int, enabled bool, minutes, attempts *int) error {
+	return DB.Transaction(func(tx *gorm.DB) error {
+		var channels []Channel
+		if err := lockForUpdate(tx).Select("id", "type", "settings").Where("id IN ?", ids).Order("id").Find(&channels).Error; err != nil {
+			return err
+		}
+		for i, id := range ids {
+			if i >= len(channels) || channels[i].Id != id {
+				return common.NewMessage("Channel #{{id}} was not found", map[string]any{"id": id})
+			}
+			ch := channels[i]
+			if enabled && (ch.Type == constant.ChannelTypeMidjourney || ch.Type == constant.ChannelTypeMidjourneyPlus) {
+				return common.NewMessage("Channel #{{id}} does not support automatic switching", map[string]any{"id": id})
+			}
+			settings := make(map[string]json.RawMessage)
+			if ch.OtherSettings != "" {
+				if err := common.UnmarshalJsonStr(ch.OtherSettings, &settings); err != nil || settings == nil {
+					return common.NewMessage("Invalid automatic switching settings")
+				}
+			}
+			settings["auto_switch_enabled"], _ = common.Marshal(enabled)
+			if enabled {
+				settings["auto_switch_retry_window_minutes"], _ = common.Marshal(minutes)
+				settings["auto_switch_max_attempts"], _ = common.Marshal(attempts)
+			}
+			data, err := common.Marshal(settings)
+			if err != nil {
+				return err
+			}
+			if err := tx.Model(&Channel{}).Where("id = ?", id).Update("settings", string(data)).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
 func BatchSetChannelTag(ids []int, tag *string) error {
 	// 开启事务
 	tx := DB.Begin()

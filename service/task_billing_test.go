@@ -1078,7 +1078,7 @@ func TestNonTerminalUpdate_NoBilling(t *testing.T) {
 
 func (m *mockAdaptor) Init(_ *relaycommon.RelayInfo) {}
 
-func (m *mockAdaptor) FetchTask(string, string, *model.Task, string) (*http.Response, error) {
+func (m *mockAdaptor) FetchTask(context.Context, string, string, *model.Task, string) (*http.Response, error) {
 	return nil, nil
 }
 

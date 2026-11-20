@@ -12,6 +12,7 @@ import (
 	"github.com/MoeForge/moego/base64"
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
+	"github.com/QuantumNous/new-api/setting/system_setting"
 
 	"golang.org/x/image/webp"
 )
@@ -67,7 +68,12 @@ func DecodeBase64FileData(base64String string) (string, string, error) {
 
 // GetImageFromUrl 获取图片的类型和base64编码的数据
 func GetImageFromUrl(url string) (mimeType string, data string, err error) {
-	resp, err := DoDownloadRequest(url)
+	var resp *http.Response
+	if system_setting.EnableWorker() {
+		resp, err = DoDownloadRequest(url)
+	} else {
+		resp, err = getImageResult(url, "", GetSSRFProtectedHTTPClient())
+	}
 	if err != nil {
 		return "", "", fmt.Errorf("failed to download image: %w", err)
 	}

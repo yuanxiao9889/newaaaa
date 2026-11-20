@@ -64,9 +64,11 @@ func runRetryableAsyncImageRelay(ctx context.Context, task *model.Task) ([]byte,
 		var apiErr *types.NewAPIError
 		var proxy string
 		var upstreamErrorType string
+		var finishedAt time.Time
 		confirmedTaskFailure := false
 		if task.PrivateData.RequestRelayFormat == relay.NativeAsyncImageFormat {
 			body, channelID, usedProxy, err := relay.ResumeNativeAsyncImageTask(ctx, task)
+			finishedAt = time.Now()
 			if err == nil {
 				return body, channelID, usedProxy, nil, nil
 			}
@@ -272,6 +274,7 @@ func runRetryableAsyncImageRelay(ctx context.Context, task *model.Task) ([]byte,
 			}
 			info.RetryIndex = len(task.PrivateData.ChannelRetryPath) - 1
 			addUsedChannel(c, channel.Id)
+			retry.AttemptStartedAtMS = time.Now().UnixMilli()
 			c.Request = c.Request.WithContext(service.BeginUpstreamDelivery(c.Request.Context(), channel.Id, len(task.PrivateData.ChannelRetryPath)))
 			if isCompatibleImageFormat(retry.RelayFormat) {
 				apiErr = runCompatibleImageHelper(c, info, retry.RelayFormat)
@@ -280,6 +283,7 @@ func runRetryableAsyncImageRelay(ctx context.Context, task *model.Task) ([]byte,
 			} else {
 				apiErr = relay.ImageHelper(c, info)
 			}
+			finishedAt = time.Now()
 			common.CleanupBodyStorage(c)
 			task.Properties.UpstreamModelName = info.UpstreamModelName
 			retry.Submitting = false
@@ -309,7 +313,7 @@ func runRetryableAsyncImageRelay(ctx context.Context, task *model.Task) ([]byte,
 			service.RecordAutoSwitchRequestResult(c, false, apiErr)
 		}
 		apiErr = service.NormalizeViolationFeeError(apiErr)
-		detail := buildInternalAsyncChannelRetryDetail(len(task.PrivateData.ChannelRetryPath), channel, apiErr)
+		detail := buildInternalAsyncChannelRetryDetail(len(task.PrivateData.ChannelRetryPath), channel, apiErr, retry.AttemptStartedAtMS, finishedAt)
 		if upstreamErrorType != "" {
 			detail.ErrorType = upstreamErrorType
 		}

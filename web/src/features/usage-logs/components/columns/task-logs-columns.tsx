@@ -235,18 +235,12 @@ export function useTaskLogsColumns(
         cell: ({ row }) => {
           const log = row.original
           const modelName = log.model_name
-          const actualModel =
-            isAdmin &&
-            log.upstream_model_name &&
-            log.upstream_model_name !== modelName
-              ? log.upstream_model_name
-              : undefined
           if (!modelName) {
             return <span className='text-muted-foreground/60 text-xs'>-</span>
           }
           return (
             <div className='max-w-[180px]'>
-              <ModelBadge modelName={modelName} actualModel={actualModel} />
+              <ModelBadge modelName={modelName} />
             </div>
           )
         },

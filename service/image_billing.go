@@ -1,6 +1,7 @@
 package service
 
 import (
+	"cmp"
 	"errors"
 	"fmt"
 	"math"
@@ -152,9 +153,7 @@ func NormalizeOpenAIImageUsage(usage *dto.Usage) {
 	if usage.InputTokens != 0 {
 		usage.PromptTokens = usage.InputTokens
 	}
-	if usage.OutputTokens != 0 {
-		usage.CompletionTokens = usage.OutputTokens
-	}
+	usage.CompletionTokens = imageCompletionTokens(usage.OutputTokens, usage.CompletionTokens)
 	if usage.InputTokensDetails != nil {
 		usage.PromptTokensDetails = usage.InputTokensDetails.Clone()
 	}
@@ -164,4 +163,10 @@ func NormalizeOpenAIImageUsage(usage *dto.Usage) {
 	if usage.TotalTokens == 0 {
 		usage.TotalTokens = usage.PromptTokens + usage.CompletionTokens
 	}
+}
+
+// Providers can leave output_tokens at zero while reporting the measured count
+// in completion_tokens. Validation and settlement must select the same count.
+func imageCompletionTokens(output, completion int) int {
+	return cmp.Or(output, completion)
 }

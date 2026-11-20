@@ -665,9 +665,17 @@ export function DetailsDialog(props: DetailsDialogProps) {
           const channel = detail.channel_id
             ? `${detail.channel_id}${detail.channel_name ? ` (${detail.channel_name})` : ''}`
             : '-'
+          const ms = detail.elapsed_ms
+          let duration = ''
+          if (typeof ms === 'number' && Number.isFinite(ms) && ms >= 0) {
+            const seconds = ms >= 60_000 ? Math.round(ms / 1000) : ms / 1000
+            const value = ms < 1000 ? `${ms}ms` : formatUseTime(seconds)
+            duration = `${t('Duration')}=${value}`
+          }
           const fields = [
             `#${detail.attempt ?? index + 1}`,
             `channel=${channel}`,
+            duration,
             detail.status_code != null
               ? `status_code=${detail.status_code}`
               : '',

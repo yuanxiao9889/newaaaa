@@ -36,6 +36,9 @@ type VideoTaskRetryState struct {
 	Ready           bool                    `json:"ready,omitempty"`
 	Details         []AsyncImageRetryDetail `json:"details,omitempty"`
 	QuotaSaturation map[string]any          `json:"quota_saturation,omitempty"`
+
+	// Includes submission time when failure is reported by a later poll.
+	AttemptStartedAtMS int64 `json:"attempt_started_at_ms,omitempty"`
 }
 
 // RecordQuotaClamp retains the first saturation marker until final billing.

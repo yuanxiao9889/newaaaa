@@ -207,7 +207,7 @@ func (i *ImageRequest) SetModelName(modelName string) {
 }
 
 type ImageResponse struct {
-	Data     []ImageData     `json:"data"`
+	Data     ImageDataList   `json:"data"`
 	Created  int64           `json:"created"`
 	Metadata json.RawMessage `json:"metadata,omitempty"`
 }
@@ -246,4 +246,20 @@ type ImageData struct {
 	Url           string `json:"url"`
 	B64Json       string `json:"b64_json"`
 	RevisedPrompt string `json:"revised_prompt"`
+}
+
+// ImageDataList accepts providers that unwrap a single result. When encoded,
+// it retains the standard array form for clients and persisted results.
+type ImageDataList []ImageData
+
+func (images *ImageDataList) UnmarshalJSON(data []byte) error {
+	if kitutil.GetJsonType(data) == "object" {
+		var item ImageData
+		if err := kitutil.Unmarshal(data, &item); err != nil {
+			return err
+		}
+		*images = ImageDataList{item}
+		return nil
+	}
+	return kitutil.Unmarshal(data, (*[]ImageData)(images))
 }

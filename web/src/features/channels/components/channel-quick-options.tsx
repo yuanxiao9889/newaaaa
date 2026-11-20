@@ -274,7 +274,7 @@ export function ChannelQuickOptions(props: ChannelQuickOptionsProps) {
   )
 }
 
-function MediaRetryFields(props: {
+export function MediaRetryFields(props: {
   form: UseFormReturn<ChannelFormValues>
   disabled: boolean
   inline?: boolean

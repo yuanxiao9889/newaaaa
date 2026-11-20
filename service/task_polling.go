@@ -18,6 +18,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/MoeForge/moego/ojson"
@@ -28,7 +29,7 @@ import (
 // TaskPollingAdaptor 定义轮询所需的最小适配器接口，避免 service -> relay 的循环依赖
 type TaskPollingAdaptor interface {
 	Init(info *relaycommon.RelayInfo)
-	FetchTask(baseURL string, key string, task *model.Task, proxy string) (*http.Response, error)
+	FetchTask(ctx context.Context, baseURL string, key string, task *model.Task, proxy string) (*http.Response, error)
 	ParseTaskResult(task *model.Task, resp *http.Response, body []byte) (*relaycommon.TaskInfo, error)
 	// AdjustBillingOnComplete 在任务到达终态（成功/失败）时由轮询循环调用。
 	// 返回正数触发差额结算（补扣/退还），返回 0 保持预扣费金额不变。
@@ -38,11 +39,14 @@ type TaskPollingAdaptor interface {
 type BatchTaskPollingAdaptor interface {
 	TaskPollingAdaptor
 	FetchMode() string
-	FetchBatchTasks(baseURL, key string, tasks []*model.Task, proxy string) (*http.Response, error)
+	FetchBatchTasks(ctx context.Context, baseURL, key string, tasks []*model.Task, proxy string) (*http.Response, error)
 	ParseBatchResult(tasks []*model.Task, resp *http.Response, body []byte) (map[string]*BatchTaskResult, error)
 }
 
 const (
+	taskStatusQueryTimeout = 15 * time.Second
+	taskPollConcurrency    = 8
+
 	pollClassOK           = "ok"
 	pollClassOtherClient  = "other_client"
 	pollClassNotFound     = "not_found"
@@ -191,20 +195,28 @@ func RunTaskPollingOnce(ctx context.Context, report func(processed, total int)) 
 
 	totalPlatforms := len(platformTask)
 	processedPlatforms := 0
+	var wg sync.WaitGroup
+	var progressMu sync.Mutex
+	slots := make(chan struct{}, taskPollConcurrency)
+	// The reporter persists mutable progress state and must be called serially.
+	platformDone := func() {
+		progressMu.Lock()
+		defer progressMu.Unlock()
+		processedPlatforms++
+		if report != nil && ctx.Err() == nil {
+			report(processedPlatforms, totalPlatforms)
+		}
+	}
+	if report != nil {
+		report(0, totalPlatforms)
+	}
 	for platform, tasks := range platformTask {
 		if ctx.Err() != nil {
 			break
 		}
-		if report != nil {
-			report(processedPlatforms, totalPlatforms)
-		}
-		processedPlatforms++
-		if len(tasks) == 0 {
-			continue
-		}
 		summary.PlatformsScanned++
 		taskChannelM := make(map[int][]string)
-		taskM := make(map[string]*model.Task)
+		tasksByChannel := make(map[int]map[string]*model.Task)
 		nullTaskIds := make([]int64, 0)
 		for _, task := range tasks {
 			poll, err := prepareVideoTaskForPolling(ctx, task)
@@ -220,7 +232,10 @@ func RunTaskPollingOnce(ctx context.Context, report func(processed, total int)) 
 				nullTaskIds = append(nullTaskIds, task.ID)
 				continue
 			}
-			taskM[upstreamID] = task
+			if tasksByChannel[task.ChannelId] == nil {
+				tasksByChannel[task.ChannelId] = make(map[string]*model.Task)
+			}
+			tasksByChannel[task.ChannelId][upstreamID] = task
 			taskChannelM[task.ChannelId] = append(taskChannelM[task.ChannelId], upstreamID)
 		}
 		if len(nullTaskIds) > 0 {
@@ -235,15 +250,33 @@ func RunTaskPollingOnce(ctx context.Context, report func(processed, total int)) 
 				logger.LogInfo(ctx, common.LogText("Fix null task_id task success: %v", nullTaskIds))
 			}
 		}
-		if len(taskChannelM) == 0 {
+		if len(taskChannelM) == 0 || platform == constant.TaskPlatformInternalImage || platform == constant.TaskPlatformMidjourney {
+			platformDone()
 			continue
 		}
-
-		DispatchPlatformUpdate(ctx, platform, taskChannelM, taskM)
+		var remaining atomic.Int32
+		remaining.Store(int32(len(taskChannelM)))
+		for channelID, ids := range taskChannelM {
+			if ctx.Err() != nil {
+				break
+			}
+			taskM := tasksByChannel[channelID]
+			slots <- struct{}{}
+			wg.Add(1)
+			gopool.Go(func() {
+				defer wg.Done()
+				defer func() { <-slots }()
+				if ctx.Err() != nil {
+					return
+				}
+				DispatchPlatformUpdate(ctx, platform, map[int][]string{channelID: ids}, taskM)
+				if remaining.Add(-1) == 0 {
+					platformDone()
+				}
+			})
+		}
 	}
-	if report != nil && ctx.Err() == nil {
-		report(totalPlatforms, totalPlatforms)
-	}
+	wg.Wait()
 	common.SysLog(common.LogText("task progress polling finished"))
 	return summary
 }
@@ -330,7 +363,9 @@ func updateBatchTasks(ctx context.Context, adaptor BatchTaskPollingAdaptor, chan
 	}
 	info.ApiKey = ch.Key
 	adaptor.Init(info)
-	resp, err := adaptor.FetchBatchTasks(baseURL, ch.Key, tasks, proxy)
+	queryCtx, cancel := context.WithTimeout(ctx, taskStatusQueryTimeout)
+	defer cancel()
+	resp, err := adaptor.FetchBatchTasks(queryCtx, baseURL, ch.Key, tasks, proxy)
 	if err != nil {
 		common.SysLog(common.LogText("Get Task Do req error: %v", err))
 		return recordPollFailureForTasks(ctx, adaptor, tasks, pollClassTransport, 0, err.Error())
@@ -582,7 +617,9 @@ func updateVideoSingleTask(ctx context.Context, adaptor TaskPollingAdaptor, ch *
 		key = privateData.Key
 	}
 	snap := task.Snapshot()
-	resp, err := adaptor.FetchTask(baseURL, key, task, proxy)
+	queryCtx, cancel := context.WithTimeout(ctx, taskStatusQueryTimeout)
+	defer cancel()
+	resp, err := adaptor.FetchTask(queryCtx, baseURL, key, task, proxy)
 	if err != nil {
 		return recordPollFailure(ctx, adaptor, task, snap.Status, pollClassTransport, 0, err.Error())
 	}
@@ -903,6 +940,9 @@ func unrecognizedPollDetail(reason string, body []byte) string {
 }
 
 func recordPollFailure(ctx context.Context, adaptor TaskPollingAdaptor, task *model.Task, fromStatus model.TaskStatus, class string, statusCode int, detail string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	task.PrivateData.PollFailures++
 	// TASK_POLL_MAX_FAILURES <= 0 disables the consecutive-failure cutoff, matching
 	// TASK_TIMEOUT_MINUTES semantics; the 72h sweep (TASK_TIMEOUT_MINUTES default

@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"github.com/QuantumNous/new-api/relay"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
@@ -62,11 +63,13 @@ func TestAsyncImageMultipleResults(t *testing.T) {
 		name                          string
 		count                         int
 		mixed, invalid, retryDownload bool
+		objectResult                  bool
 	}{
 		{name: "four_urls", count: 4, retryDownload: true},
 		{name: "mixed_url_and_base64", count: 4, mixed: true},
 		{name: "partial_failure", count: 4, invalid: true},
 		{name: "single_image", count: 1},
+		{name: "single_object_with_completion_usage", count: 1, objectResult: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			db := setupAsyncImageWorkerTestDB(t)
@@ -117,7 +120,12 @@ func TestAsyncImageMultipleResults(t *testing.T) {
 						}
 						result.Data = append(result.Data, item)
 					}
-					body, err := common.Marshal(result)
+					var response any = result
+					if tc.objectResult {
+						response = gin.H{"created": result.Created, "data": result.Data[0],
+							"usage": gin.H{"input_tokens": 0, "output_tokens": 0, "prompt_tokens": 19, "completion_tokens": 1001, "total_tokens": 1020}}
+					}
+					body, err := common.Marshal(response)
 					if err != nil {
 						w.WriteHeader(500)
 						return
@@ -189,6 +197,11 @@ func TestAsyncImageMultipleResults(t *testing.T) {
 			}
 			require.NoError(t, err)
 			require.Equal(t, model.TaskStatus(model.TaskStatusSuccess), restored.Status)
+			if tc.objectResult {
+				assert.EqualValues(t, 19, restored.PrivateData.PromptTokens)
+				assert.EqualValues(t, 1001, restored.PrivateData.CompletionTokens)
+				assert.EqualValues(t, 1020, restored.PrivateData.TotalTokens)
+			}
 			require.Len(t, restored.PrivateData.ImageAssets, tc.count)
 			var persisted dto.ImageResponse
 			require.NoError(t, common.Unmarshal(restored.Data, &persisted))
@@ -572,18 +585,9 @@ func TestRecordInternalAsyncImageFinalErrorLogStoresRetryPathAndIdentity(t *test
 		Name: "XGJ-banana",
 		Type: constant.ChannelTypeGemini,
 	}, apiErr, []string{"28", "36", "36", "36"}, []internalAsyncChannelRetryDetail{
-		{
-			Attempt:     1,
-			ChannelID:   28,
-			ChannelName: "first-banana",
-			ChannelType: constant.ChannelTypeGemini,
-			Status:      "error",
-			StatusCode:  http.StatusBadGateway,
-			ErrorType:   "openai_error",
-			ErrorCode:   "bad_gateway",
-			Error:       "status_code=502, upstream unavailable",
-			AttemptedAt: time.Now().Unix(),
-		},
+		buildInternalAsyncChannelRetryDetail(1, &model.Channel{Id: 28, Name: "first-banana", Type: constant.ChannelTypeGemini},
+			types.NewErrorWithStatusCode(errors.New("upstream unavailable"), "bad_gateway", http.StatusBadGateway),
+			10000, time.UnixMilli(11234)),
 		{
 			Attempt:     2,
 			ChannelID:   36,
@@ -626,6 +630,7 @@ func TestRecordInternalAsyncImageFinalErrorLogStoresRetryPathAndIdentity(t *test
 	require.True(t, ok)
 	require.Equal(t, float64(28), firstDetail["channel_id"])
 	require.Equal(t, "first-banana", firstDetail["channel_name"])
+	assert.EqualValues(t, 1234, firstDetail["elapsed_ms"])
 	require.Contains(t, firstDetail["error"], "upstream unavailable")
 	require.Equal(t, "/v1beta/models/monkey-image-flash 2:generateContent", other["request_path"])
 }
@@ -2072,6 +2077,13 @@ func TestAsyncImageRetry(t *testing.T) {
 			original, err := os.ReadFile(originalPath)
 			require.NoError(t, err)
 			assert.Equal(t, body, string(original))
+			// The worker resumes a previously accepted job. Its poll starts later
+			// than the original channel submission.
+			nativeAttemptStart := task.SubmitTime*1000 - 42000
+			if tc.name == "mapped native failover" {
+				task.PrivateData.ImageRetry.AttemptStartedAtMS = nativeAttemptStart
+				require.NoError(t, model.UpdateTaskPrivateData(task.ID, task.PrivateData))
+			}
 			if tc.resume {
 				snapshot.ID, snapshot.PollURL, snapshot.ChannelID = "backup", upstream.URL+"/jobs/backup", 809
 				require.NoError(t, relay.SaveNativeAsyncImageSnapshot(&task, snapshot))
@@ -2150,6 +2162,9 @@ func TestAsyncImageRetry(t *testing.T) {
 				require.Len(t, stored.PrivateData.ImageRetry.Details, 1)
 				assert.NotEmpty(t, stored.PrivateData.ImageRetry.Details[0].ErrorCode)
 				if tc.name == "mapped native failover" {
+					detail := stored.PrivateData.ImageRetry.Details[0]
+					require.NotNil(t, detail.ElapsedMS)
+					assert.Equal(t, detail.AttemptedAt, time.UnixMilli(nativeAttemptStart+*detail.ElapsedMS).Unix())
 					assert.Equal(t, "provider_error", stored.PrivateData.ImageRetry.Details[0].ErrorType)
 					assert.Equal(t, "server_error", stored.PrivateData.ImageRetry.Details[0].ErrorCode)
 				}
@@ -2508,6 +2523,12 @@ func TestAsyncImageRetryCycleBudget(t *testing.T) {
 			assert.NotContains(t, stored.PrivateData.ChannelRetryPath, "810", "disabled channel must stay excluded in every round")
 			if tc.alwaysFail {
 				assert.Len(t, stored.PrivateData.ChannelRetryPath, tc.wantPosts)
+				require.Len(t, stored.PrivateData.ImageRetry.Details, tc.wantPosts)
+				for i, detail := range stored.PrivateData.ImageRetry.Details {
+					assert.Equal(t, i+1, detail.Attempt)
+					assert.Equal(t, stored.PrivateData.ChannelRetryPath[i], strconv.Itoa(detail.ChannelID))
+					assert.NotNil(t, detail.ElapsedMS)
+				}
 			}
 			if tc.resumeAtLimit {
 				assert.Len(t, stored.PrivateData.ChannelRetryPath, 16)

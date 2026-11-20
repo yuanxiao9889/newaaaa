@@ -369,7 +369,7 @@ type terminalSettlementPollingAdaptor struct {
 
 func (a *terminalSettlementPollingAdaptor) Init(*relaycommon.RelayInfo) {}
 
-func (a *terminalSettlementPollingAdaptor) FetchTask(string, string, *model.Task, string) (*http.Response, error) {
+func (a *terminalSettlementPollingAdaptor) FetchTask(context.Context, string, string, *model.Task, string) (*http.Response, error) {
 	return &http.Response{
 		StatusCode: http.StatusOK,
 		Body:       io.NopCloser(strings.NewReader(`{}`)),

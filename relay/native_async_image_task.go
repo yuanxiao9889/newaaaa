@@ -111,6 +111,8 @@ type NativeAsyncImageSnapshot struct {
 	KeyFingerprint string                         `json:"key_fingerprint"`
 	Task           *kitdto.ImageAdapterTaskConfig `json:"image_adapter_task,omitempty"`
 	Provider       string                         `json:"native_provider,omitempty"`
+
+	attemptStartedAtMS int64 // Passed to queue admission before the polling snapshot is serialized.
 }
 
 func parseNativeAsyncImageSnapshot(resp *http.Response, info *relaycommon.RelayInfo, nativeConfig ...*kitdto.ImageAdapterTaskConfig) (*NativeAsyncImageSnapshot, error) {
@@ -143,13 +145,25 @@ func parseNativeAsyncImageSnapshot(resp *http.Response, info *relaycommon.RelayI
 		configured.Provider = snapshot.Provider
 		snapshot = *configured
 	} else {
-		if err = common.Unmarshal(body, &snapshot); err != nil {
+		var receipt struct {
+			ID         string `json:"id"`
+			TaskID     string `json:"task_id"`
+			PollURL    string `json:"poll_url"`
+			StatusURL  string `json:"status_url"`
+			ContentURL string `json:"content_url"`
+		}
+		if err = common.Unmarshal(body, &receipt); err != nil {
 			return nil, fmt.Errorf("invalid native image task response")
 		}
-		snapshot.Task = nil
-		// Provider parsers are host-selected; an upstream task envelope cannot
-		// opt itself into a different protocol interpretation.
-		snapshot.Provider = ""
+		snapshot.ID = strings.TrimSpace(receipt.ID)
+		if snapshot.ID == "" {
+			snapshot.ID = strings.TrimSpace(receipt.TaskID)
+		}
+		snapshot.PollURL = strings.TrimSpace(receipt.PollURL)
+		if snapshot.PollURL == "" {
+			snapshot.PollURL = strings.TrimSpace(receipt.StatusURL)
+		}
+		snapshot.ContentURL = receipt.ContentURL
 	}
 	if strings.TrimSpace(snapshot.ID) == "" || strings.TrimSpace(snapshot.PollURL) == "" {
 		return nil, fmt.Errorf("native image task response missing id or poll_url")
@@ -295,8 +309,8 @@ func pollNativeAsyncImageResult(ctx context.Context, client *http.Client, entry 
 					}
 				}
 				var payload struct {
-					Status string          `json:"status"`
-					Data   []dto.ImageData `json:"data"`
+					Status string               `json:"status"`
+					Data   kitdto.ImageDataList `json:"data"`
 				}
 				if common.Unmarshal(body, &payload) != nil {
 					return nil, fmt.Errorf("invalid native image task status response")

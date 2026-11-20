@@ -124,6 +124,7 @@ const retryDetails = [
     status_code: 429,
     error_code: 'rate_limit',
     error_type: 'upstream_error',
+    elapsed_ms: 1204000,
     error: 'Upstream rate limited',
   },
   {
@@ -131,6 +132,7 @@ const retryDetails = [
     channel_id: 66,
     channel_name: 'last',
     status_code: 502,
+    elapsed_ms: 0,
     error: 'Upstream unavailable',
   },
   {
@@ -293,10 +295,12 @@ test.each(['admin', 'legacy'] as const)(
     const items = within(list).getAllByRole('listitem')
     expect(items).toHaveLength(3)
     expect(items[0]).toHaveTextContent(
-      '#1, channel=143 (first), status_code=429, error_code=rate_limit, error_type=upstream_error'
+      '#1, channel=143 (first), Duration=20m 4s, status_code=429, error_code=rate_limit, error_type=upstream_error'
     )
     expect(items[0]).toHaveTextContent('Upstream rate limited')
-    expect(items[1]).toHaveTextContent('#2, channel=66 (last), status_code=502')
+    expect(items[1]).toHaveTextContent(
+      '#2, channel=66 (last), Duration=0ms, status_code=502'
+    )
     expect(items[1]).toHaveTextContent('Upstream unavailable')
     expect(items[2]).toHaveTextContent('#3, channel=66 (last), status_code=503')
     expect(items[2]).toHaveTextContent('No available channel')
@@ -352,8 +356,8 @@ test('copies all retry errors in their original order', async () => {
     screen.getByRole('button', { name: 'Copy Retry Failure Details' })
   )
   expect(await navigator.clipboard.readText()).toBe(
-    '#1, channel=143 (first), status_code=429, error_code=rate_limit, error_type=upstream_error\nUpstream rate limited\n\n' +
-      '#2, channel=66 (last), status_code=502\nUpstream unavailable\n\n' +
+    '#1, channel=143 (first), Duration=20m 4s, status_code=429, error_code=rate_limit, error_type=upstream_error\nUpstream rate limited\n\n' +
+      '#2, channel=66 (last), Duration=0ms, status_code=502\nUpstream unavailable\n\n' +
       '#3, channel=66 (last), status_code=503\nNo available channel'
   )
 })

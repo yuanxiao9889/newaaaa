@@ -17,6 +17,9 @@ func TestValidateOpenAIImageResponseForBillingObjectData(t *testing.T) {
 		{"empty object", `{"data":{}}`, false},
 		{"blank image", `{"data":{"url":"  "}}`, false},
 		{"zero output tokens", `{"data":{"b64_json":"abc123"},"usage":{"output_tokens":0}}`, false},
+		{"measured completion tokens", `{"data":[{"url":"https://example.com/image.png"}],"usage":{"input_tokens":0,"output_tokens":0,"prompt_tokens":19,"completion_tokens":1001,"total_tokens":1020}}`, true},
+		{"empty image with measured tokens", `{"data":[{"url":"","b64_json":""}],"usage":{"output_tokens":0,"completion_tokens":1001}}`, false},
+		{"negative output tokens", `{"data":{"url":"https://example.com/image.png"},"usage":{"output_tokens":-1,"completion_tokens":1001}}`, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			err := ValidateOpenAIImageResponseForBilling([]byte(tc.body))

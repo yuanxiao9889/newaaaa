@@ -1,6 +1,7 @@
 package relay
 
 import (
+	"context"
 	"encoding/base64"
 	"net/http"
 	"net/http/httptest"
@@ -76,7 +77,7 @@ func TestRealtimeFetchAppliesChannelHeaderOverrides(t *testing.T) {
 		},
 	}
 
-	tryRealtimeFetch(task, true)
+	tryRealtimeFetch(context.Background(), task, true)
 
 	require.Len(t, requests, 1)
 	request := <-requests
@@ -122,7 +123,7 @@ func TestRealtimeFetchRefundsTaskItFindsFailed(t *testing.T) {
 	}
 	require.NoError(t, database.Create(task).Error)
 
-	tryRealtimeFetch(task, true)
+	tryRealtimeFetch(context.Background(), task, true)
 
 	var stored model.Task
 	require.NoError(t, database.First(&stored, task.ID).Error)

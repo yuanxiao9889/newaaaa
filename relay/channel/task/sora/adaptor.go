@@ -2,6 +2,7 @@ package sora
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"mime/multipart"
@@ -312,7 +313,7 @@ func (a *TaskAdaptor) ParseResponse(c *gin.Context, resp *http.Response, info *r
 }
 
 // FetchTask fetch task status
-func (a *TaskAdaptor) FetchTask(baseUrl, key string, task *model.Task, proxy string) (*http.Response, error) {
+func (a *TaskAdaptor) FetchTask(ctx context.Context, baseUrl, key string, task *model.Task, proxy string) (*http.Response, error) {
 	taskID := task.GetUpstreamTaskID()
 	if taskID == "" {
 		return nil, fmt.Errorf("invalid task_id")
@@ -320,7 +321,7 @@ func (a *TaskAdaptor) FetchTask(baseUrl, key string, task *model.Task, proxy str
 
 	uri := fmt.Sprintf("%s/v1/videos/%s", baseUrl, taskID)
 
-	req, err := http.NewRequest(http.MethodGet, uri, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, uri, nil)
 	if err != nil {
 		return nil, err
 	}

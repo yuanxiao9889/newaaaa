@@ -7,13 +7,16 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/gin-gonic/gin"
+	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
 )
 
 func TestSearchChannelsExactModelFilter(t *testing.T) {
@@ -175,4 +178,95 @@ func TestSearchChannelsExactModelFilter(t *testing.T) {
 			})
 		}
 	}
+}
+
+func TestBatchSetChannelAutoSwitch(t *testing.T) {
+	db, dialect := openTaskDialectDatabase(t, &model.Channel{}, &model.Ability{}, &model.User{})
+	logDB, err := gorm.Open(sqlite.Open(filepath.Join(t.TempDir(), "batch-audit.db")))
+	require.NoError(t, err)
+	conn, err := logDB.DB()
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, conn.Close()) })
+	require.NoError(t, logDB.AutoMigrate(&model.Log{}, &model.AuditLog{}))
+	oldDB, oldLog := model.DB, model.LOG_DB
+	oldRedis := common.RedisEnabled
+	common.RedisEnabled = false
+	t.Cleanup(func() { common.RedisEnabled = oldRedis })
+	oldMain, oldLogType, oldCache := common.MainDatabaseType(), common.LogDatabaseType(), common.MemoryCacheEnabled
+	model.DB, model.LOG_DB, common.MemoryCacheEnabled = db, logDB, false
+	common.SetDatabaseTypes(dialect, common.DatabaseTypeSQLite)
+	t.Cleanup(func() {
+		model.DB, model.LOG_DB, common.MemoryCacheEnabled = oldDB, oldLog, oldCache
+		common.SetDatabaseTypes(oldMain, oldLogType)
+	})
+	for _, ch := range []model.Channel{
+		{Id: 1, Type: 1, Status: common.ChannelStatusManuallyDisabled, OtherSettings: `{"future":{"large":9007199254740993},"auto_switch_max_attempts":7}`},
+		{Id: 2, Type: 1, OtherSettings: `{"auto_switch_enabled":true,"auto_switch_retry_window_minutes":4,"auto_switch_max_attempts":2}`},
+		{Id: 3, Type: 2},
+	} {
+		require.NoError(t, db.Create(&ch).Error)
+	}
+	router := gin.New()
+	require.NoError(t, db.Create(&model.User{Id: 1, Username: "batch-admin", Role: common.RoleRootUser}).Error)
+	router.POST("/batch", func(c *gin.Context) { c.Set("id", 1); c.Set("role", common.RoleRootUser) }, BatchSetChannelAutoSwitch)
+	post := func(body string, success bool) {
+		t.Helper()
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/batch", strings.NewReader(body)))
+		require.Equal(t, 200, rec.Code)
+		var response struct {
+			Success bool `json:"success"`
+			Data    int  `json:"data"`
+		}
+		require.NoError(t, common.Unmarshal(rec.Body.Bytes(), &response))
+		require.Equal(t, success, response.Success, rec.Body.String())
+		if success {
+			require.Equal(t, 2, response.Data)
+		}
+	}
+	read := func(id int) model.Channel {
+		t.Helper()
+		var ch model.Channel
+		require.NoError(t, db.First(&ch, id).Error)
+		return ch
+	}
+	off := `{"ids":[2,1],"auto_switch_enabled":false}`
+	post(off, true)
+	ch1, ch2 := read(1), read(2)
+	a, b := ch1.GetOtherSettings(), ch2.GetOtherSettings()
+	assert.False(t, a.AutoSwitchEnabled)
+	assert.False(t, b.AutoSwitchEnabled)
+	assert.Nil(t, a.AutoSwitchRetryWindowMinutes)
+	assert.Equal(t, 7, *a.AutoSwitchMaxAttempts)
+	assert.Equal(t, 2, *b.AutoSwitchMaxAttempts)
+	assert.Equal(t, 4, *b.AutoSwitchRetryWindowMinutes)
+	valid := `{"ids":[2,1,1],"auto_switch_enabled":true,"auto_switch_retry_window_minutes":120,"auto_switch_max_attempts":10}`
+	for _, invalid := range []string{strings.Replace(valid, "2,1,1", "1,999", 1), strings.Replace(valid, "2,1,1", "1,3", 1), strings.Replace(valid, "120", "121", 1), strings.Replace(valid, "120", "0", 1), strings.Replace(valid, "10}", "11}", 1), strings.Replace(valid, "10}", "1.5}", 1), strings.Replace(valid, "10}", "null}", 1), strings.Replace(valid, "true", "null", 1)} {
+		post(invalid, false)
+		assert.Equal(t, ch1.OtherSettings, read(1).OtherSettings)
+		assert.Equal(t, ch2.OtherSettings, read(2).OtherSettings)
+	}
+	post(valid, true)
+	post(valid, true)
+	for _, id := range []int{1, 2} {
+		ch := read(id)
+		settings := ch.GetOtherSettings()
+		assert.True(t, settings.AutoSwitchEnabled)
+		assert.Equal(t, 120, *settings.AutoSwitchRetryWindowMinutes)
+		assert.Equal(t, 10, *settings.AutoSwitchMaxAttempts)
+	}
+	assert.Contains(t, read(1).OtherSettings, "9007199254740993")
+	assert.Equal(t, common.ChannelStatusManuallyDisabled, read(1).Status)
+	assert.Empty(t, read(3).OtherSettings)
+	post(off, true)
+	for _, id := range []int{1, 2} {
+		ch := read(id)
+		settings := ch.GetOtherSettings()
+		assert.False(t, settings.AutoSwitchEnabled)
+		assert.Equal(t, 120, *settings.AutoSwitchRetryWindowMinutes)
+		assert.Equal(t, 10, *settings.AutoSwitchMaxAttempts)
+	}
+	var audits int64
+	require.NoError(t, logDB.Model(&model.AuditLog{}).Where("action = ?", "channel.auto_switch_batch_set").Count(&audits).Error)
+	assert.EqualValues(t, 4, audits)
 }

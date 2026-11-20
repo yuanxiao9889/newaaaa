@@ -804,7 +804,7 @@ func (a *TaskAdaptor) GetModelList() []string { return append([]string(nil), a.p
 func (a *TaskAdaptor) GetChannelName() string { return a.plugin.Meta.Name }
 func (a *TaskAdaptor) FetchMode() string      { return a.plugin.Meta.FetchMode }
 
-func (a *TaskAdaptor) FetchBatchTasks(baseURL, key string, tasks []*model.Task, proxy string) (*http.Response, error) {
+func (a *TaskAdaptor) FetchBatchTasks(requestCtx context.Context, baseURL, key string, tasks []*model.Task, proxy string) (*http.Response, error) {
 	taskContexts := make([]map[string]any, 0, len(tasks))
 	for _, task := range tasks {
 		taskCtx, err := a.queryContext(task, key, baseURL, proxy)
@@ -817,14 +817,14 @@ func (a *TaskAdaptor) FetchBatchTasks(baseURL, key string, tasks []*model.Task, 
 	if err != nil {
 		return nil, err
 	}
-	descriptor, err := a.requestDescriptor(pluginruntime.WithFetcher(context.Background(), a.hookFetcher(baseURL, proxy)), "buildBatchQueryRequest", ctx, taskContexts)
+	descriptor, err := a.requestDescriptor(pluginruntime.WithFetcher(requestCtx, a.hookFetcher(baseURL, proxy)), "buildBatchQueryRequest", ctx, taskContexts)
 	if err != nil {
 		return nil, err
 	}
-	return a.doFetchDescriptor(baseURL, key, proxy, descriptor)
+	return a.doFetchDescriptor(requestCtx, baseURL, key, proxy, descriptor)
 }
 
-func (a *TaskAdaptor) FetchTask(baseURL, key string, task *model.Task, proxy string) (*http.Response, error) {
+func (a *TaskAdaptor) FetchTask(requestCtx context.Context, baseURL, key string, task *model.Task, proxy string) (*http.Response, error) {
 	if task != nil && task.PrivateData.Key != "" {
 		key = task.PrivateData.Key
 	}
@@ -832,11 +832,11 @@ func (a *TaskAdaptor) FetchTask(baseURL, key string, task *model.Task, proxy str
 	if err != nil {
 		return nil, err
 	}
-	descriptor, err := a.requestDescriptor(pluginruntime.WithFetcher(context.Background(), a.hookFetcher(baseURL, proxy)), "buildQueryRequest", ctx)
+	descriptor, err := a.requestDescriptor(pluginruntime.WithFetcher(requestCtx, a.hookFetcher(baseURL, proxy)), "buildQueryRequest", ctx)
 	if err != nil {
 		return nil, err
 	}
-	return a.doFetchDescriptor(baseURL, key, proxy, descriptor)
+	return a.doFetchDescriptor(requestCtx, baseURL, key, proxy, descriptor)
 }
 
 // hookFetcher sends a driver hook's utils.fetch requests to the hosts its
@@ -885,7 +885,7 @@ func (a *TaskAdaptor) hookFetcher(baseURL, proxy string) pluginruntime.Fetcher {
 	}
 }
 
-func (a *TaskAdaptor) doFetchDescriptor(baseURL, key, proxy string, descriptor requestDescriptor) (*http.Response, error) {
+func (a *TaskAdaptor) doFetchDescriptor(ctx context.Context, baseURL, key, proxy string, descriptor requestDescriptor) (*http.Response, error) {
 	if err := pluginruntime.ValidateRequestURL(descriptor.URL, baseURL, a.plugin.Meta.AllowedHosts); err != nil {
 		return nil, err
 	}
@@ -907,7 +907,7 @@ func (a *TaskAdaptor) doFetchDescriptor(baseURL, key, proxy string, descriptor r
 	if method == "" {
 		method = http.MethodGet
 	}
-	req, err := http.NewRequest(method, descriptor.URL, requestBody)
+	req, err := http.NewRequestWithContext(ctx, method, descriptor.URL, requestBody)
 	if err != nil {
 		return nil, err
 	}

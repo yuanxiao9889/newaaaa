@@ -44,6 +44,116 @@ export const videoCommonParameters: VideoParameter[] = [
 
 export const videoGroups: VideoGroup[] = [
   {
+    id: 'video-301010-sss',
+    title: '全能视频2.5-301010-sss',
+    variants: [
+      {
+        models: ['全能视频2.5-301010-sss'],
+        seconds: '5–30',
+        resolution: '480p / 720p / 1080p',
+        ratios: '16:9, 9:16, 4:3, 3:4, 1:1, 21:9, adaptive',
+        limits:
+          'Apply both per-type and total reference limits. A zero limit means that media type is unsupported.',
+        constraints: {
+          inputModes: [
+            'textToVideo',
+            'reference',
+            'firstFrame',
+            'firstLastFrame',
+          ],
+          maxImages: 30,
+          maxVideos: 10,
+          maxAudios: 10,
+          maxTotal: 50,
+        },
+      },
+    ],
+    parameters: [
+      {
+        name: 'duration',
+        type: 'integer',
+        required: false,
+        description:
+          'Output duration in whole seconds, from 5 to 30. Defaults to 5. The alias is seconds.',
+      },
+      {
+        name: 'ratio',
+        type: 'string',
+        required: false,
+        description: 'Defaults to 16:9. The alias is aspect_ratio.',
+      },
+      {
+        name: 'resolution',
+        type: 'string',
+        required: false,
+        description: 'Output resolution is 480p, 720p (default) or 1080p.',
+      },
+      {
+        name: 'images / videos / audios',
+        type: 'string | string[]',
+        required: false,
+        description:
+          'Send public media URLs by type, up to 30 images, 10 videos and 10 audio clips. The respective aliases are reference_images, reference_videos and reference_audio. Use one name per field.',
+      },
+      {
+        name: 'first_frame / last_frame',
+        type: 'string | string[]',
+        required: false,
+        description:
+          'Supply one first-frame URL and optionally one last-frame URL. The aliases are start_frame and end_frame. Use frame controls separately from reference media.',
+      },
+      {
+        name: 'generate_audio / watermark / camera_fixed',
+        type: 'boolean',
+        required: false,
+        description:
+          'Enable or disable audio generation, watermarking and a fixed camera independently.',
+      },
+      {
+        name: 'seed',
+        type: 'integer',
+        required: false,
+        description: 'Optional random seed. Use a JavaScript safe integer.',
+      },
+    ],
+    notes: [
+      'Each JSON request creates one asynchronous video. Omit n and stream, or set n to 1 and stream to false.',
+      'The default group is billed per output second: 480p ¥0.30, 720p ¥0.39, 1080p ¥0.85. Five seconds at 480p costs ¥1.50. Check the pricing page for current rates.',
+    ],
+    examples: [
+      {
+        title: 'Request example',
+        body: {
+          model: '全能视频2.5-301010-sss',
+          prompt: 'A cinematic shot of a mountain ridge at sunrise.',
+          duration: 5,
+          resolution: '480p',
+          ratio: '16:9',
+        },
+      },
+      {
+        title: 'apiDocs.video.mixedExample',
+        body: {
+          model: '全能视频2.5-301010-sss',
+          prompt:
+            'Show the pictured dancer following the reference movement in time with the music.',
+          images: ['https://your-storage.example.com/dancer.jpg'],
+          videos: ['https://your-storage.example.com/movement.mp4'],
+          audios: ['https://your-storage.example.com/music.mp3'],
+        },
+      },
+      {
+        title: 'First and last frame example',
+        body: {
+          model: '全能视频2.5-301010-sss',
+          prompt: 'Move smoothly from the opening frame to the closing frame.',
+          first_frame: 'https://your-storage.example.com/start.jpg',
+          last_frame: 'https://your-storage.example.com/end.jpg',
+        },
+      },
+    ],
+  },
+  {
     id: 'video-ailxp-seedance-2.5-activity',
     title: '全能视频2.5-30-720',
     variants: [

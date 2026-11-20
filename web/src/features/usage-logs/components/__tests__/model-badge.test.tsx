@@ -18,7 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { expect, it, vi } from 'vitest'
+import { expect, it } from 'vitest'
 
 import {
   categorizeModels,
@@ -284,7 +284,9 @@ it.each([
 ])('keeps unknown model %s in Other with the dot fallback', (model) => {
   expect(getModelCategory(model)).toBe('Other')
   const { container } = render(<ModelBadge modelName={model} />)
-  expect(container.querySelector('svg, img')).toBeNull()
+  expect(
+    container.querySelector('[data-slot="status-badge"] :is(svg, img)')
+  ).toBeNull()
   expect(container.querySelector('[aria-hidden="true"]')).not.toBeNull()
 })
 
@@ -305,9 +307,7 @@ it('preserves model names and input order when grouping models', () => {
 })
 
 it('shows the OpenAI icon in the mobile model button', () => {
-  render(
-    <ModelBadge modelName='codex-auto-review' wrapText onInspect={vi.fn()} />
-  )
+  render(<ModelBadge modelName='codex-auto-review' wrapText />)
   expect(
     screen.getByRole('button', { name: 'Model: codex-auto-review' })
   ).toContainElement(screen.getByLabelText('OpenAI'))
@@ -317,116 +317,18 @@ it('makes the Wan icon available to model icon selectors', () => {
   expect(getLobeIconNames()).toContain('Wan')
 })
 
-it('hides the response model in the list and opens its evidence with the keyboard', async () => {
+it('copies the displayed desktop model name on click or keyboard activation', async () => {
   const user = userEvent.setup()
-  const returned =
-    'unexpected-provider-model-with-a-long-dated-version-2026-09-17'
-  render(
-    <ModelBadge
-      modelName='requested-model'
-      responseModel={{
-        requested_model: 'requested-model',
-        upstream_model: 'mapped-model',
-        returned_model: returned,
-      }}
-    />
-  )
-  expect(screen.queryByText(/^Response model:/)).not.toBeInTheDocument()
+  render(<ModelBadge modelName='all-image-2.6-sunburst-H' />)
+  const button = screen.getByRole('button', {
+    name: 'Model: all-image-2.6-sunburst-H',
+  })
   await user.tab()
-  expect(
-    screen.getByRole('button', {
-      name: 'Model: requested-model',
-    })
-  ).toHaveFocus()
+  expect(button).toHaveFocus()
   await user.keyboard('{Enter}')
-  expect(await screen.findByText(returned)).toBeVisible()
-  expect(screen.getByText('mapped-model')).toBeVisible()
-  expect(screen.getByText('Request Model')).toBeVisible()
-  expect(screen.getByText('Upstream Model')).toBeVisible()
-  expect(screen.getByText('Response Model')).toBeVisible()
-  expect(
-    screen.getByText(/this warning alone does not prove model substitution/)
-  ).toBeVisible()
+  expect(await navigator.clipboard.readText()).toBe('all-image-2.6-sunburst-H')
+  await navigator.clipboard.writeText('')
+  await user.click(button)
+  expect(await navigator.clipboard.readText()).toBe('all-image-2.6-sunburst-H')
+  expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
 })
-
-it.each([false, true])(
-  'copies the model without opening details when there is no mapping or difference (response observed: %s)',
-  async (observed) => {
-    const user = userEvent.setup()
-    const copy = vi.spyOn(navigator.clipboard, 'writeText').mockResolvedValue()
-    render(
-      <ModelBadge
-        modelName='requested-model'
-        responseModel={
-          observed
-            ? {
-                requested_model: 'requested-model',
-                upstream_model: 'requested-model',
-                returned_model: 'requested-model',
-              }
-            : undefined
-        }
-      />
-    )
-    expect(screen.queryByRole('button')).not.toBeInTheDocument()
-    await user.click(screen.getByText('requested-model'))
-    expect(copy).toHaveBeenCalledWith('requested-model')
-    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
-    expect(screen.queryByText('Response Model')).not.toBeInTheDocument()
-  }
-)
-
-it('keeps mapped model details available when the response matches the upstream model', async () => {
-  const user = userEvent.setup()
-  render(
-    <ModelBadge
-      modelName='requested-model'
-      responseModel={{
-        requested_model: 'requested-model',
-        upstream_model: 'mapped-model',
-        returned_model: 'mapped-model',
-      }}
-    />
-  )
-  await user.click(
-    screen.getByRole('button', { name: 'Model: requested-model' })
-  )
-  expect(await screen.findByText('Response Model')).toBeVisible()
-  expect(screen.queryByText(/^Response model:/)).not.toBeInTheDocument()
-})
-
-it.each([
-  'requested-model-2026-09-17',
-  'REQUESTED-MODEL',
-  'mapped-model-2026-09-17',
-  'MAPPED-MODEL',
-  'deepseek/requested-model',
-  'accounts/vendor/models/MAPPED-MODEL',
-])(
-  'keeps the compatible response %s in the popover without a list annotation',
-  async (returned) => {
-    const user = userEvent.setup()
-    render(
-      <ModelBadge
-        modelName='requested-model'
-        responseModel={{
-          requested_model: 'requested-model',
-          upstream_model: 'mapped-model',
-          returned_model: returned,
-        }}
-      />
-    )
-    expect(screen.queryByText(returned)).not.toBeInTheDocument()
-    expect(screen.queryByText(/^Response model:/)).not.toBeInTheDocument()
-    const trigger = screen.getByRole('button', {
-      name: 'Model: requested-model',
-    })
-    expect(trigger).toHaveTextContent(/^requested-model$/)
-    await user.click(trigger)
-    expect(await screen.findByText(returned)).toBeVisible()
-    expect(screen.queryByText(/^Response model:/)).not.toBeInTheDocument()
-    expect(
-      screen.queryByText(/this warning alone does not prove model substitution/)
-    ).not.toBeInTheDocument()
-  }
-)

@@ -19,6 +19,8 @@ For commercial licensing, please contact support@quantumnous.com
 // Static translation keys that don't get picked up by the t('...') regex.
 // These cover dynamic labels (e.g. constants, configs) that are passed into t at runtime.
 export const STATIC_I18N_KEYS = [
+  'Channel #{{id}} was not found',
+  'Channel #{{id}} does not support automatic switching',
   '{{count}} price options',
   'Some prices are not configured',
   '{{count}} providers',
@@ -1194,6 +1196,16 @@ export const STATIC_I18N_KEYS = [
   '全能视频2.5-30-720',
   '全能视频2.0-fast-720',
   '全能视频2.5-1055-flash',
+  '全能视频2.5-301010-sss',
+  'Output duration in whole seconds, from 5 to 30. Defaults to 5. The alias is seconds.',
+  'Defaults to 16:9. The alias is aspect_ratio.',
+  'Output resolution is 480p, 720p (default) or 1080p.',
+  'Send public media URLs by type, up to 30 images, 10 videos and 10 audio clips. The respective aliases are reference_images, reference_videos and reference_audio. Use one name per field.',
+  'Supply one first-frame URL and optionally one last-frame URL. The aliases are start_frame and end_frame. Use frame controls separately from reference media.',
+  'Enable or disable audio generation, watermarking and a fixed camera independently.',
+  'Optional random seed. Use a JavaScript safe integer.',
+  'Each JSON request creates one asynchronous video. Omit n and stream, or set n to 1 and stream to false.',
+  'The default group is billed per output second: 480p ¥0.30, 720p ¥0.39, 1080p ¥0.85. Five seconds at 480p costs ¥1.50. Check the pricing page for current rates.',
   'Storyboard Copilot sends n=1, exact size, and quality for both generations and multipart edits without aspect_ratio, image_backend, or response_format.',
   'H routing variant of all-image-2 with the same OpenAI Images generation and editing contract.',
   'Projects that explicitly select the OOpii H route while preserving the aggregate image workflow.',

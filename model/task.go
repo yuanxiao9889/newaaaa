@@ -218,6 +218,7 @@ type AsyncPluginImageState struct {
 	Status           TaskStatus            `json:"status"`
 	ResultURL        string                `json:"result_url,omitempty"`
 	ResponseBodyPath string                `json:"response_body_path,omitempty"`
+	FailedAtMS       int64                 `json:"failed_at_ms,omitempty"`
 }
 
 // AsyncImageRetryState keeps the original client request separate from the
@@ -237,6 +238,9 @@ type AsyncImageRetryState struct {
 	SettlementQuota *int                      `json:"settlement_quota,omitempty"`
 	SettlementInput *billingexpr.RequestInput `json:"settlement_input,omitempty"`
 	Details         []AsyncImageRetryDetail   `json:"details,omitempty"`
+
+	// Retain the current submission's start across polling and worker restarts.
+	AttemptStartedAtMS int64 `json:"attempt_started_at_ms,omitempty"`
 }
 
 type AsyncImageRetryDetail struct {
@@ -250,6 +254,7 @@ type AsyncImageRetryDetail struct {
 	ErrorCode   string `json:"error_code,omitempty"`
 	Error       string `json:"error,omitempty"`
 	AttemptedAt int64  `json:"attempted_at"`
+	ElapsedMS   *int64 `json:"elapsed_ms,omitempty"`
 }
 
 type TaskExecutionSnapshot struct {

@@ -243,6 +243,7 @@ func canRetryVideoTask(task *model.Task, failure *relaycommon.TaskInfo, now int6
 }
 
 func retryVideoTask(ctx context.Context, task *model.Task, failure *relaycommon.TaskInfo) (bool, error) {
+	finishedAt := time.Now()
 	service.RecordAutoSwitchTaskResult(ctx, task, failure)
 	now := time.Now().Unix()
 	if state := task.PrivateData.MediaRetry; state != nil && failure != nil && failure.Status == model.TaskStatusFailure {
@@ -263,7 +264,8 @@ func retryVideoTask(ctx context.Context, task *model.Task, failure *relaycommon.
 	retry.Submitting, retry.SubmitStartedAt = true, now
 	retry.Details = append(retry.Details, model.AsyncImageRetryDetail{
 		Attempt: len(task.PrivateData.ChannelRetryPath), ChannelID: task.ChannelId,
-		Status: model.TaskStatusFailure, Error: failure.Reason, AttemptedAt: now,
+		Status: model.TaskStatusFailure, Error: failure.Reason, AttemptedAt: finishedAt.Unix(),
+		ElapsedMS: channelAttemptElapsedMS(retry.AttemptStartedAtMS, finishedAt),
 	})
 	won, err := task.UpdateWithStatus(fromStatus)
 	if err != nil || !won {
@@ -317,7 +319,9 @@ func retryVideoTask(ctx context.Context, task *model.Task, failure *relaycommon.
 			}
 			return nil
 		})
+		task.PrivateData.VideoRetry.AttemptStartedAtMS = time.Now().UnixMilli()
 		result, taskErr := relay.RelayTaskSubmit(c, info)
+		finishedAt := time.Now()
 		if info.QuotaClamp != nil {
 			task.PrivateData.VideoRetry.RecordQuotaClamp(info.QuotaClamp)
 			logger.LogWarn(c, fmt.Sprintf("video task %s retry quota saturated: %s", task.TaskID, info.QuotaClamp))
@@ -327,7 +331,8 @@ func retryVideoTask(ctx context.Context, task *model.Task, failure *relaycommon.
 			task.PrivateData.VideoRetry.Details = append(task.PrivateData.VideoRetry.Details, model.AsyncImageRetryDetail{
 				Attempt: len(task.PrivateData.ChannelRetryPath), ChannelID: channel.Id, ChannelName: channel.Name,
 				ChannelType: channel.Type, Status: model.TaskStatusFailure, StatusCode: taskErr.StatusCode,
-				ErrorCode: taskErr.Code, Error: taskErr.Message, AttemptedAt: time.Now().Unix(),
+				ErrorCode: taskErr.Code, Error: taskErr.Message, AttemptedAt: finishedAt.Unix(),
+				ElapsedMS: channelAttemptElapsedMS(task.PrivateData.VideoRetry.AttemptStartedAtMS, finishedAt),
 			})
 			failure.Reason = taskErr.Message
 			// Only a definite non-2xx response permits another POST. Transport

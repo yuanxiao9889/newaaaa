@@ -231,6 +231,7 @@ func ImageHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *type
 	if apiErr := service.BeginMediaRetryDispatch(c); apiErr != nil {
 		return apiErr
 	}
+	attemptStartedAtMS := time.Now().UnixMilli()
 	resp, err := adaptor.DoRequest(c, info, requestBody)
 	if err != nil {
 		return types.NewOpenAIError(err, types.ErrorCodeDoRequestFailed, http.StatusInternalServerError)
@@ -248,6 +249,7 @@ func ImageHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *type
 				if err != nil {
 					return types.NewOpenAIError(err, types.ErrorCodeReadResponseBodyFailed, http.StatusBadGateway, types.ErrOptionWithSkipRetry())
 				}
+				snapshot.attemptStartedAtMS = attemptStartedAtMS
 				if c.GetBool("async_image_worker") {
 					c.Set(NativeAsyncImageFormat, snapshot)
 					return nil

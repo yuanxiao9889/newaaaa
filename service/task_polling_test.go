@@ -48,7 +48,7 @@ type batchPollingAdaptor struct {
 }
 
 func (a *batchPollingAdaptor) FetchMode() string { return "batch" }
-func (a *batchPollingAdaptor) FetchBatchTasks(_ string, _ string, tasks []*model.Task, _ string) (*http.Response, error) {
+func (a *batchPollingAdaptor) FetchBatchTasks(_ context.Context, _ string, _ string, tasks []*model.Task, _ string) (*http.Response, error) {
 	a.batchCalls++
 	a.batchIDs = a.batchIDs[:0]
 	for _, task := range tasks {
@@ -81,7 +81,7 @@ func (a *taskPollingFetchAdaptor) initChannelMeta() *relaycommon.ChannelMeta {
 	return a.initInfo.ChannelMeta
 }
 
-func (a *taskPollingFetchAdaptor) FetchTask(_ string, _ string, task *model.Task, _ string) (*http.Response, error) {
+func (a *taskPollingFetchAdaptor) FetchTask(_ context.Context, _ string, _ string, task *model.Task, _ string) (*http.Response, error) {
 	taskID := ""
 	if task != nil {
 		taskID = task.GetUpstreamTaskID()
@@ -729,6 +729,88 @@ func TestUpdateSunoTasksStalePollsRefundExactlyOnce(t *testing.T) {
 	assert.Equal(t, int64(1), countLogs(t))
 }
 
+type pollRequestAdaptor struct {
+	scriptedPollingAdaptor
+	fetch func(context.Context, *model.Task) error
+}
+
+func (a *pollRequestAdaptor) FetchTask(ctx context.Context, baseURL, key string, task *model.Task, proxy string) (*http.Response, error) {
+	if err := a.fetch(ctx, task); err != nil {
+		return nil, err
+	}
+	return a.scriptedPollingAdaptor.FetchTask(ctx, baseURL, key, task, proxy)
+}
+
+func TestRunTaskPollingOnceIsolatesSlowPlatform(t *testing.T) {
+	setupTaskPollingRegressionDB(t)
+	truncate(t)
+	require.NoError(t, model.DB.AutoMigrate(&model.TaskRetryBodyChunk{}))
+	seedTaskPollingChannel(t, 201, false)
+	seedTaskPollingChannel(t, 283, false)
+	fast := seedPollingTask(t, 201, "public_fast", "upstream_video")
+	slow := seedPollingTask(t, 283, "public_slow", "upstream_image")
+	require.NoError(t, model.DB.Model(slow).Update("platform", "image-plugin").Error)
+
+	previousLimit, previousFactory := constant.TaskQueryLimit, GetTaskAdaptorFunc
+	constant.TaskQueryLimit = 100
+	t.Cleanup(func() { constant.TaskQueryLimit, GetTaskAdaptorFunc = previousLimit, previousFactory })
+	started := make(chan struct{})
+	finishedPlatform := make(chan struct{}, 1)
+	ctx, cancel := context.WithCancel(t.Context())
+	slowAdaptor := &pollRequestAdaptor{fetch: func(queryCtx context.Context, task *model.Task) error {
+		assert.Equal(t, slow.GetUpstreamTaskID(), task.GetUpstreamTaskID())
+		_, bounded := queryCtx.Deadline()
+		assert.True(t, bounded, "status query needs its own deadline")
+		close(started)
+		<-queryCtx.Done()
+		return queryCtx.Err()
+	}}
+	fastAdaptor := &pollRequestAdaptor{
+		scriptedPollingAdaptor: scriptedPollingAdaptor{parse: &relaycommon.TaskInfo{Status: model.TaskStatusSuccess, Url: "https://example.com/video.mp4"}},
+		fetch: func(queryCtx context.Context, task *model.Task) error {
+			select {
+			case <-started:
+				return nil
+			case <-queryCtx.Done():
+				return queryCtx.Err()
+			}
+		},
+	}
+	GetTaskAdaptorFunc = func(platform constant.TaskPlatform) TaskPollingAdaptor {
+		if platform == "image-plugin" {
+			return slowAdaptor
+		}
+		return fastAdaptor
+	}
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		RunTaskPollingOnce(ctx, func(processed, total int) {
+			if processed == 1 && total == 2 {
+				finishedPlatform <- struct{}{}
+			}
+		})
+	}()
+	defer func() { cancel(); <-done }()
+	select {
+	case <-finishedPlatform:
+	case <-time.After(5 * time.Second):
+		t.Fatal("video status did not advance while the image status query was blocked")
+	}
+	var stored model.Task
+	require.NoError(t, model.DB.First(&stored, fast.ID).Error)
+	assert.Equal(t, model.TaskStatus(model.TaskStatusSuccess), stored.Status)
+	assert.Equal(t, "https://example.com/video.mp4", stored.GetResultURL())
+	cancel()
+	<-done
+	var interrupted model.Task
+	require.NoError(t, model.DB.First(&interrupted, slow.ID).Error)
+	assert.Equal(t, model.TaskStatus(model.TaskStatusInProgress), interrupted.Status)
+	assert.Zero(t, interrupted.PrivateData.PollFailures)
+	assert.Equal(t, slow.GetUpstreamTaskID(), interrupted.GetUpstreamTaskID())
+}
+
 func TestRunTaskPollingOnceDoesNotRefundHistoricalFailedTask(t *testing.T) {
 	truncate(t)
 
@@ -845,7 +927,7 @@ type scriptedPollingAdaptor struct {
 }
 
 func (a *scriptedPollingAdaptor) Init(*relaycommon.RelayInfo) {}
-func (a *scriptedPollingAdaptor) FetchTask(string, string, *model.Task, string) (*http.Response, error) {
+func (a *scriptedPollingAdaptor) FetchTask(context.Context, string, string, *model.Task, string) (*http.Response, error) {
 	if a.fetchErr != nil {
 		return nil, a.fetchErr
 	}
@@ -878,8 +960,8 @@ type scriptedBatchPollingAdaptor struct {
 }
 
 func (a *scriptedBatchPollingAdaptor) FetchMode() string { return "batch" }
-func (a *scriptedBatchPollingAdaptor) FetchBatchTasks(string, string, []*model.Task, string) (*http.Response, error) {
-	return a.FetchTask("", "", nil, "")
+func (a *scriptedBatchPollingAdaptor) FetchBatchTasks(context.Context, string, string, []*model.Task, string) (*http.Response, error) {
+	return a.FetchTask(context.Background(), "", "", nil, "")
 }
 func (a *scriptedBatchPollingAdaptor) ParseBatchResult([]*model.Task, *http.Response, []byte) (map[string]*BatchTaskResult, error) {
 	if a.parseErr != nil {
@@ -907,6 +989,14 @@ func TestUpdateVideoSingleTaskPollClassification(t *testing.T) {
 		wantState     string
 		wantUnchanged bool
 	}{
+		{
+			name:          "status query deadline keeps the accepted task pending",
+			fetchErr:      context.DeadlineExceeded,
+			maxFailures:   3,
+			wantStatus:    model.TaskStatusInProgress,
+			wantFailures:  1,
+			wantUnchanged: true,
+		},
 		{
 			name:          "404 fails immediately and refunds",
 			statusCode:    http.StatusNotFound,

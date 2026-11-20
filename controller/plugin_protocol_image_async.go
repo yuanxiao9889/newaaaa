@@ -145,6 +145,7 @@ func runQueuedTaskPluginImageAttempt(ctx context.Context, task *model.Task, cycl
 		c.Request = c.Request.WithContext(service.BeginUpstreamDelivery(ctx, channel.Id, len(task.PrivateData.ChannelRetryPath)))
 		var result *relay.TaskSubmitResult
 		var taskErr *dto.TaskError
+		retry.AttemptStartedAtMS = time.Now().UnixMilli()
 		if replacing {
 			// Re-price the replacement provider using its own schema. The task funds
 			// adapter reserves only the difference, atomically, before the new POST.
@@ -154,9 +155,10 @@ func runQueuedTaskPluginImageAttempt(ctx context.Context, task *model.Task, cycl
 			result, taskErr = relay.RelayQueuedTaskSubmit(c, info)
 		}
 		if taskErr != nil {
+			finishedAt := time.Now()
 			service.RecordAutoSwitchTaskSubmissionFailure(c, taskErr)
 			apiErr := taskSubmissionAPIError(taskErr)
-			retry.Details = append(retry.Details, buildInternalAsyncChannelRetryDetail(len(task.PrivateData.ChannelRetryPath), channel, apiErr))
+			retry.Details = append(retry.Details, buildInternalAsyncChannelRetryDetail(len(task.PrivateData.ChannelRetryPath), channel, apiErr, retry.AttemptStartedAtMS, finishedAt))
 			remaining := cycle.Budget.Remaining(common.RetryTimes-len(task.PrivateData.ChannelRetryPath)+1, len(task.PrivateData.ChannelRetryPath), time.Now())
 			confirmed := !taskErr.LocalError && !taskErr.NoRetry && taskErr.Code == "fail_to_fetch_task" && c.GetBool("auto_switch_task_rejected")
 			again := confirmed && !retry.SkipRetry && (task.PrivateData.MediaRetry != nil || operation_setting.ShouldRetryByStatusCode(taskErr.StatusCode)) && decideTaskRetry(c, taskErr, remaining).Action == "retry"
@@ -237,7 +239,7 @@ func runQueuedTaskPluginImageAttempt(ctx context.Context, task *model.Task, cycl
 		}
 		providerTask := *task
 		providerTask.Platform = task.PrivateData.PluginImage.Platform
-		response, err := adaptor.FetchTask(channel.GetBaseURL(), info.ApiKey, &providerTask, proxy)
+		response, err := adaptor.FetchTask(ctx, channel.GetBaseURL(), info.ApiKey, &providerTask, proxy)
 		if err != nil {
 			return nil, proxy, false, err
 		}
@@ -278,10 +280,15 @@ func runQueuedTaskPluginImageAttempt(ctx context.Context, task *model.Task, cycl
 	if task.PrivateData.PluginImage.Status == model.TaskStatusFailure {
 		state := task.PrivateData.MediaRetry
 		if state != nil && !task.PrivateData.ImageRetry.SkipRetry {
+			finishedAt := time.Now()
+			if failedAtMS := task.PrivateData.PluginImage.FailedAtMS; failedAtMS > 0 {
+				finishedAt = time.UnixMilli(failedAtMS)
+			}
 			decision := service.DecideMediaRetry(c, channel.Id, "", task.FailReason)
 			task.PrivateData.ImageRetry.Details = append(task.PrivateData.ImageRetry.Details, model.AsyncImageRetryDetail{
 				Attempt: state.Attempts, ChannelID: channel.Id, ChannelName: channel.Name, Status: model.TaskStatusFailure,
-				Error: task.FailReason, ErrorType: decision.Reason, AttemptedAt: time.Now().Unix(),
+				Error: task.FailReason, ErrorType: decision.Reason, AttemptedAt: finishedAt.Unix(),
+				ElapsedMS: channelAttemptElapsedMS(task.PrivateData.ImageRetry.AttemptStartedAtMS, finishedAt),
 			})
 			if decision.Action == "retry" {
 				task.PrivateData.PluginImage, task.PrivateData.AutoSwitch = nil, nil
@@ -336,6 +343,7 @@ func applyQueuedPluginImageResult(task *model.Task, result *relaycommon.TaskInfo
 		task.PrivateData.PluginState = result.PluginState
 	}
 	if result.Status == model.TaskStatusFailure {
+		task.PrivateData.PluginImage.FailedAtMS = time.Now().UnixMilli()
 		task.FailReason = result.Reason
 	}
 	if usage := result.TokenUsage; usage != nil {

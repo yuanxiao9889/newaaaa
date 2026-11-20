@@ -285,33 +285,6 @@ export function getResponseTimeColor(
 }
 
 /**
- * Format model name with mapping indicator
- */
-export function formatModelName(
-  log: UsageLog,
-  isAdmin: boolean
-): {
-  name: string
-  isMapped: boolean
-  actualModel?: string
-  responseModel?: LogOtherData['response_model']
-} {
-  const other = isAdmin ? parseLogOther(log.other) : null
-  const isMapped = !!(
-    other?.is_model_mapped &&
-    other?.upstream_model_name &&
-    other.upstream_model_name !== ''
-  )
-
-  return {
-    name: log.model_name,
-    isMapped,
-    actualModel: isMapped ? other.upstream_model_name : undefined,
-    responseModel: other?.response_model,
-  }
-}
-
-/**
  * Decode a base64-encoded billing expression. Safely returns an empty string
  * when the input is missing or malformed (e.g. legacy logs without expr_b64).
  */

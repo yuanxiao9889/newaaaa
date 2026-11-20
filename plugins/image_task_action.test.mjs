@@ -8,6 +8,7 @@ const providers = [
   ['pidoi-seedream55', 'dou-5-5', 'seedream_5.5'],
   ['duola-seedream55', 'dou-5-5', 'doubao-seedream-5-5-261028'],
   ['kuaiai-image25', 'all-image-2.5-sunburst-H'],
+  ['sunburst-images', 'all-image-2.6-sunburst-H', 'gpt-image-2.6-sunburst'],
   ['jieapi-flux3', 'flux-3-image'],
   ['tencent-hy-image', 'hy-image-v3.5-preview'],
   ['doubao', 'doubao-seedream-5-0-lite-260128'],
@@ -42,3 +43,33 @@ for (const [key, model, upstreamModel = model] of providers) {
     }
   });
 }
+
+test('Sunburst edits accept both async ID fields and render the completed provider image', async () => {
+  const source = await readFile(new URL('./tasks/sunburst-images/plugin.js', import.meta.url), 'utf8');
+  const plugin = await import('data:text/javascript;base64,' + Buffer.from(source).toString('base64'));
+  const ctx = { baseUrl: 'https://upstream.example', apiKey: 'fixture', authHeader: 'fixture', publicTaskId: 'gateway-id' };
+  const url = 'https://cdn.example/image.png';
+  const image = { data: [{ url }] };
+  const edit = plugin.buildSubmitRequest({ ...ctx, model: 'mapped', requestBody: { operation: 'edit', body: { kind: 'json', value: {} } } });
+  assert.equal(edit.headers.Authorization, 'Bearer fixture');
+  for (const body of [{ id: 'abc' }, { task_id: 'abc' }, { id: '', task_id: 'abc', poll_url: 'https://ignored.example/' }]) {
+    const accepted = plugin.parseSubmitResponse(ctx, { statusCode: 202, body });
+    assert.equal(accepted.taskId, 'abc');
+    assert.equal(accepted.immediate, undefined);
+    const poll = plugin.buildQueryRequest({ ...ctx, taskId: accepted.taskId });
+    assert.equal(poll.method, 'GET');
+    assert.equal(poll.headers.Authorization, 'Bearer fixture');
+    assert.equal(poll.url, 'https://upstream.example/v1/images/tasks/abc');
+  }
+  assert.throws(() => plugin.parseSubmitResponse(ctx, { statusCode: 202, body: {} }), /task ID/);
+  assert.throws(() => plugin.buildQueryRequest({ ...ctx, taskId: '..' }), /task ID/);
+  assert.equal(plugin.parseSubmitResponse(ctx, { statusCode: 200, body: image }).immediate.status, 'SUCCESS');
+  assert.equal(plugin.parseTaskResult(ctx, { status: 'running', ...image }).status, 'IN_PROGRESS');
+  assert.equal(plugin.parseTaskResult(ctx, { status: 'failed', ...image }).status, 'FAILURE');
+  assert.throws(() => plugin.parseTaskResult(ctx, image, { status: 503 }), /503/);
+  for (const body of [image, { result: image }, { image_url: url }]) {
+    const completed = { status: 'completed', ...body };
+    assert.equal(plugin.parseTaskResult(ctx, completed).url, url);
+    assert.deepEqual(plugin.protocols.openai_image.render(ctx, { data: completed }), image);
+  }
+});

@@ -137,7 +137,7 @@ it('only copies the public model for users even when upstream metadata is presen
   ).not.toBeInTheDocument()
 })
 
-it('hides the response model in the mobile card and shows evidence when tapping the model badge', async () => {
+it('copies the request model from the admin card even when a different model responded', async () => {
   const user = userEvent.setup()
   renderLogs({
     logs: [
@@ -159,12 +159,8 @@ it('hides the response model in the mobile card and shows evidence when tapping 
       name: `Model: ${longName}`,
     })
   )
-  const dialog = await screen.findByRole('dialog', { name: 'Model' })
-  expect(
-    within(dialog).getByText('Response model: unexpected-model')
-  ).toBeVisible()
-  expect(within(dialog).getByText('mapped-model')).toBeVisible()
-  expect(within(dialog).getByText('unexpected-model')).toBeVisible()
+  expect(await navigator.clipboard.readText()).toBe(longName)
+  expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
 })
 
 it('opens long channel text on tap and copies the complete value', async () => {
@@ -344,7 +340,7 @@ it('labels a task whose result was returned in the response as synchronous', () 
   expect(screen.queryByText('Async')).not.toBeInTheDocument()
 })
 
-it('shows mapped model names in full when inspecting a mobile model badge', async () => {
+it('copies the full request model from a mapped admin log in one tap', async () => {
   const user = userEvent.setup()
   renderLogs({
     logs: [
@@ -359,13 +355,8 @@ it('shows mapped model names in full when inspecting a mobile model badge', asyn
     ],
   })
   await user.click(screen.getByRole('button', { name: `Model: ${longName}` }))
-  const dialog = await screen.findByRole('dialog', { name: 'Model' })
-  expect(within(dialog).getByText('Actual Model')).toBeVisible()
-  expect(
-    within(dialog).getByText(
-      'provider-production-mapped-model-with-a-long-name'
-    )
-  ).toBeVisible()
+  expect(await navigator.clipboard.readText()).toBe(longName)
+  expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
 })
 
 it('shows loading placeholders without displaying stale log fields', () => {

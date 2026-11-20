@@ -1589,6 +1589,42 @@ func FetchModels(c *gin.Context) {
 	})
 }
 
+func BatchSetChannelAutoSwitch(c *gin.Context) {
+	var request struct {
+		IDs      []int `json:"ids"`
+		Enabled  *bool `json:"auto_switch_enabled"`
+		Minutes  *int  `json:"auto_switch_retry_window_minutes"`
+		Attempts *int  `json:"auto_switch_max_attempts"`
+	}
+	if err := c.ShouldBindJSON(&request); err != nil || request.Enabled == nil || len(request.IDs) == 0 {
+		common.ApiErrorT(c, "Invalid automatic switching settings")
+		return
+	}
+	slices.Sort(request.IDs)
+	ids := slices.Compact(request.IDs)
+	if ids[0] < 1 {
+		common.ApiErrorT(c, "Invalid parameters")
+		return
+	}
+	if *request.Enabled {
+		if request.Minutes == nil || *request.Minutes < 1 || *request.Minutes > 120 {
+			common.ApiErrorT(c, "Retry window must be an integer from 1 to 120 minutes")
+			return
+		}
+		if request.Attempts == nil || *request.Attempts < 1 || *request.Attempts > 10 {
+			common.ApiErrorT(c, "Total attempts must be an integer from 1 to 10")
+			return
+		}
+	}
+	if err := model.BatchSetChannelAutoSwitch(ids, *request.Enabled, request.Minutes, request.Attempts); err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	model.InitChannelCache()
+	recordManageAudit(c, "channel.auto_switch_batch_set", map[string]any{"ids": ids, "enabled": *request.Enabled})
+	common.ApiSuccessT(c, "Updated successfully", len(ids))
+}
+
 func BatchSetChannelTag(c *gin.Context) {
 	channelBatch := ChannelBatch{}
 	err := c.ShouldBindJSON(&channelBatch)

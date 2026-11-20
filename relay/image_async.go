@@ -192,6 +192,7 @@ func SubmitInternalAsyncImageTask(c *gin.Context, info *relaycommon.RelayInfo, r
 				started = time.Now()
 			}
 			task.PrivateData.ImageRetry.StartedAtMS = started.UnixMilli()
+			task.PrivateData.ImageRetry.AttemptStartedAtMS = native[0].attemptStartedAtMS
 			task.PrivateData.ChannelRetryPath = append([]string(nil), c.GetStringSlice("use_channel")...)
 			if len(task.PrivateData.ChannelRetryPath) == 0 {
 				task.PrivateData.ChannelRetryPath = []string{strconv.Itoa(native[0].ChannelID)}
