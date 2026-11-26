@@ -18,7 +18,6 @@ import (
 	"sort"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/MoeForge/moego/ojson"
@@ -45,7 +44,6 @@ type BatchTaskPollingAdaptor interface {
 
 const (
 	taskStatusQueryTimeout = 15 * time.Second
-	taskPollConcurrency    = 8
 
 	pollClassOK           = "ok"
 	pollClassOtherClient  = "other_client"
@@ -82,24 +80,30 @@ type TaskPollSummary struct {
 // 每次最多处理 100 条，剩余的下个周期继续处理。
 // 使用 per-task CAS (UpdateWithStatus) 防止覆盖被正常轮询已推进的任务。
 func sweepTimedOutTasks(ctx context.Context) {
-	if constant.TaskTimeoutMinutes <= 0 {
-		return
-	}
-	cutoff := time.Now().Unix() - int64(constant.TaskTimeoutMinutes)*60
-	tasks := model.GetTimedOutUnfinishedTasks(cutoff, 100)
-	if len(tasks) == 0 {
-		return
-	}
-
-	reason := "Task timed out"
-	legacyReason := "Task timed out (a task left by the old system is not refunded; contact the administrator)"
 	now := time.Now().Unix()
-	timedOutCount := 0
-
-	for _, task := range tasks {
+	var globalCutoff, imageCutoff int64
+	if constant.TaskTimeoutMinutes > 0 {
+		globalCutoff = now - int64(constant.TaskTimeoutMinutes)*60
+	}
+	imageTimeout := common.GetAsyncImageTaskTimeoutSeconds()
+	if imageTimeout > 0 {
+		imageCutoff = now - int64(imageTimeout)
+	}
+	if globalCutoff == 0 && imageCutoff == 0 {
+		return
+	}
+	tasks := model.FindUnfinishedTasksPastDeadline(max(globalCutoff, imageCutoff), 100, func(task *model.Task) bool {
 		if task.PrivateData.AudioQueue != nil {
-			continue // The audio queue owns timeout, persistence and settlement.
+			return false
 		}
+		if globalCutoff != 0 && task.PrivateData.MediaRetry.ExecutionTimeoutStart(task.SubmitTime) < globalCutoff {
+			return true
+		}
+		deadline := pluginImageDeadline(task, imageTimeout)
+		return deadline > 0 && now >= deadline
+	})
+	timedOutCount := 0
+	for _, task := range tasks {
 		if retry := task.PrivateData.VideoRetry; retry != nil && (retry.Submitting ||
 			!retry.Ready && retry.AcceptedAt > 0 && now-retry.AcceptedAt < VideoTaskRetrySubmitTimeoutSeconds) {
 			if _, err := prepareVideoTaskForPolling(ctx, task); err != nil {
@@ -107,41 +111,120 @@ func sweepTimedOutTasks(ctx context.Context) {
 			}
 			continue
 		}
-		isLegacy := task.SubmitTime > 0 && task.SubmitTime < model.TaskRefundLegacyCutoff
-
-		oldStatus := task.Status
-		task.Status = model.TaskStatusFailure
-		task.Progress = "100%"
-		task.FinishTime = now
-		if isLegacy {
-			task.FailReason = legacyReason
-			// 旧系统任务明确不退款，随终态 CAS 一并清掉 quota，
-			// 避免留下可再次退款的计费状态。
-			task.Quota = 0
-		} else {
-			task.FailReason = reason
-		}
-
-		won, err := task.UpdateWithStatus(oldStatus)
+		won, err := expirePolledTask(ctx, task, now)
 		if err != nil {
-			logger.LogError(ctx, common.LogText("sweepTimedOutTasks CAS update error for task %s: %v", task.TaskID, err))
-			continue
+			logger.LogError(ctx, fmt.Sprintf("expire task %s: %v", task.TaskID, err))
 		}
-		if !won {
-			logger.LogInfo(ctx, common.LogText("sweepTimedOutTasks: task %s already transitioned, skip", task.TaskID))
-			continue
-		}
-		timedOutCount++
-		RecordAutoSwitchTaskFailure(ctx, task, 0, "upstream_poll_timeout", reason)
-		if !isLegacy && task.Quota != 0 {
-			if err := RefundTaskQuota(ctx, task, reason); err != nil {
-				logger.LogError(ctx, fmt.Sprintf("sweepTimedOutTasks refund failed for task %s: %v", task.TaskID, err))
-			}
+		if won {
+			timedOutCount++
 		}
 	}
 
 	if timedOutCount > 0 {
 		logger.LogInfo(ctx, common.LogText("sweepTimedOutTasks: timed out %d tasks", timedOutCount))
+	}
+}
+
+// The host's persisted submission time also covers tasks that stay queued
+// upstream and never receive a start time.
+func pluginImageDeadline(task *model.Task, timeout int) int64 {
+	if task.PrivateData.InternalAsync || task.PrivateData.AudioQueue != nil ||
+		task.Platform == constant.TaskPlatformInternalImage || task.Platform == constant.TaskPlatformMidjourney {
+		return 0
+	}
+	submitted := task.SubmitTime
+	if submitted <= 0 {
+		submitted = task.CreatedAt
+	}
+	return PluginImageExecutionDeadline(taskPollingPath(task), task.Action, submitted, task.PrivateData.MediaRetry, timeout)
+}
+
+// PluginImageExecutionDeadline binds both the submission HTTP request and subsequent
+// polling to the original image request's execution and retry allowance.
+func PluginImageExecutionDeadline(path, action string, submitted int64, retry *model.MediaRetryState, timeout int) int64 {
+	if submitted <= 0 || timeout <= 0 || requestPollingKind(path, action) != pollImage {
+		return 0
+	}
+	return retry.ExecutionTimeoutStart(submitted) + int64(timeout)
+}
+
+func expirePluginImageIfDue(ctx context.Context, task *model.Task, deadline int64) (bool, error) {
+	now := time.Now().Unix()
+	if deadline == 0 || now < deadline {
+		return false, nil
+	}
+	_, err := expirePolledTask(ctx, task, now)
+	return true, err
+}
+
+func expirePolledTask(ctx context.Context, task *model.Task, now int64) (bool, error) {
+	oldStatus := task.Status
+	if oldStatus == model.TaskStatusSuccess || oldStatus == model.TaskStatusFailure {
+		return false, nil
+	}
+	expired := *task
+	expired.Status = model.TaskStatusFailure
+	expired.Progress = "100%"
+	expired.FinishTime = now
+	expired.FailReason = "Task timed out"
+	legacy := task.SubmitTime > 0 && task.SubmitTime < model.TaskRefundLegacyCutoff
+	if legacy {
+		expired.FailReason = "Task timed out (a task left by the old system is not refunded; contact the administrator)"
+		expired.Quota = 0
+	}
+	won, err := expired.UpdateWithStatus(oldStatus)
+	if err != nil || !won {
+		return false, err
+	}
+	*task = expired
+	RecordAutoSwitchTaskFailure(ctx, task, 0, "upstream_poll_timeout", task.FailReason)
+	if !legacy && task.Quota != 0 {
+		err = RefundTaskQuota(ctx, task, task.FailReason)
+	}
+	return true, err
+}
+
+type taskPollKind uint8
+
+const (
+	pollImage taskPollKind = iota
+	pollVideo
+	pollOther
+	pollKindCount
+)
+
+// The original submission path identifies host protocols even when an older
+// plugin persisted an empty or vendor-specific action.
+func taskPollingPath(task *model.Task) string {
+	if execution := task.PrivateData.Execution; execution != nil && execution.RequestPath != "" {
+		return execution.RequestPath
+	}
+	return task.PrivateData.RequestPath
+}
+
+func pollingKind(task *model.Task) taskPollKind {
+	return requestPollingKind(taskPollingPath(task), task.Action)
+}
+
+func requestPollingKind(path, action string) taskPollKind {
+	switch strings.TrimSuffix(path, "/") {
+	case "/v1/images/generations", "/v1/images/edits":
+		return pollImage
+	case "/v1/videos", "/v1/video/generations":
+		return pollVideo
+	}
+	action = constant.NormalizeTaskAction(action)
+	if IsImageTaskAction(action) {
+		return pollImage
+	}
+	switch action {
+	case "text_to_image", "image_to_image", "image_generation":
+		return pollImage
+	case constant.TaskActionImageToVideo, constant.TaskActionTextToVideo, constant.TaskActionFirstTailToVideo,
+		constant.TaskActionReferenceToVideo, constant.TaskActionRemix, "video_generation", "video_edit", "video_extension":
+		return pollVideo
+	default:
+		return pollOther
 	}
 }
 
@@ -185,97 +268,125 @@ func RunTaskPollingOnce(ctx context.Context, report func(processed, total int)) 
 	sweepTimedOutTasks(ctx)
 	allTasks := model.GetAllUnFinishSyncTasks(constant.TaskQueryLimit)
 	summary.UnfinishedTasks = len(allTasks)
-	platformTask := make(map[constant.TaskPlatform][]*model.Task)
-	for _, t := range allTasks {
-		if t.PrivateData.AudioQueue != nil {
-			continue
-		}
-		platformTask[t.Platform] = append(platformTask[t.Platform], t)
+	type groupKey struct {
+		platform  constant.TaskPlatform
+		channelID int
+		kind      taskPollKind
+	}
+	type pollGroup struct {
+		groupKey
+		ids   []string
+		tasks map[string]*model.Task
 	}
 
-	totalPlatforms := len(platformTask)
-	processedPlatforms := 0
-	var wg sync.WaitGroup
-	var progressMu sync.Mutex
-	slots := make(chan struct{}, taskPollConcurrency)
-	// The reporter persists mutable progress state and must be called serially.
-	platformDone := func() {
-		progressMu.Lock()
-		defer progressMu.Unlock()
-		processedPlatforms++
-		if report != nil && ctx.Err() == nil {
-			report(processedPlatforms, totalPlatforms)
+	var queues [pollKindCount][]*pollGroup
+	groups := make(map[groupKey]*pollGroup)
+	pending := make(map[constant.TaskPlatform]int)
+	var nullIDs []int64
+	for _, task := range allTasks {
+		if ctx.Err() != nil {
+			return summary
+		}
+		if task.PrivateData.AudioQueue != nil {
+			continue
+		}
+		if _, seen := pending[task.Platform]; !seen {
+			pending[task.Platform] = 0
+		}
+		poll, err := prepareVideoTaskForPolling(ctx, task)
+		if err != nil {
+			logger.LogError(ctx, fmt.Sprintf("prepare video task %s polling failed: %v", task.TaskID, err))
+		}
+		if err != nil || !poll {
+			continue
+		}
+		id := task.GetUpstreamTaskID()
+		if id == "" {
+			nullIDs = append(nullIDs, task.ID)
+			continue
+		}
+		if task.Platform == constant.TaskPlatformInternalImage || task.Platform == constant.TaskPlatformMidjourney {
+			continue
+		}
+		key := groupKey{task.Platform, task.ChannelId, pollingKind(task)}
+		group := groups[key]
+		if group == nil {
+			group = &pollGroup{groupKey: key, tasks: make(map[string]*model.Task)}
+			groups[key] = group
+			queues[key.kind] = append(queues[key.kind], group)
+			pending[key.platform]++
+		}
+		group.ids = append(group.ids, id)
+		group.tasks[id] = task
+	}
+	if len(nullIDs) > 0 {
+		summary.NullTasksFailed = len(nullIDs)
+		err := model.TaskBulkUpdateByID(nullIDs, map[string]any{"status": model.TaskStatusFailure, "progress": "100%"})
+		if err != nil {
+			logger.LogError(ctx, common.LogText("Fix null task_id task error: %v", err))
+		} else {
+			logger.LogInfo(ctx, common.LogText("Fix null task_id task success: %v", nullIDs))
+		}
+	}
+
+	summary.PlatformsScanned = len(pending)
+	processed := 0
+	for _, count := range pending {
+		if count == 0 {
+			processed++
 		}
 	}
 	if report != nil {
-		report(0, totalPlatforms)
+		report(processed, summary.PlatformsScanned)
 	}
-	for platform, tasks := range platformTask {
-		if ctx.Err() != nil {
-			break
+	// A pass has a fixed snapshot. A closed, drained queue therefore has no
+	// further work this pass, even if another worker is still polling a group.
+	var jobs [pollKindCount]chan *pollGroup
+	for kind, groups := range queues {
+		jobs[kind] = make(chan *pollGroup, len(groups))
+		for _, group := range groups {
+			jobs[kind] <- group
 		}
-		summary.PlatformsScanned++
-		taskChannelM := make(map[int][]string)
-		tasksByChannel := make(map[int]map[string]*model.Task)
-		nullTaskIds := make([]int64, 0)
-		for _, task := range tasks {
-			poll, err := prepareVideoTaskForPolling(ctx, task)
-			if err != nil {
-				logger.LogError(ctx, fmt.Sprintf("prepare video task %s polling failed: %v", task.TaskID, err))
-			}
-			if err != nil || !poll {
-				continue
-			}
-			upstreamID := task.GetUpstreamTaskID()
-			if upstreamID == "" {
-				// 统计失败的未完成任务
-				nullTaskIds = append(nullTaskIds, task.ID)
-				continue
-			}
-			if tasksByChannel[task.ChannelId] == nil {
-				tasksByChannel[task.ChannelId] = make(map[string]*model.Task)
-			}
-			tasksByChannel[task.ChannelId][upstreamID] = task
-			taskChannelM[task.ChannelId] = append(taskChannelM[task.ChannelId], upstreamID)
+		close(jobs[kind])
+	}
+
+	var wg sync.WaitGroup
+	var progressMu sync.Mutex
+	startWorkers := func(count int, preferred taskPollKind, fallback ...taskPollKind) {
+		order := append([]taskPollKind{preferred}, fallback...)
+		available := 0
+		for _, kind := range order {
+			available += len(queues[kind])
 		}
-		if len(nullTaskIds) > 0 {
-			summary.NullTasksFailed += len(nullTaskIds)
-			err := model.TaskBulkUpdateByID(nullTaskIds, map[string]any{
-				"status":   "FAILURE",
-				"progress": "100%",
-			})
-			if err != nil {
-				logger.LogError(ctx, common.LogText("Fix null task_id task error: %v", err))
-			} else {
-				logger.LogInfo(ctx, common.LogText("Fix null task_id task success: %v", nullTaskIds))
-			}
-		}
-		if len(taskChannelM) == 0 || platform == constant.TaskPlatformInternalImage || platform == constant.TaskPlatformMidjourney {
-			platformDone()
-			continue
-		}
-		var remaining atomic.Int32
-		remaining.Store(int32(len(taskChannelM)))
-		for channelID, ids := range taskChannelM {
-			if ctx.Err() != nil {
-				break
-			}
-			taskM := tasksByChannel[channelID]
-			slots <- struct{}{}
+		for range min(count, available) {
 			wg.Add(1)
 			gopool.Go(func() {
 				defer wg.Done()
-				defer func() { <-slots }()
-				if ctx.Err() != nil {
-					return
-				}
-				DispatchPlatformUpdate(ctx, platform, map[int][]string{channelID: ids}, taskM)
-				if remaining.Add(-1) == 0 {
-					platformDone()
+				for _, kind := range order {
+					for group := range jobs[kind] {
+						if ctx.Err() != nil {
+							return
+						}
+						DispatchPlatformUpdate(ctx, group.platform, map[int][]string{group.channelID: group.ids}, group.tasks)
+						if report != nil {
+							progressMu.Lock()
+							pending[group.platform]--
+							if pending[group.platform] == 0 && ctx.Err() == nil {
+								processed++
+								report(processed, summary.PlatformsScanned)
+							}
+							progressMu.Unlock()
+						}
+					}
 				}
 			})
 		}
 	}
+	startWorkers(3, pollImage)
+	startWorkers(2, pollVideo)
+	startWorkers(1, pollOther)
+	startWorkers(1, pollImage, pollVideo)
+	startWorkers(1, pollVideo, pollImage)
 	wg.Wait()
 	common.SysLog(common.LogText("task progress polling finished"))
 	return summary
@@ -333,10 +444,17 @@ func updateBatchTasks(ctx context.Context, adaptor BatchTaskPollingAdaptor, chan
 	if baseURL == "" {
 		baseURL = constant.GetChannelBaseURL(ch.Type)
 	}
+	imageTimeout := common.GetAsyncImageTaskTimeoutSeconds()
 	tasks := make([]*model.Task, 0, len(taskIds))
 	polledTasks := make(map[string]*model.Task, len(taskIds))
 	for _, upstreamID := range taskIds {
 		if task := taskM[upstreamID]; task != nil {
+			if expired, err := expirePluginImageIfDue(ctx, task, pluginImageDeadline(task, imageTimeout)); expired {
+				if err != nil {
+					return err
+				}
+				continue
+			}
 			poll, err := prepareVideoTaskForPolling(ctx, task)
 			if err != nil {
 				return err
@@ -403,6 +521,13 @@ func updateBatchTasks(ctx context.Context, adaptor BatchTaskPollingAdaptor, chan
 			logger.LogWarn(ctx, common.LogText("Batch task response ignored: unknown task_id=%s", upstreamID))
 			continue
 		}
+		deadline := pluginImageDeadline(task, imageTimeout)
+		if expired, err := expirePluginImageIfDue(ctx, task, deadline); expired {
+			if err != nil {
+				return err
+			}
+			continue
+		}
 		snap := task.Snapshot()
 		httpClass := classifyPollHTTP(resp.StatusCode)
 		parsedStatus := model.TaskStatus(responseItem.TaskInfo.Status)
@@ -435,7 +560,10 @@ func updateBatchTasks(ctx context.Context, adaptor BatchTaskPollingAdaptor, chan
 		}
 		task.Status = lo.If(parsedStatus != "", parsedStatus).Else(task.Status)
 		task.FailReason = lo.If(responseItem.TaskInfo.Reason != "", responseItem.TaskInfo.Reason).Else(task.FailReason)
-		task.SubmitTime = lo.If(responseItem.SubmitTime != 0, responseItem.SubmitTime).Else(task.SubmitTime)
+		// Keep the host clock stable across batch polls and restarts.
+		if responseItem.SubmitTime != 0 && pollingKind(task) != pollImage {
+			task.SubmitTime = responseItem.SubmitTime
+		}
 		task.StartTime = lo.If(responseItem.StartTime != 0, responseItem.StartTime).Else(task.StartTime)
 		task.FinishTime = lo.If(responseItem.FinishTime != 0, responseItem.FinishTime).Else(task.FinishTime)
 		if responseItem.TaskInfo.Progress != "" {
@@ -606,6 +734,10 @@ func updateVideoSingleTask(ctx context.Context, adaptor TaskPollingAdaptor, ch *
 		logger.LogError(ctx, common.LogText("Task %s not found in taskM", taskId))
 		return fmt.Errorf("task %s not found", taskId)
 	}
+	deadline := pluginImageDeadline(task, common.GetAsyncImageTaskTimeoutSeconds())
+	if expired, err := expirePluginImageIfDue(ctx, task, deadline); expired {
+		return err
+	}
 	poll, err := prepareVideoTaskForPolling(ctx, task)
 	if err != nil || !poll {
 		return err
@@ -617,16 +749,25 @@ func updateVideoSingleTask(ctx context.Context, adaptor TaskPollingAdaptor, ch *
 		key = privateData.Key
 	}
 	snap := task.Snapshot()
-	queryCtx, cancel := context.WithTimeout(ctx, taskStatusQueryTimeout)
+	queryDeadline := time.Now().Add(taskStatusQueryTimeout)
+	if deadline > 0 && deadline <= queryDeadline.Unix() {
+		queryDeadline = time.Unix(deadline, 0)
+	}
+	queryCtx, cancel := context.WithDeadline(ctx, queryDeadline)
 	defer cancel()
 	resp, err := adaptor.FetchTask(queryCtx, baseURL, key, task, proxy)
-	if err != nil {
-		return recordPollFailure(ctx, adaptor, task, snap.Status, pollClassTransport, 0, err.Error())
+	var responseBody []byte
+	var statusCode int
+	if err == nil {
+		defer resp.Body.Close()
+		statusCode = resp.StatusCode
+		responseBody, err = io.ReadAll(resp.Body)
 	}
-	defer resp.Body.Close()
-	responseBody, err := io.ReadAll(resp.Body)
+	if expired, err := expirePluginImageIfDue(ctx, task, deadline); expired {
+		return err
+	}
 	if err != nil {
-		return recordPollFailure(ctx, adaptor, task, snap.Status, pollClassTransport, resp.StatusCode, err.Error())
+		return recordPollFailure(ctx, adaptor, task, snap.Status, pollClassTransport, statusCode, err.Error())
 	}
 
 	logger.LogDebug(ctx, "updateVideoSingleTask response: %s", responseBody)
@@ -668,6 +809,9 @@ func updateVideoSingleTask(ctx context.Context, adaptor TaskPollingAdaptor, ch *
 
 	logger.LogDebug(ctx, "updateVideoSingleTask taskResult: %+v", taskResult)
 
+	if expired, err := expirePluginImageIfDue(ctx, task, deadline); expired {
+		return err
+	}
 	parsedStatus := model.TaskStatus(taskResult.Status)
 	if parsedStatus == model.TaskStatusUnknown || parsedStatus == "" || !knownPollStatus(parsedStatus) {
 		return recordPollFailure(ctx, adaptor, task, snap.Status, pollClassUnrecognized, resp.StatusCode, unrecognizedPollDetail(taskResult.Reason, responseBody))

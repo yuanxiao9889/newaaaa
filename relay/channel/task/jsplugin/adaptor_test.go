@@ -71,6 +71,33 @@ export const protocols = {openai_video: {
 }};
 `
 
+func TestPluginImageSubmitHonorsExecutionDeadline(t *testing.T) {
+	t.Setenv("ASYNC_IMAGE_TASK_TIMEOUT_SECONDS", "1600")
+	service.InitHttpClient()
+	requests := make(chan struct{}, 2)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requests <- struct{}{}
+		w.WriteHeader(http.StatusAccepted)
+	}))
+	t.Cleanup(server.Close)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/images/edits", nil)
+	c.Set(pluginruntime.ContextKeyPinnedRoute, pluginruntime.PinnedRoute{})
+	start := time.Now().Add(-30 * time.Minute)
+	info := &relaycommon.RelayInfo{StartTime: start, ChannelMeta: &relaycommon.ChannelMeta{ChannelBaseUrl: server.URL},
+		TaskRelayInfo: &relaycommon.TaskRelayInfo{Action: "image_edit"}}
+	adaptor := &TaskAdaptor{plugin: &pluginruntime.LoadedPlugin{}, submit: &requestDescriptor{URL: server.URL, ResponseType: "sse"}}
+	_, err := adaptor.DoRequest(c, info, strings.NewReader("{}"))
+	require.Error(t, err)
+	assert.Empty(t, requests)
+	service.BindMediaRetry(c, &model.MediaRetryState{Version: 1, MaxAttempts: 5, WindowMinutes: 10, StartedAtMS: start.UnixMilli()})
+	resp, err := adaptor.DoRequest(c, info, strings.NewReader("{}"))
+	require.NoError(t, err)
+	require.NoError(t, resp.Body.Close())
+	assert.Equal(t, http.StatusAccepted, resp.StatusCode)
+	assert.Len(t, requests, 1)
+}
+
 func TestTaskAdaptorRejectsDeprecatedClientResponse(t *testing.T) {
 	source := strings.Replace(mockPlugin, `taskData: {accepted: true, status: resp.statusCode},`, `taskData: {}, clientResponse: {id: ctx.publicTaskId},`, 1)
 	plugin, err := pluginruntime.NewRegistry().Register(source, pluginruntime.Options{})

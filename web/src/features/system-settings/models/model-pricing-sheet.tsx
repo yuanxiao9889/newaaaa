@@ -81,7 +81,10 @@ import {
 import { PricingCurrencySelector } from '@/features/model-pricing/pricing-currency-selector'
 import { usePricingData } from '@/features/pricing/hooks/use-pricing-data'
 import { combineBillingExpr } from '@/features/pricing/lib/billing-expr'
-import { pluginExpressionsEqual } from '@/features/pricing/lib/plugin-pricing'
+import {
+  modelPricesTaskUsage,
+  pluginExpressionsEqual,
+} from '@/features/pricing/lib/plugin-pricing'
 import {
   createDefaultTaskVisualConfig,
   generateTaskExprFromConfig,
@@ -837,7 +840,11 @@ export const ModelPricingEditorPanel = forwardRef<
     setPluginExpressions((current) => {
       const next = { ...current }
       for (const variant of pluginVariants ?? []) {
-        if (!variant.stale && !Object.hasOwn(next, variant.plugin_key)) {
+        if (
+          !variant.stale &&
+          (!Object.hasOwn(next, variant.plugin_key) ||
+            modelPricesTaskUsage(inheritedExpression, variant.usage_schema))
+        ) {
           next[variant.plugin_key] = inheritedExpression
         }
       }
@@ -969,6 +976,12 @@ export const ModelPricingEditorPanel = forwardRef<
                   )}
                   modelBillingMode={
                     pricingMode === 'tiered_expr' ? 'tiered_expr' : 'ratio'
+                  }
+                  hasModelUnitPrice={
+                    (pricingMode === 'per-request' &&
+                      hasValue(watchedValues.price)) ||
+                    (pricingMode === 'per-token' &&
+                      hasValue(watchedValues.ratio))
                   }
                   currency={currency}
                   ordinaryPricing={!usesTaskPricing}

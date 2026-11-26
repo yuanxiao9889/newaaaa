@@ -117,27 +117,44 @@ func GetPluginBillingExpr(pluginKey, model string) (string, bool) {
 	return expression, ok
 }
 
-// ResolveTaskBillingExpr selects the executing plugin's override before the
-// model expression, retaining the model alias fallback and explicit modes.
-func ResolveTaskBillingExpr(pluginKey, model, mappedModel string) (string, bool) {
+// ResolveTaskBillingExpr returns no expression when the public model is
+// billed by its configured per-call price or ratio, including explicit zero.
+func ResolveTaskBillingExpr(pluginKey, model, mappedModel string, schema map[string]jsplugin.UsageFieldSchema) (string, bool) {
+	mode := GetBillingMode(model)
+	if mode != BillingModeTieredExpr {
+		_, hasPrice := ratio_setting.GetModelPrice(model, false)
+		if hasPrice || ratio_setting.HasConfiguredModelRatio(model) {
+			return "", false
+		}
+	} else if expression, ok := GetBillingExpr(model); ok && ModelPricesTaskUsage(expression, schema) {
+		return expression, true
+	}
+	mapped := mappedModel != "" && mappedModel != model
 	if pluginKey != "" {
 		if expr, ok := GetPluginBillingExpr(pluginKey, model); ok {
 			return expr, true
 		}
-		if mappedModel != "" && mappedModel != model {
+		if mapped {
 			if expr, ok := GetPluginBillingExpr(pluginKey, mappedModel); ok {
 				return expr, true
 			}
 		}
 	}
-	if GetBillingMode(model) == BillingModeTieredExpr {
+	if mode == BillingModeTieredExpr {
 		return GetBillingExpr(model)
 	}
-	if mappedModel != "" && mappedModel != model && GetBillingMode(mappedModel) == BillingModeTieredExpr {
+	if mapped && GetBillingMode(mappedModel) == BillingModeTieredExpr {
 		expression, ok := GetBillingExpr(mappedModel)
 		return expression, ok && strings.TrimSpace(expression) != ""
 	}
 	return "", false
+}
+
+// ModelPricesTaskUsage identifies an explicit task meter shared by the model
+// and this plugin. Ordinary expressions use different units, and providers
+// that report different quantities may need their own expression.
+func ModelPricesTaskUsage(expression string, schema map[string]jsplugin.UsageFieldSchema) bool {
+	return billingexpr.UsedVars(expression)["u"] && TaskExprCompatible(expression, schema)
 }
 
 // TaskExprCompatible checks the schema contract even for usage references in
@@ -146,7 +163,7 @@ func TaskExprCompatible(expression string, schema map[string]jsplugin.UsageField
 	if strings.TrimSpace(expression) == "" {
 		return false
 	}
-	if _, err := billingexpr.CompileFromCache(expression); err != nil {
+	if err := billingexpr.ValidateTaskExprInputs(expression); err != nil {
 		return false
 	}
 	for key := range billingexpr.UsedUsageKeys(expression) {
@@ -154,7 +171,7 @@ func TaskExprCompatible(expression string, schema map[string]jsplugin.UsageField
 			return false
 		}
 	}
-	return !billingexpr.UsesFixedPricing(expression)
+	return true
 }
 
 func GetBuiltinBillingExprCopy() map[string]string {
@@ -244,11 +261,8 @@ func smokeTestExpr(exprStr string) error {
 // declared by its plugin. Literal u() keys must be declared; dynamic calls are
 // still exercised by the generated runtime vectors when possible.
 func SmokeTestTaskExpr(exprStr string, schema map[string]jsplugin.UsageFieldSchema) error {
-	if _, err := billingexpr.CompileFromCache(exprStr); err != nil {
+	if err := billingexpr.ValidateTaskExprInputs(exprStr); err != nil {
 		return err
-	}
-	if billingexpr.UsesFixedPricing(exprStr) {
-		return fmt.Errorf("fixed pricing is not supported for task usage expressions")
 	}
 	for key := range billingexpr.UsedUsageKeys(exprStr) {
 		if _, declared := schema[key]; !declared {

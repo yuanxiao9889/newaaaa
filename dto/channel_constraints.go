@@ -59,6 +59,10 @@ type ChannelFilter struct {
 	// TaskPluginRelayOnly excludes endpoint candidates after an ordinary relay
 	// channel wins selection, so retries keep using the same protocol handler.
 	TaskPluginRelayOnly bool
+	// Worker-only exclusions keep rejected plugins on extended New API and
+	// legacy plugin channels from being selected as ordinary relays.
+	ExcludedPluginKeys         []string `json:"-"`
+	ExcludedPluginChannelTypes []int    `json:"-"`
 }
 
 type ChannelConstraints struct {

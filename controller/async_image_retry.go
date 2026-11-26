@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"slices"
 	"strconv"
 	"time"
 
@@ -137,6 +138,15 @@ func runRetryableAsyncImageRelay(ctx context.Context, task *model.Task) ([]byte,
 			constraints := service.GetChannelConstraints(c)
 			constraints.Pins = append(constraints.Pins, retry.Constraints.Pins...)
 			constraints.Filters = append(constraints.Filters, retry.Constraints.Filters...)
+			if execution := task.PrivateData.Execution; execution != nil && execution.TaskPlugin != nil {
+				// Resume a checkpoint with its own plugin. Older plugin tasks that
+				// only recorded the selected plugin can also safely use that key.
+				if task.PrivateData.PluginImage != nil || !slices.ContainsFunc(retry.Constraints.Filters, func(f dto.ChannelFilter) bool {
+					return f.Kind == dto.FilterTaskPluginIdentity && f.TaskPluginKey != ""
+				}) {
+					constraints.AddFilter(dto.ChannelFilter{Kind: dto.FilterTaskPluginIdentity, TaskPluginKey: execution.TaskPlugin.Key})
+				}
+			}
 			var endpoint *pluginruntime.PinnedEndpoint
 			if retry.RelayFormat == string(types.RelayFormatOpenAIImage) {
 				endpoint = middleware.PrepareImageRetryEndpoint(c, task.Properties.OriginModelName)

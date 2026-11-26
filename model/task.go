@@ -513,16 +513,22 @@ func TaskGetAllTasks(startIdx int, num int, queryParams SyncTaskQueryParams) []*
 }
 
 func GetTimedOutUnfinishedTasks(cutoffUnix int64, limit int) []*Task {
+	return FindUnfinishedTasksPastDeadline(cutoffUnix, limit, func(task *Task) bool {
+		return task.PrivateData.MediaRetry.ExecutionTimeoutStart(task.SubmitTime) < cutoffUnix
+	})
+}
+
+func FindUnfinishedTasksPastDeadline(cutoffUnix int64, limit int, expired func(*Task) bool) []*Task {
 	query := DB.Where("progress != ?", "100%").
 		Where("status NOT IN ?", []string{TaskStatusFailure, TaskStatusSuccess}).
-		Where("submit_time < ?", cutoffUnix)
-	return getTasksPastExecutionTimeout(query, cutoffUnix, limit, false)
+		Where("submit_time <= ? OR (submit_time IS NULL AND created_at <= ?)", cutoffUnix, cutoffUnix)
+	return getTasksPastExecutionTimeout(query, limit, expired)
 }
 
 // Filter persisted retry windows in Go to keep JSON handling portable across
 // all databases. Keyset scanning lets expired tasks behind protected tasks be
 // processed in the same sweep instead of starving behind the first page.
-func getTasksPastExecutionTimeout(query *gorm.DB, cutoff int64, limit int, internalImage bool) []*Task {
+func getTasksPastExecutionTimeout(query *gorm.DB, limit int, expired func(*Task) bool) []*Task {
 	if limit <= 0 {
 		limit = 100
 	}
@@ -535,11 +541,7 @@ func getTasksPastExecutionTimeout(query *gorm.DB, cutoff int64, limit int, inter
 		}
 		for _, task := range candidates {
 			lastID = task.ID
-			start := task.SubmitTime
-			if internalImage {
-				start = task.StartTime
-			}
-			if task.PrivateData.MediaRetry.ExecutionTimeoutStart(start) < cutoff {
+			if expired(task) {
 				tasks = append(tasks, task)
 				if len(tasks) == limit {
 					return tasks
@@ -1066,7 +1068,9 @@ func GetTimedOutInternalAsyncImageTasks(cutoff int64, limit int) []*Task {
 		Where("status = ?", TaskStatusInProgress).
 		Where("start_time > 0").
 		Where("start_time < ?", cutoff)
-	return getTasksPastExecutionTimeout(query, cutoff, limit, true)
+	return getTasksPastExecutionTimeout(query, limit, func(task *Task) bool {
+		return task.PrivateData.MediaRetry.ExecutionTimeoutStart(task.StartTime) < cutoff
+	})
 }
 
 func GetSuccessfulImageTasksForCleanup(startIdx int, num int) []*Task {

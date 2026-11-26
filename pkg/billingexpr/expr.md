@@ -289,11 +289,20 @@ Multiple plugins may serve the same model with different usage schemas. The
 executing channel identifies the plugin; clients do not select a billing
 provider. Task expression resolution uses this order:
 
-1. `billing_setting.plugin_billing_expr["<pluginKey>::<clientModel>"]`
-2. The same plugin's override for the final mapped model, when present
-3. The client model's expression when its billing mode is `tiered_expr`
-4. The final mapped model's expression when the client model has no expression
-   billing mode
+1. The client model's configured per-call price or ratio in legacy mode. This
+   uses the same model price as ordinary channels, including an explicit zero.
+2. In expression mode, a client-model expression using `u()` that is
+   compatible with the executing plugin's usage schema.
+3. The executing plugin's expression for the client model, then its expression
+   for the mapped model. These can price providers with different meters.
+4. The client model's expression in expression mode, then the mapped model's
+   expression when the client model has no active price.
+
+Task usage comes from `u("key")`. The host rejects ordinary relay variables
+such as `p`, `c`, or bare `image_count` before reserving a new task. An image
+plugin can share a per-call model price by reporting its image count through
+its existing billing hooks. Changing the client model's fixed price in the
+model list applies across providers even if they have saved fallback prices.
 
 Plugin overrides always use task-usage semantics, independently of the model's
 billing mode. The flat override map is a separate option and never contributes
@@ -302,7 +311,8 @@ prices are not rewritten. The billing snapshot freezes the selected expression;
 completion uses that snapshot even if provider pricing later changes.
 
 A model-level expression save smoke-tests each candidate's selected schema,
-skipping candidates with their own override in the same complete draft.
+including candidates for which the shared task meter takes precedence. A
+provider using its own fallback expression validates that expression separately.
 Provider expression saves validate the plugin/model binding and that plugin's
 schema; errors identify both model and plugin. For a shared model, an effective
 expression referencing an undeclared literal `u()` key is unconfigured for that

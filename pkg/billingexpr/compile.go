@@ -171,6 +171,27 @@ func CompileFromCache(exprStr string) (*vm.Program, error) {
 	return compileFromCacheByHash(exprStr, ExprHashString(exprStr))
 }
 
+// ValidateTaskExprInputs checks new prices and submissions. Frozen tasks
+// continue to settle with the expression admitted at submission.
+func ValidateTaskExprInputs(expression string) error {
+	entry, err := compileEntryFromCacheByHash(expression, ExprHashString(expression))
+	if err != nil {
+		return err
+	}
+	if entry.fixedPricing {
+		return fmt.Errorf("fixed pricing is not supported for task usage expressions")
+	}
+	// The scalar inputs in the ordinary expression environment are token
+	// dimensions and image_count. Tasks supply their quantities through u().
+	env := getCompileEnv(entry.version)
+	for name := range entry.usedVars {
+		if _, ordinaryMeter := env[name].(float64); ordinaryMeter {
+			return fmt.Errorf("task usage expressions cannot read relay variable %q; use a declared plugin usage field via u()", name)
+		}
+	}
+	return nil
+}
+
 // CompileFromCacheByHash is like CompileFromCache but accepts a pre-computed
 // hash, useful when the caller already has the BillingSnapshot.ExprHash.
 func CompileFromCacheByHash(exprStr, hash string) (*vm.Program, error) {

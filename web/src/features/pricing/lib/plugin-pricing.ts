@@ -44,7 +44,8 @@ export function taskExpressionCompatible(
   if (!expression.trim()) return false
   const compiled = compileBillingExpression(expression)
   if (compiled.status !== 'ready') return undefined
-  let compatible = !compiled.functions.has('fixed')
+  let compatible =
+    !compiled.functions.has('fixed') && compiled.variables.size === 0
   visitExpression(compiled.ast, (node) => {
     if (node.kind !== 'call' || node.name !== 'u') return
     const key = node.args[0]
@@ -57,6 +58,18 @@ export function taskExpressionCompatible(
     }
   })
   return compatible
+}
+
+export function modelPricesTaskUsage(
+  expression: string,
+  schema: BillingUsageSchema
+): boolean {
+  const compiled = compileBillingExpression(expression)
+  return (
+    compiled.status === 'ready' &&
+    compiled.functions.has('u') &&
+    taskExpressionCompatible(expression, schema) === true
+  )
 }
 
 export function withPluginPricing(

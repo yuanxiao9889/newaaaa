@@ -320,12 +320,13 @@ func TestRelayTaskSubmitAliasBillingIdentityAndExprFallback(t *testing.T) {
 	const legacyExpr = `tier("legacy", u("old_units") * 2)`
 
 	tests := []struct {
-		name       string
-		modes      map[string]string
-		exprs      map[string]string
-		wantTiered bool
-		wantExpr   string
-		source     string
+		name         string
+		modes        map[string]string
+		exprs        map[string]string
+		wantTiered   bool
+		wantExpr     string
+		invalidMeter bool
+		source       string
 	}{
 		{
 			name:       "alias own tiered wins",
@@ -354,6 +355,12 @@ export function extractUsage(){return {old_units:2};}
 		{
 			name:       "neither tiered uses ordinary pricing",
 			wantTiered: false,
+		},
+		{
+			name:         "unpriced alias cannot settle a mapped token meter with empty token counts",
+			invalidMeter: true,
+			modes:        map[string]string{"declared-model": "tiered_expr"},
+			exprs:        map[string]string{"declared-model": `tier("tokens", p * 17.5 + c * 105)`},
 		},
 	}
 	for _, testCase := range tests {
@@ -409,6 +416,12 @@ export function extractUsage(){return {old_units:2};}
 			} else {
 				assert.Nil(t, info.TieredBillingSnapshot)
 				assert.Equal(t, "model_price_error", taskErr.Code)
+				if testCase.invalidMeter {
+					assert.Equal(t, http.StatusBadRequest, taskErr.StatusCode)
+					assert.ErrorContains(t, taskErr.Error, "cannot read relay variable")
+					assert.Contains(t, taskErr.Message, "alias-model")
+					assert.Nil(t, info.Billing)
+				}
 			}
 		})
 	}
@@ -427,6 +440,7 @@ func TestSharedTaskBillingExpressionSelectionAndFrozenSettlement(t *testing.T) {
 		{name: "executing plugin override", plugin: "billing-beta", model: "declared-model", modelExpr: baseExpr, mode: "tiered_expr", variants: map[string]string{"billing-alpha::declared-model": alphaExpr, "billing-beta::declared-model": betaExpr}, wantExpr: betaExpr},
 		{name: "override ignores model mode", plugin: "billing-beta", model: "declared-model", modelExpr: baseExpr, mode: "ratio", variants: map[string]string{"billing-beta::declared-model": betaExpr}, wantExpr: betaExpr},
 		{name: "model expression fallback", plugin: "billing-alpha", model: "declared-model", modelExpr: baseExpr, mode: "tiered_expr", wantExpr: baseExpr},
+		{name: "model usage price beats a compatible provider price", plugin: "billing-alpha", model: "declared-model", modelExpr: baseExpr, mode: "tiered_expr", variants: map[string]string{"billing-alpha::declared-model": alphaExpr}, wantExpr: baseExpr},
 		{name: "alias override precedes mapped override", plugin: "billing-beta", model: "alias-model", mapping: `{"alias-model":"declared-model"}`, modelExpr: baseExpr, mode: "tiered_expr", variants: map[string]string{"billing-beta::declared-model": betaExpr, "billing-beta::alias-model": aliasExpr}, wantExpr: aliasExpr},
 		{name: "mapped override precedes model fallback", plugin: "billing-beta", model: "alias-model", mapping: `{"alias-model":"declared-model"}`, modelExpr: baseExpr, mode: "tiered_expr", variants: map[string]string{"billing-beta::declared-model": betaExpr}, wantExpr: betaExpr},
 		{name: "unconfigured plugin cannot use another schema", plugin: "billing-beta", model: "declared-model", modelExpr: baseExpr, mode: "tiered_expr", wantPriceError: true},
@@ -508,6 +522,7 @@ func TestSharedEndpointBillingKeepsOrdinaryAndPluginPricesSeparate(t *testing.T)
 		ordinaryReserve                     int
 		wantError                           string
 		alias, shared, legacy               bool
+		mappedTokenPrice, free              bool
 	}{
 		{name: "task usage price is rejected by ordinary relay", expression: taskExpr, taskQuota: 50000, taskFinal: 75000, wantError: "task usage expression"},
 		{name: "enum fallback cannot silently bill zero", expression: `u("output_image_type") == "2k" ? tier("2k", u("image_count") * 0.08) : tier("1k", 0.04)`, taskQuota: 20000, taskFinal: 20000, wantError: "task usage expression"},
@@ -521,6 +536,10 @@ func TestSharedEndpointBillingKeepsOrdinaryAndPluginPricesSeparate(t *testing.T)
 		{name: "ordinary constant has ordinary units with plugin override", expression: `tier("flat", 80000)`, override: taskExpr, ordinaryQuota: 40000, ordinaryReserve: 1500000, taskQuota: 50000, taskFinal: 75000},
 		{name: "another plugin still inherits task USD units", expression: `tier("flat", 0.04)`, override: taskExpr, taskQuota: 50000, taskFinal: 75000, wantError: "shares its billing expression", shared: true},
 		{name: "legacy per image pricing stays shared", ordinaryQuota: 40000, taskQuota: 40000, legacy: true},
+		{name: "model image price beats direct plugin price for two images", legacy: true, override: taskExpr, ordinaryQuota: 40000, taskQuota: 40000},
+		{name: "free model beats a paid plugin", legacy: true, free: true, override: taskExpr},
+		{name: "configured alias price precedes mapped plugin and token prices", alias: true, legacy: true, mappedTokenPrice: true, override: taskExpr, ordinaryQuota: 40000, taskQuota: 40000},
+		{name: "explicit zero alias price remains free", alias: true, legacy: true, mappedTokenPrice: true, free: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			saveBillingConfig(t)
@@ -536,17 +555,28 @@ func TestSharedEndpointBillingKeepsOrdinaryAndPluginPricesSeparate(t *testing.T)
 			if tc.override != "" {
 				variants["bill-fallback::declared-model"] = tc.override
 			}
-			modes, err := common.Marshal(map[string]string{name: mode})
+			modelModes := map[string]string{name: mode}
+			modelExpressions := map[string]string{name: tc.expression}
+			if tc.mappedTokenPrice {
+				modelModes[mappedModel] = billing_setting.BillingModeTieredExpr
+				modelExpressions[mappedModel] = `tier("tokens", p * 17.5 + c * 105)`
+			}
+			modes, err := common.Marshal(modelModes)
 			require.NoError(t, err)
-			expressions, err := common.Marshal(map[string]string{name: tc.expression})
+			expressions, err := common.Marshal(modelExpressions)
 			require.NoError(t, err)
 			overrides, err := common.Marshal(variants)
 			require.NoError(t, err)
 			require.NoError(t, config.GlobalConfig.LoadFromDB(map[string]string{
 				"billing_setting.billing_mode": string(modes), "billing_setting.billing_expr": string(expressions),
 				billing_setting.PluginBillingExprOption: string(overrides), "group_ratio_setting.group_ratio": `{"default":1}`,
+				"quota_setting.enable_free_model_pre_consume": "true",
 			}))
-			prices, err := common.Marshal(map[string]float64{name: 0.04})
+			unitPrice := 0.04
+			if tc.free {
+				unitPrice = 0
+			}
+			prices, err := common.Marshal(map[string]float64{name: unitPrice})
 			require.NoError(t, err)
 			require.NoError(t, ratio_setting.UpdateModelPriceByJSONString(string(prices)))
 			registry := pluginruntime.NewRegistry()
@@ -586,8 +616,8 @@ func TestSharedEndpointBillingKeepsOrdinaryAndPluginPricesSeparate(t *testing.T)
 			pluginContext.Set("group", "default")
 			pluginContext.Set(pluginruntime.ContextKeyPinnedPlugin, pluginruntime.PinnedPlugin{Generation: registry.Generation(), Plugin: plugin})
 			task.OriginModelName, task.UserGroup, task.UsingGroup = name, "default", "default"
-			_, taskErr := RelayTaskSubmit(pluginContext, task)
-			require.NotNil(t, taskErr) // This fixture stops at reservation, before upstream submission.
+			_, taskErr := PrepareTaskSubmission(pluginContext, task)
+			require.NotNil(t, taskErr) // This fixture stops at reservation, including for a configured zero price.
 			assert.NotEqual(t, "model_price_error", taskErr.Code)
 			assert.Equal(t, tc.taskQuota, task.PriceData.Quota)
 			if tc.legacy {

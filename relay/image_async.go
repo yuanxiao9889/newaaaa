@@ -12,6 +12,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
+	"github.com/QuantumNous/new-api/middleware"
 	"github.com/QuantumNous/new-api/model"
 	pluginruntime "github.com/QuantumNous/new-api/pkg/jsplugin"
 	"github.com/QuantumNous/new-api/relay/channel/task/taskcommon"
@@ -325,7 +326,7 @@ func saveInternalAsyncImageReplay(c *gin.Context, task *model.Task) error {
 	if size > 0 {
 		task.PrivateData.ImageRetry = &model.AsyncImageRetryState{
 			BodyPath: path, BodySize: size, RelayFormat: task.PrivateData.RequestRelayFormat,
-			Constraints: *service.GetChannelConstraints(c),
+			Constraints: middleware.ImageRetryConstraints(c),
 			SkipRetry:   service.ShouldSkipRetryAfterChannelAffinityFailure(c),
 			UserGroup:   common.GetContextKeyString(c, constant.ContextKeyUserGroup),
 		}

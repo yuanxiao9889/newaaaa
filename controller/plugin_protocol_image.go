@@ -206,7 +206,19 @@ func pollTaskPluginImageTask(ctx context.Context, task *model.Task) error {
 	if upstreamID == "" {
 		return errors.New("task has no upstream id")
 	}
-	return service.UpdateVideoTasks(ctx, task.Platform, map[int][]string{task.ChannelId: {upstreamID}}, map[string]*model.Task{upstreamID: task})
+	if err := service.UpdateVideoTasks(ctx, task.Platform, map[int][]string{task.ChannelId: {upstreamID}}, map[string]*model.Task{upstreamID: task}); err != nil {
+		return err
+	}
+	// A background poll or timeout sweep may have won the terminal CAS.
+	stored, exists, err := model.GetTaskForProtocolObservation(ctx, task.UserId, task.Platform, task.TaskID)
+	if err != nil {
+		return err
+	}
+	if !exists {
+		return errors.New("image task no longer exists")
+	}
+	*task = *stored
+	return nil
 }
 
 func taskPluginImageResponseFormat(request pluginruntime.ProtocolRequestContext) string {

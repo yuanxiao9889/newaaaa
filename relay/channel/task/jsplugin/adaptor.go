@@ -562,17 +562,29 @@ func (a *TaskAdaptor) DoRequest(c *gin.Context, info *relaycommon.RelayInfo, bod
 	// keeps reading to the end and settles. Keep-alive comments reset the
 	// idle timeout, so the upstream request is bounded by the submission
 	// deadline of the host protocols (TASK_PLUGIN_PROTOCOL_TIMEOUT_SECONDS).
-	var release context.CancelFunc
+	request := c.Request
+	var deadline time.Time
 	if a.submit != nil && a.submit.ResponseType == "sse" && relaysSubmitEvents(c) {
-		detached := c.Request.WithContext(context.WithoutCancel(c.Request.Context()))
+		request = request.WithContext(context.WithoutCancel(request.Context()))
 		timeout := time.Duration(constant.TaskPluginProtocolTimeoutSeconds) * time.Second
 		if timeout <= 0 {
 			timeout = 10 * time.Minute
 		}
+		deadline = time.Now().Add(timeout)
+	}
+	if request != nil && info.TaskRelayInfo != nil {
+		expires := service.PluginImageExecutionDeadline(request.URL.Path, info.Action, info.StartTime.Unix(),
+			service.MediaRetry(c), common.GetAsyncImageTaskTimeoutSeconds())
+		if expires > 0 && (deadline.IsZero() || expires <= deadline.Unix()) {
+			deadline = time.Unix(expires, 0)
+		}
+	}
+	var release context.CancelFunc
+	if !deadline.IsZero() {
 		var upstream context.Context
-		upstream, release = context.WithTimeout(detached.Context(), timeout)
-		c.Request = detached.WithContext(upstream)
-		defer func() { c.Request = detached }()
+		upstream, release = context.WithDeadline(request.Context(), deadline)
+		c.Request = request.WithContext(upstream)
+		defer func() { c.Request = request }()
 	}
 	if a.submit != nil && strings.TrimSpace(a.submit.Method) != "" {
 		originalMethod := c.Request.Method
@@ -590,7 +602,7 @@ func (a *TaskAdaptor) DoRequest(c *gin.Context, info *relaycommon.RelayInfo, bod
 	return resp, err
 }
 
-// deadlineBody releases the deadline of a relayed submission's upstream
+// deadlineBody releases the deadline of a plugin submission's upstream
 // request once its reply is closed.
 type deadlineBody struct {
 	io.ReadCloser

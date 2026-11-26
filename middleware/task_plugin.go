@@ -568,35 +568,80 @@ func RouteTaskPluginEndpoint() gin.HandlerFunc {
 	}
 }
 
-// PrepareImageRetryEndpoint rebuilds execution-only constraints for a public
-// Images request. A saved plugin identity or relay-only decision describes the
-// previous executor, not the client's allowed providers. Explicit pins, image
-// capabilities, group/model admission and caller exclusions remain intact.
+// ImageRetryConstraints snapshots admission for the worker. When an ordinary
+// relay won initial routing, its fallback plugins have not been decoded yet.
+func ImageRetryConstraints(c *gin.Context) dto.ChannelConstraints {
+	constraints := *service.GetChannelConstraints(c)
+	value, _ := c.Get(pluginruntime.ContextKeyRelayEndpoint)
+	endpoint, ok := value.(pluginruntime.PinnedEndpoint)
+	if !ok || endpoint.Protocol != pluginruntime.ProtocolOpenAIImage {
+		return constraints
+	}
+	// A native relay may already have rewritten the multipart boundary for
+	// its own POST. Decode the retained body with its original content type.
+	value, _ = c.Get("async_image_original_content_type")
+	if original, ok := value.(string); ok && original != c.GetHeader("Content-Type") {
+		c = c.Copy()
+		c.Request = c.Request.Clone(c.Request.Context())
+		c.Request.Header.Set("Content-Type", original)
+	}
+	decoded, _, _ := decodeTaskPluginEndpoint(c, endpoint)
+	if decoded != nil {
+		filter := dto.ChannelFilter{Kind: dto.FilterTaskPluginIdentity, TaskPluginKey: decoded.candidates[0].Plugin.Meta.Key}
+		for _, candidate := range decoded.candidates {
+			filter.TaskPluginKeys = append(filter.TaskPluginKeys, candidate.Plugin.Meta.Key)
+		}
+		constraints.Filters = append(slices.Clone(constraints.Filters), filter)
+	}
+	return constraints
+}
+
+// PrepareImageRetryEndpoint admits ordinary channels and currently registered
+// plugins that accepted this particular request. A registry reload may remove
+// a candidate but cannot add one to an already queued request.
 func PrepareImageRetryEndpoint(c *gin.Context, modelName string) *pluginruntime.PinnedEndpoint {
 	if c.Request == nil || (c.Request.URL.Path != "/v1/images/generations" && c.Request.URL.Path != "/v1/images/edits") {
 		return nil
 	}
 	constraints := service.GetChannelConstraints(c)
-	constraints.Filters = slices.DeleteFunc(slices.Clone(constraints.Filters), func(filter dto.ChannelFilter) bool {
+	saved := constraints.Filters
+	constraints.Filters = slices.DeleteFunc(slices.Clone(saved), func(filter dto.ChannelFilter) bool {
 		return filter.Kind == dto.FilterTaskPluginIdentity || filter.Kind == dto.FilterTaskPluginEndpoint
 	})
 	filter := dto.ChannelFilter{Kind: dto.FilterTaskPluginEndpoint}
 	generation := pluginruntime.DefaultRegistry.Generation()
 	var endpoint pluginruntime.PinnedEndpoint
-	var found bool
 	if generation != nil {
-		endpoint, found = lookupTaskPluginEndpoint(generation, c.Request.Method, c.Request.URL.Path, modelName)
+		endpoint, _ = lookupTaskPluginEndpoint(generation, c.Request.Method, c.Request.URL.Path, modelName)
 	}
-	if found {
-		for _, candidate := range endpoint.Candidates {
-			filter.TaskPluginKeys = append(filter.TaskPluginKeys, candidate.Plugin.Meta.Key)
+	accepted := endpoint.Candidates[:0]
+	for _, candidate := range endpoint.Candidates {
+		key := candidate.Plugin.Meta.Key
+		admitted := false
+		for _, identity := range saved {
+			if identity.Kind != dto.FilterTaskPluginIdentity || identity.TaskPluginKey == "" {
+				continue
+			}
+			admitted = identity.TaskPluginKey == key || slices.Contains(identity.TaskPluginKeys, key)
+			if !admitted {
+				break
+			}
+		}
+		if admitted {
+			accepted = append(accepted, candidate)
+			filter.TaskPluginKeys = append(filter.TaskPluginKeys, key)
 			filter.TaskPluginChannelTypes = append(filter.TaskPluginChannelTypes, candidate.Plugin.Meta.ChannelTypes...)
+		} else {
+			filter.ExcludedPluginKeys = append(filter.ExcludedPluginKeys, key)
+			filter.ExcludedPluginChannelTypes = append(filter.ExcludedPluginChannelTypes, candidate.Plugin.Meta.ChannelTypes...)
 		}
 	}
 	constraints.AddFilter(filter)
-	if !found {
+	if len(accepted) == 0 {
 		return nil
 	}
+	endpoint.Candidates = accepted
+	endpoint.Plugin, endpoint.Protocol, endpoint.Operation = accepted[0].Plugin, accepted[0].Protocol, accepted[0].Operation
 	return &endpoint
 }
 
@@ -816,145 +861,14 @@ func PrepareTaskPluginEndpoint() gin.HandlerFunc {
 			abortTaskPluginProtocolError(c, http.StatusNotImplemented, "Task protocol bridge is not available")
 			return
 		}
-		requestContext, err := buildTaskPluginRouteRequest(c)
-		if err != nil {
-			logger.LogWarn(
-				c,
-				common.LogText("task_plugin subsystem=endpoint event=prepare_rejected generation=%d plugin=%q stage=request_decode reason=invalid_request",
-					pinned.Generation.Number,
-					pinned.Plugin.Meta.Key),
-			)
-			status := http.StatusBadRequest
-			if errors.Is(err, errTaskPluginUnsupportedMediaType) {
-				status = http.StatusUnsupportedMediaType
-			}
-			abortTaskPluginProtocolError(c, status, err.Error())
-			return
-		}
-		if body, ok := requestContext.Body.(map[string]any); ok {
-			if fields, ok := body["fields"].(map[string][]string); ok {
-				if values := fields["model"]; len(values) > 0 && values[0] != pinned.Model {
-					fields["model"][0] = pinned.Model
-				}
-			}
-		}
-		bodyObject, _ := requestContext.Body.(map[string]any)
-		bodyKind, _ := bodyObject["kind"].(string)
-		allowedBody := false
-		for _, allowed := range pinned.Operation.BodyKinds {
-			if bodyKind == string(allowed) {
-				allowedBody = true
-				break
-			}
-		}
-		if !allowedBody {
-			logger.LogWarn(
-				c,
-				common.LogText("task_plugin subsystem=endpoint event=prepare_rejected generation=%d plugin=%q stage=request_decode reason=body_kind_mismatch body_kind=%q",
-					pinned.Generation.Number,
-					pinned.Plugin.Meta.Key,
-					bodyKind),
-			)
-			detail := "unsupported request body for this operation"
-			if len(pinned.Operation.BodyKinds) == 1 && pinned.Operation.BodyKinds[0] == pluginruntime.BodyJSON {
-				detail = "this route requires a JSON body"
-			}
-			abortTaskPluginProtocolError(c, http.StatusUnsupportedMediaType, detail)
-			return
-		}
-		stream := false
-		if body, bodyOK := requestContext.Body.(map[string]any); bodyOK && body["kind"] == string(pluginruntime.BodyJSON) {
-			requestBody, _ := body["value"].(map[string]any)
-			if streamValue, present := requestBody["stream"]; present {
-				stream, ok = streamValue.(bool)
-				if !ok {
-					logger.LogWarn(
-						c,
-						common.LogText("task_plugin subsystem=endpoint event=prepare_rejected generation=%d plugin=%q stage=request_decode reason=invalid_stream_flag",
-							pinned.Generation.Number,
-							pinned.Plugin.Meta.Key),
-					)
-					abortTaskPluginProtocolError(c, http.StatusBadRequest, "stream must be a boolean")
-					return
-				}
-			}
-		}
-		protocolContext := pluginruntime.ProtocolRequestContext{
-			RouteRequestContext: requestContext,
-			Protocol:            pinned.Protocol,
-			Operation:           pinned.Operation.Name,
-			Model:               pinned.Model,
-			UpstreamModel:       pinned.MappedModel,
-			Stream:              stream,
-		}
 		hookStarted := time.Now()
-		candidates := pinned.Candidates
-		if len(candidates) == 0 {
-			candidates = []pluginruntime.ProtocolBinding{{Plugin: pinned.Plugin, Protocol: pinned.Protocol, Operation: pinned.Operation, Model: pinned.Model}}
-		}
-		accepted := make([]pluginruntime.ProtocolBinding, 0, len(candidates))
-		var resolved map[string]any
-		var resolvedBodyText json.RawMessage
-		var failures []string
-		rejectedPlugins := make(map[string][]string)
-		for _, candidate := range candidates {
-			candidateContext := protocolContext
-			candidateContext.Protocol = candidate.Protocol
-			candidateContext.Operation = candidate.Operation.Name
-			// Parsing belongs to durable submission; disconnecting only stops
-			// the later Responses observation.
-			resolvedValue, requestBodyText, callErr := candidate.Plugin.Engine.CallPathWithMemberJSON(
-				context.WithoutCancel(c.Request.Context()), pluginruntime.DefaultCallTimeout,
-				candidate.Plugin.Meta.JSONTextMember("requestBody"),
-				"protocols", []string{candidate.Protocol, "decodeRequest"}, candidateContext.JSValueFor(candidate.Plugin.Meta),
-			)
-			result, resultOK := resolvedValue.(map[string]any)
-			detail := ""
-			reason := ""
-			if callErr != nil {
-				reason = "hook_failed"
-				detail = taskPluginHookDetail(callErr)
-				if detail == "" {
-					detail = "Invalid task protocol request"
-				}
-			} else if !resultOK {
-				reason = "result_not_object"
-				detail = taskPluginInvalidRouteResult
-			} else if kind, _ := result["kind"].(string); kind != string(pluginruntime.RouteTypeSubmit) {
-				reason = "unsupported_kind"
-				detail = taskPluginInvalidRouteResult
-			} else if model, _ := result["model"].(string); strings.TrimSpace(model) == "" {
-				reason = "invalid_model"
-				detail = "decoded request is missing a model"
-			} else if model != pinned.Model || (pinned.MappedModel == "" && !slices.Contains(candidate.Plugin.Meta.Models, model)) {
-				reason = "resolved_model_not_owned"
-				detail = fmt.Sprintf("model %q is not served by this plugin", model)
-			}
-			if detail != "" {
-				logger.LogWarn(c, common.LogText("task_plugin subsystem=endpoint event=prepare_rejected generation=%d plugin=%q stage=parse_request reason=%s err=%q elapsed_ms=%d",
-					pinned.Generation.Number, candidate.Plugin.Meta.Key, reason, detail, time.Since(hookStarted).Milliseconds()))
-				if _, seen := rejectedPlugins[detail]; !seen {
-					failures = append(failures, detail)
-				}
-				rejectedPlugins[detail] = append(rejectedPlugins[detail], candidate.Plugin.Meta.Key)
-				continue
-			}
-			accepted = append(accepted, candidate)
-			if resolved == nil {
-				resolved = result
-				resolvedBodyText = requestBodyText
-				protocolContext = candidateContext
-			}
-		}
-		if len(accepted) == 0 {
-			if len(candidates) > 1 {
-				for index, detail := range failures {
-					failures[index] = strings.Join(rejectedPlugins[detail], ", ") + ": " + detail
-				}
-			}
-			abortTaskPluginProtocolError(c, http.StatusBadRequest, strings.Join(failures, "; "))
+		decoded, status, detail := decodeTaskPluginEndpoint(c, pinned)
+		if decoded == nil {
+			abortTaskPluginProtocolError(c, status, detail)
 			return
 		}
+		accepted, protocolContext := decoded.candidates, decoded.protocol
+		requestContext, resolved := protocolContext.RouteRequestContext, decoded.resolved
 		pinned.Candidates = accepted
 		pinned.Plugin = accepted[0].Plugin
 		pinned.Protocol = accepted[0].Protocol
@@ -984,8 +898,8 @@ func PrepareTaskPluginEndpoint() gin.HandlerFunc {
 		}
 		c.Set(pluginruntime.ContextKeyRouteRequest, requestContext)
 		c.Set("task_request", requestContext.RequestBody)
-		if resolvedBodyText != nil {
-			c.Set(pluginruntime.ContextKeyRequestBodyText, resolvedBodyText)
+		if decoded.bodyText != nil {
+			c.Set(pluginruntime.ContextKeyRequestBodyText, decoded.bodyText)
 		}
 		c.Set("resolved_task_model", resolvedModel)
 		c.Set("expected_task_plugin_key", pinned.Plugin.Meta.Key)
@@ -1016,12 +930,163 @@ func PrepareTaskPluginEndpoint() gin.HandlerFunc {
 			pinned.Model,
 			resolvedModel,
 			action != "",
-			stream,
+			protocolContext.Stream,
 			bodyReplaced,
 			time.Since(hookStarted).Milliseconds(),
 		)
 		c.Next()
 	}
+}
+
+type decodedTaskPluginEndpoint struct {
+	candidates []pluginruntime.ProtocolBinding
+	protocol   pluginruntime.ProtocolRequestContext
+	resolved   map[string]any
+	bodyText   json.RawMessage
+}
+
+// Decode without changing the selected channel, request body or HTTP response.
+// An ordinary image relay can therefore validate potential queue fallbacks.
+func decodeTaskPluginEndpoint(c *gin.Context, pinned pluginruntime.PinnedEndpoint) (*decodedTaskPluginEndpoint, int, string) {
+	requestContext, err := buildTaskPluginRouteRequest(c)
+	if err != nil {
+		logger.LogWarn(
+			c,
+			common.LogText("task_plugin subsystem=endpoint event=prepare_rejected generation=%d plugin=%q stage=request_decode reason=invalid_request",
+				pinned.Generation.Number,
+				pinned.Plugin.Meta.Key),
+		)
+		status := http.StatusBadRequest
+		if errors.Is(err, errTaskPluginUnsupportedMediaType) {
+			status = http.StatusUnsupportedMediaType
+		}
+		return nil, status, err.Error()
+	}
+	if body, ok := requestContext.Body.(map[string]any); ok {
+		if fields, ok := body["fields"].(map[string][]string); ok {
+			if values := fields["model"]; len(values) > 0 && values[0] != pinned.Model {
+				fields["model"][0] = pinned.Model
+			}
+		}
+	}
+	bodyObject, _ := requestContext.Body.(map[string]any)
+	bodyKind, _ := bodyObject["kind"].(string)
+	allowedBody := false
+	for _, allowed := range pinned.Operation.BodyKinds {
+		if bodyKind == string(allowed) {
+			allowedBody = true
+			break
+		}
+	}
+	if !allowedBody {
+		logger.LogWarn(
+			c,
+			common.LogText("task_plugin subsystem=endpoint event=prepare_rejected generation=%d plugin=%q stage=request_decode reason=body_kind_mismatch body_kind=%q",
+				pinned.Generation.Number,
+				pinned.Plugin.Meta.Key,
+				bodyKind),
+		)
+		detail := "unsupported request body for this operation"
+		if len(pinned.Operation.BodyKinds) == 1 && pinned.Operation.BodyKinds[0] == pluginruntime.BodyJSON {
+			detail = "this route requires a JSON body"
+		}
+		return nil, http.StatusUnsupportedMediaType, detail
+	}
+	stream := false
+	if body, bodyOK := requestContext.Body.(map[string]any); bodyOK && body["kind"] == string(pluginruntime.BodyJSON) {
+		requestBody, _ := body["value"].(map[string]any)
+		if streamValue, present := requestBody["stream"]; present {
+			var ok bool
+			stream, ok = streamValue.(bool)
+			if !ok {
+				logger.LogWarn(
+					c,
+					common.LogText("task_plugin subsystem=endpoint event=prepare_rejected generation=%d plugin=%q stage=request_decode reason=invalid_stream_flag",
+						pinned.Generation.Number,
+						pinned.Plugin.Meta.Key),
+				)
+				return nil, http.StatusBadRequest, "stream must be a boolean"
+			}
+		}
+	}
+	protocolContext := pluginruntime.ProtocolRequestContext{
+		RouteRequestContext: requestContext,
+		Protocol:            pinned.Protocol,
+		Operation:           pinned.Operation.Name,
+		Model:               pinned.Model,
+		UpstreamModel:       pinned.MappedModel,
+		Stream:              stream,
+	}
+	hookStarted := time.Now()
+	candidates := pinned.Candidates
+	if len(candidates) == 0 {
+		candidates = []pluginruntime.ProtocolBinding{{Plugin: pinned.Plugin, Protocol: pinned.Protocol, Operation: pinned.Operation, Model: pinned.Model}}
+	}
+	accepted := make([]pluginruntime.ProtocolBinding, 0, len(candidates))
+	var resolved map[string]any
+	var resolvedBodyText json.RawMessage
+	var failures []string
+	rejectedPlugins := make(map[string][]string)
+	for _, candidate := range candidates {
+		candidateContext := protocolContext
+		candidateContext.Protocol = candidate.Protocol
+		candidateContext.Operation = candidate.Operation.Name
+		// Parsing belongs to durable submission; disconnecting only stops
+		// the later Responses observation.
+		resolvedValue, requestBodyText, callErr := candidate.Plugin.Engine.CallPathWithMemberJSON(
+			context.WithoutCancel(c.Request.Context()), pluginruntime.DefaultCallTimeout,
+			candidate.Plugin.Meta.JSONTextMember("requestBody"),
+			"protocols", []string{candidate.Protocol, "decodeRequest"}, candidateContext.JSValueFor(candidate.Plugin.Meta),
+		)
+		result, resultOK := resolvedValue.(map[string]any)
+		detail := ""
+		reason := ""
+		if callErr != nil {
+			reason = "hook_failed"
+			detail = taskPluginHookDetail(callErr)
+			if detail == "" {
+				detail = "Invalid task protocol request"
+			}
+		} else if !resultOK {
+			reason = "result_not_object"
+			detail = taskPluginInvalidRouteResult
+		} else if kind, _ := result["kind"].(string); kind != string(pluginruntime.RouteTypeSubmit) {
+			reason = "unsupported_kind"
+			detail = taskPluginInvalidRouteResult
+		} else if model, _ := result["model"].(string); strings.TrimSpace(model) == "" {
+			reason = "invalid_model"
+			detail = "decoded request is missing a model"
+		} else if model != pinned.Model || (pinned.MappedModel == "" && !slices.Contains(candidate.Plugin.Meta.Models, model)) {
+			reason = "resolved_model_not_owned"
+			detail = fmt.Sprintf("model %q is not served by this plugin", model)
+		}
+		if detail != "" {
+			logger.LogWarn(c, common.LogText("task_plugin subsystem=endpoint event=prepare_rejected generation=%d plugin=%q stage=parse_request reason=%s err=%q elapsed_ms=%d",
+				pinned.Generation.Number, candidate.Plugin.Meta.Key, reason, detail, time.Since(hookStarted).Milliseconds()))
+			if _, seen := rejectedPlugins[detail]; !seen {
+				failures = append(failures, detail)
+			}
+			rejectedPlugins[detail] = append(rejectedPlugins[detail], candidate.Plugin.Meta.Key)
+			continue
+		}
+		accepted = append(accepted, candidate)
+		if resolved == nil {
+			resolved = result
+			resolvedBodyText = requestBodyText
+			protocolContext = candidateContext
+		}
+	}
+	if len(accepted) == 0 {
+		if len(candidates) > 1 {
+			for index, detail := range failures {
+				failures[index] = strings.Join(rejectedPlugins[detail], ", ") + ": " + detail
+			}
+		}
+		return nil, http.StatusBadRequest, strings.Join(failures, "; ")
+	}
+	return &decodedTaskPluginEndpoint{
+		candidates: accepted, protocol: protocolContext, resolved: resolved, bodyText: resolvedBodyText,
+	}, http.StatusOK, ""
 }
 
 func buildTaskPluginRouteRequest(c *gin.Context) (pluginruntime.RouteRequestContext, error) {

@@ -118,9 +118,10 @@ func channelMatchesFilter(ch *Channel, modelName string, filter dto.ChannelFilte
 		}
 		return slices.Contains(filter.TaskPluginChannelTypes, ch.Type)
 	case dto.FilterTaskPluginEndpoint:
-		pluginChannel := slices.Contains(filter.TaskPluginChannelTypes, ch.Type)
-		if ch.Type == constant.ChannelTypeTaskPlugin || ch.Type == constant.ChannelTypeNewAPI {
-			pluginChannel = slices.ContainsFunc(filter.TaskPluginKeys, ch.GetSetting().BindsTaskPlugin)
+		pluginChannel := ch.matchesTaskPluginEndpoint(filter.TaskPluginKeys, filter.TaskPluginChannelTypes)
+		if !pluginChannel && (len(filter.ExcludedPluginKeys) > 0 || len(filter.ExcludedPluginChannelTypes) > 0) &&
+			ch.matchesTaskPluginEndpoint(filter.ExcludedPluginKeys, filter.ExcludedPluginChannelTypes) {
+			return false
 		}
 		if filter.TaskPluginRelayOnly {
 			return ch.Type != constant.ChannelTypeTaskPlugin && !pluginChannel
@@ -149,6 +150,13 @@ func channelMatchesFilter(ch *Channel, modelName string, filter dto.ChannelFilte
 	default:
 		return true
 	}
+}
+
+func (ch *Channel) matchesTaskPluginEndpoint(keys []string, channelTypes []int) bool {
+	if ch.Type == constant.ChannelTypeTaskPlugin || ch.Type == constant.ChannelTypeNewAPI {
+		return slices.ContainsFunc(keys, ch.GetSetting().BindsTaskPlugin)
+	}
+	return slices.Contains(channelTypes, ch.Type)
 }
 
 func channelMatchesImageRequestFilter(ch *Channel, modelName string, filter dto.ChannelFilter) bool {

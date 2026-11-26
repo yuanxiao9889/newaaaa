@@ -359,9 +359,7 @@ it('shows and removes a single provider override while retaining the per-call de
   )
   const user = userEvent.setup()
   await user.click(screen.getByRole('tab', { name: 'Alpha' }))
-  await user.click(
-    screen.getByRole('switch', { name: 'Set separately for this provider' })
-  )
+  await user.click(screen.getByRole('button', { name: 'Remove saved price' }))
   expect(screen.getByText('Use model-level pricing')).toBeVisible()
   expect(await ref.current?.commitDraft()).toMatchObject({
     billingMode: 'per-request',
@@ -371,12 +369,12 @@ it('shows and removes a single provider override while retaining the per-call de
 })
 
 it('clears dirty state after restoring an override in a different key order', async () => {
-  const expression = 'tier("base", u("seconds") * 0.4)'
+  const expression = 'tier("base", u("seconds") * 0)'
   const { dirty } = renderEditor(
     {
       name: 'shared',
       billingMode: 'tiered_expr',
-      billingExpr: expression,
+      billingExpr: 'tier("base", u("credits") * 0.4)',
       pluginBillingExpr: { alpha: expression, beta: expression },
     },
     ['alpha', 'beta'].map((key) => ({
@@ -456,12 +454,12 @@ it('configures ordinary OpenAI pricing while preserving inherited and saved plug
   await user.click(screen.getByRole('tab', { name: 'alpha' }))
   expect(screen.getByRole('textbox', { name: 'seconds' })).toHaveValue('0.4')
   await user.click(screen.getByRole('tab', { name: 'beta' }))
-  expect(screen.getByRole('textbox', { name: 'seconds' })).toHaveValue('0.7')
+  expect(screen.getByRole('textbox', { name: 'seconds' })).toHaveValue('0.4')
   const draft = await ref.current?.commitDraft()
   expect(draft).toMatchObject({
     billingMode: 'tiered_expr',
     billingExpr: 'tier("base", p * 2.5 + c * 0)',
-    pluginBillingExpr: { alpha: expression, beta: savedOverride },
+    pluginBillingExpr: { alpha: expression, beta: expression },
   })
 })
 

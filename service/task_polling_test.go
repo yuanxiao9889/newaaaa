@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/url"
@@ -749,7 +750,7 @@ func TestRunTaskPollingOnceIsolatesSlowPlatform(t *testing.T) {
 	seedTaskPollingChannel(t, 283, false)
 	fast := seedPollingTask(t, 201, "public_fast", "upstream_video")
 	slow := seedPollingTask(t, 283, "public_slow", "upstream_image")
-	require.NoError(t, model.DB.Model(slow).Update("platform", "image-plugin").Error)
+	require.NoError(t, model.DB.Model(slow).Updates(map[string]any{"platform": "image-plugin", "action": "image_generate"}).Error)
 
 	previousLimit, previousFactory := constant.TaskQueryLimit, GetTaskAdaptorFunc
 	constant.TaskQueryLimit = 100
@@ -809,6 +810,111 @@ func TestRunTaskPollingOnceIsolatesSlowPlatform(t *testing.T) {
 	assert.Equal(t, model.TaskStatus(model.TaskStatusInProgress), interrupted.Status)
 	assert.Zero(t, interrupted.PrivateData.PollFailures)
 	assert.Equal(t, slow.GetUpstreamTaskID(), interrupted.GetUpstreamTaskID())
+}
+
+func TestRunTaskPollingOnceReservesMediaSlots(t *testing.T) {
+	setupTaskPollingRegressionDB(t)
+	truncate(t)
+	require.NoError(t, model.DB.AutoMigrate(&model.TaskRetryBodyChunk{}))
+	previousLimit, previousFactory := constant.TaskQueryLimit, GetTaskAdaptorFunc
+	constant.TaskQueryLimit = 100
+	t.Cleanup(func() { constant.TaskQueryLimit, GetTaskAdaptorFunc = previousLimit, previousFactory })
+
+	// Each channel serves all three kinds from one plugin. Older image actions
+	// and video submissions with an empty action must still get their own slots.
+	kinds := []string{"image", "video", "other"}
+	const channels = 6
+	for i := range channels {
+		channelID := 201 + i
+		seedTaskPollingChannel(t, channelID, true)
+		for _, kind := range kinds {
+			id := fmt.Sprintf("%s-%d", kind, i)
+			task := seedPollingTask(t, channelID, "public-"+id, id)
+			task.Action = kind
+			switch kind {
+			case "image":
+				task.Action = "text_to_image"
+			case "video":
+				task.Action = ""
+				task.PrivateData.Execution = &model.TaskExecutionSnapshot{RequestPath: "/v1/videos"}
+			}
+			require.NoError(t, model.DB.Save(task).Error)
+		}
+	}
+
+	for _, releaseKind := range []string{"image", "video"} {
+		t.Run("drain_"+releaseKind, func(t *testing.T) {
+			started := make(chan string, channels*len(kinds))
+			release := make(chan struct{})
+			ctx, cancel := context.WithCancel(t.Context())
+			var mu sync.Mutex
+			active := make(map[string]int)
+			peak := make(map[string]int)
+			totalPeak := 0
+			GetTaskAdaptorFunc = func(constant.TaskPlatform) TaskPollingAdaptor {
+				return &pollRequestAdaptor{fetch: func(ctx context.Context, task *model.Task) error {
+					kind, _, _ := strings.Cut(task.GetUpstreamTaskID(), "-")
+					mu.Lock()
+					active[kind]++
+					peak[kind] = max(peak[kind], active[kind])
+					totalPeak = max(totalPeak, active["image"]+active["video"]+active["other"])
+					mu.Unlock()
+					defer func() {
+						mu.Lock()
+						active[kind]--
+						mu.Unlock()
+					}()
+					started <- kind
+					if kind == releaseKind {
+						select {
+						case <-release:
+							return nil
+						case <-ctx.Done():
+							return ctx.Err()
+						}
+					}
+					<-ctx.Done()
+					return ctx.Err()
+				}}
+			}
+
+			done := make(chan struct{})
+			go func() {
+				defer close(done)
+				RunTaskPollingOnce(ctx, nil)
+			}()
+			defer func() { cancel(); <-done }()
+			timeout := time.After(5 * time.Second)
+			counts := make(map[string]int)
+			waitForStarts := func(n int) {
+				t.Helper()
+				for range n {
+					select {
+					case kind := <-started:
+						counts[kind]++
+					case <-timeout:
+						t.Fatalf("timed out waiting for queries, started %v", counts)
+					}
+				}
+			}
+			waitForStarts(8)
+			require.Equal(t, map[string]int{"image": 4, "video": 3, "other": 1}, counts)
+
+			// Finish one kind only. Its flexible worker should pick up a
+			// waiting group of the opposite kind without waiting for a new pass.
+			close(release)
+			waitForStarts(channels - counts[releaseKind] + 1)
+			require.Equal(t, channels, counts[releaseKind])
+			cancel()
+			<-done
+			wantPeak := map[string]int{"image": 4, "video": 4, "other": 1}
+			if releaseKind == "video" {
+				wantPeak = map[string]int{"image": 5, "video": 3, "other": 1}
+			}
+			assert.Equal(t, wantPeak, peak)
+			assert.Equal(t, 8, totalPeak)
+		})
+	}
 }
 
 func TestRunTaskPollingOnceDoesNotRefundHistoricalFailedTask(t *testing.T) {
@@ -916,6 +1022,82 @@ func TestSweepTimedOutTasksAtTheDefaultDeadline(t *testing.T) {
 	assert.EqualValues(t, model.TaskStatusFailure, reloadedStuck.Status)
 	assert.Equal(t, "Task timed out", reloadedStuck.FailReason)
 	assert.Equal(t, initialQuota+taskQuota, getUserQuota(t, userID))
+}
+
+func TestPluginImageExecutionDeadline(t *testing.T) {
+	setupTaskPollingRegressionDB(t)
+	truncate(t)
+	t.Setenv("ASYNC_IMAGE_TASK_TIMEOUT_SECONDS", "1600")
+	oldTimeout := constant.TaskTimeoutMinutes
+	constant.TaskTimeoutMinutes = 0 // Image expiry is independent of the general sweep.
+	t.Cleanup(func() { constant.TaskTimeoutMinutes = oldTimeout })
+	const userID, channelID, balance, reservation = 911, 911, 10000, 80
+	seedUser(t, userID, balance)
+	seedTaskPollingChannel(t, channelID, true)
+	now := time.Now().Unix()
+	makeImage := func(id string, age int64) *model.Task {
+		task := makeTask(userID, channelID, reservation, 0, BillingSourceWallet, 0)
+		task.TaskID = id
+		task.Platform = "mixed-media-plugin"
+		task.Status = model.TaskStatusSubmitted
+		task.Progress = "0%"
+		task.Action = "text_to_image"
+		task.SubmitTime = now - age
+		task.PrivateData.UpstreamTaskID = id
+		return task
+	}
+	expired := makeImage("poll-expired", 1650)
+	expired.Action = "vendor_action"
+	expired.PrivateData.Execution = &model.TaskExecutionSnapshot{RequestPath: "/v1/images/edits"}
+	protected := makeImage("retry-in-window", 1800)
+	protected.PrivateData.MediaRetry = &model.MediaRetryState{Version: 1, WindowMinutes: 10, MaxAttempts: 5,
+		StartedAtMS: protected.SubmitTime * 1000, DeadlineMS: (protected.SubmitTime + 600) * 1000, Attempts: 1}
+	overWindow := makeImage("retry-expired", 2210)
+	overWindow.PrivateData.MediaRetry = &model.MediaRetryState{Version: 1, WindowMinutes: 10, MaxAttempts: 5,
+		StartedAtMS: overWindow.SubmitTime * 1000, DeadlineMS: (overWindow.SubmitTime + 600) * 1000, Attempts: 2}
+	video := makeImage("video", 4000)
+	video.Action = constant.TaskActionImageToVideo
+	batchExpired := makeImage("batch-expired", 1610)
+	for _, task := range []*model.Task{expired, protected, overWindow, video, batchExpired} {
+		require.NoError(t, model.DB.Create(task).Error)
+	}
+	stale := *expired
+	single := &taskPollingFetchAdaptor{}
+	taskM := map[string]*model.Task{expired.TaskID: expired}
+	require.NoError(t, updateVideoSingleTask(t.Context(), single, &model.Channel{Id: channelID}, expired.TaskID, taskM))
+	assert.Zero(t, single.fetchCount())
+	assert.EqualValues(t, model.TaskStatusFailure, expired.Status)
+	batch := &batchPollingAdaptor{results: map[string]*BatchTaskResult{
+		protected.TaskID: {TaskInfo: relaycommon.TaskInfo{Status: model.TaskStatusInProgress}, SubmitTime: now},
+	}}
+	submitted := protected.SubmitTime
+	require.NoError(t, UpdateBatchTasks(t.Context(), batch, map[int][]string{channelID: {protected.TaskID, batchExpired.TaskID}},
+		map[string]*model.Task{protected.TaskID: protected, batchExpired.TaskID: batchExpired}))
+	assert.Equal(t, []string{protected.TaskID}, batch.batchIDs)
+	assert.Equal(t, submitted, protected.SubmitTime)
+	assert.EqualValues(t, model.TaskStatusFailure, batchExpired.Status)
+	t.Setenv("ASYNC_IMAGE_TASK_TIMEOUT_SECONDS", "0")
+	sweepTimedOutTasks(t.Context())
+	assert.Equal(t, balance+2*reservation, getUserQuota(t, userID))
+	t.Setenv("ASYNC_IMAGE_TASK_TIMEOUT_SECONDS", "1600")
+	sweepTimedOutTasks(t.Context())
+	sweepTimedOutTasks(t.Context())
+	require.NoError(t, updateVideoSingleTask(t.Context(), single, &model.Channel{Id: channelID}, stale.TaskID, map[string]*model.Task{stale.TaskID: &stale}))
+	assert.Zero(t, single.fetchCount())
+	for _, task := range []*model.Task{expired, batchExpired, overWindow, protected, video} {
+		var stored model.Task
+		require.NoError(t, model.DB.First(&stored, task.ID).Error)
+		if task == protected || task == video {
+			assert.NotEqualValues(t, model.TaskStatusFailure, stored.Status)
+			assert.Equal(t, reservation, stored.Quota)
+			continue
+		}
+		assert.EqualValues(t, model.TaskStatusFailure, stored.Status)
+		assert.Equal(t, "Task timed out", stored.FailReason)
+		assert.Equal(t, TaskBillingStateRefunded, stored.PrivateData.BillingState)
+		assert.Zero(t, stored.Quota)
+	}
+	assert.Equal(t, balance+3*reservation, getUserQuota(t, userID))
 }
 
 type scriptedPollingAdaptor struct {

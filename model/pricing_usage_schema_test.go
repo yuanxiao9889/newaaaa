@@ -291,7 +291,8 @@ func TestPricingSharedPluginVariantsUseEachSchemaAndExpression(t *testing.T) {
 	mixed := pricingByModel(GetPricing())["pricing-usage-model"].BillingPluginVariants
 	require.Len(t, mixed, 2)
 	assert.Equal(t, billing_setting.BillingModeRatio, mixed[0].BillingMode)
-	assert.Equal(t, billing_setting.BillingModeTieredExpr, mixed[1].BillingMode)
+	assert.Equal(t, billing_setting.BillingModeRatio, mixed[1].BillingMode)
+	assert.Empty(t, mixed[1].BillingExpr)
 	require.NoError(t, config.GlobalConfig.LoadFromDB(map[string]string{billing_setting.PluginBillingExprOption: `{}`}))
 	InvalidatePricingCache()
 	perCall := pricingByModel(GetPricing())["pricing-usage-model"]
@@ -306,7 +307,8 @@ func TestPricingSharedPluginVariantsUseEachSchemaAndExpression(t *testing.T) {
 	single := pricingByModel(GetPricing())["pricing-usage-model"]
 	require.Len(t, single.BillingPluginVariants, 1)
 	assert.Equal(t, "pricing-beta", single.BillingPluginVariants[0].PluginKey)
-	assert.Equal(t, `tier("beta", u("credits") * 2)`, single.BillingPluginVariants[0].BillingExpr)
+	assert.Equal(t, billing_setting.BillingModeRatio, single.BillingPluginVariants[0].BillingMode)
+	assert.Empty(t, single.BillingPluginVariants[0].BillingExpr)
 	encoded, err := common.Marshal(single)
 	require.NoError(t, err)
 	assert.Contains(t, string(encoded), "billing_plugin_variants")

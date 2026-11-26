@@ -1,21 +1,29 @@
 // New API task plugin for explicitly bound TokenMei-compatible video channels.
-const MODEL = "全能视频2.5-301010-sss";
+const AGGREGATE_MODEL = "全能视频2.5-301010-720-聚合";
+const MODELS = ["全能视频2.5-301010-sss", AGGREGATE_MODEL];
 const RESOLUTIONS = ["480p", "720p", "1080p"];
 const RATIOS = ["16:9", "9:16", "4:3", "3:4", "1:1", "21:9", "adaptive"];
 const MEDIA = [
   ["reference_images", "images", 30], ["reference_videos", "videos", 10],
   ["reference_audio", "audios", 10], ["first_frame", "start_frame", 1], ["last_frame", "end_frame", 1],
 ];
+function usageSchema(resolutions) {
+  return {
+    seconds: { type: "number", unit: "second", description: { en: "Video generation unit price", zh: "视频生成单价" } },
+    resolution: { enum: resolutions, description: { en: "Output resolution", zh: "输出分辨率" } },
+  };
+}
 export const meta = {
-  apiVersion: 1, key: "tokenmei-video", name: "TokenMei Video", version: "1.0.0",
-  author: { name: "OOpii" }, description: { zh: "TokenMei 异步视频，按输出分辨率和时长计费", en: "TokenMei asynchronous video by resolution and duration" },
+  apiVersion: 1, key: "tokenmei-video", name: "TokenMei Video", version: "1.1.0",
+  author: { name: "OOpii" }, description: { zh: "通过 TokenMei 生成异步视频", en: "Asynchronous video generation via TokenMei" },
   website: "https://tokenmei.com/zh/docs/videos", baseUrl: "https://tokenmei.com",
-  auth: "api_key", models: [MODEL], protocols: ["openai_video"], fetchMode: "per_task",
-  usageSchema: {
-    seconds: { type: "number", unit: "second", description: { en: "Requested output seconds", zh: "输出秒数" } },
-    resolution: { enum: RESOLUTIONS, description: { en: "Output resolution", zh: "输出分辨率" } },
-  },
+  auth: "api_key", models: MODELS, protocols: ["openai_video"], fetchMode: "per_task",
+  usageSchema: usageSchema(RESOLUTIONS),
   usageExamples: RESOLUTIONS.map(resolution => ({ label: resolution + " / 5s", facts: { seconds: 5, resolution } })),
+  usageProfiles: [{
+    models: [AGGREGATE_MODEL], schema: usageSchema(["720p"]),
+    examples: [{ label: "720p / 5s", facts: { seconds: 5, resolution: "720p" } }],
+  }],
 };
 
 function publicUrl(value) {
@@ -28,7 +36,7 @@ function publicUrl(value) {
     && labels.every(label => /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(label));
 }
 function normalize(req, model) {
-  if (!req || typeof req !== "object" || Array.isArray(req) || model !== MODEL || (req.model !== undefined && req.model !== model)) throw new Error("Unsupported video request or model");
+  if (!req || typeof req !== "object" || Array.isArray(req) || !MODELS.includes(model) || (req.model !== undefined && req.model !== model)) throw new Error("Unsupported video request or model");
   const fields = ["model", "prompt", "duration", "seconds", "ratio", "aspect_ratio", "resolution", "generate_audio", "watermark", "seed", "camera_fixed", "n", "stream"];
   for (const [key, alias] of MEDIA) fields.push(key, alias);
   for (const key of Object.keys(req)) if (!fields.includes(key)) throw new Error("Unsupported video request field: " + key);
@@ -38,6 +46,7 @@ function normalize(req, model) {
   const duration = Number(value);
   if (!/^[0-9]+$/.test(String(value)) || !["number","string"].includes(typeof value) || !Number.isSafeInteger(duration) || duration < 5 || duration > 30) throw new Error("Duration must be 5 to 30 seconds");
   const resolution = req.resolution === undefined ? "720p" : req.resolution;
+  if (model === AGGREGATE_MODEL && resolution !== "720p") throw new Error("Resolution must be 720p");
   const ratio = req.ratio !== undefined ? req.ratio : req.aspect_ratio !== undefined ? req.aspect_ratio : "16:9";
   if (!RESOLUTIONS.includes(resolution) || !RATIOS.includes(ratio)) throw new Error("Unsupported resolution or aspect ratio");
   const body = { model, prompt: req.prompt, duration, ratio, resolution };

@@ -1576,9 +1576,33 @@ func TestSharedModelPluginPricingDatabaseMatrix(t *testing.T) {
 			assert.Equal(t, base, loaded.Entries[0].PluginVariants[0].Effective)
 			assert.True(t, loaded.Entries[0].PluginVariants[1].Compatible)
 			assert.Equal(t, variant, loaded.Entries[0].PluginVariants[1].Configured)
+			// Save one price through the model-list API with both existing plugin
+			// prices present. Each public model price applies to both providers.
+			version := loaded.Entries[0].Version
+			for _, unitPrice := range []float64{0.24, 0.30, 0} {
+				draft := model.ModelPricingChange{ModelName: name, ExpectedVersion: version, Pricing: model.PricingValues{
+					"billing_setting.billing_mode": "ratio", "ModelPrice": unitPrice,
+					billing_setting.PluginBillingExprOption: map[string]any{"matrix-alpha": base, "matrix-beta": variant},
+				}}
+				response := modelManagementRequest(t, UpdateModelPricingConfig, http.MethodPatch, "/api/option/model_pricing", map[string]any{"changes": []model.ModelPricingChange{draft}}, nil)
+				require.Contains(t, response.Body.String(), `"success":true`)
+				snapshot, err := model.GetModelPricingSnapshot([]string{name})
+				require.NoError(t, err)
+				entry := snapshot.Entries[0]
+				assert.Equal(t, unitPrice, entry.Effective["ModelPrice"])
+				assert.Equal(t, draft.Pricing[billing_setting.PluginBillingExprOption], entry.Configured[billing_setting.PluginBillingExprOption])
+				for _, provider := range entry.PluginVariants {
+					expr, useExpr := billing_setting.ResolveTaskBillingExpr(provider.PluginKey, name, "", provider.UsageSchema)
+					assert.False(t, useExpr)
+					assert.Empty(t, expr)
+					assert.True(t, provider.Compatible)
+					assert.Empty(t, provider.Effective)
+				}
+				version = entry.Version
+			}
 			// Ordinary relay pricing and the existing plugin expressions are
 			// saved together without changing either plugin's billing contract.
-			ordinary := model.ModelPricingChange{ModelName: name, ExpectedVersion: loaded.Entries[0].Version, Pricing: model.PricingValues{
+			ordinary := model.ModelPricingChange{ModelName: name, ExpectedVersion: version, Pricing: model.PricingValues{
 				"billing_setting.billing_mode": "tiered_expr", "billing_setting.billing_expr": `tier("image", fixed(0.04)) * image_count`,
 				billing_setting.PluginBillingExprOption: map[string]any{"matrix-alpha": base, "matrix-beta": variant},
 			}}

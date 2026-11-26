@@ -97,7 +97,7 @@ func testPluginImageRetry(t *testing.T, guarded bool) {
 			}
 			t.Setenv("ASYNC_IMAGE_REQUEST_STORAGE_PATH", t.TempDir())
 			t.Setenv("ASYNC_IMAGE_STORAGE_PATH", t.TempDir())
-			withTieredBillingConfig(t, map[string]string{"retry-image": "tiered_expr"}, map[string]string{"retry-image": `u("images") * 0.1`})
+			withTieredBillingConfig(t, map[string]string{}, map[string]string{})
 			billing := config.GlobalConfig.Get("billing_setting").(*billing_setting.BillingSetting)
 			oldOverrides := billing.PluginBillingExpr
 			groupRatio := 1.0
@@ -108,14 +108,16 @@ func testPluginImageRetry(t *testing.T, guarded bool) {
 			if scenario == "cheaper" || scenario == "stale_completion" || scenario == "ordinary_cheaper" {
 				price = 0.05
 			}
-			billing.PluginBillingExpr = map[string]string{"retry-b::retry-image": fmt.Sprintf(`u("images") * %g`, price)}
+			billing.PluginBillingExpr = map[string]string{
+				"retry-a::retry-image": `u("images") * 0.1`,
+				"retry-b::retry-image": fmt.Sprintf(`u("images") * %g`, price),
+			}
 			if mixed {
 				ordinaryPrice := price
 				if ordinaryFirst {
 					ordinaryPrice = 0.1
 				}
 				withTieredBillingConfig(t, map[string]string{"retry-image": "tiered_expr"}, map[string]string{"retry-image": fmt.Sprintf(`tier("base", fixed(%g)) * image_count`, ordinaryPrice)})
-				billing.PluginBillingExpr["retry-a::retry-image"] = `u("images") * 0.1`
 				if scenario == "ordinary_tokens" {
 					withTieredBillingConfig(t, map[string]string{"retry-image": "tiered_expr"}, map[string]string{"retry-image": `param("size") == "1024x1024" ? tier("tokens", p * 1000 + c * 1000) : tier("other", p * 3000 + c * 3000)`})
 				}
@@ -537,16 +539,33 @@ func testImageQueueLifecycle(t *testing.T, kuaiai bool) {
 			upstreamModel := modelName
 			if kuaiai {
 				modelName, upstreamModel, pluginKey = "all-image-2.5-sunburst-H", "gpt-image-2.5-sunburst", "kuaiai-image25"
+				if scenario == "price_changed" {
+					billing := config.GlobalConfig.Get("billing_setting").(*billing_setting.BillingSetting)
+					oldVariants := billing.PluginBillingExpr
+					billing.PluginBillingExpr = map[string]string{
+						pluginKey + "::" + modelName:    `u("image_count") * 0.09`,
+						"sunburst-images::" + modelName: `u("image_count") * 0.15`,
+					}
+					sunburst, err := os.ReadFile("../plugins/tasks/sunburst-images/plugin.js")
+					require.NoError(t, err)
+					_, err = pluginruntime.DefaultRegistry.Register(string(sunburst), pluginruntime.Options{})
+					require.NoError(t, err)
+					t.Cleanup(func() { billing.PluginBillingExpr = oldVariants })
+				}
 				if scenario == "flare" {
 					modelName, upstreamModel = "all-image-2.5-flare-H", "gpt-image-2.5-flare"
 				}
-				withTieredBillingConfig(t, map[string]string{modelName: "ratio", upstreamModel: "ratio"}, map[string]string{})
+				// The upstream bills tokens, while both channel types sell the
+				// public model at the same per-image price without an override.
+				withTieredBillingConfig(t, map[string]string{modelName: "ratio", upstreamModel: "tiered_expr"}, map[string]string{
+					upstreamModel: `tier("base", p * 17.5 + c * 105 + cr * 7 + img * 28)`,
+				})
 				groupRatios := ratio_setting.GroupGroupRatio2JSONString()
 				require.NoError(t, ratio_setting.UpdateGroupGroupRatioByJSONString(`{"vip":{"default":0.9}}`))
 				t.Cleanup(func() { require.NoError(t, ratio_setting.UpdateGroupGroupRatioByJSONString(groupRatios)) })
 				prices := ratio_setting.ModelPrice2JSONString()
 				t.Cleanup(func() { require.NoError(t, ratio_setting.UpdateModelPriceByJSONString(prices)) })
-				require.NoError(t, ratio_setting.UpdateModelPriceByJSONString(`{"all-image-2.5-sunburst-H":0.2,"all-image-2.5-flare-H":0.2}`))
+				require.NoError(t, ratio_setting.UpdateModelPriceByJSONString(`{"all-image-2.5-sunburst-H":0.24,"all-image-2.5-flare-H":0.24}`))
 			}
 			source, err := os.ReadFile("../plugins/tasks/" + pluginKey + "/plugin.js")
 			require.NoError(t, err)
@@ -833,7 +852,7 @@ export function extractUsageOnComplete(){return {tokens:20000};}
 			assert.Equal(t, "canvas", task.TokenName)
 			if kuaiai {
 				assert.Nil(t, task.PrivateData.BillingContext.TieredSnapshot)
-				expected := 0.2
+				expected := 0.24
 				if scenario == "vip" {
 					expected *= 0.9
 				}
@@ -881,7 +900,7 @@ export function extractUsageOnComplete(){return {tokens:20000};}
 			assert.Zero(t, submissionLogs, "submission belongs in tasks, not usage logs")
 			require.True(t, claimInternalAsyncImageTask(&task))
 			if scenario == "price_changed" {
-				require.NoError(t, ratio_setting.UpdateModelPriceByJSONString(`{"all-image-2.5-sunburst-H":0.9}`))
+				require.NoError(t, ratio_setting.UpdateModelPriceByJSONString(`{"all-image-2.5-sunburst-H":0.30}`))
 			}
 			if scenario == "mapping_changed" {
 				require.NoError(t, db.Model(&channel).Update("model_mapping", fmt.Sprintf(`{%q:"different-model"}`, modelName)).Error)
@@ -939,7 +958,7 @@ export function extractUsageOnComplete(){return {tokens:20000};}
 				assert.Equal(t, model.TaskStatus(model.TaskStatusSuccess), task.Status)
 				price := 0.02
 				if kuaiai {
-					price = 0.2
+					price = 0.24
 					if scenario == "vip" {
 						price *= 0.9
 					}
@@ -964,8 +983,140 @@ export function extractUsageOnComplete(){return {tokens:20000};}
 			} else {
 				assert.EqualValues(t, 1, posts.Load())
 			}
+			if scenario == "price_changed" {
+				// The admitted image settled at $0.24. New images must reserve
+				// and settle at $0.30 with either real plugin on the same model.
+				for _, key := range []string{pluginKey, "sunburst-images"} {
+					channel.SetSetting(kitdto.ChannelSettings{TaskPluginKey: key})
+					require.NoError(t, db.Model(&channel).Update("setting", channel.Setting).Error)
+					next := httptest.NewRequest(http.MethodPost, path+"?async=true", bytes.NewReader(body))
+					next.Header.Set("Content-Type", contentType)
+					reply := httptest.NewRecorder()
+					engine.ServeHTTP(reply, next)
+					require.Equal(t, http.StatusOK, reply.Code, reply.Body.String())
+					var receipt dto.ImageAsyncSubmitResponse
+					require.NoError(t, common.Unmarshal(reply.Body.Bytes(), &receipt))
+					var fresh model.Task
+					require.NoError(t, db.Where("task_id = ?", receipt.TaskID).First(&fresh).Error)
+					require.NotNil(t, fresh.PrivateData.Execution)
+					require.NotNil(t, fresh.PrivateData.Execution.TaskPlugin)
+					require.Equal(t, key, fresh.PrivateData.Execution.TaskPlugin.Key)
+					want := common.QuotaRound(0.30 * common.QuotaPerUnit)
+					assert.Equal(t, want, fresh.PrivateData.PreConsumedQuota)
+					require.True(t, claimInternalAsyncImageTask(&fresh))
+					require.NoError(t, executeInternalAsyncImageTask(t.Context(), &fresh))
+					require.NoError(t, db.First(&fresh, fresh.ID).Error)
+					assert.Equal(t, service.TaskBillingStateSettled, fresh.PrivateData.BillingState)
+					assert.Equal(t, want, fresh.PrivateData.ActualQuota)
+				}
+				require.NoError(t, db.First(&user, 61).Error)
+				assert.Equal(t, 1000000-common.QuotaRound((0.24+2*0.30)*common.QuotaPerUnit), user.Quota)
+				assert.EqualValues(t, 3, posts.Load())
+			}
 		})
 	}
+}
+
+func TestQueuedSeedreamReferenceUpload(t *testing.T) {
+	oldMaxDownload := constant.MaxFileDownloadMB
+	constant.MaxFileDownloadMB = 20
+	t.Cleanup(func() { constant.MaxFileDownloadMB = oldMaxDownload })
+	db := setupAsyncImageWorkerTestDB(t)
+	require.NoError(t, db.AutoMigrate(&model.Channel{}, &model.Ability{}, &model.QuotaData{}))
+	oldRegistry, oldCache, oldEnabled := pluginruntime.DefaultRegistry, common.MemoryCacheEnabled, common.AsyncImageInternalTaskEnabled
+	pluginruntime.DefaultRegistry = pluginruntime.NewRegistry()
+	common.MemoryCacheEnabled, common.AsyncImageInternalTaskEnabled = false, true
+	t.Cleanup(func() {
+		pluginruntime.DefaultRegistry, common.MemoryCacheEnabled, common.AsyncImageInternalTaskEnabled = oldRegistry, oldCache, oldEnabled
+	})
+	t.Setenv("ASYNC_IMAGE_REQUEST_STORAGE_PATH", t.TempDir())
+	t.Setenv("ASYNC_IMAGE_STORAGE_PATH", t.TempDir())
+	withTieredBillingConfig(t, map[string]string{"dou-5-5": "tiered_expr"}, map[string]string{"dou-5-5": `u("image_count") * 0.16`})
+	require.NoError(t, db.Create(&model.User{Id: 61, Username: "reference-edit", Status: common.UserStatusEnabled, Quota: 1000000}).Error)
+	require.NoError(t, db.Create(&model.Token{Id: 62, UserId: 61, Key: "reference-token", Status: common.TokenStatusEnabled, RemainQuota: 1000000}).Error)
+
+	var reference bytes.Buffer
+	require.NoError(t, png.Encode(&reference, image.NewRGBA(image.Rect(0, 0, 4, 4))))
+	var posts atomic.Int32
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/result.png" {
+			w.Header().Set("Content-Type", "image/png")
+			_, _ = w.Write(reference.Bytes())
+			return
+		}
+		posts.Add(1)
+		assert.Equal(t, "/v1/images/edits", r.URL.Path)
+		assert.Equal(t, "Bearer aicost-seedream55", r.Header.Get("Authorization"))
+		file, _, err := r.FormFile("image")
+		require.NoError(t, err)
+		defer file.Close()
+		data, err := io.ReadAll(file)
+		require.NoError(t, err)
+		assert.Equal(t, reference.Bytes(), data)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprintf(w, `{"data":[{"url":"http://%s/result.png"}]}`, r.Host)
+	}))
+	t.Cleanup(upstream.Close)
+	fetch := system_setting.GetFetchSetting()
+	oldFetch := *fetch
+	fetch.AllowPrivateIp, fetch.AllowedPorts = true, nil
+	t.Cleanup(func() { *fetch = oldFetch })
+	for i, key := range []string{"aicost-seedream55", "mai-seedream55"} {
+		source, err := os.ReadFile("../plugins/tasks/" + key + "/plugin.js")
+		require.NoError(t, err)
+		_, err = pluginruntime.DefaultRegistry.Register(string(source), pluginruntime.Options{})
+		require.NoError(t, err)
+		channel := model.Channel{Id: 941 + i, Name: key, Type: constant.ChannelTypeTaskPlugin, Key: key,
+			BaseURL: &upstream.URL, Models: "dou-5-5", Group: "default", Status: common.ChannelStatusEnabled, Priority: common.GetPointer(int64(i + 1))}
+		channel.SetSetting(kitdto.ChannelSettings{TaskPluginKey: key})
+		require.NoError(t, db.Create(&channel).Error)
+		require.NoError(t, channel.AddAbilities(db))
+		t.Cleanup(func() { require.NoError(t, channel.DeleteAbilities()) })
+	}
+
+	var body bytes.Buffer
+	form := multipart.NewWriter(&body)
+	require.NoError(t, form.WriteField("model", "dou-5-5"))
+	require.NoError(t, form.WriteField("prompt", "edit this reference"))
+	part, err := form.CreatePart(textproto.MIMEHeader{"Content-Disposition": {`form-data; name="image"; filename="reference.png"`}, "Content-Type": {"image/png"}})
+	require.NoError(t, err)
+	_, err = part.Write(reference.Bytes())
+	require.NoError(t, err)
+	require.NoError(t, form.Close())
+	req := httptest.NewRequest(http.MethodPost, "/v1/images/edits?async=true", &body)
+	req.Header.Set("Content-Type", form.FormDataContentType())
+	engine := gin.New()
+	engine.Use(func(c *gin.Context) {
+		defer common.CleanupBodyStorage(c)
+		common.SetContextKey(c, constant.ContextKeyUserId, 61)
+		common.SetContextKey(c, constant.ContextKeyTokenId, 62)
+		common.SetContextKey(c, constant.ContextKeyTokenKey, "reference-token")
+		common.SetContextKey(c, constant.ContextKeyUserSetting, dto.UserSetting{BillingPreference: "wallet_only"})
+		common.SetContextKey(c, constant.ContextKeyUserGroup, "default")
+		common.SetContextKey(c, constant.ContextKeyUsingGroup, "default")
+		common.SetContextKey(c, constant.ContextKeyTokenGroup, "default")
+		common.SetContextKey(c, constant.ContextKeyRequestStartTime, time.Now())
+		c.Next()
+	})
+	engine.POST(req.URL.Path, middleware.RouteTaskPluginEndpoint(), middleware.PrepareTaskPluginEndpoint(), middleware.Distribute(), func(c *gin.Context) {
+		RelayTaskPluginEndpoint(c, func(c *gin.Context) { Relay(c, types.RelayFormatOpenAIImage) })
+	})
+	reply := httptest.NewRecorder()
+	engine.ServeHTTP(reply, req)
+	require.Equal(t, http.StatusOK, reply.Code, reply.Body.String())
+	var receipt dto.ImageAsyncSubmitResponse
+	require.NoError(t, common.Unmarshal(reply.Body.Bytes(), &receipt))
+	var task model.Task
+	require.NoError(t, db.Where("task_id = ?", receipt.TaskID).First(&task).Error)
+	require.Equal(t, 941, task.ChannelId)
+	require.Zero(t, posts.Load())
+	require.True(t, claimInternalAsyncImageTask(&task))
+	require.NoError(t, executeInternalAsyncImageTask(t.Context(), &task))
+	require.NoError(t, db.First(&task, task.ID).Error)
+	assert.Equal(t, model.TaskStatus(model.TaskStatusSuccess), task.Status)
+	assert.Equal(t, service.TaskBillingStateSettled, task.PrivateData.BillingState)
+	assert.Equal(t, []string{"941"}, task.PrivateData.ChannelRetryPath)
+	assert.EqualValues(t, 1, posts.Load())
 }
 
 func TestImageTaskPriorityIsolation(t *testing.T) {

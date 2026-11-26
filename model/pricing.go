@@ -382,11 +382,9 @@ func updatePricing() {
 				pricing.BillingExpr = expr
 			}
 		} else if target, resolved := ResolveTaskModelAlias(pluginGeneration, model); resolved && target.Declared != "" {
-			if tailMode := billing_setting.GetBillingMode(target.Declared); tailMode == "tiered_expr" {
-				if expr, ok := billing_setting.GetBillingExpr(target.Declared); ok && strings.TrimSpace(expr) != "" {
-					pricing.BillingMode = tailMode
-					pricing.BillingExpr = expr
-				}
+			if expr, ok := billing_setting.ResolveTaskBillingExpr("", model, target.Declared, nil); ok {
+				pricing.BillingMode = billing_setting.BillingModeTieredExpr
+				pricing.BillingExpr = expr
 			}
 		}
 		usageModel := model
@@ -416,7 +414,7 @@ func updatePricing() {
 				if schema == nil {
 					schema = map[string]jsplugin.UsageFieldSchema{}
 				}
-				expression, hasExpression := billing_setting.ResolveTaskBillingExpr(provider.Meta.Key, model, "")
+				expression, hasExpression := billing_setting.ResolveTaskBillingExpr(provider.Meta.Key, model, "", schema)
 				mode := billing_setting.BillingModeRatio
 				if hasExpression || billing_setting.GetBillingMode(model) == billing_setting.BillingModeTieredExpr {
 					mode = billing_setting.BillingModeTieredExpr

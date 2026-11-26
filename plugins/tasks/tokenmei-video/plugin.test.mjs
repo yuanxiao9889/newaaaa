@@ -9,6 +9,27 @@ const ctx = { model, baseUrl: 'https://api.example/v1/', apiKey: 'test-channel-k
 const request = { model, prompt: 'A scene', seconds: '5', ratio: '9:16' };
 const decode = data => api.protocols.openai_video.decodeRequest({ operation: 'create', model, body: { kind: 'json', value: data } });
 
+test('the shared 720p model keeps its client identity and uses the selected channel mapping', () => {
+  const sharedModel = '全能视频2.5-301010-720-聚合';
+  assert.ok(api.meta.models.includes(sharedModel));
+  const input = { ...request, model: sharedModel, videos: ['https://media.example/v'] };
+  const decodeShared = body => api.protocols.openai_video.decodeRequest({
+    operation: 'create', model: sharedModel, body: { kind: 'json', value: body },
+  });
+  const intent = decodeShared(input);
+  assert.equal(intent.model, sharedModel);
+  assert.equal(intent.action, 'image_to_video');
+  const driver = { ...ctx, model: sharedModel, upstreamModel: 'seedance2.5-720p-Pro-mo', requestBody: intent.requestBody };
+  assert.deepEqual(api.buildSubmitRequest(driver).body, {
+    model: driver.upstreamModel, prompt: input.prompt, duration: 5, ratio: '9:16',
+    resolution: '720p', reference_videos: input.videos,
+  });
+  assert.deepEqual(api.extractUsage(driver), { seconds: 5, resolution: '720p' });
+  for (const resolution of ['480p', '1080p']) {
+    assert.throws(() => decodeShared({ ...input, resolution }), /Resolution must be 720p/);
+  }
+});
+
 for (const resolution of ['480p', '720p', '1080p']) {
   test(resolution + ' uses the currently mapped ID and exact output usage', () => {
     const { requestBody } = decode({ ...request, resolution, images: ['https://media.example/i'],

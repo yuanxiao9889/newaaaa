@@ -286,6 +286,9 @@ func GetModelPricingSnapshot(names []string) (*ModelPricingSnapshot, error) {
 		}
 		plugins := generation.PluginsByModel(name)
 		configuredVariants, _ := configured[billing_setting.PluginBillingExprOption].(map[string]any)
+		_, hasPrice := entry.Effective["ModelPrice"]
+		_, hasRatio := values["ModelRatio"][ratio_setting.FormatMatchingModelName(name)]
+		modelUnitPrice := entry.Effective["billing_setting.billing_mode"] != billing_setting.BillingModeTieredExpr && (hasPrice || hasRatio)
 		if len(plugins) > 0 || len(configuredVariants) > 0 {
 			keys := make(map[string]bool, len(plugins)+len(configuredVariants))
 			for _, plugin := range plugins {
@@ -314,13 +317,18 @@ func GetModelPricingSnapshot(names []string) (*ModelPricingSnapshot, error) {
 					schema = map[string]jsplugin.UsageFieldSchema{}
 				}
 				expression := configuredExpr
-				if !overridden && entry.Effective["billing_setting.billing_mode"] == billing_setting.BillingModeTieredExpr {
-					expression, _ = entry.Effective["billing_setting.billing_expr"].(string)
+				if modelUnitPrice {
+					expression = ""
+				} else if entry.Effective["billing_setting.billing_mode"] == billing_setting.BillingModeTieredExpr {
+					modelExpr, _ := entry.Effective["billing_setting.billing_expr"].(string)
+					if !overridden || billing_setting.ModelPricesTaskUsage(modelExpr, schema) {
+						expression = modelExpr
+					}
 				}
 				entry.PluginVariants = append(entry.PluginVariants, ModelPricingPluginVariant{
 					PluginKey: plugin.Meta.Key, PluginName: plugin.Meta.Name, Icon: plugin.Meta.Icon,
 					UsageSchema: schema, UsageExamples: examples, Configured: configuredExpr, Effective: expression,
-					Compatible: billing_setting.TaskExprCompatible(expression, schema),
+					Compatible: modelUnitPrice || billing_setting.TaskExprCompatible(expression, schema),
 				})
 			}
 		}
@@ -497,6 +505,7 @@ func validateModelPricing(name string, values, previous PricingValues) error {
 	}
 	generation := jsplugin.DefaultRegistry.Generation()
 	previousVariants, _ := previous[billing_setting.PluginBillingExprOption].(map[string]any)
+	modelUnitPrice := values["billing_setting.billing_mode"] != billing_setting.BillingModeTieredExpr && (values["ModelPrice"] != nil || values["ModelRatio"] != nil)
 	variants := map[string]any{}
 	if value, exists := values[billing_setting.PluginBillingExprOption]; exists {
 		var ok bool
@@ -515,7 +524,7 @@ func validateModelPricing(name string, values, previous PricingValues) error {
 			// stops declaring the model. A sole provider also keeps it after
 			// narrowing its usage profile; relay checks shared models against
 			// each profile, so their prices must follow it.
-			if previousVariants[key] == expression && (!declared || !generation.SharedModel(name)) {
+			if previousVariants[key] == expression && (modelUnitPrice || !declared || !generation.SharedModel(name)) {
 				continue
 			}
 			if !declared {
@@ -566,10 +575,10 @@ func validateModelPricing(name string, values, previous PricingValues) error {
 				for _, plugin := range plugins {
 					_, overridden := variants[plugin.Meta.Key]
 					_, wasOverridden := previousVariants[plugin.Meta.Key]
-					if overridden || (unchanged && !wasOverridden && len(plugins) == 1) {
+					schema, _ := plugin.Meta.UsageForModel(name)
+					if (overridden && !billing_setting.ModelPricesTaskUsage(expression, schema)) || (unchanged && !wasOverridden && len(plugins) == 1) {
 						continue
 					}
-					schema, _ := plugin.Meta.UsageForModel(name)
 					if err = billing_setting.SmokeTestTaskExpr(expression, schema); err != nil {
 						return fmt.Errorf("model %s: plugin %s: %w", name, plugin.Meta.Key, err)
 					}

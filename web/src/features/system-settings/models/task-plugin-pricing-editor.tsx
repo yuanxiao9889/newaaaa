@@ -34,7 +34,10 @@ import {
   combineBillingExpr,
   splitBillingExprAndRequestRules,
 } from '@/features/pricing/lib/billing-expr'
-import { taskExpressionCompatible } from '@/features/pricing/lib/plugin-pricing'
+import {
+  modelPricesTaskUsage,
+  taskExpressionCompatible,
+} from '@/features/pricing/lib/plugin-pricing'
 import {
   createDefaultTaskVisualConfig,
   generateTaskExprFromConfig,
@@ -50,6 +53,7 @@ type TaskPluginPricingEditorProps = {
   onChange: Dispatch<SetStateAction<Record<string, string>>>
   modelExpression: string
   modelBillingMode?: 'ratio' | 'tiered_expr'
+  hasModelUnitPrice?: boolean
   currency: PricingCurrency
   children: ReactNode
   ordinaryPricing?: boolean
@@ -78,7 +82,6 @@ export function TaskPluginPricingEditor(props: TaskPluginPricingEditorProps) {
   })
 
   if (props.variants.length === 0) return props.children
-
   return (
     <Tabs
       value={selected}
@@ -89,7 +92,11 @@ export function TaskPluginPricingEditor(props: TaskPluginPricingEditorProps) {
         className='max-w-full flex-wrap justify-start group-data-horizontal/tabs:h-auto'
       >
         <TabsTrigger value='__model__'>
-          {props.ordinaryPricing ? t('Ordinary OpenAI') : t('Default')}
+          {props.hasModelUnitPrice
+            ? t('Model Pricing')
+            : props.ordinaryPricing
+              ? t('Ordinary OpenAI')
+              : t('Default')}
         </TabsTrigger>
         {!props.ordinaryPricing && props.onConfigureOrdinaryPricing && (
           <TabsTrigger value='__ordinary__'>{t('Ordinary OpenAI')}</TabsTrigger>
@@ -167,7 +174,11 @@ export function TaskPluginPricingEditor(props: TaskPluginPricingEditorProps) {
       {props.variants.map((variant) => {
         const key = variant.plugin_key
         const separate = Object.hasOwn(props.expressions, key)
-        if (variant.stale) {
+        const usesModelPrice =
+          props.hasModelUnitPrice ||
+          (usesExpression &&
+            modelPricesTaskUsage(props.modelExpression, variant.usage_schema))
+        if (variant.stale || usesModelPrice) {
           return (
             <TabsContent
               key={key}
@@ -175,11 +186,21 @@ export function TaskPluginPricingEditor(props: TaskPluginPricingEditorProps) {
               keepMounted
               className='space-y-3'
             >
-              <Alert>
-                <AlertDescription>
-                  {t('This provider is unavailable for this model.')}
-                </AlertDescription>
-              </Alert>
+              {variant.stale ? (
+                <Alert>
+                  <AlertDescription>
+                    {t('This provider is unavailable for this model.')}
+                  </AlertDescription>
+                </Alert>
+              ) : (
+                <Button
+                  type='button'
+                  variant='link'
+                  onClick={() => setSelected('__model__')}
+                >
+                  {t('Use model-level pricing')}
+                </Button>
+              )}
               {separate && (
                 <>
                   <code className='bg-muted/30 block max-h-40 overflow-auto rounded-md border p-3 text-xs break-all whitespace-pre-wrap'>
@@ -194,7 +215,7 @@ export function TaskPluginPricingEditor(props: TaskPluginPricingEditorProps) {
                         delete next[key]
                         return next
                       })
-                      setSelected('__model__')
+                      if (variant.stale) setSelected('__model__')
                     }}
                   >
                     {t('Remove saved price')}
